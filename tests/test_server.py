@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import mac_mcp.server as srv
 from mac_mcp.contracts import (
@@ -15,6 +16,7 @@ from mac_mcp.contracts import (
     Recurrence,
     ReminderData,
 )
+from mac_mcp.runtime import AppNotRunning, AutomationDenied
 
 
 class _FakeSource:
@@ -439,3 +441,57 @@ def test_delete_note_dispatches(monkeypatch):
     out = srv.delete_note("N-1", expect_title="Milk")
     assert fake.calls == [("N-1", "Milk")]
     assert out == {"deleted": "N-1"}
+
+
+# --- errors-as-results: the dispatch seam converts typed native failures (#47) --------
+
+
+class _DeniedSource:
+    """A read adapter whose native call is TCC-denied — the failure #47 must surface."""
+
+    def get_pointers(self, query: str) -> list[Pointer]:
+        raise AutomationDenied("grant Automation access, then restart mac-mcp")
+
+
+class _EmptySource:
+    """A read adapter with a genuine no-match — must stay [], never an error."""
+
+    def get_pointers(self, query: str) -> list[Pointer]:
+        return []
+
+
+def test_read_tool_converts_native_error_to_agent_directive(monkeypatch):
+    # A denied read is a loud ToolError carrying the remediation — the model is told to
+    # stop and ask the user, not handed a silent [] it would retry against.
+    monkeypatch.setattr(srv, "_mail", _DeniedSource())
+    with pytest.raises(ToolError, match="Automation access"):
+        srv.mail("invoice")
+
+
+def test_read_tool_empty_result_is_not_an_error(monkeypatch):
+    # The whole point of the taxonomy: no-matches ([]) is distinct from failure. An
+    # empty search must return [] cleanly, never raise.
+    monkeypatch.setattr(srv, "_notes", _EmptySource())
+    assert srv.notes("nonexistent") == []
+
+
+def test_write_tool_converts_native_error_to_agent_directive(monkeypatch):
+    class _DeadWriter:
+        def create_reminder(self, data: ReminderData) -> Pointer:
+            raise AppNotRunning("open the app, then try again")
+
+    monkeypatch.setattr(srv, "_reminders", _DeadWriter())
+    with pytest.raises(ToolError, match="open the app"):
+        srv.create_reminder("Call dentist")
+
+
+def test_guard_does_not_swallow_value_errors(monkeypatch):
+    # Only NativeError becomes a directive; a validation error stays a ValueError so a
+    # caller bug reads as a caller bug, not a bogus "grant access" directive.
+    class _BadInput:
+        def get_pointers(self, query: str) -> list[Pointer]:
+            raise ValueError("bad query")
+
+    monkeypatch.setattr(srv, "_contacts", _BadInput())
+    with pytest.raises(ValueError, match="bad query"):
+        srv.contacts("jane")

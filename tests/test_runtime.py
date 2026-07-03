@@ -10,6 +10,13 @@ import pytest
 from mac_mcp.contracts import Recurrence
 from mac_mcp.runtime import (
     AccessDenied,
+    AppNotRunning,
+    AutomationDenied,
+    NativeError,
+    NativeTimeout,
+    OutputOverflow,
+    SchemaDrift,
+    _classify_osascript_failure,
     _decide,
     due_components,
     from_nsdate,
@@ -82,8 +89,80 @@ def test_run_osascript_returns_output():
 
 def test_run_osascript_raises_on_error():
     # A failing script must raise, never return "" (don't mask failures as "no result").
-    with pytest.raises(RuntimeError, match="osascript failed"):
+    # A script error with no OSStatus fingerprint stays the loud generic NativeError.
+    with pytest.raises(NativeError, match="osascript failed"):
         run_osascript('error "boom"')
+
+
+# --- typed error taxonomy (#47) ------------------------------------------------------
+
+
+def test_taxonomy_all_subclass_native_error_and_runtime_error():
+    # One `except NativeError` at the dispatch seam must catch every native failure, and
+    # nothing weaker breaks the existing `except RuntimeError` callers.
+    for cls in (
+        AccessDenied,
+        AutomationDenied,
+        AppNotRunning,
+        NativeTimeout,
+        OutputOverflow,
+        SchemaDrift,
+    ):
+        assert issubclass(cls, NativeError)
+        assert issubclass(cls, RuntimeError)
+
+
+def test_taxonomy_kinds_are_distinct_machine_codes():
+    # `kind` is what doctor (#48) and agents branch on — no two classes may collide.
+    kinds = [
+        c.kind
+        for c in (
+            NativeError,
+            AccessDenied,
+            AutomationDenied,
+            AppNotRunning,
+            NativeTimeout,
+            OutputOverflow,
+            SchemaDrift,
+        )
+    ]
+    assert len(kinds) == len(set(kinds))
+
+
+def test_classify_automation_denied():
+    err = _classify_osascript_failure(
+        "execution error: Not authorized to send Apple events to Mail. (-1743)"
+    )
+    assert isinstance(err, AutomationDenied)
+    assert "System Settings" in str(err) and "-1743" in str(err)
+
+
+@pytest.mark.parametrize("code", ["(-609)", "(-10810)"])
+def test_classify_app_not_running(code):
+    err = _classify_osascript_failure(f"execution error: something {code}")
+    assert isinstance(err, AppNotRunning)
+
+
+def test_classify_unknown_code_stays_generic_native_error():
+    # An unrecognized OSStatus must NOT be mis-fingerprinted as denied/not-running —
+    # it stays a loud generic error carrying the raw native detail.
+    err = _classify_osascript_failure("execution error: weird thing (-2700)")
+    assert type(err) is NativeError
+    assert "weird thing" in str(err)
+
+
+def test_classify_bare_digits_do_not_false_match():
+    # We match the parenthesized OSStatus, so a 1743 appearing bare in a subject/body
+    # must not be read as an Automation denial.
+    err = _classify_osascript_failure("execution error: order 1743 shipped (-2700)")
+    assert type(err) is NativeError
+
+
+def test_run_osascript_timeout_raises_native_timeout():
+    # Real osascript, no TCC needed: a 2s delay against a 0.1s budget must surface as
+    # NativeTimeout (not a bare TimeoutError, not a masked hang).
+    with pytest.raises(NativeTimeout):
+        run_osascript("delay 2", timeout=0.1)
 
 
 def test_run_native_async_returns_result():

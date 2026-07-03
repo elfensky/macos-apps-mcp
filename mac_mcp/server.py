@@ -6,10 +6,12 @@ register reads only (the destructive write tools are skipped) — a safe-deploy 
 
 from __future__ import annotations
 
+import functools
 import os
 from datetime import datetime
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
@@ -27,6 +29,7 @@ from .contracts import (
     Recurrence,
     ReminderData,
 )
+from .runtime import NativeError
 
 mcp = FastMCP("mac-mcp")
 
@@ -54,60 +57,84 @@ def _read_only() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _guard(fn):
+    """Convert a typed native failure into a loud, agent-directed tool result (#47).
+
+    Errors-as-results, never exceptions through the protocol: a ``NativeError`` becomes
+    a FastMCP ``ToolError`` carrying the remediation directive, so the model sees an
+    ``isError`` result with *what to do* — never a masked stack trace, and never an
+    empty list masquerading as "no matches". A real empty result stays a plain ``[]``.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except NativeError as e:
+            raise ToolError(str(e)) from e
+
+    return wrapper
+
+
+def _read_tool(fn):
+    """Register a read tool, wrapped so typed native failures surface as directives."""
+    return mcp.tool()(_guard(fn))
+
+
 def _write_tool(fn):
     """Register a destructive tool — skipped in read-only mode (safe-deploy guard)."""
-    return fn if _read_only() else mcp.tool()(fn)
+    return fn if _read_only() else mcp.tool()(_guard(fn))
 
 
 @mcp.tool()
 def ping() -> str:
-    """Health check — confirms mac-mcp is alive."""
+    """Health check — confirms mac-mcp is alive (no native call, so never guarded)."""
     return "mac-mcp ok"
 
 
-@mcp.tool()
+@_read_tool
 def reminders(due: str = "today") -> list[dict]:
     """List reminders as pointers. `due`: today | overdue | this-week | a list name."""
     return [_emit(p) for p in _reminders.get_pointers(due)]
 
 
-@mcp.tool()
+@_read_tool
 def events(when: str = "today") -> list[dict]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD."""
     return [_emit(p) for p in _calendar.get_pointers(when)]
 
 
-@mcp.tool()
+@_read_tool
 def reminder_lists() -> list[dict]:
     """List reminder lists as pointers (id + name); use a name to target writes."""
     return [_emit(p) for p in _reminders.get_lists()]
 
 
-@mcp.tool()
+@_read_tool
 def calendars() -> list[dict]:
     """List calendars as pointers (id + name); use a name to target writes."""
     return [_emit(p) for p in _calendar.get_calendars()]
 
 
-@mcp.tool()
+@_read_tool
 def contacts(name: str) -> list[dict]:
     """Find contacts by name (substring). Returns pointers (id + name/org)."""
     return [_emit(p) for p in _contacts.get_pointers(name)]
 
 
-@mcp.tool()
+@_read_tool
 def mail(subject: str) -> list[dict]:
     """Search the Mail inbox by subject substring. Pointers (id + subject/sender)."""
     return [_emit(p) for p in _mail.get_pointers(subject)]
 
 
-@mcp.tool()
+@_read_tool
 def notes(title: str) -> list[dict]:
     """Search Notes by title substring. Returns pointers (id + title)."""
     return [_emit(p) for p in _notes.get_pointers(title)]
 
 
-@mcp.tool()
+@_read_tool
 def notes_all() -> list[dict]:
     """List every note as pointers (id + "Account / Folder" + title), excluding
     Recently Deleted. No cap; very large libraries can hit the osascript timeout
@@ -115,32 +142,32 @@ def notes_all() -> list[dict]:
     return [_emit(p) for p in _notes.get_all()]
 
 
-@mcp.tool()
+@_read_tool
 def note_bodies(ids: list[str]) -> list[dict]:
     """Hydrate plaintext bodies for up to 50 note ids (opt-in; search stays
     pointer-only). Returns [{"id", "body"}]; unknown ids are silently skipped."""
     return _notes.get_bodies(ids)
 
 
-@mcp.tool()
+@_read_tool
 def safari_tabs() -> list[dict]:
     """List open Safari tabs as pointers (url + title)."""
     return [_emit(p) for p in _safari.get_tabs()]
 
 
-@mcp.tool()
+@_read_tool
 def photos(query: str) -> list[dict]:
     """Search Photos (filename, place, date). Returns pointers (id + filename)."""
     return [_emit(p) for p in _photos.get_pointers(query)]
 
 
-@mcp.tool()
+@_read_tool
 def messages_chats() -> list[dict]:
     """List Messages conversations (id + name). No content; sending isn't supported."""
     return [_emit(p) for p in _messages.get_chats()]
 
 
-@mcp.tool()
+@_read_tool
 def shortcuts(name: str = "") -> list[dict]:
     """List/search Shortcuts by name (empty lists all). Pointers (name)."""
     return [_emit(p) for p in _shortcuts.get_pointers(name)]

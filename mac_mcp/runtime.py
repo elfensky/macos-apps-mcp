@@ -55,8 +55,55 @@ _FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
 _ACCESS_TIMEOUT = 120.0  # seconds
 
 
-class AccessDenied(RuntimeError):
-    """Raised when Calendar/Reminders TCC access is not fully granted."""
+# --- typed error taxonomy (#47) ------------------------------------------------------
+# The winnable axis is trust: the category leader died of *fake success* — stubbed reads
+# returning [] made permission-denied / crashed / genuinely-empty indistinguishable, so
+# the agent hammered a denied tool. Every native failure is one of these loud, typed
+# classes; str(e) IS the agent-directed remediation. The dispatch layer (server.py)
+# turns them into MCP tool *results* carrying that directive — never a silent [], never
+# a masked stack trace. `kind` is the machine code doctor (#48) and tests branch on.
+
+
+class NativeError(RuntimeError):
+    """Base for every typed native failure. ``str(e)`` is the agent-facing directive."""
+
+    kind = "native_error"
+
+
+class AccessDenied(NativeError):
+    """Calendar/Reminders (EventKit) TCC access is not fully granted."""
+
+    kind = "access_denied"
+
+
+class AutomationDenied(NativeError):
+    """osascript blocked from controlling an app — Automation consent not granted."""
+
+    kind = "automation_denied"
+
+
+class AppNotRunning(NativeError):
+    """The target app isn't running / its Apple-events connection is invalid."""
+
+    kind = "app_not_running"
+
+
+class NativeTimeout(NativeError):
+    """A native call didn't return in time (stuck dialog, pathological query)."""
+
+    kind = "native_timeout"
+
+
+class OutputOverflow(NativeError):
+    """A native result exceeded the caller's size cap (raised by callers, e.g. #52)."""
+
+    kind = "output_overflow"
+
+
+class SchemaDrift(NativeError):
+    """Native output didn't match the shape the parser expects (an OS/app change)."""
+
+    kind = "schema_drift"
 
 
 def _decide(status: int) -> None:
@@ -100,6 +147,35 @@ def store() -> EK.EKEventStore:
 # (e.g. a modal permission dialog) can't block the worker forever.
 _OSASCRIPT_TIMEOUT = 30.0  # seconds
 
+# osascript reports native failures as an OSStatus in parentheses at the end of stderr,
+# e.g. "…Not authorized to send Apple events to Mail. (-1743)". Match the parenthesized
+# form so a bare digit run never false-fingerprints. Codes per the survey (#47 design).
+_AUTOMATION_DENIED = "(-1743)"  # Automation (Apple-events) consent not granted
+_APP_NOT_RUNNING = ("(-609)", "(-10810)")  # connection invalid / app not launchable
+
+
+def _classify_osascript_failure(stderr: str) -> NativeError:
+    """Fingerprint a non-zero osascript exit into a typed, agent-directed error.
+
+    Only the failures with a *clear* remediation get a specific class; everything else
+    stays a loud generic ``NativeError`` (never swallowed, never an empty result). The
+    raw native detail is appended in ``[...]`` so the model has the underlying evidence.
+    """
+    detail = stderr.strip() or "osascript failed with no stderr"
+    if _AUTOMATION_DENIED in stderr:
+        return AutomationDenied(
+            "macOS blocked mac-mcp from controlling the app (Automation consent not "
+            "granted). Tell the user to enable it in System Settings → Privacy & "
+            "Security → Automation, for whichever app launched mac-mcp, then restart "
+            f"mac-mcp. Do not retry until the next user message. [{detail}]"
+        )
+    if any(code in stderr for code in _APP_NOT_RUNNING):
+        return AppNotRunning(
+            "The target macOS app isn't running or couldn't be launched. Tell the user "
+            f"to open it, then try again once it's open. [{detail}]"
+        )
+    return NativeError(f"osascript failed: {detail}")
+
 
 def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) -> str:
     """Run an AppleScript via ``osascript`` on the native worker; return stdout.
@@ -107,9 +183,10 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     The sanctioned escape hatch for framework-less apps (Mail/Notes/Contacts).
     ``args`` are passed to the script's ``on run argv`` handler — put any user input
     (names, ids) there so values are never interpolated into the script (no injection).
-    Raises RuntimeError on a non-zero exit (app not running, TCC denied, script error)
-    or timeout — it never returns an empty string to mask a failure as "no result".
-    Safe on or off the worker (dispatches via run_native when called off it).
+    Raises a typed ``NativeError`` (``AutomationDenied`` / ``AppNotRunning`` / generic)
+    on a non-zero exit, and ``NativeTimeout`` on timeout — it never returns an empty
+    string to mask a failure as "no result". Safe on or off the worker (dispatches via
+    run_native when called off it).
     """
 
     def _run() -> str:
@@ -121,9 +198,14 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"osascript timed out after {timeout}s") from e
+            raise NativeTimeout(
+                f"The macOS app didn't respond within {timeout}s (it may be blocked on "
+                "a dialog, or the query is too broad). Tell the user to dismiss any "
+                "stuck prompt, then retry with a narrower query. Do not retry "
+                "immediately."
+            ) from e
         if proc.returncode != 0:
-            raise RuntimeError(f"osascript failed: {proc.stderr.strip()}")
+            raise _classify_osascript_failure(proc.stderr)
         return proc.stdout.rstrip("\n")
 
     return _run() if _on_worker() else run_native(_run)
