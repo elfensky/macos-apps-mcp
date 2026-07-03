@@ -485,6 +485,20 @@ def test_write_tool_converts_native_error_to_agent_directive(monkeypatch):
         srv.create_reminder("Call dentist")
 
 
+def test_doctor_tool_dispatches(monkeypatch):
+    # Thin dispatch: the tool just forwards `request` to doctor.diagnose and returns it.
+    calls = []
+
+    def fake_diagnose(request=False):
+        calls.append(request)
+        return {"summary": "ok", "surfaces": []}
+
+    monkeypatch.setattr(srv, "diagnose", fake_diagnose)
+    out = srv.doctor(request=True)
+    assert calls == [True]
+    assert out == {"summary": "ok", "surfaces": []}
+
+
 def test_guard_does_not_swallow_value_errors(monkeypatch):
     # Only NativeError becomes a directive; a validation error stays a ValueError so a
     # caller bug reads as a caller bug, not a bogus "grant access" directive.

@@ -29,6 +29,7 @@ from .contracts import (
     Recurrence,
     ReminderData,
 )
+from .doctor import diagnose
 from .runtime import NativeError
 
 mcp = FastMCP("mac-mcp")
@@ -90,6 +91,16 @@ def _write_tool(fn):
 def ping() -> str:
     """Health check — confirms mac-mcp is alive (no native call, so never guarded)."""
     return "mac-mcp ok"
+
+
+@_read_tool
+def doctor(request: bool = False) -> dict:
+    """Diagnose per-surface macOS permissions + health with exact remediation.
+
+    Read-only and prompt-free by default. `request=True` also triggers permission
+    prompts (EventKit consent + per-app Automation probes) — use it once to grant.
+    """
+    return diagnose(request=request)
 
 
 @_read_tool
