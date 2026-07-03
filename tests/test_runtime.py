@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import EventKit as EK
 import pytest
@@ -16,16 +17,20 @@ from mac_mcp.runtime import (
     NativeTimeout,
     OutputOverflow,
     SchemaDrift,
+    VerificationFailed,
     _classify_osascript_failure,
     _decide,
     due_components,
     from_nsdate,
+    persisted_recurrence_signature,
+    recurrence_signature,
     run_native,
     run_native_async,
     run_osascript,
     store,
     to_nsdate,
     to_recurrence_rule,
+    verify_persisted,
 )
 
 
@@ -107,6 +112,7 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         NativeTimeout,
         OutputOverflow,
         SchemaDrift,
+        VerificationFailed,
     ):
         assert issubclass(cls, NativeError)
         assert issubclass(cls, RuntimeError)
@@ -124,6 +130,7 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             NativeTimeout,
             OutputOverflow,
             SchemaDrift,
+            VerificationFailed,
         )
     ]
     assert len(kinds) == len(set(kinds))
@@ -163,6 +170,81 @@ def test_run_osascript_timeout_raises_native_timeout():
     # NativeTimeout (not a bare TimeoutError, not a masked hang).
     with pytest.raises(NativeTimeout):
         run_osascript("delay 2", timeout=0.1)
+
+
+# --- verify-after-write diff (#49) ---------------------------------------------------
+
+
+def test_verify_persisted_passes_when_all_match():
+    verify_persisted(
+        "reminder",
+        {"title": "x", "due": (2026, 6, 23)},
+        {"title": "x", "due": (2026, 6, 23)},
+    )
+
+
+def test_verify_persisted_raises_naming_dropped_fields():
+    with pytest.raises(VerificationFailed) as exc:
+        verify_persisted(
+            "reminder",
+            {"title": "Pay rent", "due": (2026, 6, 25), "list": "Home"},
+            {
+                "title": "Pay rent",
+                "due": None,
+                "list": "Inbox",
+            },  # due dropped, wrong list
+        )
+    msg = str(exc.value)
+    assert "due" in msg and "list" in msg
+    assert "title" not in msg  # unchanged fields aren't reported
+
+
+def test_verify_persisted_ignores_keys_absent_from_expected():
+    # only requested fields are diffed; extra persisted state (e.g. EventKit metadata)
+    # is not a mismatch.
+    verify_persisted(
+        "event", {"title": "x"}, {"title": "x", "lastModified": "whenever"}
+    )
+
+
+def test_recurrence_signature_requested():
+    assert recurrence_signature(None) is None
+    # frequency maps to the EK constant; interval defaults 1; no count → 0
+    assert recurrence_signature(Recurrence(frequency="daily")) == (
+        int(EK.EKRecurrenceFrequencyDaily),
+        1,
+        0,
+    )
+    assert recurrence_signature(
+        Recurrence(frequency="weekly", interval=2, count=10)
+    ) == (int(EK.EKRecurrenceFrequencyWeekly), 2, 10)
+
+
+def test_persisted_recurrence_signature_readback():
+    assert persisted_recurrence_signature(None) is None
+    assert persisted_recurrence_signature([]) is None
+    rule = SimpleNamespace(
+        frequency=lambda: EK.EKRecurrenceFrequencyWeekly,
+        interval=lambda: 2,
+        recurrenceEnd=lambda: SimpleNamespace(occurrenceCount=lambda: 10),
+    )
+    assert persisted_recurrence_signature([rule]) == (
+        int(EK.EKRecurrenceFrequencyWeekly),
+        2,
+        10,
+    )
+
+
+def test_recurrence_signatures_agree_for_equivalent_rule():
+    # the requested and persisted signatures must be equal for an unchanged write, so
+    # verify-after-write doesn't false-fail a correct recurrence.
+    req = recurrence_signature(Recurrence(frequency="monthly", interval=1))
+    rule = SimpleNamespace(
+        frequency=lambda: EK.EKRecurrenceFrequencyMonthly,
+        interval=lambda: 1,
+        recurrenceEnd=lambda: None,  # open-ended → count 0
+    )
+    assert req == persisted_recurrence_signature([rule])
 
 
 def test_run_native_async_returns_result():

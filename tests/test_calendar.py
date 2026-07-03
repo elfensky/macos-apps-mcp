@@ -14,9 +14,12 @@ from mac_mcp.adapters.calendar import (
     _event_pointer,
     _event_summary,
     _range,
+    _refetch_event,
     _resolve_calendar,
+    _verify_event,
 )
-from mac_mcp.contracts import Pointer
+from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
+from mac_mcp.runtime import VerificationFailed
 
 
 def _ns(dt: datetime):
@@ -120,3 +123,183 @@ def test_resolve_missing_calendar_raises():
     s = _fake_store(["Work"])
     with pytest.raises(ValueError, match="no calendar named"):
         _resolve_calendar(s, "Nope")
+
+
+# --- verify-after-write (#49) --------------------------------------------------------
+
+
+def _fake_rule(freq=0, interval=1, count=None):
+    # freq is the EKRecurrenceFrequency int (daily=0, weekly=1, monthly=2, yearly=3).
+    end = None if count is None else SimpleNamespace(occurrenceCount=lambda: count)
+    return SimpleNamespace(
+        frequency=lambda: freq, interval=lambda: interval, recurrenceEnd=lambda: end
+    )
+
+
+def _fake_persisted_event(
+    title="Standup",
+    start=datetime(2026, 6, 24, 9, 0),
+    end=datetime(2026, 6, 24, 9, 15),
+    all_day=False,
+    location=None,
+    notes=None,
+    cal_title="Work",
+    rule=None,
+):
+    return SimpleNamespace(
+        title=lambda: title,
+        startDate=lambda: _ns(start),
+        endDate=lambda: _ns(end),
+        isAllDay=lambda: all_day,
+        location=lambda: location,
+        notes=lambda: notes,
+        calendar=lambda: SimpleNamespace(title=lambda: cal_title),
+        recurrenceRules=lambda: [rule] if rule is not None else None,
+    )
+
+
+def test_verify_event_passes_on_timed_match():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        calendar="Work",
+    )
+    _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
+
+
+def test_verify_event_none_fresh_is_rollback():
+    data = CalendarEventData(
+        title="x", start=datetime(2026, 6, 24, 9, 0), end=datetime(2026, 6, 24, 9, 15)
+    )
+    with pytest.raises(VerificationFailed, match="could not be re-fetched"):
+        _verify_event(None, "E-1|x", data, "Work")
+
+
+def test_verify_event_dropped_title_raises():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+    fresh = _fake_persisted_event(title="Untitled")
+    with pytest.raises(VerificationFailed, match="title"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_wrong_calendar_raises():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        calendar="Work",
+    )
+    fresh = _fake_persisted_event(cal_title="Personal")  # landed on wrong calendar
+    with pytest.raises(VerificationFailed, match="calendar"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_timed_end_drift_raises():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+    fresh = _fake_persisted_event(end=datetime(2026, 6, 24, 9, 30))  # end changed
+    with pytest.raises(VerificationFailed, match="end"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_all_day_ignores_end_representation():
+    # EventKit's all-day end may store as next-midnight; verifying start-date + flag
+    # only must NOT false-fail when fresh end differs from the requested end.
+    data = CalendarEventData(
+        title="Holiday",
+        start=datetime(2026, 7, 1),
+        end=datetime(2026, 7, 1),
+        all_day=True,
+    )
+    fresh = _fake_persisted_event(
+        title="Holiday",
+        start=datetime(2026, 7, 1),
+        end=datetime(2026, 7, 2),  # EventKit's exclusive-end representation
+        all_day=True,
+    )
+    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+
+
+def test_verify_event_all_day_wrong_start_date_raises():
+    data = CalendarEventData(
+        title="Holiday",
+        start=datetime(2026, 7, 1),
+        end=datetime(2026, 7, 1),
+        all_day=True,
+    )
+    fresh = _fake_persisted_event(
+        title="Holiday",
+        start=datetime(2026, 7, 2),
+        end=datetime(2026, 7, 2),
+        all_day=True,
+    )
+    with pytest.raises(VerificationFailed, match="start_date"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_dropped_recurrence_raises():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence(frequency="weekly"),
+    )
+    fresh = _fake_persisted_event()  # rule=None → the series rule was dropped
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_wrong_frequency_raises():
+    # presence-only was insufficient (#49 review): a non-empty rule with the WRONG
+    # cadence must still fail loudly.
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence(frequency="weekly"),
+    )
+    fresh = _fake_persisted_event(
+        rule=_fake_rule(freq=2)
+    )  # persisted MONTHLY, not weekly
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_matching_recurrence_passes():
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence(frequency="weekly", interval=2),
+    )
+    fresh = _fake_persisted_event(rule=_fake_rule(freq=1, interval=2))  # weekly/2 match
+    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+
+
+def test_verify_event_no_recurrence_requested_skips_check():
+    # recurrence=None means "leave series untouched" — a fresh event with no rules must
+    # not be flagged.
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+    _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
+
+
+def test_refetch_event_missing_is_rollback():
+    # The REAL calendar rollback detector: _refetch_event resolves the id after a save;
+    # a miss (fabricated id / iCloud rollback) must surface as VerificationFailed, not a
+    # bare lookup miss. A suffix-less id takes _resolve_event's master-lookup branch,
+    # which returns None → ValueError → _refetch_event converts it.
+    store = SimpleNamespace(calendarItemWithIdentifier_=lambda ident: None)
+    with pytest.raises(VerificationFailed, match="could not be re-fetched"):
+        _refetch_event(store, "E-404")

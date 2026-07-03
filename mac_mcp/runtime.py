@@ -106,6 +106,39 @@ class SchemaDrift(NativeError):
     kind = "schema_drift"
 
 
+class VerificationFailed(NativeError):
+    """A create/update didn't persist as requested — the returned id is fabricated, or
+    a field was dropped, or iCloud reverted the write (#49)."""
+
+    kind = "verification_failed"
+
+
+def verify_persisted(
+    entity: str, expected: dict[str, object], actual: dict[str, object]
+) -> None:
+    """Diff requested field values against what the store actually persisted; raise
+    ``VerificationFailed`` naming every dropped/changed field (#49).
+
+    The anti-fabrication + anti-rollback check behind every create/update: the category
+    leader shipped a fabricated id and dropped due/list (supermemoryai #64), and iCloud
+    can revert a write ~1s later — and our writes feed the vault id-writeback, so a fake
+    or reverted id silently corrupts the cockpit. Callers pass primitives already
+    normalized for comparison (dates → epoch ints / y-m-d tuples, containers → names) so
+    this stays pure and unit-testable with plain fakes.
+    """
+    dropped = {k: (v, actual.get(k)) for k, v in expected.items() if actual.get(k) != v}
+    if dropped:
+        fields = "; ".join(
+            f"{k}: requested {req!r}, persisted {got!r}"
+            for k, (req, got) in dropped.items()
+        )
+        raise VerificationFailed(
+            f"{entity} write did not persist as requested (dropped or reverted; iCloud "
+            f"can roll a write back ~1s later). Mismatches: {fields}. Re-read the item "
+            "before trusting it; do not reuse the returned id."
+        )
+
+
 def _decide(status: int) -> None:
     """Map an EKAuthorizationStatus to a decision: return on full access, else raise."""
     if status == _FULL_ACCESS:
@@ -279,6 +312,35 @@ def to_recurrence_rule(r: Recurrence) -> EK.EKRecurrenceRule:
     return EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
         _FREQUENCIES[r.frequency], r.interval, end
     )
+
+
+def recurrence_signature(recurrence: Recurrence | None) -> tuple | None:
+    """Comparable ``(frequency, interval, count)`` of a *requested* recurrence (#49).
+
+    Verify-after-write diffs this against what persisted, so a *changed* cadence (not
+    just a dropped rule) fails loudly. UNTIL is omitted on purpose: its endDate carries
+    the same inclusive/exclusive ambiguity as an all-day end, so diffing it would
+    false-fail a correct write. ``count`` and "no count" both normalize to 0 (a
+    date-based/open-ended rule reports 0), so an until rule still matches on count.
+    """
+    if recurrence is None:
+        return None
+    return (
+        int(_FREQUENCIES[recurrence.frequency]),
+        recurrence.interval,
+        recurrence.count or 0,
+    )
+
+
+def persisted_recurrence_signature(rules) -> tuple | None:
+    """The same ``(frequency, interval, count)`` read back from a persisted
+    EKRecurrenceRule list (the first rule); ``None``/empty → ``None``."""
+    if not rules:
+        return None
+    rule = rules[0]
+    end = rule.recurrenceEnd()
+    count = end.occurrenceCount() if end is not None else 0
+    return (int(rule.frequency()), int(rule.interval()), int(count))
 
 
 log = logging.getLogger("mac_mcp")

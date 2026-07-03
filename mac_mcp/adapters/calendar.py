@@ -13,11 +13,15 @@ import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer
 from ..runtime import (
+    VerificationFailed,
     from_nsdate,
+    persisted_recurrence_signature,
+    recurrence_signature,
     run_native,
     store,
     to_nsdate,
     to_recurrence_rule,
+    verify_persisted,
 )
 
 
@@ -162,6 +166,63 @@ def _resolve_event(s, ident: str):
     raise ValueError(f"no event occurrence for id {ident!r}")
 
 
+def _verify_event(fresh, ident: str, data: CalendarEventData, cal_title: str) -> None:
+    """Re-fetch-by-id verify (#49): fail loudly if the saved event didn't persist as
+    requested. `fresh` is a fresh re-resolve of the occurrence we're about to return;
+    `cal_title` is the requested calendar (what _apply_event set)."""
+    if fresh is None:
+        raise VerificationFailed(
+            f"event {ident!r} could not be re-fetched after save — the write did not "
+            "persist (a fabricated id or an iCloud rollback). Do not trust the id."
+        )
+    expected = {
+        "title": data.title,
+        "all_day": data.all_day,
+        "location": data.location or None,  # "" and None are both "no location"
+        "notes": data.notes or None,
+        "calendar": cal_title,
+    }
+    actual = {
+        "title": fresh.title(),
+        "all_day": bool(fresh.isAllDay()),
+        "location": fresh.location() or None,
+        "notes": fresh.notes() or None,
+        "calendar": fresh.calendar().title(),
+    }
+    fresh_start = from_nsdate(fresh.startDate())
+    if data.all_day:
+        # EventKit's internal all-day END representation is ambiguous (inclusive vs
+        # stored-as-next-midnight) — an end-epoch check would false-fail every all-day
+        # event, so verify the start *date* + the flag only. End stays on-device
+        # calibration (integration), like the deeplinks.
+        s_exp, _ = _all_day_bounds(data.start, data.end)
+        expected["start_date"] = (s_exp.year, s_exp.month, s_exp.day)
+        actual["start_date"] = (fresh_start.year, fresh_start.month, fresh_start.day)
+    else:
+        expected["start"] = int(data.start.timestamp())
+        expected["end"] = int(data.end.timestamp())
+        actual["start"] = int(fresh_start.timestamp())
+        actual["end"] = int(from_nsdate(fresh.endDate()).timestamp())
+    if data.recurrence is not None:  # None = "leave series untouched" (_apply_event)
+        # verify the exact cadence, not just presence — a wrong-frequency series is a
+        # changed field #49 must name (UNTIL deferred; see recurrence_signature).
+        expected["recurs"] = recurrence_signature(data.recurrence)
+        actual["recurs"] = persisted_recurrence_signature(fresh.recurrenceRules())
+    verify_persisted("event", expected, actual)
+
+
+def _refetch_event(s, ident: str):
+    """Re-resolve the occurrence by id after a write; a not-found is a persistence
+    failure (fabricated id / rollback), not a plain lookup miss."""
+    try:
+        return _resolve_event(s, ident)
+    except ValueError as e:
+        raise VerificationFailed(
+            f"event {ident!r} could not be re-fetched after save — the write did not "
+            "persist (a fabricated id or an iCloud rollback). Do not trust the id."
+        ) from e
+
+
 class CalendarAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """query: 'today' | 'week' | 'YYYY-MM-DD'."""
@@ -196,7 +257,12 @@ class CalendarAdapter:
             ok, err = s.saveEvent_span_commit_error_(e, _span(data), True, None)
             if not ok:
                 raise RuntimeError(f"save event failed: {err}")
-            return _event_pointer(e)
+            # Re-resolve by the occurrence id we'll return — never trust the in-memory
+            # event (#49): prove the id resolves and the fields persisted.
+            ident = _event_id(e)
+            fresh = _refetch_event(s, ident)
+            _verify_event(fresh, ident, data, e.calendar().title())
+            return _event_pointer(fresh)
 
         return run_native(work)
 
@@ -208,7 +274,12 @@ class CalendarAdapter:
             ok, err = s.saveEvent_span_commit_error_(e, _span(data), True, None)
             if not ok:
                 raise RuntimeError(f"save event failed: {err}")
-            return _event_pointer(e)
+            # Re-key from the post-apply event: if start changed, _event_id(e) carries
+            # the new occurrence epoch, so we re-resolve (and cite) it as persisted.
+            ident_after = _event_id(e)
+            fresh = _refetch_event(s, ident_after)
+            _verify_event(fresh, ident_after, data, e.calendar().title())
+            return _event_pointer(fresh)
 
         return run_native(work)
 

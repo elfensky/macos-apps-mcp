@@ -12,12 +12,16 @@ import EventKit as EK
 
 from ..contracts import Pointer, ReminderData
 from ..runtime import (
+    VerificationFailed,
     due_components,
+    persisted_recurrence_signature,
+    recurrence_signature,
     run_native,
     run_native_async,
     store,
     to_nsdate,
     to_recurrence_rule,
+    verify_persisted,
 )
 
 # A fetch has no user interaction, so the GCD callback should arrive quickly. Bound the
@@ -107,6 +111,63 @@ def _apply_reminder(s, r, data: ReminderData) -> None:
     r.setCalendar_(_resolve_list(s, data.list_name))
 
 
+def _due_tuple(comps) -> tuple | None:
+    """The (year, month, day, hour, minute) due_components() sets — the exact fields we
+    request, so the diff compares like-for-like (EventKit may add extras on read)."""
+    if comps is None:
+        return None
+    return (comps.year(), comps.month(), comps.day(), comps.hour(), comps.minute())
+
+
+def _expected_due_tuple(dt: datetime | None) -> tuple | None:
+    return None if dt is None else (dt.year, dt.month, dt.day, dt.hour, dt.minute)
+
+
+def _verify_reminder(fresh, ident: str, data: ReminderData, list_title: str) -> None:
+    """Re-fetch-by-id verify (#49): fail loudly if the saved reminder can't be re-read
+    or any requested field didn't persist. `fresh` is a fresh fetch by the id we return;
+    `list_title` is the requested list (the calendar _apply_reminder set)."""
+    if fresh is None:
+        raise VerificationFailed(
+            f"reminder {ident!r} could not be re-fetched — the write did not persist "
+            "(a fabricated id or an iCloud rollback). Do not trust the id; re-read "
+            "Reminders before retrying."
+        )
+    expected = {
+        "title": data.title,
+        "notes": data.notes or None,  # "" and None are both "no notes"
+        "priority": data.priority,
+        "due": _expected_due_tuple(data.due),
+        "start": _expected_due_tuple(data.start),
+        "list": list_title,
+        # full-replace: None clears the rule, so verify the exact cadence both ways
+        "recurs": recurrence_signature(data.recurrence),
+    }
+    actual = {
+        "title": fresh.title(),
+        "notes": fresh.notes() or None,
+        "priority": fresh.priority(),
+        "due": _due_tuple(fresh.dueDateComponents()),
+        "start": _due_tuple(fresh.startDateComponents()),
+        "list": fresh.calendar().title(),
+        "recurs": persisted_recurrence_signature(fresh.recurrenceRules()),
+    }
+    verify_persisted("reminder", expected, actual)
+
+
+def _verify_completed(fresh, ident: str) -> None:
+    if fresh is None:
+        raise VerificationFailed(
+            f"reminder {ident!r} could not be re-fetched after completing it — the "
+            "write did not persist. Do not trust the id."
+        )
+    if not fresh.isCompleted():
+        raise VerificationFailed(
+            f"reminder {ident!r} did not persist as completed (dropped or reverted). "
+            "Re-read it before retrying."
+        )
+
+
 class RemindersAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """query: 'today' | 'overdue' | 'this-week' | a reminder-list name."""
@@ -159,7 +220,12 @@ class RemindersAdapter:
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise RuntimeError(f"save reminder failed: {err}")
-            return _reminder_pointer(r)
+            # Re-fetch by the id we'll return — never trust the in-memory object (#49):
+            # prove the id resolves and the fields persisted.
+            ident = r.calendarItemIdentifier()
+            fresh = s.calendarItemWithIdentifier_(ident)
+            _verify_reminder(fresh, ident, data, r.calendar().title())
+            return _reminder_pointer(fresh)
 
         return run_native(work)
 
@@ -173,7 +239,9 @@ class RemindersAdapter:
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise RuntimeError(f"save reminder failed: {err}")
-            return _reminder_pointer(r)
+            fresh = s.calendarItemWithIdentifier_(ident)
+            _verify_reminder(fresh, ident, data, r.calendar().title())
+            return _reminder_pointer(fresh)
 
         return run_native(work)
 
@@ -187,6 +255,8 @@ class RemindersAdapter:
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise RuntimeError(f"complete reminder failed: {err}")
-            return _reminder_pointer(r)
+            fresh = s.calendarItemWithIdentifier_(ident)
+            _verify_completed(fresh, ident)
+            return _reminder_pointer(fresh)
 
         return run_native(work)
