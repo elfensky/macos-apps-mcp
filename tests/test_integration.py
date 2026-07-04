@@ -279,11 +279,144 @@ def test_recurring_event_update_targets_one_occurrence(created):
             start=days[1],
             end=days[1] + timedelta(hours=1),
         ),
+        span="this-event",  # #51: edit only THIS occurrence
     )
 
     assert any("EDITED" in t for t in titles_on(days[1]))  # middle occurrence changed
     assert all("EDITED" not in t for t in titles_on(days[0]))  # day 0 untouched
     assert all("EDITED" not in t for t in titles_on(days[2]))  # day 2 untouched
+
+
+@pytest.mark.integration
+def test_recurring_update_omitted_span_raises_and_does_not_write(created):
+    """#51: an update to a recurring occurrence with NO span must raise SpanRequired and
+    leave the series untouched (no silent whole-series rewrite)."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData
+    from mac_mcp.runtime import SpanRequired, to_nsdate
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    day0 = (datetime.now() + timedelta(days=2)).replace(
+        hour=9, minute=0, second=0, microsecond=0
+    )
+
+    def _make_series():
+        s = store()
+        e = EK.EKEvent.eventWithEventStore_(s)
+        e.setTitle_(f"{TITLE_PREFIX} span-guard")
+        e.setStartDate_(to_nsdate(day0))
+        e.setEndDate_(to_nsdate(day0 + timedelta(hours=1)))
+        e.setCalendar_(s.defaultCalendarForNewEvents())
+        end = EK.EKRecurrenceEnd.recurrenceEndWithEndDate_(
+            to_nsdate(day0 + timedelta(days=2, hours=2))
+        )
+        rule = EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
+            EK.EKRecurrenceFrequencyDaily, 1, end
+        )
+        e.setRecurrenceRules_([rule])
+        ok, err = s.saveEvent_span_commit_error_(e, EK.EKSpanFutureEvents, True, None)
+        if not ok:
+            raise RuntimeError(f"create recurring failed: {err}")
+        return e.calendarItemIdentifier()
+
+    created.append(("event", run_native(_make_series)))
+
+    occ = [
+        p
+        for p in a.get_pointers(day0.strftime("%Y-%m-%d"))
+        if "span-guard" in p.summary
+    ]
+    assert len(occ) == 1
+
+    with pytest.raises(SpanRequired, match="recurring event"):
+        a.update_event(
+            occ[0].id,
+            CalendarEventData(
+                title=f"{TITLE_PREFIX} span-guard SHOULD-NOT-STICK",
+                start=day0,
+                end=day0 + timedelta(hours=1),
+            ),
+        )  # no span → must raise, no write
+    # the title never changed — the write was refused, not silently applied
+    still = [
+        p.summary
+        for p in a.get_pointers(day0.strftime("%Y-%m-%d"))
+        if "span-guard" in p.summary
+    ]
+    assert still and all("SHOULD-NOT-STICK" not in t for t in still)
+
+
+@pytest.mark.integration
+def test_recurring_update_future_events_propagates(created):
+    """#51: span='future-events' edits this occurrence AND all later ones, leaving
+    earlier occurrences untouched."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData
+    from mac_mcp.runtime import to_nsdate
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    days = [
+        (datetime.now() + timedelta(days=2)).replace(
+            hour=9, minute=0, second=0, microsecond=0
+        )
+        + timedelta(days=d)
+        for d in range(3)
+    ]
+
+    def _make_series():
+        s = store()
+        e = EK.EKEvent.eventWithEventStore_(s)
+        e.setTitle_(f"{TITLE_PREFIX} propagate")
+        e.setStartDate_(to_nsdate(days[0]))
+        e.setEndDate_(to_nsdate(days[0] + timedelta(hours=1)))
+        e.setCalendar_(s.defaultCalendarForNewEvents())
+        end = EK.EKRecurrenceEnd.recurrenceEndWithEndDate_(
+            to_nsdate(days[2] + timedelta(hours=2))
+        )
+        rule = EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
+            EK.EKRecurrenceFrequencyDaily, 1, end
+        )
+        e.setRecurrenceRules_([rule])
+        ok, err = s.saveEvent_span_commit_error_(e, EK.EKSpanFutureEvents, True, None)
+        if not ok:
+            raise RuntimeError(f"create recurring failed: {err}")
+        return e.calendarItemIdentifier()
+
+    created.append(("event", run_native(_make_series)))
+
+    def titles_on(day):
+        return [
+            p.summary
+            for p in a.get_pointers(day.strftime("%Y-%m-%d"))
+            if "propagate" in p.summary
+        ]
+
+    mid = [
+        p
+        for p in a.get_pointers(days[1].strftime("%Y-%m-%d"))
+        if "propagate" in p.summary
+    ]
+    assert len(mid) == 1
+
+    a.update_event(
+        mid[0].id,
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} propagate EDITED",
+            start=days[1],
+            end=days[1] + timedelta(hours=1),
+        ),
+        span="future-events",  # #51: this occurrence + all later
+    )
+
+    assert all("EDITED" not in t for t in titles_on(days[0]))  # earlier untouched
+    assert any("EDITED" in t for t in titles_on(days[1]))  # this occurrence
+    assert any("EDITED" in t for t in titles_on(days[2]))  # later propagated
 
 
 @pytest.mark.integration

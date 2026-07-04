@@ -13,6 +13,7 @@ import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer
 from ..runtime import (
+    SpanRequired,
     VerificationFailed,
     from_nsdate,
     persisted_recurrence_signature,
@@ -119,18 +120,51 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     e.setLocation_(data.location)  # full-replace: None clears
     e.setNotes_(data.notes)  # full-replace: None clears
     # Recurrence is the exception to full-replace: only SET it when provided. Clearing a
-    # series needs EKSpanFutureEvents (see _span), but an omitted recurrence means "edit
-    # this occurrence" (EKSpanThisEvent) — so clearing-on-None would silently detach one
-    # occurrence and leave the series recurring. Leave the rule untouched instead.
+    # series needs EKSpanFutureEvents (see _resolve_span), but an omitted recurrence
+    # means "edit this occurrence" (EKSpanThisEvent) — so clearing-on-None would detach
+    # one occurrence and leave the series recurring. Leave the rule untouched.
     if data.recurrence is not None:
         e.setRecurrenceRules_([to_recurrence_rule(data.recurrence)])
     e.setCalendar_(_resolve_calendar(s, data.calendar))
+    # ponytail: all-day alarm 1440-gotcha (#51) — EKAlarm relativeOffset for an all-day
+    # event is measured from MIDNIGHT, so "9am the day before" is -1440+540 = -900 min,
+    # NOT -900 from an implicit 9am. We set no alarms yet (no alarm field on
+    # CalendarEventData), so nothing can go wrong; wire the -1440 base in with the alarm
+    # field, and test it then.
 
 
-def _span(data: CalendarEventData):
-    # A recurrence change defines the whole series, so it must span future events; a
-    # plain edit stays on the single cited occurrence (see _resolve_event).
-    return EK.EKSpanFutureEvents if data.recurrence else EK.EKSpanThisEvent
+# EKSpanThisEvent == 0 (falsy!), EKSpanFutureEvents == 1 — so map via membership, never
+# a truthy test.
+_SPANS = {
+    "this-event": EK.EKSpanThisEvent,
+    "future-events": EK.EKSpanFutureEvents,
+}
+
+
+def _resolve_span(e, span: str | None, *, adds_recurrence: bool = False) -> int:
+    """The EKSpan for an update/delete — requiring an explicit choice for a recurring
+    target (#51).
+
+    Editing/deleting one occurrence vs rewriting the whole series is destructive to get
+    wrong (mcp-ical silently rewrote users' series with a hardcoded EKSpanFutureEvents),
+    so a **recurring** event demands an explicit ``span``; a **single** event ignores it
+    (span is moot — EventKit has no other occurrences to span). Adding a rule to a
+    single event is inherently series-defining, so it saves future-events.
+    """
+    if not e.recurrenceRules():  # single event — span is moot
+        return EK.EKSpanFutureEvents if adds_recurrence else EK.EKSpanThisEvent
+    if span is None:
+        raise SpanRequired(
+            "This is a recurring event — specify span='this-event' (only this "
+            "occurrence) or span='future-events' (this and all later), then retry. "
+            "No change was made."
+        )
+    if span not in _SPANS:
+        raise SpanRequired(
+            "span must be 'this-event' or 'future-events' for a recurring event; got "
+            f"{span!r}. No change was made."
+        )
+    return _SPANS[span]
 
 
 def _resolve_event(s, ident: str):
@@ -253,8 +287,11 @@ class CalendarAdapter:
         def work():
             s = store()
             e = EK.EKEvent.eventWithEventStore_(s)
+            # A fresh event has no rules → single-event path; a create defining a series
+            # saves future-events. No span param — create is never an ambiguous edit.
+            span = _resolve_span(e, None, adds_recurrence=data.recurrence is not None)
             _apply_event(s, e, data)
-            ok, err = s.saveEvent_span_commit_error_(e, _span(data), True, None)
+            ok, err = s.saveEvent_span_commit_error_(e, span, True, None)
             if not ok:
                 raise RuntimeError(f"save event failed: {err}")
             # Re-resolve by the occurrence id we'll return — never trust the in-memory
@@ -266,12 +303,20 @@ class CalendarAdapter:
 
         return run_native(work)
 
-    def update_event(self, ident: str, data: CalendarEventData) -> Pointer:
+    def update_event(
+        self, ident: str, data: CalendarEventData, span: str | None = None
+    ) -> Pointer:
         def work():
             s = store()
             e = _resolve_event(s, ident)
+            # Resolve span BEFORE saving: a recurring target with no span raises here,
+            # so no write happens (#51). Checks the ORIGINAL event's rules, so a
+            # single→recurring conversion is series-defining, not ambiguous.
+            ek_span = _resolve_span(
+                e, span, adds_recurrence=data.recurrence is not None
+            )
             _apply_event(s, e, data)
-            ok, err = s.saveEvent_span_commit_error_(e, _span(data), True, None)
+            ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise RuntimeError(f"save event failed: {err}")
             # Re-key from the post-apply event: if start changed, _event_id(e) carries
@@ -283,13 +328,14 @@ class CalendarAdapter:
 
         return run_native(work)
 
-    def delete_event(self, ident: str) -> None:
+    def delete_event(self, ident: str, span: str | None = None) -> None:
         def work():
             s = store()
             e = _resolve_event(s, ident)
-            ok, err = s.removeEvent_span_commit_error_(
-                e, EK.EKSpanThisEvent, True, None
-            )
+            ek_span = _resolve_span(
+                e, span
+            )  # recurring + no span → SpanRequired, no write
+            ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise RuntimeError(f"delete event failed: {err}")
 

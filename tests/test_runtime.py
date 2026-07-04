@@ -17,6 +17,7 @@ from mac_mcp.runtime import (
     NativeTimeout,
     OutputOverflow,
     SchemaDrift,
+    SpanRequired,
     VerificationFailed,
     _classify_osascript_failure,
     _decide,
@@ -112,6 +113,7 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         NativeTimeout,
         OutputOverflow,
         SchemaDrift,
+        SpanRequired,
         VerificationFailed,
     ):
         assert issubclass(cls, NativeError)
@@ -130,6 +132,7 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             NativeTimeout,
             OutputOverflow,
             SchemaDrift,
+            SpanRequired,
             VerificationFailed,
         )
     ]

@@ -172,12 +172,14 @@ class _FakeWriter:
         self.calls.append(("create_event", data))
         return Pointer(id="E-9", summary="s", deeplink="d")
 
-    def update_event(self, ident: str, data: CalendarEventData) -> Pointer:
-        self.calls.append(("update_event", ident, data))
+    def update_event(
+        self, ident: str, data: CalendarEventData, span: str | None = None
+    ) -> Pointer:
+        self.calls.append(("update_event", ident, data, span))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def delete_event(self, ident: str) -> None:
-        self.calls.append(("delete_event", ident))
+    def delete_event(self, ident: str, span: str | None = None) -> None:
+        self.calls.append(("delete_event", ident, span))
 
     def create_contact(self, data: ContactData) -> Pointer:
         self.calls.append(("create_contact", data))
@@ -244,8 +246,8 @@ def test_update_event_builds_typed_payload(monkeypatch):
     out = srv.update_event(
         "E-1", "Standup", start="2026-06-24T09:00:00", end="2026-06-24T09:15:00"
     )
-    kind, ident, data = fake.calls[0]
-    assert kind == "update_event" and ident == "E-1"
+    kind, ident, data, span = fake.calls[0]
+    assert kind == "update_event" and ident == "E-1" and span is None
     assert data == CalendarEventData(
         title="Standup",
         start=datetime(2026, 6, 24, 9, 0),
@@ -258,7 +260,27 @@ def test_delete_event_dispatches(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
     out = srv.delete_event("E-1")
-    assert fake.calls[0] == ("delete_event", "E-1") and out == {"deleted": "E-1"}
+    assert fake.calls[0] == ("delete_event", "E-1", None) and out == {"deleted": "E-1"}
+
+
+def test_update_event_passes_span(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.update_event(
+        "E-1",
+        "Standup",
+        start="2026-06-24T09:00:00",
+        end="2026-06-24T09:15:00",
+        span="future-events",
+    )
+    assert fake.calls[0][0] == "update_event" and fake.calls[0][3] == "future-events"
+
+
+def test_delete_event_passes_span(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.delete_event("E-1", span="this-event")
+    assert fake.calls[0] == ("delete_event", "E-1", "this-event")
 
 
 def test_create_contact_builds_typed_payload(monkeypatch):

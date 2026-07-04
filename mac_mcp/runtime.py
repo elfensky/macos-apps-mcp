@@ -113,6 +113,13 @@ class VerificationFailed(NativeError):
     kind = "verification_failed"
 
 
+class SpanRequired(NativeError):
+    """A recurring event's update/delete needs an explicit span (this-event vs
+    future-events) so one occurrence isn't silently rewritten as the series (#51)."""
+
+    kind = "span_required"
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:

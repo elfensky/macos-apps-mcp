@@ -320,8 +320,11 @@ def update_event(
     notes: str | None = None,
     all_day: bool = False,
     recurrence: str | None = None,
+    span: str | None = None,
 ) -> dict:
-    """Update an event by id (full replace). `start`/`end` ISO — naive = local time."""
+    """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
+    `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
+    'future-events' (this + all later); ignored for single events."""
     data = CalendarEventData(
         title=title,
         start=_parse_required("start", start),
@@ -332,13 +335,15 @@ def update_event(
         all_day=all_day,
         recurrence=_recurrence(recurrence),
     )
-    return _emit(_calendar.update_event(id, data))
+    return _emit(_calendar.update_event(id, data, span=span))
 
 
 @_write_tool
-def delete_event(id: str) -> dict:
-    """Delete a calendar event by id."""
-    _calendar.delete_event(id)
+def delete_event(id: str, span: str | None = None) -> dict:
+    """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
+    'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
+    for single events."""
+    _calendar.delete_event(id, span=span)
     return {"deleted": id}
 
 

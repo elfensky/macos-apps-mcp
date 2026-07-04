@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import EventKit as EK
 import Foundation as F
 import pytest
 
@@ -16,10 +17,11 @@ from mac_mcp.adapters.calendar import (
     _range,
     _refetch_event,
     _resolve_calendar,
+    _resolve_span,
     _verify_event,
 )
 from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
-from mac_mcp.runtime import VerificationFailed
+from mac_mcp.runtime import SpanRequired, VerificationFailed
 
 
 def _ns(dt: datetime):
@@ -293,6 +295,47 @@ def test_verify_event_no_recurrence_requested_skips_check():
         end=datetime(2026, 6, 24, 9, 15),
     )
     _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
+
+
+# --- explicit span on recurring update/delete (#51) ----------------------------------
+
+
+def _fake_target(recurring: bool):
+    return SimpleNamespace(recurrenceRules=lambda: ["rule"] if recurring else None)
+
+
+def test_resolve_span_single_event_is_this_event():
+    # a single (non-recurring) event ignores span — it's moot, EventKit has no other
+    # occurrences to span.
+    assert _resolve_span(_fake_target(False), None) == EK.EKSpanThisEvent
+    assert _resolve_span(_fake_target(False), "future-events") == EK.EKSpanThisEvent
+
+
+def test_resolve_span_single_event_adding_recurrence_is_future():
+    # defining a series on a single event is inherently series-wide.
+    assert (
+        _resolve_span(_fake_target(False), None, adds_recurrence=True)
+        == EK.EKSpanFutureEvents
+    )
+
+
+def test_resolve_span_recurring_requires_explicit_choice():
+    with pytest.raises(SpanRequired, match="recurring event"):
+        _resolve_span(_fake_target(True), None)
+
+
+def test_resolve_span_recurring_maps_this_event():
+    # EKSpanThisEvent == 0 (falsy) — the mapping must use membership, not truthiness.
+    assert _resolve_span(_fake_target(True), "this-event") == EK.EKSpanThisEvent
+
+
+def test_resolve_span_recurring_maps_future_events():
+    assert _resolve_span(_fake_target(True), "future-events") == EK.EKSpanFutureEvents
+
+
+def test_resolve_span_recurring_rejects_invalid_value():
+    with pytest.raises(SpanRequired, match="must be 'this-event' or 'future-events'"):
+        _resolve_span(_fake_target(True), "the-whole-thing")
 
 
 def test_refetch_event_missing_is_rollback():
