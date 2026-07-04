@@ -133,6 +133,32 @@ def test_event_create_update_delete(created):
 
 
 @pytest.mark.integration
+def test_all_day_event_round_trips_date(created):
+    """#50: an all-day event created from a date-only local date reads back on the SAME
+    calendar day — never shifted a day by the UTC offset."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData, parse_datetime
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    day = (datetime.now() + timedelta(days=2)).date()
+    start = parse_datetime(day.isoformat())  # date-only → local midnight, naive
+
+    p = a.create_event(  # verify-after-write (#49) already asserts the start date here
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} all-day", start=start, end=start, all_day=True
+        )
+    )
+    created.append(("event", p.id))
+
+    # read that calendar day back — the event must appear on it, not day ±1
+    same_day = a.get_pointers(day.isoformat())
+    assert any(q.id.split("|")[0] == p.id.split("|")[0] for q in same_day)
+
+
+@pytest.mark.integration
 def test_named_list_read_excludes_completed(created):
     """Parity row 4: a named-list read returns only incomplete reminders.
 

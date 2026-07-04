@@ -485,6 +485,27 @@ def test_write_tool_converts_native_error_to_agent_directive(monkeypatch):
         srv.create_reminder("Call dentist")
 
 
+def test_now_tool_returns_local_context():
+    info = srv.now()
+    assert set(info) == {"datetime", "date", "timezone", "utc_offset", "weekday"}
+
+
+def test_event_date_params_route_through_parser(monkeypatch):
+    # #50: an aware ISO start must reach the adapter as naive-local with the instant
+    # preserved — proves date params go through contracts.parse_datetime.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event(
+        "Standup", start="2026-06-24T09:00:00+00:00", end="2026-06-24T10:00:00+00:00"
+    )
+    _, data = fake.calls[0]
+    assert data.start.tzinfo is None  # canonicalized to naive-local
+    assert (
+        data.start.timestamp()
+        == datetime.fromisoformat("2026-06-24T09:00:00+00:00").timestamp()
+    )
+
+
 def test_doctor_tool_dispatches(monkeypatch):
     # Thin dispatch: the tool just forwards `request` to doctor.diagnose and returns it.
     calls = []

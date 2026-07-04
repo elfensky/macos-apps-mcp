@@ -28,6 +28,8 @@ from .contracts import (
     Pointer,
     Recurrence,
     ReminderData,
+    now_local,
+    parse_datetime,
 )
 from .doctor import diagnose
 from .runtime import NativeError
@@ -101,6 +103,17 @@ def doctor(request: bool = False) -> dict:
     prompts (EventKit consent + per-app Automation probes) — use it once to grant.
     """
     return diagnose(request=request)
+
+
+@mcp.tool()
+def now() -> dict:
+    """Current local date, time, timezone, UTC offset, and weekday.
+
+    Call this FIRST to ground any relative date ("today", "tomorrow", "next Friday") —
+    never guess the date from memory. Every date parameter on the write tools is
+    interpreted in THIS timezone (naive ISO = local time).
+    """
+    return now_local()
 
 
 @_read_tool
@@ -185,17 +198,18 @@ def shortcuts(name: str = "") -> list[dict]:
 
 
 def _parse(s: str | None) -> datetime | None:
-    """Optional ISO datetime (reminder due). Empty/absent → None."""
-    return datetime.fromisoformat(s) if s else None
+    """Optional ISO datetime → naive local (contracts.parse_datetime). Empty/absent →
+    None."""
+    return parse_datetime(s) if s else None
 
 
 def _parse_required(label: str, s: str) -> datetime:
-    """Required ISO datetime (event start/end).
+    """Required ISO datetime (event start/end) → naive local.
 
     Bad/empty input fails clearly at the tool boundary.
     """
     try:
-        return datetime.fromisoformat(s)
+        return parse_datetime(s)
     except (TypeError, ValueError) as e:
         raise ValueError(
             f"{label} must be an ISO datetime string "
@@ -225,7 +239,8 @@ def create_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict:
-    """Create a reminder. `due`/`start` ISO; `priority` 0–9; `recurrence` an RRULE."""
+    """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
+    first; `priority` 0–9; `recurrence` an RRULE."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -249,7 +264,7 @@ def update_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict:
-    """Update a reminder by id (full replace from the given fields)."""
+    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local)."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -279,7 +294,8 @@ def create_event(
     all_day: bool = False,
     recurrence: str | None = None,
 ) -> dict:
-    """Create an event. `start`/`end` ISO; `all_day` flag; `recurrence` an RRULE."""
+    """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
+    first; `all_day` snaps to a pure date; `recurrence` an RRULE."""
     data = CalendarEventData(
         title=title,
         start=_parse_required("start", start),
@@ -305,7 +321,7 @@ def update_event(
     all_day: bool = False,
     recurrence: str | None = None,
 ) -> dict:
-    """Update an event by id (full replace from the given fields)."""
+    """Update an event by id (full replace). `start`/`end` ISO — naive = local time."""
     data = CalendarEventData(
         title=title,
         start=_parse_required("start", start),
