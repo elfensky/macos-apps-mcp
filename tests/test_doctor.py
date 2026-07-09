@@ -41,6 +41,28 @@ def test_eventkit_writeonly_is_not_ok(monkeypatch):
     assert all(s["ok"] is False and s["status"] == "write_only" for s in surfaces)
 
 
+def test_eventkit_request_routes_request_access_each_through_run_native(monkeypatch):
+    # An undetermined surface triggers one per-entity request pass — the module-top
+    # request_access_each handed to run_native — then status is re-read.
+    def fake_request():
+        raise AssertionError("request_access_each must go through run_native")
+
+    monkeypatch.setattr(doc, "request_access_each", fake_request)
+    codes = iter([0, 0, 3, 3])  # not_determined on first read; granted on re-read
+    requested = []
+
+    def fake_run_native(fn):
+        if fn is fake_request:
+            requested.append(True)
+            return None
+        return next(codes)
+
+    monkeypatch.setattr(doc, "run_native", fake_run_native)
+    surfaces = doc._eventkit_surfaces(request=True)
+    assert requested == [True]
+    assert all(s["ok"] is True and s["status"] == "full_access" for s in surfaces)
+
+
 # --- Automation surfaces (prompt-gated) ----------------------------------------------
 
 
@@ -85,6 +107,14 @@ def test_automation_probe_app_not_running_is_reported_not_raised(monkeypatch):
     monkeypatch.setattr(doc, "run_osascript", not_running)
     surfaces = doc._automation_surfaces(request=True)  # must not raise
     assert all(s["status"] == "app_not_running" for s in surfaces)
+
+
+def test_probe_is_a_real_apple_event_with_consent_budget():
+    # Pins the vacuous-probe regression: host-resolved properties (name/version/…)
+    # never hit TCC, so the probe must send a real Apple event; the timeout budgets
+    # for the one-time Automation consent dialog (a human answer).
+    assert "count windows" in doc._PROBE
+    assert doc._PROBE_TIMEOUT == 120.0
 
 
 # --- Shortcuts CLI + Full Disk Access ------------------------------------------------
@@ -162,6 +192,32 @@ def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
     report = doc.diagnose(request=False)
     assert report["probed_automation"] is False
     assert "Automation unprobed" in report["summary"]
+
+
+def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
+    # An unprobeable surface (ok=None) must not be counted as OK: FDA probe path
+    # missing → ok=None → the request=True summary says unverified, never all-OK.
+    _all_granted(monkeypatch, tmp_path)
+    monkeypatch.setattr(doc, "_FDA_PATH", tmp_path / "nope" / "TCC.db")
+    report = doc.diagnose(request=True)
+    assert "unverified" in report["summary"]
+    assert "full_disk_access" in report["summary"]
+    assert "all 10 surfaces OK" not in report["summary"]
+
+
+def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
+    # All-granted request=True takes exactly one status read per entity — no
+    # request pass, no re-read.
+    _all_granted(monkeypatch, tmp_path)
+    reads = []
+
+    def counting_run_native(fn):
+        reads.append(fn)
+        return 3  # full access
+
+    monkeypatch.setattr(doc, "run_native", counting_run_native)
+    doc.diagnose(request=True)
+    assert len(reads) == 2
 
 
 def test_report_stays_under_token_budget(monkeypatch, tmp_path):

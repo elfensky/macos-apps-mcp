@@ -11,11 +11,14 @@ from datetime import datetime, timedelta
 
 import EventKit as EK
 
-from ..contracts import CalendarEventData, Pointer
+from ..contracts import CalendarEventData, Pointer, parse_datetime
 from ..runtime import (
     SpanRequired,
     VerificationFailed,
+    WriteRefused,
+    epoch_nsdate,
     from_nsdate,
+    norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
     run_native,
@@ -33,7 +36,7 @@ def _range(query: str) -> tuple[datetime, datetime]:
         return today, today + timedelta(days=1)
     if q == "week":
         return today, today + timedelta(days=7)
-    day = datetime.fromisoformat(query.strip()).replace(
+    day = parse_datetime(query.strip()).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     return day, day + timedelta(days=1)
@@ -164,6 +167,12 @@ def _resolve_span(e, span: str | None, *, adds_recurrence: bool = False) -> int:
             "span must be 'this-event' or 'future-events' for a recurring event; got "
             f"{span!r}. No change was made."
         )
+    if adds_recurrence and _SPANS[span] == EK.EKSpanThisEvent:
+        raise SpanRequired(
+            "a recurrence change rewrites the series, so span='this-event' cannot "
+            "apply it — use span='future-events', or omit recurrence to edit only "
+            "this occurrence. No change was made."
+        )
     return _SPANS[span]
 
 
@@ -185,10 +194,11 @@ def _resolve_event(s, ident: str):
             raise ValueError(f"no event with id {ident!r}")
         return e
     occ_epoch = int(occ)
-    occ_start = datetime.fromtimestamp(occ_epoch)
+    # ±1s window built straight from the epoch: datetime±timedelta resets the PEP-495
+    # fold, shifting DST-repeated-hour instants by 1h — epoch_nsdate is fold-proof.
     pred = s.predicateForEventsWithStartDate_endDate_calendars_(
-        to_nsdate(occ_start - timedelta(seconds=1)),
-        to_nsdate(occ_start + timedelta(seconds=1)),
+        epoch_nsdate(occ_epoch - 1),
+        epoch_nsdate(occ_epoch + 1),
         None,
     )
     for e in s.eventsMatchingPredicate_(pred) or []:
@@ -202,26 +212,24 @@ def _resolve_event(s, ident: str):
 
 def _verify_event(fresh, ident: str, data: CalendarEventData, cal_title: str) -> None:
     """Re-fetch-by-id verify (#49): fail loudly if the saved event didn't persist as
-    requested. `fresh` is a fresh re-resolve of the occurrence we're about to return;
-    `cal_title` is the requested calendar (what _apply_event set)."""
-    if fresh is None:
-        raise VerificationFailed(
-            f"event {ident!r} could not be re-fetched after save — the write did not "
-            "persist (a fabricated id or an iCloud rollback). Do not trust the id."
-        )
+    requested. `fresh` is a fresh re-resolve of the occurrence we're about to return
+    (from _refetch_event — never None; a missed re-fetch raised there); `cal_title` is
+    the requested calendar (what _apply_event set)."""
+    # free text through norm_text: NFC/NFD + CRLF folds are the store normalizing, not
+    # a dropped field; "" and None both mean "unset" (norm_text folds "" → None).
     expected = {
-        "title": data.title,
+        "title": norm_text(data.title),
         "all_day": data.all_day,
-        "location": data.location or None,  # "" and None are both "no location"
-        "notes": data.notes or None,
-        "calendar": cal_title,
+        "location": norm_text(data.location),
+        "notes": norm_text(data.notes),
+        "calendar": norm_text(cal_title),
     }
     actual = {
-        "title": fresh.title(),
+        "title": norm_text(fresh.title()),
         "all_day": bool(fresh.isAllDay()),
-        "location": fresh.location() or None,
-        "notes": fresh.notes() or None,
-        "calendar": fresh.calendar().title(),
+        "location": norm_text(fresh.location()),
+        "notes": norm_text(fresh.notes()),
+        "calendar": norm_text(fresh.calendar().title()),
     }
     fresh_start = from_nsdate(fresh.startDate())
     if data.all_day:
@@ -291,14 +299,24 @@ class CalendarAdapter:
             # saves future-events. No span param — create is never an ambiguous edit.
             span = _resolve_span(e, None, adds_recurrence=data.recurrence is not None)
             _apply_event(s, e, data)
+            # read before save — the commit may re-home the object, and post-save it
+            # would tautologically equal the actual. cal may be nil (no writable
+            # calendar account); let the save below surface the WriteRefused.
+            cal = e.calendar()
+            cal_title = cal.title() if cal is not None else None
             ok, err = s.saveEvent_span_commit_error_(e, span, True, None)
             if not ok:
-                raise RuntimeError(f"save event failed: {err}")
+                raise WriteRefused(
+                    f"the event write was refused by the store: {err}. The target "
+                    "calendar may be read-only (a subscribed calendar) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
             # Re-resolve by the occurrence id we'll return — never trust the in-memory
             # event (#49): prove the id resolves and the fields persisted.
             ident = _event_id(e)
             fresh = _refetch_event(s, ident)
-            _verify_event(fresh, ident, data, e.calendar().title())
+            _verify_event(fresh, ident, data, cal_title)
             return _event_pointer(fresh)
 
         return run_native(work)
@@ -316,14 +334,24 @@ class CalendarAdapter:
                 e, span, adds_recurrence=data.recurrence is not None
             )
             _apply_event(s, e, data)
+            # read before save — the commit may re-home the object, and post-save it
+            # would tautologically equal the actual. cal may be nil (no writable
+            # calendar account); let the save below surface the WriteRefused.
+            cal = e.calendar()
+            cal_title = cal.title() if cal is not None else None
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise RuntimeError(f"save event failed: {err}")
+                raise WriteRefused(
+                    f"the event write was refused by the store: {err}. The target "
+                    "calendar may be read-only (a subscribed calendar) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
             # Re-key from the post-apply event: if start changed, _event_id(e) carries
             # the new occurrence epoch, so we re-resolve (and cite) it as persisted.
             ident_after = _event_id(e)
             fresh = _refetch_event(s, ident_after)
-            _verify_event(fresh, ident_after, data, e.calendar().title())
+            _verify_event(fresh, ident_after, data, cal_title)
             return _event_pointer(fresh)
 
         return run_native(work)
@@ -337,6 +365,11 @@ class CalendarAdapter:
             )  # recurring + no span → SpanRequired, no write
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise RuntimeError(f"delete event failed: {err}")
+                raise WriteRefused(
+                    f"the event delete was refused by the store: {err}. The target "
+                    "calendar may be read-only (a subscribed calendar) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
 
         run_native(work)

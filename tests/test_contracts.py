@@ -16,6 +16,7 @@ from mac_mcp.contracts import (
     ReminderData,
     _format_offset,
     now_local,
+    parse_all_day,
     parse_datetime,
 )
 from mac_mcp.runtime import run_native
@@ -223,6 +224,39 @@ def test_parse_datetime_preserves_instant_across_fall_back_fold(monkeypatch):
 def test_parse_datetime_rejects_garbage():
     with pytest.raises(ValueError, match="ISO-8601"):
         parse_datetime("next tuesday")
+
+
+# --- all-day boundary (#50 review): a calendar DATE, not an instant ------------------
+
+
+def test_parse_all_day_accepts_date_only():
+    # an all-day param is a calendar DATE — date-only parses to naive local midnight.
+    assert parse_all_day("2026-07-01") == datetime(2026, 7, 1, 0, 0)
+    assert parse_all_day("2026-07-01").tzinfo is None
+
+
+def test_parse_all_day_accepts_naive_datetime():
+    # a naive datetime passes through; the adapter floors it to the day downstream.
+    assert parse_all_day("2026-07-01T09:30:00") == datetime(2026, 7, 1, 9, 30)
+
+
+@pytest.mark.parametrize("value", ["2026-07-01T00:00:00Z", "2026-07-01T00:00:00+09:00"])
+def test_parse_all_day_rejects_aware_instant(value):
+    # midnight-Z is an instant, not a date — west of UTC it converts to the PREVIOUS
+    # local day, so aware values are rejected instead of silently day-shifting.
+    with pytest.raises(ValueError, match="calendar date"):
+        parse_all_day(value)
+
+
+def test_parse_all_day_rejection_carries_date_hint():
+    # the error hands the agent the exact fix: the date-only form of its own input.
+    with pytest.raises(ValueError, match="date-only string like '2026-07-01'"):
+        parse_all_day("2026-07-01T12:00:00+09:00")
+
+
+def test_parse_all_day_rejects_garbage():
+    with pytest.raises(ValueError, match="ISO-8601"):
+        parse_all_day("next tuesday")
 
 
 def test_format_offset():

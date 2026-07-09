@@ -19,6 +19,7 @@ from mac_mcp.adapters.reminders import (
 )
 from mac_mcp.contracts import Pointer, Recurrence, ReminderData
 from mac_mcp.runtime import VerificationFailed
+from tests._fakes import fake_rule
 
 
 def _fake_reminder(title, ident, due=None):
@@ -93,20 +94,11 @@ def _comps(y, m, d, h, mi):
     )
 
 
-def _fake_rule(freq=0, interval=1, count=None):
-    # freq is the EKRecurrenceFrequency int (daily=0, weekly=1, monthly=2, yearly=3).
-    end = None if count is None else SimpleNamespace(occurrenceCount=lambda: count)
-    return SimpleNamespace(
-        frequency=lambda: freq, interval=lambda: interval, recurrenceEnd=lambda: end
-    )
-
-
 def _fake_persisted(
     title="Pay rent",
     notes=None,
     priority=0,
     due=None,
-    start=None,
     list_title="Home",
     rule=None,
     completed=False,
@@ -116,7 +108,7 @@ def _fake_persisted(
         notes=lambda: notes,
         priority=lambda: priority,
         dueDateComponents=lambda: due,
-        startDateComponents=lambda: start,
+        startDateComponents=lambda: None,
         calendar=lambda: SimpleNamespace(title=lambda: list_title),
         recurrenceRules=lambda: [rule] if rule is not None else None,
         isCompleted=lambda: completed,
@@ -186,7 +178,7 @@ def test_verify_reminder_wrong_frequency_raises():
     fresh = _fake_persisted(
         title="Water plants",
         due=_comps(2026, 6, 25, 9, 0),
-        rule=_fake_rule(freq=0, interval=2),  # persisted DAILY, not weekly
+        rule=fake_rule(freq=0, interval=2),  # persisted DAILY, not weekly
     )
     with pytest.raises(VerificationFailed, match="recurs"):
         _verify_reminder(fresh, "R-1", data, "Home")
@@ -201,9 +193,38 @@ def test_verify_reminder_matching_recurrence_passes():
     fresh = _fake_persisted(
         title="Water plants",
         due=_comps(2026, 6, 25, 9, 0),
-        rule=_fake_rule(freq=1, interval=2, count=10),  # weekly/2/10 — exact match
+        rule=fake_rule(freq=1, interval=2, count=10),  # weekly/2/10 — exact match
     )
     _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+
+
+def test_verify_reminder_nfd_title_matches_nfc_persisted():
+    # Cocoa normalizes to NFC on store — a byte-exact diff would false-fail a
+    # correct write (#49).
+    data = ReminderData(title="Cafe\u0301 run")  # NFD: e + combining acute
+    fresh = _fake_persisted(title="Caf\u00e9 run")  # persisted as NFC
+    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+
+
+def test_verify_reminder_crlf_notes_match_lf_persisted():
+    data = ReminderData(title="Pay rent", notes="first\r\nsecond")
+    fresh = _fake_persisted(notes="first\nsecond")  # store folded CRLF → LF
+    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+
+
+def test_verify_reminder_changed_notes_raises():
+    # normalization must not swallow a genuinely different value
+    data = ReminderData(title="Pay rent", notes="pay by the 1st")
+    fresh = _fake_persisted(notes="pay by the 5th")
+    with pytest.raises(VerificationFailed, match="notes"):
+        _verify_reminder(fresh, "R-1", data, "Home")
+
+
+def test_verify_reminder_dropped_notes_raises():
+    data = ReminderData(title="Pay rent", notes="pay by the 1st")
+    fresh = _fake_persisted(notes=None)
+    with pytest.raises(VerificationFailed, match="notes"):
+        _verify_reminder(fresh, "R-1", data, "Home")
 
 
 def test_verify_completed_passes_when_completed():

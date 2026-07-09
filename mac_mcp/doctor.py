@@ -25,16 +25,21 @@ from pathlib import Path
 
 import EventKit as EK
 
-from .runtime import NativeError, run_native, run_osascript
+from .runtime import NativeError, request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 _AUTOMATION_APPS = ("Mail", "Notes", "Contacts", "Photos", "Safari", "Messages")
 
 # The app name is passed via argv (never interpolated), matching the injection-safe
-# osascript convention even though these targets are constants. `tell application <var>`
-# resolves the app by name at runtime; `name` is the cheapest property to ask for.
-_PROBE = "on run argv\n  tell application (item 1 of argv) to return name\nend run"
-_PROBE_TIMEOUT = 5.0  # short: a hung probe must not stall the whole report
+# osascript convention even though these targets are constants. name/id/version/
+# running/frontmost are host-resolved since AppleScript 10.5 — no Apple event, no TCC
+# check — so a probe asking for them proves nothing; it must send a REAL event, and
+# `count windows` is the cheapest read-only command that does. Trade-off: it launches
+# a quit app, and a never-authorized one can surface the one-time consent dialog.
+_PROBE = "on run argv\n  tell application (item 1 of argv) to count windows\nend run"
+# Budget for the one-time Automation consent dialog — a human answer, same rationale as
+# runtime._ACCESS_TIMEOUT; already-granted/denied probes return in well under a second.
+_PROBE_TIMEOUT = 120.0
 
 # A read of this path is gated by Full Disk Access and it always exists on macOS, so a
 # PermissionError vs a clean read cleanly separates FDA-denied from FDA-granted. The
@@ -78,23 +83,23 @@ def _ek_status(entity: int) -> int:
 def _try_request_access() -> None:
     """request=True: trigger the EventKit consent prompt for any not-yet-determined
     surface, then let the caller re-read status. A denial isn't fatal to a diagnosis —
-    the caller's re-read reports the resulting (denied) status."""
-    from contextlib import suppress
-
-    from .runtime import AccessDenied, request_access
-
-    with suppress(AccessDenied):
-        run_native(request_access)
+    request_access_each is per-entity and non-fatal, and the caller's re-read reports
+    the resulting (denied) status."""
+    run_native(request_access_each)
 
 
 def _eventkit_surfaces(request: bool) -> list[dict]:
-    if request and any(_ek_status(e) == 0 for _, e, _ in _EK_ENTITIES):
+    codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
+    if request and any(
+        code == EK.EKAuthorizationStatusNotDetermined for code in codes.values()
+    ):
         _try_request_access()
+        codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
     out = []
     for name, entity, pane in _EK_ENTITIES:
-        code = _ek_status(entity)
+        code = codes[entity]
         status = _EK_STATUS.get(code, f"unknown({code})")
-        ok = status == "full_access"
+        ok = code == EK.EKAuthorizationStatusFullAccess
         remediation = (
             None
             if ok
@@ -202,13 +207,19 @@ def diagnose(request: bool = False) -> dict:
         _fda_surface(),
     ]
     needs = [s["surface"] for s in surfaces if s["ok"] is False]
+    unknown = [s["surface"] for s in surfaces if s["ok"] is None]
     if needs:
         summary = (
             f"{len(needs)} of {len(surfaces)} surfaces need attention: "
             + ", ".join(needs)
         )
     elif request:
-        summary = f"all {len(surfaces)} surfaces OK"
+        # An unprobeable surface (ok=None) must not be counted as OK.
+        summary = (
+            f"all {len(surfaces)} surfaces OK"
+            if not unknown
+            else f"no denied surfaces; {len(unknown)} unverified: " + ", ".join(unknown)
+        )
     else:
         summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
     return {

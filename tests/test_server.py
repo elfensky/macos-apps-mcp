@@ -10,6 +10,7 @@ from fastmcp.exceptions import ToolError
 
 import mac_mcp.server as srv
 from mac_mcp.contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
     Pointer,
@@ -319,6 +320,41 @@ def test_create_event_passes_all_day(monkeypatch):
     assert data.all_day is True
 
 
+def test_create_event_all_day_accepts_date_only(monkeypatch):
+    # all_day takes a calendar DATE — date-only parses to naive local midnight.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event("Holiday", start="2026-07-01", end="2026-07-02", all_day=True)
+    _, data = fake.calls[0]
+    assert data.all_day is True
+    assert data.start == datetime(2026, 7, 1) and data.end == datetime(2026, 7, 2)
+
+
+def test_create_event_all_day_rejects_utc_offset(monkeypatch):
+    # an all-day instant with a UTC offset can land on the wrong calendar day —
+    # rejected with the date-only hint, prefixed by the failing param's label.
+    monkeypatch.setattr(srv, "_calendar", _FakeWriter())
+    with pytest.raises(ValueError, match=r"start: .*date-only"):
+        srv.create_event(
+            "Holiday",
+            start="2026-07-01T00:00:00Z",
+            end="2026-07-02T00:00:00Z",
+            all_day=True,
+        )
+
+
+def test_update_event_all_day_rejects_utc_offset(monkeypatch):
+    monkeypatch.setattr(srv, "_calendar", _FakeWriter())
+    with pytest.raises(ValueError, match="date-only"):
+        srv.update_event(
+            "E-1",
+            "Holiday",
+            start="2026-07-01T00:00:00Z",
+            end="2026-07-02T00:00:00Z",
+            all_day=True,
+        )
+
+
 def test_create_event_parses_recurrence(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
@@ -347,6 +383,37 @@ def test_create_reminder_recurrence_without_due_rejected(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
     with pytest.raises(ValueError, match="needs a due date"):
         srv.create_reminder("Water plants", recurrence="FREQ=DAILY")
+
+
+@pytest.mark.parametrize("val", ["none", "None", "NONE", " none "])
+def test_update_reminder_recurrence_none_is_clear_sentinel(monkeypatch, val):
+    # tri-state: the literal 'none' is an explicit stop — the adapter clears the rule
+    # instead of refusing the update.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder("R-1", "Call dentist", recurrence=val)
+    _, _, data = fake.calls[0]
+    assert data.recurrence is CLEAR_RECURRENCE
+
+
+def test_update_reminder_recurrence_omitted_is_none(monkeypatch):
+    # omitted stays None (unspecified) — the adapter refuses that on a repeating
+    # target, so a rename can't silently kill the series.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder("R-1", "Call dentist")
+    _, _, data = fake.calls[0]
+    assert data.recurrence is None
+
+
+def test_update_reminder_recurrence_rrule_parses(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder(
+        "R-1", "Water plants", due="2026-06-25T09:00:00", recurrence="FREQ=DAILY"
+    )
+    _, _, data = fake.calls[0]
+    assert data.recurrence == Recurrence(frequency="daily")
 
 
 def test_create_event_rejects_bad_rrule(monkeypatch):
@@ -398,8 +465,9 @@ def test_safari_open_dispatches(monkeypatch):
 
 def test_create_event_rejects_empty_start():
     # Required event dates fail clearly at the tool boundary, not as an obscure
-    # worker-thread crash.
-    with pytest.raises(ValueError, match="ISO datetime"):
+    # worker-thread crash: the label prefixes contracts.parse_datetime's message
+    # verbatim (which rightly still offers the date-only form for timed events).
+    with pytest.raises(ValueError, match=r"start: expected an ISO-8601 .* or date"):
         srv.create_event("Standup", start="", end="2026-06-24T09:15:00")
 
 

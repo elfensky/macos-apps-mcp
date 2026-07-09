@@ -12,7 +12,7 @@ the script, so a name or id can't break out of the AppleScript.
 from __future__ import annotations
 
 from ..contracts import ContactData, Pointer
-from ..runtime import VerificationFailed, run_osascript, verify_persisted
+from ..runtime import VerificationFailed, norm_text, run_osascript, verify_persisted
 
 MAX_CONTACTS = 50  # cap a broad name match
 
@@ -71,15 +71,19 @@ _CREATE = """on run argv
 end run"""
 
 # Re-read a person by the id we're about to return (#49) — proves the create persisted
-# and didn't silently drop a field. Emits "firstname|lastname|org" (US-delimited); an
-# empty return means the id resolves to nothing (fabricated / not saved). id via argv.
+# and didn't silently drop a field. `person id` is the direct O(1) specifier (the form
+# notes.py already uses); a whose-filter would scan the whole address book. Emits
+# "firstname|lastname|org" (US-delimited); an empty return means the id resolves to
+# nothing (fabricated / not saved). id via argv.
 _VERIFY = """on run argv
   set pid to item 1 of argv
   set uSep to character id 31
   tell application "Contacts"
-    set matches to (people whose id is pid)
-    if (count of matches) is 0 then return ""
-    set p to item 1 of matches
+    try
+      set p to person id pid
+    on error
+      return ""
+    end try
     set fn to first name of p
     if fn is missing value then set fn to ""
     set ln to last name of p
@@ -94,10 +98,10 @@ end run"""
 def _verify_contact(raw: str, ident: str, data: ContactData) -> None:
     """Re-query verify (#49): fail loudly if the created contact can't be re-read or a
     requested field didn't persist. `raw` is the ``_VERIFY`` payload for ``ident``."""
-    # rstrip ONLY the newline — NOT str.strip(): the \x1f/\x1e separators are Unicode
+    # run_osascript already strips osascript's single terminating newline, so `raw` is
+    # the payload as-is — never str.strip() it: the \x1f/\x1e separators are Unicode
     # whitespace, so strip() would eat a leading empty given_name's delimiter and shift
     # every field left. _VERIFY returns "" (empty) for a not-found id.
-    raw = raw.rstrip("\n")
     if not raw:
         raise VerificationFailed(
             f"contact {ident!r} could not be re-read after save — the write did not "
@@ -108,16 +112,16 @@ def _verify_contact(raw: str, ident: str, data: ContactData) -> None:
     ln = parts[1] if len(parts) > 1 else ""
     org = parts[2] if len(parts) > 2 else ""
     expected = {
-        # normalize "" ↔ None on BOTH sides (as with family_name/organization) so an
-        # empty given_name — an org-only contact — doesn't false-fail a correct save.
-        "given_name": data.given_name or None,
-        "family_name": data.family_name or None,  # "" and None are both "no last name"
-        "organization": data.organization or None,
+        # norm_text folds "" ↔ None on BOTH sides (an org-only contact has an empty
+        # given_name) and NFC/LF-normalizes, so a correct save can't false-fail (#49).
+        "given_name": norm_text(data.given_name),
+        "family_name": norm_text(data.family_name),
+        "organization": norm_text(data.organization),
     }
     actual = {
-        "given_name": fn or None,
-        "family_name": ln or None,
-        "organization": org or None,
+        "given_name": norm_text(fn),
+        "family_name": norm_text(ln),
+        "organization": norm_text(org),
     }
     verify_persisted("contact", expected, actual)
 

@@ -10,12 +10,16 @@ from datetime import datetime, timedelta
 
 import EventKit as EK
 
-from ..contracts import Pointer, ReminderData
+from ..contracts import Pointer, Recurrence, ReminderData
 from ..runtime import (
+    RecurrenceRequired,
     VerificationFailed,
+    WriteRefused,
     due_components,
+    norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    rrule_text,
     run_native,
     run_native_async,
     store,
@@ -105,8 +109,13 @@ def _apply_reminder(s, r, data: ReminderData) -> None:
     r.setStartDateComponents_(
         due_components(data.start) if data.start is not None else None
     )
-    r.setRecurrenceRules_(  # full-replace: None clears any existing rule
-        [to_recurrence_rule(data.recurrence)] if data.recurrence else None
+    # Tri-state: a Recurrence sets the rule; CLEAR_RECURRENCE and None both clear —
+    # None only gets here when the target has no rule to destroy (RecurrenceRequired
+    # guard in update_reminder).
+    r.setRecurrenceRules_(
+        [to_recurrence_rule(data.recurrence)]
+        if isinstance(data.recurrence, Recurrence)
+        else None
     )
     r.setCalendar_(_resolve_list(s, data.list_name))
 
@@ -134,22 +143,22 @@ def _verify_reminder(fresh, ident: str, data: ReminderData, list_title: str) -> 
             "Reminders before retrying."
         )
     expected = {
-        "title": data.title,
-        "notes": data.notes or None,  # "" and None are both "no notes"
+        "title": norm_text(data.title),
+        "notes": norm_text(data.notes),  # norm_text folds "" and None to "no notes"
         "priority": data.priority,
         "due": _expected_due_tuple(data.due),
         "start": _expected_due_tuple(data.start),
-        "list": list_title,
+        "list": norm_text(list_title),
         # full-replace: None clears the rule, so verify the exact cadence both ways
         "recurs": recurrence_signature(data.recurrence),
     }
     actual = {
-        "title": fresh.title(),
-        "notes": fresh.notes() or None,
+        "title": norm_text(fresh.title()),
+        "notes": norm_text(fresh.notes()),
         "priority": fresh.priority(),
         "due": _due_tuple(fresh.dueDateComponents()),
         "start": _due_tuple(fresh.startDateComponents()),
-        "list": fresh.calendar().title(),
+        "list": norm_text(fresh.calendar().title()),
         "recurs": persisted_recurrence_signature(fresh.recurrenceRules()),
     }
     verify_persisted("reminder", expected, actual)
@@ -217,14 +226,27 @@ class RemindersAdapter:
             s = store()
             r = EK.EKReminder.reminderWithEventStore_(s)
             _apply_reminder(s, r, data)
+            # Read the EXPECTED list before the save — the commit may re-home the
+            # object, and post-save it would tautologically equal the actual.
+            cal = r.calendar()
+            list_title = cal.title() if cal is not None else None
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise RuntimeError(f"save reminder failed: {err}")
+                raise WriteRefused(
+                    f"the reminder write was refused by the store: {err}. The target "
+                    "list may be read-only (a subscribed list) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
             # Re-fetch by the id we'll return — never trust the in-memory object (#49):
             # prove the id resolves and the fields persisted.
             ident = r.calendarItemIdentifier()
             fresh = s.calendarItemWithIdentifier_(ident)
-            _verify_reminder(fresh, ident, data, r.calendar().title())
+            # Same-store fetches can serve the registered in-memory object; refresh()
+            # pulls current DB state so the diff is against what actually persisted.
+            if fresh is not None and not fresh.refresh():
+                fresh = None  # gone from the DB between save and verify
+            _verify_reminder(fresh, ident, data, list_title)
             return _reminder_pointer(fresh)
 
         return run_native(work)
@@ -235,12 +257,38 @@ class RemindersAdapter:
             r = s.calendarItemWithIdentifier_(ident)
             if r is None:
                 raise ValueError(f"no reminder with id {ident!r}")
+            # Repeating target + omitted recurrence → refuse BEFORE any mutation, so
+            # a rename can't silently clear the series (mirror of SpanRequired, #51).
+            rules = r.recurrenceRules()
+            if rules and data.recurrence is None:
+                raise RecurrenceRequired(
+                    f"this reminder repeats ({rrule_text(rules[0])}) — re-send "
+                    "recurrence='FREQ=...' to keep or change it, or "
+                    "recurrence='none' to stop it repeating, then retry. "
+                    "No change was made."
+                )
             _apply_reminder(s, r, data)
+            # Read the EXPECTED list before the save — the commit may re-home the
+            # object, and post-save it would tautologically equal the actual.
+            cal = r.calendar()
+            list_title = cal.title() if cal is not None else None
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise RuntimeError(f"save reminder failed: {err}")
-            fresh = s.calendarItemWithIdentifier_(ident)
-            _verify_reminder(fresh, ident, data, r.calendar().title())
+                raise WriteRefused(
+                    f"the reminder write was refused by the store: {err}. The target "
+                    "list may be read-only (a subscribed list) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
+            # A list move may re-issue the identifier; the held object's post-save id
+            # is authoritative (same pattern as create and calendar.update).
+            ident_after = r.calendarItemIdentifier()
+            fresh = s.calendarItemWithIdentifier_(ident_after)
+            # Same-store fetches can serve the registered in-memory object; refresh()
+            # pulls current DB state so the diff is against what actually persisted.
+            if fresh is not None and not fresh.refresh():
+                fresh = None  # gone from the DB between save and verify
+            _verify_reminder(fresh, ident_after, data, list_title)
             return _reminder_pointer(fresh)
 
         return run_native(work)
@@ -254,8 +302,17 @@ class RemindersAdapter:
             r.setCompleted_(True)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise RuntimeError(f"complete reminder failed: {err}")
+                raise WriteRefused(
+                    f"the reminder completion was refused by the store: {err}. The "
+                    "target list may be read-only (a subscribed list) or the account "
+                    "rejected the change — do not retry the same target; tell the "
+                    "user."
+                )
             fresh = s.calendarItemWithIdentifier_(ident)
+            # Same-store fetches can serve the registered in-memory object; refresh()
+            # pulls current DB state so the diff is against what actually persisted.
+            if fresh is not None and not fresh.refresh():
+                fresh = None  # gone from the DB between save and verify
             _verify_completed(fresh, ident)
             return _reminder_pointer(fresh)
 

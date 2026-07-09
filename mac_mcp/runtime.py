@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -26,7 +27,7 @@ from typing import TypeVar
 import EventKit as EK
 import Foundation as F
 
-from .contracts import Recurrence
+from .contracts import CLEAR_RECURRENCE, Recurrence
 
 T = TypeVar("T")
 
@@ -120,6 +121,21 @@ class SpanRequired(NativeError):
     kind = "span_required"
 
 
+class WriteRefused(NativeError):
+    """The store refused a save/remove — a read-only or subscribed calendar/list, or
+    the account rejected the change."""
+
+    kind = "write_refused"
+
+
+class RecurrenceRequired(NativeError):
+    """Updating a repeating reminder needs an explicit recurrence (re-send the rule
+    or 'none') so a rename can't silently destroy the series (mirror of
+    SpanRequired's rationale, #51)."""
+
+    kind = "recurrence_required"
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:
@@ -144,6 +160,16 @@ def verify_persisted(
             f"can roll a write back ~1s later). Mismatches: {fields}. Re-read the item "
             "before trusting it; do not reuse the returned id."
         )
+
+
+def norm_text(v) -> str | None:
+    """NFC + LF-normalize a free-text field for verify comparison (#49): Cocoa treats
+    NFC/NFD as equal and stores may fold CRLF, so byte-exact != would false-fail a
+    correct write. "" and None both mean "unset"."""
+    if v is None:
+        return None
+    s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
+    return s or None
 
 
 def _decide(status: int) -> None:
@@ -246,7 +272,10 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
             ) from e
         if proc.returncode != 0:
             raise _classify_osascript_failure(proc.stderr)
-        return proc.stdout.rstrip("\n")
+        # trailing newlines inside the data must survive; remove only osascript's own
+        # single terminating newline
+        out = proc.stdout
+        return out[:-1] if out.endswith("\n") else out
 
     return _run() if _on_worker() else run_native(_run)
 
@@ -259,7 +288,7 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 
     Generalizes the EventKit fetch pattern. ``start(finish)`` kicks off the async op
     and arranges its completion handler to call ``finish(result)``; this returns that
-    result, or raises TimeoutError if the callback never fires within ``timeout``.
+    result, or raises NativeTimeout if the callback never fires within ``timeout``.
     Call on the worker (inside run_native), where ``start`` issues the native call.
 
     Works for GCD-delivered callbacks (EventKit fetch/auth). ponytail: APIs that
@@ -275,12 +304,21 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 
     start(finish)
     if not done.wait(timeout=timeout):
-        raise TimeoutError(f"native async callback never fired within {timeout}s")
+        raise NativeTimeout(
+            f"native async callback never fired within {timeout}s — the native "
+            "service may be hung. Tell the user; do not retry immediately."
+        )
     return box.get("result")
 
 
 def to_nsdate(dt: datetime) -> F.NSDate:
     return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+
+
+def epoch_nsdate(epoch: int) -> F.NSDate:
+    """Fold-proof NSDate from an epoch — datetime±timedelta resets the PEP-495 fold
+    and shifts DST-repeated-hour instants by 1h (#review)."""
+    return F.NSDate.dateWithTimeIntervalSince1970_(epoch)
 
 
 def from_nsdate(d: F.NSDate) -> datetime:
@@ -330,7 +368,7 @@ def recurrence_signature(recurrence: Recurrence | None) -> tuple | None:
     false-fail a correct write. ``count`` and "no count" both normalize to 0 (a
     date-based/open-ended rule reports 0), so an until rule still matches on count.
     """
-    if recurrence is None:
+    if recurrence is None or recurrence is CLEAR_RECURRENCE:
         return None
     return (
         int(_FREQUENCIES[recurrence.frequency]),
@@ -348,6 +386,22 @@ def persisted_recurrence_signature(rules) -> tuple | None:
     end = rule.recurrenceEnd()
     count = end.occurrenceCount() if end is not None else 0
     return (int(rule.frequency()), int(rule.interval()), int(count))
+
+
+_FREQUENCY_NAMES = {int(v): k.upper() for k, v in _FREQUENCIES.items()}
+
+
+def rrule_text(rule) -> str:
+    """Render a persisted EKRecurrenceRule as RRULE text for agent-facing messages,
+    e.g. ``FREQ=WEEKLY;INTERVAL=2;COUNT=10``."""
+    parts = [
+        f"FREQ={_FREQUENCY_NAMES[int(rule.frequency())]}",
+        f"INTERVAL={int(rule.interval())}",
+    ]
+    end = rule.recurrenceEnd()
+    if end is not None and end.occurrenceCount() > 0:
+        parts.append(f"COUNT={int(end.occurrenceCount())}")
+    return ";".join(parts)
 
 
 log = logging.getLogger("mac_mcp")
@@ -389,19 +443,21 @@ def request_access() -> None:
         _request_one(s, entity)
 
 
+def request_access_each() -> None:
+    """Request each EventKit surface independently — one denied surface must never
+    block the other's consent prompt (doctor #48 and bootstrap share this)."""
+    s = store()
+    for entity in _ENTITIES:
+        try:
+            _request_one(s, entity)
+        except AccessDenied as e:
+            log.warning("EventKit surface not granted: %s", e)
+
+
 def bootstrap() -> None:
     """Startup hook: create the store + request each TCC surface on the worker.
 
     Each surface is requested independently and **non-fatally** — a denied permission
     disables only that adapter (which raises on use), never the server.
     """
-
-    def _request_all() -> None:
-        s = store()
-        for entity in _ENTITIES:
-            try:
-                _request_one(s, entity)
-            except AccessDenied as e:
-                log.warning("mac-mcp starting without one EventKit surface: %s", e)
-
-    run_native(_request_all)
+    run_native(request_access_each)

@@ -23,12 +23,15 @@ from .adapters.reminders import RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
 from .contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
     Pointer,
     Recurrence,
     ReminderData,
+    _ClearRecurrence,
     now_local,
+    parse_all_day,
     parse_datetime,
 )
 from .doctor import diagnose
@@ -89,9 +92,10 @@ def _write_tool(fn):
     return fn if _read_only() else mcp.tool()(_guard(fn))
 
 
+# no native call → registered without _guard
 @mcp.tool()
 def ping() -> str:
-    """Health check — confirms mac-mcp is alive (no native call, so never guarded)."""
+    """Health check — confirms mac-mcp is alive."""
     return "mac-mcp ok"
 
 
@@ -210,11 +214,19 @@ def _parse_required(label: str, s: str) -> datetime:
     """
     try:
         return parse_datetime(s)
-    except (TypeError, ValueError) as e:
-        raise ValueError(
-            f"{label} must be an ISO datetime string "
-            f"(e.g. 2026-06-24T09:00:00), got {s!r}"
-        ) from e
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
+def _parse_all_day(label: str, s: str) -> datetime:
+    """Required all-day date (a calendar DATE, not an instant) → naive datetime.
+
+    A timestamp with a UTC offset fails clearly at the tool boundary.
+    """
+    try:
+        return parse_all_day(s)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
 
 
 def _priority(n: int) -> int:
@@ -225,8 +237,21 @@ def _priority(n: int) -> int:
 
 
 def _recurrence(rrule: str | None) -> Recurrence | None:
-    """Optional RFC-5545 RRULE string → Recurrence. Empty/absent → None."""
-    return Recurrence.from_rrule(rrule) if rrule else None
+    """Optional RFC-5545 RRULE string → Recurrence. Empty/absent/'none' → None."""
+    if not rrule or rrule.strip().lower() == "none":
+        return None  # 'none' is taught by update_reminder — accept it everywhere
+    return Recurrence.from_rrule(rrule)
+
+
+def _recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | None:
+    """update_reminder's tri-state recurrence: absent/empty → None (unspecified —
+    refused downstream when the target repeats); the literal 'none' →
+    CLEAR_RECURRENCE (explicit stop); anything else parses as an RRULE."""
+    if not rrule:
+        return None
+    if rrule.strip().lower() == "none":
+        return CLEAR_RECURRENCE
+    return Recurrence.from_rrule(rrule)
 
 
 @_write_tool
@@ -264,7 +289,10 @@ def update_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict:
-    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local)."""
+    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
+    `recurrence`: RRULE to set; 'none' to stop repeating. REQUIRED (rule or 'none')
+    when the target reminder repeats — omitting it is refused so a rename can't
+    silently kill the series."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -272,7 +300,7 @@ def update_reminder(
         notes=notes,
         priority=_priority(priority),
         start=_parse(start),
-        recurrence=_recurrence(recurrence),
+        recurrence=_recurrence_update(recurrence),
     )
     return _emit(_reminders.update_reminder(id, data))
 
@@ -295,11 +323,13 @@ def create_event(
     recurrence: str | None = None,
 ) -> dict:
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
-    first; `all_day` snaps to a pure date; `recurrence` an RRULE."""
+    first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
+    with a UTC offset is rejected."""
+    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=_parse_required("start", start),
-        end=_parse_required("end", end),
+        start=parse("start", start),
+        end=parse("end", end),
         calendar=calendar,
         location=location,
         notes=notes,
@@ -323,12 +353,14 @@ def update_event(
     span: str | None = None,
 ) -> dict:
     """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
+    `all_day` takes a DATE (2026-07-01); a timestamp with a UTC offset is rejected.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events."""
+    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=_parse_required("start", start),
-        end=_parse_required("end", end),
+        start=parse("start", start),
+        end=parse("end", end),
         calendar=calendar,
         location=location,
         notes=notes,

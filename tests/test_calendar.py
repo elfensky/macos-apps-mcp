@@ -17,11 +17,13 @@ from mac_mcp.adapters.calendar import (
     _range,
     _refetch_event,
     _resolve_calendar,
+    _resolve_event,
     _resolve_span,
     _verify_event,
 )
 from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
 from mac_mcp.runtime import SpanRequired, VerificationFailed
+from tests._fakes import fake_rule
 
 
 def _ns(dt: datetime):
@@ -70,6 +72,25 @@ def test_range_today_is_one_day():
 def test_range_explicit_date():
     start, end = _range("2026-12-25")
     assert start == datetime(2026, 12, 25) and (end - start).days == 1
+
+
+def test_range_aware_iso_converts_to_local_day():
+    # an aware ISO routes through parse_datetime (aware → naive local), then floors —
+    # the day is the LOCAL day of that instant, whatever the machine tz.
+    aware = "2026-12-25T06:00:00+00:00"
+    local_day = (
+        datetime.fromisoformat(aware)
+        .astimezone()
+        .replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    )
+    start, end = _range(aware)
+    assert start == local_day and (end - start).days == 1
+
+
+def test_range_garbage_raises_boundary_message():
+    # garbage surfaces contracts' agent-directed parse error, not a bare fromisoformat.
+    with pytest.raises(ValueError, match="ISO-8601"):
+        _range("next tuesday")
 
 
 def test_all_day_bounds_same_day_stays_one_day():
@@ -130,14 +151,6 @@ def test_resolve_missing_calendar_raises():
 # --- verify-after-write (#49) --------------------------------------------------------
 
 
-def _fake_rule(freq=0, interval=1, count=None):
-    # freq is the EKRecurrenceFrequency int (daily=0, weekly=1, monthly=2, yearly=3).
-    end = None if count is None else SimpleNamespace(occurrenceCount=lambda: count)
-    return SimpleNamespace(
-        frequency=lambda: freq, interval=lambda: interval, recurrenceEnd=lambda: end
-    )
-
-
 def _fake_persisted_event(
     title="Standup",
     start=datetime(2026, 6, 24, 9, 0),
@@ -170,14 +183,6 @@ def test_verify_event_passes_on_timed_match():
     _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
 
 
-def test_verify_event_none_fresh_is_rollback():
-    data = CalendarEventData(
-        title="x", start=datetime(2026, 6, 24, 9, 0), end=datetime(2026, 6, 24, 9, 15)
-    )
-    with pytest.raises(VerificationFailed, match="could not be re-fetched"):
-        _verify_event(None, "E-1|x", data, "Work")
-
-
 def test_verify_event_dropped_title_raises():
     data = CalendarEventData(
         title="Standup",
@@ -186,6 +191,21 @@ def test_verify_event_dropped_title_raises():
     )
     fresh = _fake_persisted_event(title="Untitled")
     with pytest.raises(VerificationFailed, match="title"):
+        _verify_event(fresh, "E-1|x", data, "Work")
+
+
+def test_verify_event_dropped_notes_raises():
+    # notes requested but persisted as None is a dropped field #49 must name (also
+    # exercises the fake's location/notes knobs).
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        location="Room 4",
+        notes="bring the numbers",
+    )
+    fresh = _fake_persisted_event(location="Room 4")  # notes silently dropped
+    with pytest.raises(VerificationFailed, match="notes"):
         _verify_event(fresh, "E-1|x", data, "Work")
 
 
@@ -269,7 +289,7 @@ def test_verify_event_wrong_frequency_raises():
         recurrence=Recurrence(frequency="weekly"),
     )
     fresh = _fake_persisted_event(
-        rule=_fake_rule(freq=2)
+        rule=fake_rule(freq=2)
     )  # persisted MONTHLY, not weekly
     with pytest.raises(VerificationFailed, match="recurs"):
         _verify_event(fresh, "E-1|x", data, "Work")
@@ -282,19 +302,45 @@ def test_verify_event_matching_recurrence_passes():
         end=datetime(2026, 6, 24, 9, 15),
         recurrence=Recurrence(frequency="weekly", interval=2),
     )
-    fresh = _fake_persisted_event(rule=_fake_rule(freq=1, interval=2))  # weekly/2 match
+    fresh = _fake_persisted_event(rule=fake_rule(freq=1, interval=2))  # weekly/2 match
     _verify_event(fresh, "E-1|x", data, "Work")  # no raise
 
 
-def test_verify_event_no_recurrence_requested_skips_check():
-    # recurrence=None means "leave series untouched" — a fresh event with no rules must
-    # not be flagged.
+def test_verify_event_nfd_title_matches_nfc_persisted():
+    # Cocoa treats NFC/NFD as equal — an NFD input persisted as NFC is the store
+    # normalizing, not a dropped field (norm_text, #49 review).
+    data = CalendarEventData(
+        title="Cafe\u0301",  # NFD: e + combining acute
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+    fresh = _fake_persisted_event(title="Caf\u00e9")  # NFC precomposed
+    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+
+
+def test_verify_event_crlf_notes_match_lf_persisted():
+    # stores may fold CRLF → LF; a byte-exact compare would false-fail a correct write.
     data = CalendarEventData(
         title="Standup",
         start=datetime(2026, 6, 24, 9, 0),
         end=datetime(2026, 6, 24, 9, 15),
+        notes="line one\r\nline two",
     )
-    _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
+    fresh = _fake_persisted_event(notes="line one\nline two")
+    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+
+
+def test_verify_event_genuinely_different_notes_raise():
+    # normalization must not swallow a REAL content change.
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        notes="agenda v2",
+    )
+    fresh = _fake_persisted_event(notes="agenda v1")
+    with pytest.raises(VerificationFailed, match="notes"):
+        _verify_event(fresh, "E-1|x", data, "Work")
 
 
 # --- explicit span on recurring update/delete (#51) ----------------------------------
@@ -336,6 +382,48 @@ def test_resolve_span_recurring_maps_future_events():
 def test_resolve_span_recurring_rejects_invalid_value():
     with pytest.raises(SpanRequired, match="must be 'this-event' or 'future-events'"):
         _resolve_span(_fake_target(True), "the-whole-thing")
+
+
+def test_resolve_span_recurring_this_event_plus_recurrence_refused():
+    # a recurrence change rewrites the series — span='this-event' cannot apply it, so
+    # the contradictory combo is refused before any write.
+    with pytest.raises(SpanRequired, match="future-events"):
+        _resolve_span(_fake_target(True), "this-event", adds_recurrence=True)
+    assert (
+        _resolve_span(_fake_target(True), "future-events", adds_recurrence=True)
+        == EK.EKSpanFutureEvents
+    )
+
+
+def test_resolve_event_fold_window_is_built_from_the_epoch(monkeypatch):
+    # DST fall-back fold: 1793514600 is the SECOND 01:30 in America/New_York
+    # (2026-11-01). The ±1s predicate window must come straight from the epoch —
+    # datetime±timedelta resets the PEP-495 fold, which would shift the window a full
+    # hour (−3601/−3599). Pin the tz for determinism (pattern from test_contracts).
+    import time
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    try:
+        captured = []
+
+        def predicate(start, end, cals):
+            captured.append((start, end))
+            return "pred"
+
+        s = SimpleNamespace(
+            predicateForEventsWithStartDate_endDate_calendars_=predicate,
+            eventsMatchingPredicate_=lambda _p: [],
+        )
+        epoch = 1793514600
+        with pytest.raises(ValueError, match="no event occurrence"):
+            _resolve_event(s, f"X|{epoch}")  # no match — the assertion is the window
+        ((start, end),) = captured
+        assert int(start.timeIntervalSince1970()) == epoch - 1
+        assert int(end.timeIntervalSince1970()) == epoch + 1
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_refetch_event_missing_is_rollback():

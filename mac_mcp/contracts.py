@@ -65,6 +65,30 @@ def parse_datetime(value: str) -> datetime:
     return _to_naive_local(dt)
 
 
+def parse_all_day(value: str) -> datetime:
+    """Parse an all-day date param — a calendar DATE, not an instant (#50 review).
+
+    Accepts a date-only string (2026-07-01) or a naive datetime (floored downstream).
+    A timezone-aware value is REJECTED: converting an instant across timezones can
+    shift the calendar day (midnight-Z parses to the previous local day west of UTC),
+    and RFC 5545 forbids timezones on all-day DATE values.
+    """
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "expected an ISO-8601 date (e.g. 2026-07-01) or naive datetime; "
+            f"got {value!r}"
+        ) from e
+    if dt.tzinfo is not None:
+        raise ValueError(
+            "all-day events take a calendar date, not a timestamp with a UTC "
+            f"offset — send a date-only string like {dt.date().isoformat()!r} "
+            f"(got {value!r})"
+        )
+    return dt
+
+
 def _format_offset(offset: timedelta | None) -> str:
     """A UTC offset as ``±HH:MM`` (``+00:00`` if unknown)."""
     total = int((offset or timedelta()).total_seconds())
@@ -80,10 +104,10 @@ def now_local(clock: datetime | None = None) -> dict:
     Returns the local ISO datetime, the plain date, the tz name, the UTC offset, and the
     weekday. All date params to the write tools are interpreted in *this* timezone.
     """
-    dt = clock or datetime.now().astimezone()
-    if (
-        dt.tzinfo is None
-    ):  # a naive injected clock → attach the local tz for name/offset
+    dt = clock or datetime.now()
+    # the default clock and a naive injected clock both lack a tz — attach the local
+    # one so tzname/utcoffset resolve
+    if dt.tzinfo is None:
         dt = dt.astimezone()
     return {
         "datetime": dt.isoformat(timespec="seconds"),
@@ -214,6 +238,13 @@ class Recurrence:
         return cls(frequency=freq, interval=interval, count=count, until=until)
 
 
+class _ClearRecurrence:
+    """Sentinel: explicitly stop a reminder repeating (recurrence='none')."""
+
+
+CLEAR_RECURRENCE = _ClearRecurrence()
+
+
 @dataclass(frozen=True, slots=True)
 class ReminderData:
     """Payload for creating/updating an Apple Reminder."""
@@ -224,12 +255,14 @@ class ReminderData:
     notes: str | None = None
     priority: int = 0  # 0 none, 1–9 (1 highest); enforced in __post_init__
     start: datetime | None = None  # start date, distinct from due (None clears)
-    recurrence: Recurrence | None = None  # repeat rule (None clears)
+    # repeat rule: None = unspecified (an update REFUSES on a repeating target),
+    # CLEAR_RECURRENCE = explicit stop, Recurrence = set/replace the rule
+    recurrence: Recurrence | _ClearRecurrence | None = None
 
     def __post_init__(self) -> None:
         # EventKit rejects a repeating reminder with no due date (EKError 18) — surface
         # it at the boundary as a clear ValueError, not a deep native save failure.
-        if self.recurrence is not None and self.due is None:
+        if isinstance(self.recurrence, Recurrence) and self.due is None:
             raise ValueError("a recurring reminder needs a due date")
         # EventKit priority is 0 (none) or 1–9 (1 highest); enforce on the contract so
         # the invariant holds however ReminderData is built, not only via the MCP tool.
