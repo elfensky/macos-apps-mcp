@@ -6,15 +6,18 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 import mac_mcp.server as srv
 from mac_mcp.contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
     Pointer,
     Recurrence,
     ReminderData,
 )
+from mac_mcp.runtime import AppNotRunning, AutomationDenied
 
 
 class _FakeSource:
@@ -170,12 +173,14 @@ class _FakeWriter:
         self.calls.append(("create_event", data))
         return Pointer(id="E-9", summary="s", deeplink="d")
 
-    def update_event(self, ident: str, data: CalendarEventData) -> Pointer:
-        self.calls.append(("update_event", ident, data))
+    def update_event(
+        self, ident: str, data: CalendarEventData, span: str | None = None
+    ) -> Pointer:
+        self.calls.append(("update_event", ident, data, span))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def delete_event(self, ident: str) -> None:
-        self.calls.append(("delete_event", ident))
+    def delete_event(self, ident: str, span: str | None = None) -> None:
+        self.calls.append(("delete_event", ident, span))
 
     def create_contact(self, data: ContactData) -> Pointer:
         self.calls.append(("create_contact", data))
@@ -242,8 +247,8 @@ def test_update_event_builds_typed_payload(monkeypatch):
     out = srv.update_event(
         "E-1", "Standup", start="2026-06-24T09:00:00", end="2026-06-24T09:15:00"
     )
-    kind, ident, data = fake.calls[0]
-    assert kind == "update_event" and ident == "E-1"
+    kind, ident, data, span = fake.calls[0]
+    assert kind == "update_event" and ident == "E-1" and span is None
     assert data == CalendarEventData(
         title="Standup",
         start=datetime(2026, 6, 24, 9, 0),
@@ -256,7 +261,27 @@ def test_delete_event_dispatches(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
     out = srv.delete_event("E-1")
-    assert fake.calls[0] == ("delete_event", "E-1") and out == {"deleted": "E-1"}
+    assert fake.calls[0] == ("delete_event", "E-1", None) and out == {"deleted": "E-1"}
+
+
+def test_update_event_passes_span(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.update_event(
+        "E-1",
+        "Standup",
+        start="2026-06-24T09:00:00",
+        end="2026-06-24T09:15:00",
+        span="future-events",
+    )
+    assert fake.calls[0][0] == "update_event" and fake.calls[0][3] == "future-events"
+
+
+def test_delete_event_passes_span(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.delete_event("E-1", span="this-event")
+    assert fake.calls[0] == ("delete_event", "E-1", "this-event")
 
 
 def test_create_contact_builds_typed_payload(monkeypatch):
@@ -295,6 +320,41 @@ def test_create_event_passes_all_day(monkeypatch):
     assert data.all_day is True
 
 
+def test_create_event_all_day_accepts_date_only(monkeypatch):
+    # all_day takes a calendar DATE — date-only parses to naive local midnight.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event("Holiday", start="2026-07-01", end="2026-07-02", all_day=True)
+    _, data = fake.calls[0]
+    assert data.all_day is True
+    assert data.start == datetime(2026, 7, 1) and data.end == datetime(2026, 7, 2)
+
+
+def test_create_event_all_day_rejects_utc_offset(monkeypatch):
+    # an all-day instant with a UTC offset can land on the wrong calendar day —
+    # rejected with the date-only hint, prefixed by the failing param's label.
+    monkeypatch.setattr(srv, "_calendar", _FakeWriter())
+    with pytest.raises(ValueError, match=r"start: .*date-only"):
+        srv.create_event(
+            "Holiday",
+            start="2026-07-01T00:00:00Z",
+            end="2026-07-02T00:00:00Z",
+            all_day=True,
+        )
+
+
+def test_update_event_all_day_rejects_utc_offset(monkeypatch):
+    monkeypatch.setattr(srv, "_calendar", _FakeWriter())
+    with pytest.raises(ValueError, match="date-only"):
+        srv.update_event(
+            "E-1",
+            "Holiday",
+            start="2026-07-01T00:00:00Z",
+            end="2026-07-02T00:00:00Z",
+            all_day=True,
+        )
+
+
 def test_create_event_parses_recurrence(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
@@ -323,6 +383,37 @@ def test_create_reminder_recurrence_without_due_rejected(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
     with pytest.raises(ValueError, match="needs a due date"):
         srv.create_reminder("Water plants", recurrence="FREQ=DAILY")
+
+
+@pytest.mark.parametrize("val", ["none", "None", "NONE", " none "])
+def test_update_reminder_recurrence_none_is_clear_sentinel(monkeypatch, val):
+    # tri-state: the literal 'none' is an explicit stop — the adapter clears the rule
+    # instead of refusing the update.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder("R-1", "Call dentist", recurrence=val)
+    _, _, data = fake.calls[0]
+    assert data.recurrence is CLEAR_RECURRENCE
+
+
+def test_update_reminder_recurrence_omitted_is_none(monkeypatch):
+    # omitted stays None (unspecified) — the adapter refuses that on a repeating
+    # target, so a rename can't silently kill the series.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder("R-1", "Call dentist")
+    _, _, data = fake.calls[0]
+    assert data.recurrence is None
+
+
+def test_update_reminder_recurrence_rrule_parses(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_reminders", fake)
+    srv.update_reminder(
+        "R-1", "Water plants", due="2026-06-25T09:00:00", recurrence="FREQ=DAILY"
+    )
+    _, _, data = fake.calls[0]
+    assert data.recurrence == Recurrence(frequency="daily")
 
 
 def test_create_event_rejects_bad_rrule(monkeypatch):
@@ -374,8 +465,9 @@ def test_safari_open_dispatches(monkeypatch):
 
 def test_create_event_rejects_empty_start():
     # Required event dates fail clearly at the tool boundary, not as an obscure
-    # worker-thread crash.
-    with pytest.raises(ValueError, match="ISO datetime"):
+    # worker-thread crash: the label prefixes contracts.parse_datetime's message
+    # verbatim (which rightly still offers the date-only form for timed events).
+    with pytest.raises(ValueError, match=r"start: expected an ISO-8601 .* or date"):
         srv.create_event("Standup", start="", end="2026-06-24T09:15:00")
 
 
@@ -439,3 +531,92 @@ def test_delete_note_dispatches(monkeypatch):
     out = srv.delete_note("N-1", expect_title="Milk")
     assert fake.calls == [("N-1", "Milk")]
     assert out == {"deleted": "N-1"}
+
+
+# --- errors-as-results: the dispatch seam converts typed native failures (#47) --------
+
+
+class _DeniedSource:
+    """A read adapter whose native call is TCC-denied — the failure #47 must surface."""
+
+    def get_pointers(self, query: str) -> list[Pointer]:
+        raise AutomationDenied("grant Automation access, then restart mac-mcp")
+
+
+class _EmptySource:
+    """A read adapter with a genuine no-match — must stay [], never an error."""
+
+    def get_pointers(self, query: str) -> list[Pointer]:
+        return []
+
+
+def test_read_tool_converts_native_error_to_agent_directive(monkeypatch):
+    # A denied read is a loud ToolError carrying the remediation — the model is told to
+    # stop and ask the user, not handed a silent [] it would retry against.
+    monkeypatch.setattr(srv, "_mail", _DeniedSource())
+    with pytest.raises(ToolError, match="Automation access"):
+        srv.mail("invoice")
+
+
+def test_read_tool_empty_result_is_not_an_error(monkeypatch):
+    # The whole point of the taxonomy: no-matches ([]) is distinct from failure. An
+    # empty search must return [] cleanly, never raise.
+    monkeypatch.setattr(srv, "_notes", _EmptySource())
+    assert srv.notes("nonexistent") == []
+
+
+def test_write_tool_converts_native_error_to_agent_directive(monkeypatch):
+    class _DeadWriter:
+        def create_reminder(self, data: ReminderData) -> Pointer:
+            raise AppNotRunning("open the app, then try again")
+
+    monkeypatch.setattr(srv, "_reminders", _DeadWriter())
+    with pytest.raises(ToolError, match="open the app"):
+        srv.create_reminder("Call dentist")
+
+
+def test_now_tool_returns_local_context():
+    info = srv.now()
+    assert set(info) == {"datetime", "date", "timezone", "utc_offset", "weekday"}
+
+
+def test_event_date_params_route_through_parser(monkeypatch):
+    # #50: an aware ISO start must reach the adapter as naive-local with the instant
+    # preserved — proves date params go through contracts.parse_datetime.
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event(
+        "Standup", start="2026-06-24T09:00:00+00:00", end="2026-06-24T10:00:00+00:00"
+    )
+    _, data = fake.calls[0]
+    assert data.start.tzinfo is None  # canonicalized to naive-local
+    assert (
+        data.start.timestamp()
+        == datetime.fromisoformat("2026-06-24T09:00:00+00:00").timestamp()
+    )
+
+
+def test_doctor_tool_dispatches(monkeypatch):
+    # Thin dispatch: the tool just forwards `request` to doctor.diagnose and returns it.
+    calls = []
+
+    def fake_diagnose(request=False):
+        calls.append(request)
+        return {"summary": "ok", "surfaces": []}
+
+    monkeypatch.setattr(srv, "diagnose", fake_diagnose)
+    out = srv.doctor(request=True)
+    assert calls == [True]
+    assert out == {"summary": "ok", "surfaces": []}
+
+
+def test_guard_does_not_swallow_value_errors(monkeypatch):
+    # Only NativeError becomes a directive; a validation error stays a ValueError so a
+    # caller bug reads as a caller bug, not a bogus "grant access" directive.
+    class _BadInput:
+        def get_pointers(self, query: str) -> list[Pointer]:
+            raise ValueError("bad query")
+
+    monkeypatch.setattr(srv, "_contacts", _BadInput())
+    with pytest.raises(ValueError, match="bad query"):
+        srv.contacts("jane")

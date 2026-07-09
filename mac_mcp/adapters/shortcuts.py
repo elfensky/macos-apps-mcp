@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
+from ..runtime import NativeError, NativeTimeout
 
 MAX_SHORTCUTS = 100
 MAX_OUTPUT = 280  # pointers-not-payload: cite the run + a bounded snippet of any output
@@ -44,11 +45,18 @@ def _filter_names(names: list[str], query: str) -> list[str]:
 class ShortcutsAdapter:
     def get_pointers(self, query: str = "") -> list[Pointer]:
         """query: optional name substring (empty lists all shortcuts)."""
-        proc = subprocess.run(
-            ["shortcuts", "list"], capture_output=True, text=True, timeout=_TIMEOUT
-        )
+        try:
+            proc = subprocess.run(
+                ["shortcuts", "list"], capture_output=True, text=True, timeout=_TIMEOUT
+            )
+        except subprocess.TimeoutExpired as e:
+            raise NativeTimeout(
+                f"shortcuts list didn't finish within {_TIMEOUT}s and was stopped — "
+                "the Shortcuts CLI may be hung. Tell the user; do not retry "
+                "immediately."
+            ) from e
         if proc.returncode != 0:
-            raise RuntimeError(f"shortcuts list failed: {proc.stderr.strip()}")
+            raise NativeError(f"shortcuts CLI failed: {proc.stderr.strip()}")
         names = [n for n in proc.stdout.splitlines() if n.strip()]
         return [_pointer(n) for n in _filter_names(names, query)]
 
@@ -72,17 +80,25 @@ class ShortcutsAdapter:
             cmd = ["shortcuts", "run", name, "--output-path", out_path]
             if input_text is not None:
                 cmd += ["--input-path", "-"]
-            proc = subprocess.run(
-                cmd,
-                input=input_text,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=_RUN_TIMEOUT,
-            )
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    input=input_text,
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    timeout=_RUN_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired as e:
+                raise NativeTimeout(
+                    f"the shortcut didn't finish within {_RUN_TIMEOUT}s and was "
+                    "stopped — it may have partially run; check its effects before "
+                    "retrying. Do not retry immediately."
+                ) from e
             if proc.returncode != 0:
-                raise RuntimeError(
-                    f"shortcuts run {name!r} failed: {proc.stderr.strip()}"
+                raise NativeError(
+                    f"shortcuts CLI failed: shortcuts run {name!r}: "
+                    f"{proc.stderr.strip()}"
                 )
             try:
                 # errors="replace": a non-text result (image/file) must not crash the

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
+import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -26,7 +27,7 @@ from typing import TypeVar
 import EventKit as EK
 import Foundation as F
 
-from .contracts import Recurrence
+from .contracts import CLEAR_RECURRENCE, Recurrence
 
 T = TypeVar("T")
 
@@ -55,8 +56,120 @@ _FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
 _ACCESS_TIMEOUT = 120.0  # seconds
 
 
-class AccessDenied(RuntimeError):
-    """Raised when Calendar/Reminders TCC access is not fully granted."""
+# --- typed error taxonomy (#47) ------------------------------------------------------
+# The winnable axis is trust: the category leader died of *fake success* — stubbed reads
+# returning [] made permission-denied / crashed / genuinely-empty indistinguishable, so
+# the agent hammered a denied tool. Every native failure is one of these loud, typed
+# classes; str(e) IS the agent-directed remediation. The dispatch layer (server.py)
+# turns them into MCP tool *results* carrying that directive — never a silent [], never
+# a masked stack trace. `kind` is the machine code doctor (#48) and tests branch on.
+
+
+class NativeError(RuntimeError):
+    """Base for every typed native failure. ``str(e)`` is the agent-facing directive."""
+
+    kind = "native_error"
+
+
+class AccessDenied(NativeError):
+    """Calendar/Reminders (EventKit) TCC access is not fully granted."""
+
+    kind = "access_denied"
+
+
+class AutomationDenied(NativeError):
+    """osascript blocked from controlling an app — Automation consent not granted."""
+
+    kind = "automation_denied"
+
+
+class AppNotRunning(NativeError):
+    """The target app isn't running / its Apple-events connection is invalid."""
+
+    kind = "app_not_running"
+
+
+class NativeTimeout(NativeError):
+    """A native call didn't return in time (stuck dialog, pathological query)."""
+
+    kind = "native_timeout"
+
+
+class OutputOverflow(NativeError):
+    """A native result exceeded the caller's size cap (raised by callers, e.g. #52)."""
+
+    kind = "output_overflow"
+
+
+class SchemaDrift(NativeError):
+    """Native output didn't match the shape the parser expects (an OS/app change)."""
+
+    kind = "schema_drift"
+
+
+class VerificationFailed(NativeError):
+    """A create/update didn't persist as requested — the returned id is fabricated, or
+    a field was dropped, or iCloud reverted the write (#49)."""
+
+    kind = "verification_failed"
+
+
+class SpanRequired(NativeError):
+    """A recurring event's update/delete needs an explicit span (this-event vs
+    future-events) so one occurrence isn't silently rewritten as the series (#51)."""
+
+    kind = "span_required"
+
+
+class WriteRefused(NativeError):
+    """The store refused a save/remove — a read-only or subscribed calendar/list, or
+    the account rejected the change."""
+
+    kind = "write_refused"
+
+
+class RecurrenceRequired(NativeError):
+    """Updating a repeating reminder needs an explicit recurrence (re-send the rule
+    or 'none') so a rename can't silently destroy the series (mirror of
+    SpanRequired's rationale, #51)."""
+
+    kind = "recurrence_required"
+
+
+def verify_persisted(
+    entity: str, expected: dict[str, object], actual: dict[str, object]
+) -> None:
+    """Diff requested field values against what the store actually persisted; raise
+    ``VerificationFailed`` naming every dropped/changed field (#49).
+
+    The anti-fabrication + anti-rollback check behind every create/update: the category
+    leader shipped a fabricated id and dropped due/list (supermemoryai #64), and iCloud
+    can revert a write ~1s later — and our writes feed the vault id-writeback, so a fake
+    or reverted id silently corrupts the cockpit. Callers pass primitives already
+    normalized for comparison (dates → epoch ints / y-m-d tuples, containers → names) so
+    this stays pure and unit-testable with plain fakes.
+    """
+    dropped = {k: (v, actual.get(k)) for k, v in expected.items() if actual.get(k) != v}
+    if dropped:
+        fields = "; ".join(
+            f"{k}: requested {req!r}, persisted {got!r}"
+            for k, (req, got) in dropped.items()
+        )
+        raise VerificationFailed(
+            f"{entity} write did not persist as requested (dropped or reverted; iCloud "
+            f"can roll a write back ~1s later). Mismatches: {fields}. Re-read the item "
+            "before trusting it; do not reuse the returned id."
+        )
+
+
+def norm_text(v) -> str | None:
+    """NFC + LF-normalize a free-text field for verify comparison (#49): Cocoa treats
+    NFC/NFD as equal and stores may fold CRLF, so byte-exact != would false-fail a
+    correct write. "" and None both mean "unset"."""
+    if v is None:
+        return None
+    s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
+    return s or None
 
 
 def _decide(status: int) -> None:
@@ -100,6 +213,35 @@ def store() -> EK.EKEventStore:
 # (e.g. a modal permission dialog) can't block the worker forever.
 _OSASCRIPT_TIMEOUT = 30.0  # seconds
 
+# osascript reports native failures as an OSStatus in parentheses at the end of stderr,
+# e.g. "…Not authorized to send Apple events to Mail. (-1743)". Match the parenthesized
+# form so a bare digit run never false-fingerprints. Codes per the survey (#47 design).
+_AUTOMATION_DENIED = "(-1743)"  # Automation (Apple-events) consent not granted
+_APP_NOT_RUNNING = ("(-609)", "(-10810)")  # connection invalid / app not launchable
+
+
+def _classify_osascript_failure(stderr: str) -> NativeError:
+    """Fingerprint a non-zero osascript exit into a typed, agent-directed error.
+
+    Only the failures with a *clear* remediation get a specific class; everything else
+    stays a loud generic ``NativeError`` (never swallowed, never an empty result). The
+    raw native detail is appended in ``[...]`` so the model has the underlying evidence.
+    """
+    detail = stderr.strip() or "osascript failed with no stderr"
+    if _AUTOMATION_DENIED in stderr:
+        return AutomationDenied(
+            "macOS blocked mac-mcp from controlling the app (Automation consent not "
+            "granted). Tell the user to enable it in System Settings → Privacy & "
+            "Security → Automation, for whichever app launched mac-mcp, then restart "
+            f"mac-mcp. Do not retry until the next user message. [{detail}]"
+        )
+    if any(code in stderr for code in _APP_NOT_RUNNING):
+        return AppNotRunning(
+            "The target macOS app isn't running or couldn't be launched. Tell the user "
+            f"to open it, then try again once it's open. [{detail}]"
+        )
+    return NativeError(f"osascript failed: {detail}")
+
 
 def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) -> str:
     """Run an AppleScript via ``osascript`` on the native worker; return stdout.
@@ -107,9 +249,10 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     The sanctioned escape hatch for framework-less apps (Mail/Notes/Contacts).
     ``args`` are passed to the script's ``on run argv`` handler — put any user input
     (names, ids) there so values are never interpolated into the script (no injection).
-    Raises RuntimeError on a non-zero exit (app not running, TCC denied, script error)
-    or timeout — it never returns an empty string to mask a failure as "no result".
-    Safe on or off the worker (dispatches via run_native when called off it).
+    Raises a typed ``NativeError`` (``AutomationDenied`` / ``AppNotRunning`` / generic)
+    on a non-zero exit, and ``NativeTimeout`` on timeout — it never returns an empty
+    string to mask a failure as "no result". Safe on or off the worker (dispatches via
+    run_native when called off it).
     """
 
     def _run() -> str:
@@ -121,10 +264,18 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"osascript timed out after {timeout}s") from e
+            raise NativeTimeout(
+                f"The macOS app didn't respond within {timeout}s (it may be blocked on "
+                "a dialog, or the query is too broad). Tell the user to dismiss any "
+                "stuck prompt, then retry with a narrower query. Do not retry "
+                "immediately."
+            ) from e
         if proc.returncode != 0:
-            raise RuntimeError(f"osascript failed: {proc.stderr.strip()}")
-        return proc.stdout.rstrip("\n")
+            raise _classify_osascript_failure(proc.stderr)
+        # trailing newlines inside the data must survive; remove only osascript's own
+        # single terminating newline
+        out = proc.stdout
+        return out[:-1] if out.endswith("\n") else out
 
     return _run() if _on_worker() else run_native(_run)
 
@@ -137,7 +288,7 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 
     Generalizes the EventKit fetch pattern. ``start(finish)`` kicks off the async op
     and arranges its completion handler to call ``finish(result)``; this returns that
-    result, or raises TimeoutError if the callback never fires within ``timeout``.
+    result, or raises NativeTimeout if the callback never fires within ``timeout``.
     Call on the worker (inside run_native), where ``start`` issues the native call.
 
     Works for GCD-delivered callbacks (EventKit fetch/auth). ponytail: APIs that
@@ -153,12 +304,21 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 
     start(finish)
     if not done.wait(timeout=timeout):
-        raise TimeoutError(f"native async callback never fired within {timeout}s")
+        raise NativeTimeout(
+            f"native async callback never fired within {timeout}s — the native "
+            "service may be hung. Tell the user; do not retry immediately."
+        )
     return box.get("result")
 
 
 def to_nsdate(dt: datetime) -> F.NSDate:
     return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+
+
+def epoch_nsdate(epoch: int) -> F.NSDate:
+    """Fold-proof NSDate from an epoch — datetime±timedelta resets the PEP-495 fold
+    and shifts DST-repeated-hour instants by 1h (#review)."""
+    return F.NSDate.dateWithTimeIntervalSince1970_(epoch)
 
 
 def from_nsdate(d: F.NSDate) -> datetime:
@@ -197,6 +357,51 @@ def to_recurrence_rule(r: Recurrence) -> EK.EKRecurrenceRule:
     return EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
         _FREQUENCIES[r.frequency], r.interval, end
     )
+
+
+def recurrence_signature(recurrence: Recurrence | None) -> tuple | None:
+    """Comparable ``(frequency, interval, count)`` of a *requested* recurrence (#49).
+
+    Verify-after-write diffs this against what persisted, so a *changed* cadence (not
+    just a dropped rule) fails loudly. UNTIL is omitted on purpose: its endDate carries
+    the same inclusive/exclusive ambiguity as an all-day end, so diffing it would
+    false-fail a correct write. ``count`` and "no count" both normalize to 0 (a
+    date-based/open-ended rule reports 0), so an until rule still matches on count.
+    """
+    if recurrence is None or recurrence is CLEAR_RECURRENCE:
+        return None
+    return (
+        int(_FREQUENCIES[recurrence.frequency]),
+        recurrence.interval,
+        recurrence.count or 0,
+    )
+
+
+def persisted_recurrence_signature(rules) -> tuple | None:
+    """The same ``(frequency, interval, count)`` read back from a persisted
+    EKRecurrenceRule list (the first rule); ``None``/empty → ``None``."""
+    if not rules:
+        return None
+    rule = rules[0]
+    end = rule.recurrenceEnd()
+    count = end.occurrenceCount() if end is not None else 0
+    return (int(rule.frequency()), int(rule.interval()), int(count))
+
+
+_FREQUENCY_NAMES = {int(v): k.upper() for k, v in _FREQUENCIES.items()}
+
+
+def rrule_text(rule) -> str:
+    """Render a persisted EKRecurrenceRule as RRULE text for agent-facing messages,
+    e.g. ``FREQ=WEEKLY;INTERVAL=2;COUNT=10``."""
+    parts = [
+        f"FREQ={_FREQUENCY_NAMES[int(rule.frequency())]}",
+        f"INTERVAL={int(rule.interval())}",
+    ]
+    end = rule.recurrenceEnd()
+    if end is not None and end.occurrenceCount() > 0:
+        parts.append(f"COUNT={int(end.occurrenceCount())}")
+    return ";".join(parts)
 
 
 log = logging.getLogger("mac_mcp")
@@ -238,19 +443,21 @@ def request_access() -> None:
         _request_one(s, entity)
 
 
+def request_access_each() -> None:
+    """Request each EventKit surface independently — one denied surface must never
+    block the other's consent prompt (doctor #48 and bootstrap share this)."""
+    s = store()
+    for entity in _ENTITIES:
+        try:
+            _request_one(s, entity)
+        except AccessDenied as e:
+            log.warning("EventKit surface not granted: %s", e)
+
+
 def bootstrap() -> None:
     """Startup hook: create the store + request each TCC surface on the worker.
 
     Each surface is requested independently and **non-fatally** — a denied permission
     disables only that adapter (which raises on use), never the server.
     """
-
-    def _request_all() -> None:
-        s = store()
-        for entity in _ENTITIES:
-            try:
-                _request_one(s, entity)
-            except AccessDenied as e:
-                log.warning("mac-mcp starting without one EventKit surface: %s", e)
-
-    run_native(_request_all)
+    run_native(request_access_each)

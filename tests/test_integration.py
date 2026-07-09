@@ -133,6 +133,32 @@ def test_event_create_update_delete(created):
 
 
 @pytest.mark.integration
+def test_all_day_event_round_trips_date(created):
+    """#50: an all-day event created from a date-only local date reads back on the SAME
+    calendar day — never shifted a day by the UTC offset."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData, parse_datetime
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    day = (datetime.now() + timedelta(days=2)).date()
+    start = parse_datetime(day.isoformat())  # date-only → local midnight, naive
+
+    p = a.create_event(  # verify-after-write (#49) already asserts the start date here
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} all-day", start=start, end=start, all_day=True
+        )
+    )
+    created.append(("event", p.id))
+
+    # read that calendar day back — the event must appear on it, not day ±1
+    same_day = a.get_pointers(day.isoformat())
+    assert any(q.id.split("|")[0] == p.id.split("|")[0] for q in same_day)
+
+
+@pytest.mark.integration
 def test_named_list_read_excludes_completed(created):
     """Parity row 4: a named-list read returns only incomplete reminders.
 
@@ -246,18 +272,157 @@ def test_recurring_event_update_targets_one_occurrence(created):
     ]
     assert len(mid) == 1  # one occurrence on the middle day
 
-    a.update_event(
+    p = a.update_event(
         mid[0].id,
         CalendarEventData(
             title=f"{TITLE_PREFIX} recurring EDITED",
             start=days[1],
             end=days[1] + timedelta(hours=1),
         ),
+        span="this-event",  # #51: edit only THIS occurrence
     )
+    # a this-event edit detaches the occurrence into its own item, which may carry its
+    # own base id — track the returned pointer so teardown removes it too (leak fix)
+    created.append(("event", p.id.split("|")[0]))
 
     assert any("EDITED" in t for t in titles_on(days[1]))  # middle occurrence changed
     assert all("EDITED" not in t for t in titles_on(days[0]))  # day 0 untouched
     assert all("EDITED" not in t for t in titles_on(days[2]))  # day 2 untouched
+
+
+@pytest.mark.integration
+def test_recurring_update_omitted_span_raises_and_does_not_write(created):
+    """#51: an update to a recurring occurrence with NO span must raise SpanRequired and
+    leave the series untouched (no silent whole-series rewrite)."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData
+    from mac_mcp.runtime import SpanRequired, to_nsdate
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    day0 = (datetime.now() + timedelta(days=2)).replace(
+        hour=9, minute=0, second=0, microsecond=0
+    )
+
+    def _make_series():
+        s = store()
+        e = EK.EKEvent.eventWithEventStore_(s)
+        e.setTitle_(f"{TITLE_PREFIX} span-guard")
+        e.setStartDate_(to_nsdate(day0))
+        e.setEndDate_(to_nsdate(day0 + timedelta(hours=1)))
+        e.setCalendar_(s.defaultCalendarForNewEvents())
+        end = EK.EKRecurrenceEnd.recurrenceEndWithEndDate_(
+            to_nsdate(day0 + timedelta(days=2, hours=2))
+        )
+        rule = EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
+            EK.EKRecurrenceFrequencyDaily, 1, end
+        )
+        e.setRecurrenceRules_([rule])
+        ok, err = s.saveEvent_span_commit_error_(e, EK.EKSpanFutureEvents, True, None)
+        if not ok:
+            raise RuntimeError(f"create recurring failed: {err}")
+        return e.calendarItemIdentifier()
+
+    created.append(("event", run_native(_make_series)))
+
+    occ = [
+        p
+        for p in a.get_pointers(day0.strftime("%Y-%m-%d"))
+        if "span-guard" in p.summary
+    ]
+    assert len(occ) == 1
+
+    with pytest.raises(SpanRequired, match="recurring event"):
+        a.update_event(
+            occ[0].id,
+            CalendarEventData(
+                title=f"{TITLE_PREFIX} span-guard SHOULD-NOT-STICK",
+                start=day0,
+                end=day0 + timedelta(hours=1),
+            ),
+        )  # no span → must raise, no write
+    # the title never changed — the write was refused, not silently applied
+    still = [
+        p.summary
+        for p in a.get_pointers(day0.strftime("%Y-%m-%d"))
+        if "span-guard" in p.summary
+    ]
+    assert still and all("SHOULD-NOT-STICK" not in t for t in still)
+
+
+@pytest.mark.integration
+def test_recurring_update_future_events_propagates(created):
+    """#51: span='future-events' edits this occurrence AND all later ones, leaving
+    earlier occurrences untouched."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData
+    from mac_mcp.runtime import to_nsdate
+
+    run_native(request_access)
+    a = CalendarAdapter()
+    days = [
+        (datetime.now() + timedelta(days=2)).replace(
+            hour=9, minute=0, second=0, microsecond=0
+        )
+        + timedelta(days=d)
+        for d in range(3)
+    ]
+
+    def _make_series():
+        s = store()
+        e = EK.EKEvent.eventWithEventStore_(s)
+        e.setTitle_(f"{TITLE_PREFIX} propagate")
+        e.setStartDate_(to_nsdate(days[0]))
+        e.setEndDate_(to_nsdate(days[0] + timedelta(hours=1)))
+        e.setCalendar_(s.defaultCalendarForNewEvents())
+        end = EK.EKRecurrenceEnd.recurrenceEndWithEndDate_(
+            to_nsdate(days[2] + timedelta(hours=2))
+        )
+        rule = EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
+            EK.EKRecurrenceFrequencyDaily, 1, end
+        )
+        e.setRecurrenceRules_([rule])
+        ok, err = s.saveEvent_span_commit_error_(e, EK.EKSpanFutureEvents, True, None)
+        if not ok:
+            raise RuntimeError(f"create recurring failed: {err}")
+        return e.calendarItemIdentifier()
+
+    created.append(("event", run_native(_make_series)))
+
+    def titles_on(day):
+        return [
+            p.summary
+            for p in a.get_pointers(day.strftime("%Y-%m-%d"))
+            if "propagate" in p.summary
+        ]
+
+    mid = [
+        p
+        for p in a.get_pointers(days[1].strftime("%Y-%m-%d"))
+        if "propagate" in p.summary
+    ]
+    assert len(mid) == 1
+
+    p = a.update_event(
+        mid[0].id,
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} propagate EDITED",
+            start=days[1],
+            end=days[1] + timedelta(hours=1),
+        ),
+        span="future-events",  # #51: this occurrence + all later
+    )
+    # future-events SPLITS the series: this-and-later becomes a NEW series object with
+    # its own base id — track it so teardown removes both halves (leak fix)
+    created.append(("event", p.id.split("|")[0]))
+
+    assert all("EDITED" not in t for t in titles_on(days[0]))  # earlier untouched
+    assert any("EDITED" in t for t in titles_on(days[1]))  # this occurrence
+    assert any("EDITED" in t for t in titles_on(days[2]))  # later propagated
 
 
 @pytest.mark.integration
@@ -552,3 +717,163 @@ def test_notes_all_and_bodies_and_delete_roundtrip():
         for p in notes.get_all():
             if p.summary == title:
                 notes.delete(p.id)
+
+
+@pytest.mark.integration
+def test_event_move_to_other_calendar_reresolves(created):
+    """C-IDCHURN (variant c): a cross-calendar move must return the POST-save pointer —
+    the store may re-issue the item identifier when an event changes calendars, so the
+    returned id (not the pre-move one) is the one that has to resolve. update_event's
+    verify-after-write (#49) already asserts the calendar field persisted."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.calendar import CalendarAdapter
+    from mac_mcp.contracts import CalendarEventData
+
+    run_native(request_access)
+    a = CalendarAdapter()
+
+    def _writable_titles():
+        s = store()
+        default = s.defaultCalendarForNewEvents().title()
+        others = [
+            c.title()
+            for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent)
+            # writable only: moving INTO a read-only (subscribed) calendar would
+            # WriteRefused and fail this test for the wrong reason
+            if c.allowsContentModifications() and c.title() != default
+        ]
+        return others
+
+    others = run_native(_writable_titles)
+    if not others:
+        pytest.skip("needs a second writable event calendar")
+    target = others[0]
+
+    start = datetime.now().replace(microsecond=0) + timedelta(days=1)
+    p = a.create_event(  # created in the default calendar
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} cal-move",
+            start=start,
+            end=start + timedelta(hours=1),
+        )
+    )
+    created.append(("event", p.id))
+
+    p2 = a.update_event(
+        p.id,
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} cal-move (moved)",
+            start=start,
+            end=start + timedelta(hours=1),
+            calendar=target,
+        ),
+    )
+    created.append(("event", p2.id))  # the move may re-issue the id — track both
+
+    def _resolved_calendar():
+        obj = store().calendarItemWithIdentifier_(p2.id.split("|")[0])
+        return None if obj is None else str(obj.calendar().title())
+
+    # the returned pointer id resolves, and it lives in the requested calendar
+    assert run_native(_resolved_calendar) == target
+
+
+@pytest.mark.integration
+def test_reminder_move_between_lists_reresolves(created):
+    """C-REMIDMOVE: moving a reminder to another list must return the POST-save id —
+    a list move may re-issue the identifier, so update_reminder re-keys its refetch
+    (and the returned pointer) from the held object's post-save id."""
+    from mac_mcp.adapters.reminders import RemindersAdapter
+    from mac_mcp.contracts import ReminderData
+
+    run_native(request_access)
+    a = RemindersAdapter()
+
+    def _writable_titles():
+        s = store()
+        default = s.defaultCalendarForNewReminders().title()
+        others = [
+            c.title()
+            for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
+            # writable only: moving INTO a read-only (subscribed) list would
+            # WriteRefused and fail this test for the wrong reason
+            if c.allowsContentModifications() and c.title() != default
+        ]
+        return others
+
+    others = run_native(_writable_titles)
+    if not others:
+        pytest.skip("needs a second writable reminder list")
+    target = others[0]
+
+    p = a.create_reminder(  # created in the default list
+        ReminderData(title=f"{TITLE_PREFIX} list-move")
+    )
+    created.append(("reminder", p.id))
+
+    p2 = a.update_reminder(
+        p.id,
+        ReminderData(title=f"{TITLE_PREFIX} list-move (moved)", list_name=target),
+    )
+    created.append(("reminder", p2.id))  # the move may re-issue the id — track both
+
+    def _resolved_list():
+        obj = store().calendarItemWithIdentifier_(p2.id)
+        return None if obj is None else str(obj.calendar().title())
+
+    # the returned pointer id resolves, and it lives in the requested list
+    assert run_native(_resolved_list) == target
+
+
+@pytest.mark.integration
+def test_recurring_reminder_update_requires_recurrence(created):
+    """User decision 1: updating a repeating reminder with recurrence omitted is
+    REFUSED (RecurrenceRequired, rule intact — a rename can't silently kill the
+    series); an explicit CLEAR_RECURRENCE ('none' at the tool boundary) clears the
+    rule and verifies."""
+    from datetime import datetime, timedelta
+
+    from mac_mcp.adapters.reminders import RemindersAdapter
+    from mac_mcp.contracts import CLEAR_RECURRENCE, Recurrence, ReminderData
+    from mac_mcp.runtime import RecurrenceRequired
+
+    run_native(request_access)
+    a = RemindersAdapter()
+    due = (datetime.now() + timedelta(days=1)).replace(microsecond=0)
+    p = a.create_reminder(
+        ReminderData(
+            title=f"{TITLE_PREFIX} weekly guard",
+            due=due,
+            recurrence=Recurrence.from_rrule("FREQ=WEEKLY"),
+        )
+    )
+    created.append(("reminder", p.id))
+
+    def state():
+        r = store().calendarItemWithIdentifier_(p.id)
+        return bool(r.recurrenceRules()), str(r.title())
+
+    with pytest.raises(RecurrenceRequired, match="repeats"):
+        a.update_reminder(
+            p.id,
+            ReminderData(
+                title=f"{TITLE_PREFIX} weekly guard SHOULD-NOT-STICK", due=due
+            ),
+        )  # omitted recurrence on a repeating target → refuse BEFORE any mutation
+    recurs, title = run_native(state)
+    assert recurs  # the rule survived the refused update
+    assert "SHOULD-NOT-STICK" not in title  # ...and so did the title
+
+    p2 = a.update_reminder(
+        p.id,
+        ReminderData(
+            title=f"{TITLE_PREFIX} weekly guard (stopped)",
+            due=due,
+            recurrence=CLEAR_RECURRENCE,
+        ),
+    )  # explicit stop — verify-after-write inside asserts recurs cleared (#49)
+    assert p2.id == p.id and "stopped" in p2.summary
+    recurs, title = run_native(state)
+    assert not recurs  # the rule is gone from the store
+    assert "stopped" in title
