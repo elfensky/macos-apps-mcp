@@ -141,3 +141,59 @@ def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
     out = NotesAdapter().get_bodies(["N-1", "N-2"])
     assert out[0]["id"] == "N-1" and out[0]["body"].startswith("[not hydrated:")
     assert out[1] == {"id": "N-2", "body": "ok body"}
+
+
+# --- dry_run delete (#54) ------------------------------------------------------------
+
+
+def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
+    from mac_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
+
+    calls = []
+
+    def fake(script, *args):
+        calls.append((script, args))
+        return "Groceries"  # the preview script returns the live title
+
+    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", fake)
+    p = NotesAdapter().delete("N-1", dry_run=True)
+    assert isinstance(p, Pointer) and p.id == "N-1" and p.summary == "Groceries"
+    assert calls == [(_PREVIEW_DELETE, ("N-1",))]  # only id passed, no expect_title
+    assert all(s != _DELETE for s, _ in calls)  # ACCEPTANCE: nothing was deleted
+
+
+def test_delete_dry_run_delegates_expect_title_guard_to_applescript(monkeypatch):
+    # #54 review: the expect_title guard MUST run in AppleScript (same `is not` compare
+    # as _DELETE — case-insensitive, whitespace-significant), NOT a Python `!=`, or the
+    # preview can report the OPPOSITE of the real delete. Assert expect_title is
+    # forwarded to the preview script as argv so the guard is delegated, not re-done.
+    from mac_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
+
+    calls = []
+    monkeypatch.setattr(
+        "mac_mcp.adapters.notes.run_osascript",
+        lambda script, *a: calls.append((script, a)) or "Groceries",
+    )
+    NotesAdapter().delete("N-1", expect_title="groceries", dry_run=True)
+    assert calls == [
+        (_PREVIEW_DELETE, ("N-1", "groceries"))
+    ]  # guard delegated verbatim
+    assert all(s != _DELETE for s, _ in calls)  # nothing deleted
+
+
+def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
+    # the AppleScript guard raises on mismatch (via run_osascript → NativeError), just
+    # as the real delete does — the preview must not swallow it into a "would delete".
+    from mac_mcp.adapters.notes import _DELETE
+    from mac_mcp.runtime import NativeError
+
+    scripts = []
+
+    def fake(script, *args):
+        scripts.append(script)
+        raise NativeError("osascript failed: note title does not match expect_title")
+
+    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", fake)
+    with pytest.raises(NativeError, match="does not match expect_title"):
+        NotesAdapter().delete("N-1", expect_title="Wrong", dry_run=True)
+    assert _DELETE not in scripts  # a mismatch previews nothing and deletes nothing

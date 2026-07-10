@@ -16,6 +16,7 @@ from mac_mcp.runtime import (
     AccessDenied,
     AppNotRunning,
     AutomationDenied,
+    BatchTooLarge,
     NativeError,
     NativeTimeout,
     OutputOverflow,
@@ -34,6 +35,7 @@ from mac_mcp.runtime import (
     norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    require_batch_within,
     rrule_text,
     run_native,
     run_native_async,
@@ -150,6 +152,7 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         VerificationFailed,
         WriteRefused,
         RecurrenceRequired,
+        BatchTooLarge,
     ):
         assert issubclass(cls, NativeError)
         assert issubclass(cls, RuntimeError)
@@ -171,6 +174,7 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             VerificationFailed,
             WriteRefused,
             RecurrenceRequired,
+            BatchTooLarge,
         )
     ]
     assert len(kinds) == len(set(kinds))
@@ -436,3 +440,24 @@ def test_clean_helpers_are_idempotent_on_clean_text():
     assert sanitize_line(clean) == clean == clean_summary(clean)
     body = "first line\nsecond line"
     assert sanitize_block(body) == body == clean_body(body)
+
+
+# --- batch cap primitive (#54) -------------------------------------------------------
+
+
+def test_require_batch_within_allows_at_or_under_cap():
+    require_batch_within(0, 5, override_param="max_items")  # empty
+    require_batch_within(5, 5, override_param="max_items")  # exactly at cap — no raise
+
+
+def test_require_batch_within_raises_batch_too_large_naming_override():
+    # Acceptance: the typed error names the override param so the model knows how to
+    # deliberately raise the cap instead of blindly retrying the oversized batch.
+    with pytest.raises(BatchTooLarge, match="max_items") as exc:
+        require_batch_within(6, 5, override_param="max_items")
+    msg = str(exc.value)
+    assert "6" in msg and "5" in msg  # counts the model needs are surfaced
+
+
+def test_batch_too_large_kind():
+    assert BatchTooLarge.kind == "batch_too_large"

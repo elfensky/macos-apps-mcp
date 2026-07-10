@@ -137,6 +137,13 @@ class RecurrenceRequired(NativeError):
     kind = "recurrence_required"
 
 
+class BatchTooLarge(NativeError):
+    """A bulk operation exceeded its small default safety cap without an explicit
+    override — contains blast radius (griches --confirm-destructive, #54)."""
+
+    kind = "batch_too_large"
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:
@@ -240,6 +247,21 @@ def clean_body(
             "in the app instead of fetching its body; do not retry the hydrate."
         )
     return _truncate(s, limit)
+
+
+def require_batch_within(count: int, cap: int, *, override_param: str) -> None:
+    """Guard a bulk operation's size (#54): raise ``BatchTooLarge`` when ``count``
+    exceeds the small default ``cap``, naming the ``override_param`` the caller can pass
+    to raise the cap deliberately. Small caps + explicit override contain blast radius
+    (griches). The first bulk destructive op wires this in; single-item writes don't
+    need it. ponytail: this is the shared primitive — a bulk op calls it, it does not
+    invent its own limit check."""
+    if count > cap:
+        raise BatchTooLarge(
+            f"this operation would affect {count} items but the safety cap is {cap}. "
+            f"Narrow the batch, or pass {override_param}=<n> to raise the cap on "
+            "purpose. Do not retry the same oversized batch unchanged."
+        )
 
 
 def _decide(status: int) -> None:

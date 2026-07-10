@@ -454,3 +454,60 @@ def test_refetch_event_missing_is_rollback():
     store = SimpleNamespace(calendarItemWithIdentifier_=lambda ident: None)
     with pytest.raises(VerificationFailed, match="could not be re-fetched"):
         _refetch_event(store, "E-404")
+
+
+# --- dry_run delete (#54) ------------------------------------------------------------
+
+
+def _fake_event_full(title, ident, start, end, *, recurring=False):
+    # everything _resolve_span + _event_pointer touch; recurrenceRules drives the span.
+    return SimpleNamespace(
+        title=lambda: title,
+        calendarItemIdentifier=lambda: ident,
+        startDate=lambda: _ns(start),
+        endDate=lambda: _ns(end),
+        isAllDay=lambda: False,
+        recurrenceRules=lambda: [object()] if recurring else None,
+    )
+
+
+def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
+    import mac_mcp.adapters.calendar as cal
+
+    removed = []
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,
+        removeEvent_span_commit_error_=lambda *a: (removed.append(a), (True, None))[1],
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    p = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert removed == []  # ACCEPTANCE: dry_run mutated nothing
+    assert isinstance(p, Pointer) and p.summary == "Standup 09:00–09:15"
+
+
+def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
+    # the preview must be faithful: a recurring target with no span refuses in dry_run
+    # exactly as the real delete would (SpanRequired), so the model can't be misled.
+    import mac_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Weekly",
+        "E-2",
+        datetime(2026, 6, 23, 9, 0),
+        datetime(2026, 6, 23, 9, 30),
+        recurring=True,
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,
+        removeEvent_span_commit_error_=lambda *a: (True, None),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    with pytest.raises(SpanRequired):
+        cal.CalendarAdapter().delete_event("E-2", dry_run=True)

@@ -93,6 +93,24 @@ _DELETE = """on run argv
   end tell
 end run"""
 
+# dry_run preview (#54): the real-delete guard EXACTLY — same `note id` lookup and same
+# AppleScript `is not` title comparison as _DELETE (case-insensitive + whitespace-
+# significant) — minus the `delete n`, plus `return name of n`. The expect_title check
+# MUST run here, not in Python: a Python `!=` on the title diverged from AppleScript on
+# case AND whitespace, so the preview could report the opposite of what the real delete
+# does (#54 review). Errors on an unknown id or a title mismatch, exactly as _DELETE.
+_PREVIEW_DELETE = """on run argv
+  tell application "Notes"
+    set n to note id (item 1 of argv)
+    if (count of argv) > 1 then
+      if (name of n) is not (item 2 of argv) then
+        error "note title does not match expect_title"
+      end if
+    end if
+    return name of n
+  end tell
+end run"""
+
 
 def _parse(raw: str) -> list[Pointer]:
     out = []
@@ -181,16 +199,33 @@ class NotesAdapter:
             out.append({"id": rec["id"], "body": body})
         return out
 
-    def delete(self, ident: str, expect_title: str | None = None) -> None:
+    def delete(
+        self, ident: str, expect_title: str | None = None, dry_run: bool = False
+    ) -> Pointer | None:
         """Delete a note by id → Recently Deleted (recoverable).
 
         When expect_title is given, the note is deleted only if its current title
         matches — content-verify first by passing it. Without it, delete-by-id fires
         immediately (ids are globally unique, but a stale id deletes the wrong note).
+
+        ``dry_run=True`` runs the SAME id + expect_title guard as the real delete — in
+        AppleScript, so the case/whitespace semantics are byte-identical — but returns
+        the pointer that WOULD be deleted instead of deleting it. A title mismatch or
+        unknown id raises exactly as the real delete would, so the preview can never
+        disagree with the real op (#54).
         """
         if not ident.strip():
             raise ValueError("delete_note needs a note id")
+        if dry_run:
+            args = (ident,) if expect_title is None else (ident, expect_title)
+            title = run_osascript(_PREVIEW_DELETE, *args)
+            return Pointer(
+                id=ident,
+                summary=clean_summary(title) or "(untitled note)",
+                deeplink="",
+            )
         if expect_title is not None:
             run_osascript(_DELETE, ident, expect_title)
         else:
             run_osascript(_DELETE, ident)
+        return None

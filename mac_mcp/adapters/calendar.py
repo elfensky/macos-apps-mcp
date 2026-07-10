@@ -361,13 +361,21 @@ class CalendarAdapter:
 
         return run_native(work)
 
-    def delete_event(self, ident: str, span: str | None = None) -> None:
+    def delete_event(
+        self, ident: str, span: str | None = None, dry_run: bool = False
+    ) -> Pointer | None:
+        """Delete an event by id. ``dry_run=True`` resolves the target — and its span,
+        so a recurring event still surfaces ``SpanRequired`` exactly as the real delete
+        would — then returns the pointer that WOULD be deleted, no mutation (#54)."""
+
         def work():
             s = store()
             e = _resolve_event(s, ident)
             ek_span = _resolve_span(
                 e, span
             )  # recurring + no span → SpanRequired, no write
+            if dry_run:
+                return _event_pointer(e)  # preview only — nothing is removed
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise WriteRefused(
@@ -376,5 +384,6 @@ class CalendarAdapter:
                     "rejected the change — do not retry the same target; tell the "
                     "user."
                 )
+            return None
 
-        run_native(work)
+        return run_native(work)

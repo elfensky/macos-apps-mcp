@@ -410,18 +410,32 @@ def update_event(
 
 
 @_write_tool
-def delete_event(id: str, span: str | None = None) -> dict:
+def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dict:
     """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
     'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
-    for single events."""
+    for single events. `dry_run=True` previews the event that WOULD be deleted (pointer,
+    no mutation) — call it first to confirm the target before the real delete."""
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_delete": _emit(_calendar.delete_event(id, span=span, dry_run=True)),
+        }
     _calendar.delete_event(id, span=span)
     return {"deleted": id}
 
 
 @_write_tool
-def delete_note(id: str, expect_title: str | None = None) -> dict:
+def delete_note(
+    id: str, expect_title: str | None = None, dry_run: bool = False
+) -> dict:
     """Delete a note by id → Recently Deleted (recoverable ~30 days). Destructive.
-    Pass expect_title to verify the target before deleting (content-verify first)."""
+    Pass expect_title to verify the target before deleting (content-verify first).
+    `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation)."""
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_delete": _emit(_notes.delete(id, expect_title, dry_run=True)),
+        }
     _notes.delete(id, expect_title)
     return {"deleted": id}
 

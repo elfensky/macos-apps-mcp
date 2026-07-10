@@ -712,3 +712,60 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
             return str(exc.value)
 
     assert srv.UNTRUSTED_NOTICE not in asyncio.run(_run())
+
+
+# --- dry_run dispatch (#54) ----------------------------------------------------------
+
+
+def test_delete_event_dry_run_dispatches_and_formats_preview(monkeypatch):
+    calls = []
+
+    class _Cal:
+        def delete_event(self, ident, span=None, dry_run=False):
+            calls.append((ident, span, dry_run))
+            return Pointer(
+                id=ident, summary="Standup 09:00–09:15", deeplink="calshow:1"
+            )
+
+    monkeypatch.setattr(srv, "_calendar", _Cal())
+    out = srv.delete_event("E-1", dry_run=True)
+    assert calls == [("E-1", None, True)]  # dry_run flag reached the adapter
+    assert out == {
+        "dry_run": True,
+        "would_delete": {
+            "id": "E-1",
+            "summary": "Standup 09:00–09:15",
+            "deeplink": "calshow:1",
+        },
+    }
+
+
+def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypatch):
+    # guard the default path: no dry_run -> the mutating adapter call, {"deleted": id}.
+    calls = []
+
+    class _Cal:
+        def delete_event(self, ident, span=None, dry_run=False):
+            calls.append((ident, span, dry_run))
+            return None
+
+    monkeypatch.setattr(srv, "_calendar", _Cal())
+    assert srv.delete_event("E-1") == {"deleted": "E-1"}
+    assert calls == [("E-1", None, False)]
+
+
+def test_delete_note_dry_run_dispatches_and_formats_preview(monkeypatch):
+    calls = []
+
+    class _Notes:
+        def delete(self, ident, expect_title=None, dry_run=False):
+            calls.append((ident, expect_title, dry_run))
+            return Pointer(id=ident, summary="Groceries", deeplink="")
+
+    monkeypatch.setattr(srv, "_notes", _Notes())
+    out = srv.delete_note("N-1", dry_run=True)
+    assert calls == [("N-1", None, True)]
+    assert out == {
+        "dry_run": True,
+        "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
+    }
