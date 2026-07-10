@@ -3,10 +3,15 @@ boundary (no EventKit)."""
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
+from fastmcp import Client
 from fastmcp.exceptions import ToolError
+from fastmcp.tools.tool import ToolResult
+from mcp.types import TextContent
 
 import mac_mcp.server as srv
 from mac_mcp.contracts import (
@@ -620,3 +625,90 @@ def test_guard_does_not_swallow_value_errors(monkeypatch):
     monkeypatch.setattr(srv, "_contacts", _BadInput())
     with pytest.raises(ValueError, match="bad query"):
         srv.contacts("jane")
+
+
+# --- untrusted-data notice (#53) -----------------------------------------------------
+
+
+def test_untrusted_notice_covers_every_registered_tool_except_meta():
+    # Acceptance: iterate the REAL server's registered tools; the notice rides on every
+    # one carrying user-store content, and only the meta tools (ping/now/doctor) are
+    # exempt. Driven through the middleware directly (fake call_next) so no tool needs a
+    # live native call — the decision is purely name-based, so this covers all of them.
+    async def _run():
+        async with Client(srv.mcp) as c:
+            names = [t.name for t in await c.list_tools()]
+        mw = srv.UntrustedDataNotice()
+        out = {}
+        for name in names:
+            ctx = SimpleNamespace(message=SimpleNamespace(name=name))
+
+            async def call_next(_ctx):
+                return ToolResult(content=[TextContent(type="text", text="payload")])
+
+            out[name] = (await mw.on_call_tool(ctx, call_next)).content
+        return names, out
+
+    names, out = asyncio.run(_run())
+    assert names, "no tools registered"
+    assert set(names) >= srv._NO_NOTICE  # the exempt tools really exist
+    for name in names:
+        first = out[name][0].text
+        if name in srv._NO_NOTICE:
+            assert first == "payload", f"{name} must be exempt from the notice"
+        else:
+            assert first == srv.UNTRUSTED_NOTICE, f"{name} is missing the notice"
+
+
+def test_untrusted_notice_end_to_end_and_leaves_data_intact(monkeypatch):
+    # Wired on the real server: a read tool gets the notice as content[0] while its
+    # structured data (what a consumer reads) is untouched; a meta tool does not.
+    monkeypatch.setattr(srv, "_reminders", _FakeSource())
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("reminders", {"due": "today"}), await c.call_tool(
+                "now", {}
+            )
+
+    reminders_res, now_res = asyncio.run(_run())
+    assert reminders_res.content[0].text == srv.UNTRUSTED_NOTICE
+    assert reminders_res.data == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    assert now_res.content[0].text != srv.UNTRUSTED_NOTICE  # meta tool exempt
+
+
+def test_untrusted_notice_is_one_block_not_per_item(monkeypatch):
+    # Acceptance: exactly one line, never repeated per item.
+    class _Multi:
+        def get_pointers(self, query):
+            return [Pointer(id=str(i), summary=f"s{i}", deeplink="d") for i in range(4)]
+
+    monkeypatch.setattr(srv, "_reminders", _Multi())
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("reminders", {"due": "today"})
+
+    res = asyncio.run(_run())
+    notices = [
+        b for b in res.content if getattr(b, "text", None) == srv.UNTRUSTED_NOTICE
+    ]
+    assert len(notices) == 1 and res.content[0].text == srv.UNTRUSTED_NOTICE
+
+
+def test_untrusted_notice_not_added_to_error_results(monkeypatch):
+    # An error carries a remediation directive, not user data — it must not be prefixed
+    # with the notice. (_guard raises ToolError → call_next raises → prepend skipped.)
+    class _Boom:
+        def get_pointers(self, query):
+            raise AutomationDenied("automation off")
+
+    monkeypatch.setattr(srv, "_reminders", _Boom())
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            with pytest.raises(ToolError) as exc:
+                await c.call_tool("reminders", {"due": "today"})
+            return str(exc.value)
+
+    assert srv.UNTRUSTED_NOTICE not in asyncio.run(_run())
