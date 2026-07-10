@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mac_mcp.adapters.mail import _deeplink, _parse, _summary
+from mac_mcp.adapters.mail import MAX_MAILS, MailAdapter, _deeplink, _parse, _summary
 from mac_mcp.contracts import Pointer
 
 
@@ -38,3 +38,28 @@ def test_parse_tab_lines():
 
 def test_parse_skips_blank():
     assert _parse("\n  \n") == []
+
+
+def test_parse_sanitizes_control_chars_in_summary():
+    # #52: control chars in a subject (which blanked Claude Desktop, carterlasalle #2)
+    # must be stripped before the summary reaches the model. NUL/BEL/US are used here
+    # because the tab-delimited parser frames records with splitlines(), which would
+    # itself split on U+2028/NEL — that framing fragility is pre-existing (a literal
+    # newline in a subject splits too) and out of #52's scope; the helper's own
+    # U+2028/9 folding is covered in test_runtime.
+    raw = "m@host\tInv\x00oice\x1fQ3\x07\tBob\n"
+    ptr = _parse(raw)[0]
+    assert ptr.summary == "InvoiceQ3 — Bob"
+    assert "\x00" not in ptr.summary and "\x07" not in ptr.summary
+
+
+def test_get_pointers_bounds_host_side(monkeypatch):
+    # #52 acceptance: the cap is pushed INTO the AppleScript (argv[2]) so the search
+    # stops emitting after MAX_MAILS — not fetched whole then sliced in Python.
+    seen = {}
+    monkeypatch.setattr(
+        "mac_mcp.adapters.mail.run_osascript",
+        lambda script, *args: seen.setdefault("args", args) and "" or "",
+    )
+    MailAdapter().get_pointers("invoice")
+    assert seen["args"] == ("invoice", str(MAX_MAILS))

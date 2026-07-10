@@ -10,19 +10,30 @@ bounds a pathological search. User input goes via argv (no script injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 MAX_MAILS = 25
 
+# Bounded host-side (#52): stop emitting after maxN matches instead of streaming the
+# whole match set back and slicing in Python. The `whose` filter still scans the inbox
+# (AppleScript has no LIMIT), but the *output* is capped at the source, so a common
+# subject can't return thousands of records and blow the buffer (FradSer #66/#69).
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin Mail.
 _SEARCH = """on run argv
   set q to item 1 of argv
+  set maxN to (item 2 of argv) as integer
   set out to ""
+  set c to 0
+  with timeout of 120 seconds
   tell application "Mail"
     repeat with m in (messages of inbox whose subject contains q)
+      set c to c + 1
+      if c > maxN then exit repeat
       set out to out & (message id of m) & tab
       set out to out & (subject of m) & tab & (sender of m) & linefeed
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -50,7 +61,11 @@ def _parse(raw: str) -> list[Pointer]:
         subject = parts[1] if len(parts) > 1 else ""
         sender = parts[2] if len(parts) > 2 else ""
         out.append(
-            Pointer(id=mid, summary=_summary(subject, sender), deeplink=_deeplink(mid))
+            Pointer(
+                id=mid,
+                summary=clean_summary(_summary(subject, sender)),
+                deeplink=_deeplink(mid),
+            )
         )
     return out
 
@@ -61,4 +76,5 @@ class MailAdapter:
         q = query.strip()
         if not q:
             raise ValueError("mail read needs a subject substring (got an empty query)")
-        return _parse(run_osascript(_SEARCH, q))[:MAX_MAILS]
+        # maxN is enforced host-side; the slice is a cheap backstop on the result.
+        return _parse(run_osascript(_SEARCH, q, str(MAX_MAILS)))[:MAX_MAILS]

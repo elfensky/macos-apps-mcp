@@ -12,7 +12,13 @@ the script, so a name or id can't break out of the AppleScript.
 from __future__ import annotations
 
 from ..contracts import ContactData, Pointer
-from ..runtime import VerificationFailed, norm_text, run_osascript, verify_persisted
+from ..runtime import (
+    VerificationFailed,
+    clean_summary,
+    norm_text,
+    run_osascript,
+    verify_persisted,
+)
 
 MAX_CONTACTS = 50  # cap a broad name match
 
@@ -40,6 +46,7 @@ _SEARCH = """on run argv
   set rSep to character id 30
   set out to ""
   set n to 0
+  with timeout of 120 seconds
   tell application "Contacts"
     repeat with p in (people whose name contains q)
       set theOrg to organization of p
@@ -54,6 +61,7 @@ _SEARCH = """on run argv
       if n >= maxN then exit repeat
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -61,6 +69,7 @@ _CREATE = """on run argv
   set fn to item 1 of argv
   set ln to item 2 of argv
   set org to item 3 of argv
+  with timeout of 120 seconds
   tell application "Contacts"
     set p to make new person with properties {first name:fn}
     if ln is not "" then set last name of p to ln
@@ -68,6 +77,7 @@ _CREATE = """on run argv
     save
     return id of p
   end tell
+  end timeout
 end run"""
 
 # Re-read a person by the id we're about to return (#49) — proves the create persisted
@@ -78,6 +88,7 @@ end run"""
 _VERIFY = """on run argv
   set pid to item 1 of argv
   set uSep to character id 31
+  with timeout of 120 seconds
   tell application "Contacts"
     try
       set p to person id pid
@@ -92,6 +103,7 @@ _VERIFY = """on run argv
     if org is missing value then set org to ""
     return fn & uSep & ln & uSep & org
   end tell
+  end timeout
 end run"""
 
 
@@ -154,7 +166,7 @@ def _parse(raw: str) -> list[Pointer]:
         out.append(
             Pointer(
                 id=ident,
-                summary=_summary(name, org, phone, email),
+                summary=clean_summary(_summary(name, org, phone, email)),
                 deeplink=_deeplink(ident),
             )
         )
@@ -179,6 +191,6 @@ class ContactsAdapter:
         full = f"{data.given_name} {data.family_name or ''}"
         return Pointer(
             id=ident,
-            summary=_summary(full, data.organization or ""),
+            summary=clean_summary(_summary(full, data.organization or "")),
             deeplink=_deeplink(ident),
         )

@@ -10,17 +10,20 @@ Capped; Messages scripting can be slow.
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 MAX_CHATS = 30
 
-_CHATS = """tell application "Messages"
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
+_CHATS = """with timeout of 120 seconds
+tell application "Messages"
   set out to ""
   repeat with c in chats
     set out to out & (id of c) & tab & (name of c) & linefeed
   end repeat
   return out
-end tell"""
+end tell
+end timeout"""
 
 
 def _parse(raw: str) -> list[Pointer]:
@@ -29,7 +32,8 @@ def _parse(raw: str) -> list[Pointer]:
         if not line.strip():
             continue
         guid, _, name = line.partition("\t")
-        out.append(Pointer(id=guid, summary=name.strip() or "(chat)", deeplink=""))
+        summary = clean_summary(name) or "(chat)"
+        out.append(Pointer(id=guid, summary=summary, deeplink=""))
     return out
 
 
