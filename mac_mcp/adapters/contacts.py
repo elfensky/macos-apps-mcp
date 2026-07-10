@@ -12,7 +12,13 @@ the script, so a name or id can't break out of the AppleScript.
 from __future__ import annotations
 
 from ..contracts import ContactData, Pointer
-from ..runtime import VerificationFailed, norm_text, run_osascript, verify_persisted
+from ..runtime import (
+    VerificationFailed,
+    clean_summary,
+    norm_text,
+    run_osascript,
+    verify_persisted,
+)
 
 MAX_CONTACTS = 50  # cap a broad name match
 
@@ -154,7 +160,7 @@ def _parse(raw: str) -> list[Pointer]:
         out.append(
             Pointer(
                 id=ident,
-                summary=_summary(name, org, phone, email),
+                summary=clean_summary(_summary(name, org, phone, email)),
                 deeplink=_deeplink(ident),
             )
         )
@@ -179,6 +185,6 @@ class ContactsAdapter:
         full = f"{data.given_name} {data.family_name or ''}"
         return Pointer(
             id=ident,
-            summary=_summary(full, data.organization or ""),
+            summary=clean_summary(_summary(full, data.organization or "")),
             deeplink=_deeplink(ident),
         )

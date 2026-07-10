@@ -16,6 +16,7 @@ from ..runtime import (
     SpanRequired,
     VerificationFailed,
     WriteRefused,
+    clean_summary,
     epoch_nsdate,
     from_nsdate,
     norm_text,
@@ -76,14 +77,18 @@ def _event_id(item) -> str:
 def _event_pointer(item) -> Pointer:
     return Pointer(
         id=_event_id(item),
-        summary=_event_summary(item),
+        summary=clean_summary(_event_summary(item)),
         deeplink=_event_deeplink(item),
     )
 
 
 def _calendar_pointer(cal) -> Pointer:
     # A calendar (container) has no public per-calendar URL scheme; id + name (summary)
-    # are what the projection resolves a write target against. deeplink empty by design.
+    # are what the projection resolves a write target against. The title is kept RAW
+    # (NOT routed through clean_summary, unlike event summaries): _resolve_calendar
+    # matches `c.title() == name` exactly with no id fallback, so the summary IS the
+    # write key — sanitizing it would desync the displayed name from the resolvable one
+    # and make the calendar untargetable (#52 review). deeplink empty by design.
     return Pointer(id=cal.calendarIdentifier(), summary=cal.title(), deeplink="")
 
 

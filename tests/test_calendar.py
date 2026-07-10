@@ -12,6 +12,7 @@ import pytest
 
 from mac_mcp.adapters.calendar import (
     _all_day_bounds,
+    _calendar_pointer,
     _event_pointer,
     _event_summary,
     _range,
@@ -62,6 +63,25 @@ def test_pointer_shape():
     assert isinstance(p, Pointer)
     assert p.id == f"E-1|{int(start.timestamp())}"
     assert p.deeplink.startswith("calshow:")
+
+
+def test_event_pointer_summary_is_sanitized():
+    # #52 routing: a control char in the event title is stripped from the pointer
+    # summary (deleting clean_summary from _event_pointer would fail this).
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Stand\x07up", "E-1", start, datetime(2026, 6, 23, 9, 15))
+    assert _event_pointer(e).summary == "Standup 09:00–09:15"
+
+
+def test_calendar_pointer_summary_is_the_raw_write_key():
+    # #52 review: a calendar summary IS its write-resolution key (_resolve_calendar
+    # matches title exactly, no id fallback), so it must stay RAW — a sanitized name
+    # would not resolve back to the calendar.
+    cal = SimpleNamespace(calendarIdentifier=lambda: "C-1", title=lambda: "Work  Cal")
+    p = _calendar_pointer(cal)
+    assert p.summary == "Work  Cal"  # internal double space preserved, not collapsed
+    store = SimpleNamespace(calendarsForEntityType_=lambda _e: [cal])
+    assert _resolve_calendar(store, p.summary) is cal  # round-trips by displayed name
 
 
 def test_range_today_is_one_day():

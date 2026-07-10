@@ -10,7 +10,7 @@ is slow — a cold search takes ~20s); user input via argv (no injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 MAX_PHOTOS = 25
 
@@ -33,7 +33,7 @@ def _parse(raw: str) -> list[Pointer]:
             continue
         ident, _, filename = line.partition("\t")
         out.append(
-            Pointer(id=ident, summary=filename.strip() or "(photo)", deeplink="")
+            Pointer(id=ident, summary=clean_summary(filename) or "(photo)", deeplink="")
         )
     return out
 

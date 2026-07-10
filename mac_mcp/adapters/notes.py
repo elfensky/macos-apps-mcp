@@ -10,7 +10,7 @@ timeout-bounded; user input goes via argv (no script injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import OutputOverflow, clean_body, clean_summary, run_osascript
 
 MAX_NOTES = 25
 MAX_BODIES = 50
@@ -101,7 +101,11 @@ def _parse(raw: str) -> list[Pointer]:
             continue
         ident, _, name = line.partition("\t")
         out.append(
-            Pointer(id=ident, summary=name.strip() or "(untitled note)", deeplink="")
+            Pointer(
+                id=ident,
+                summary=clean_summary(name) or "(untitled note)",
+                deeplink="",
+            )
         )
     return out
 
@@ -118,7 +122,7 @@ def _parse_all(raw: str) -> list[Pointer]:
         out.append(
             Pointer(
                 id=ident,
-                summary=title.strip() or "(untitled note)",
+                summary=clean_summary(title) or "(untitled note)",
                 deeplink="",
                 folder=folder,
             )
@@ -155,7 +159,11 @@ class NotesAdapter:
     def get_bodies(self, ids: list[str]) -> list[dict]:
         """Hydrate plaintext bodies for up to MAX_BODIES ids → [{"id", "body"}].
 
-        Unknown ids are silently skipped; the caller diffs returned vs requested ids.
+        Each body is sanitized and per-item bounded through ``clean_body`` (#52): a
+        control-char-laden body can't corrupt the client and a long one is truncated
+        with a marker. A single pathological body (over the hard cap) is caught here so
+        it downgrades to a per-item notice instead of failing the whole batch. Unknown
+        ids are silently skipped; the caller diffs returned vs requested ids.
         """
         if not ids:
             raise ValueError("note_bodies needs at least one note id")
@@ -164,7 +172,14 @@ class NotesAdapter:
                 f"note_bodies accepts at most {MAX_BODIES} ids per call; "
                 f"got {len(ids)} — chunk your requests"
             )
-        return _parse_bodies(run_osascript(_BODIES, *ids))
+        out = []
+        for rec in _parse_bodies(run_osascript(_BODIES, *ids)):
+            try:
+                body = clean_body(rec["body"])
+            except OutputOverflow as e:
+                body = f"[not hydrated: {e}]"
+            out.append({"id": rec["id"], "body": body})
+        return out
 
     def delete(self, ident: str, expect_title: str | None = None) -> None:
         """Delete a note by id → Recently Deleted (recoverable).

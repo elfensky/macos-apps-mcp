@@ -119,3 +119,25 @@ def test_delete_without_title_passes_only_id(monkeypatch):
     )
     NotesAdapter().delete("N-1")
     assert calls == [("N-1",)]
+
+
+def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
+    # #52: a hydrated body is control-stripped but keeps its line/tab structure (it is
+    # legitimately multi-line — unlike a one-line summary, it must not be flattened).
+    raw = "N-1\x1fLine1\nLine2\x00\tend\x1e"
+    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    out = NotesAdapter().get_bodies(["N-1"])
+    assert out == [{"id": "N-1", "body": "Line1\nLine2\tend"}]
+
+
+def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
+    # a single pathological body (a pasted dump) must not fail the whole batch: it
+    # downgrades to a per-item notice while the sibling note hydrates normally.
+    from mac_mcp.runtime import BODY_HARD_MAX
+
+    huge = "z" * (BODY_HARD_MAX + 1)
+    raw = f"N-1\x1f{huge}\x1eN-2\x1fok body\x1e"
+    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    out = NotesAdapter().get_bodies(["N-1", "N-2"])
+    assert out[0]["id"] == "N-1" and out[0]["body"].startswith("[not hydrated:")
+    assert out[1] == {"id": "N-2", "body": "ok body"}

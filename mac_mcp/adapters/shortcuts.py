@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
-from ..runtime import NativeError, NativeTimeout
+from ..runtime import NativeError, NativeTimeout, clean_summary, sanitize_line
 
 MAX_SHORTCUTS = 100
 MAX_OUTPUT = 280  # pointers-not-payload: cite the run + a bounded snippet of any output
@@ -22,15 +22,24 @@ _RUN_TIMEOUT = 30.0  # a shortcut does real work — longer than `list`
 
 
 def _pointer(name: str) -> Pointer:
-    return Pointer(id=name, summary=name, deeplink="")
+    # id stays the exact name (the run handle); summary is the display-sanitized form.
+    return Pointer(id=name, summary=clean_summary(name), deeplink="")
 
 
 def _run_pointer(name: str, output: str) -> Pointer:
     """Cite that a shortcut ran, plus a bounded snippet of any stdout it returned."""
-    out = output.strip()
-    summary = f"ran {name}"
+    # The "…" ("more, amount unknown") marker keys off the RAW read length, NOT the
+    # sanitized length: run_shortcut reads only MAX_OUTPUT+1 chars, and sanitize_line
+    # can shrink that below MAX_OUTPUT (folding CRLF, stripping control chars) — keying
+    # off the sanitized length would drop the marker even when output WAS truncated (#52
+    # review). sanitize_line (not clean_body's char-count marker, which would lie about
+    # how much was dropped once the read is already capped) strips the control chars /
+    # ANSI a shortcut may emit (carterlasalle #2) and flattens to one citable line.
+    truncated = len(output) > MAX_OUTPUT
+    out = sanitize_line(output)
+    summary = f"ran {sanitize_line(name)}"
     if out:
-        snippet = out if len(out) <= MAX_OUTPUT else out[:MAX_OUTPUT] + "…"
+        snippet = out[:MAX_OUTPUT] + ("…" if truncated else "")
         summary = f"{summary} → {snippet}"
     return Pointer(id=name, summary=summary, deeplink="")
 

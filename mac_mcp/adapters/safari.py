@@ -8,7 +8,7 @@ via argv (no injection). Pointers, not page content.
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 _TABS = """tell application "Safari"
   set out to ""
@@ -40,7 +40,7 @@ def _parse(raw: str) -> list[Pointer]:
         if not line.strip():
             continue
         url, _, name = line.partition("\t")
-        out.append(Pointer(id=url, summary=name.strip() or url, deeplink=url))
+        out.append(Pointer(id=url, summary=clean_summary(name) or url, deeplink=url))
     return out
 
 
@@ -74,4 +74,4 @@ class SafariAdapter:
         """Open ``url`` in a new Safari tab (a new window if none is open)."""
         u = _normalize_url(url)
         run_osascript(_OPEN, u)
-        return Pointer(id=u, summary=f"opened {u}", deeplink=u)
+        return Pointer(id=u, summary=clean_summary(f"opened {u}"), deeplink=u)

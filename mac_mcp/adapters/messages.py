@@ -10,7 +10,7 @@ Capped; Messages scripting can be slow.
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 MAX_CHATS = 30
 
@@ -29,7 +29,8 @@ def _parse(raw: str) -> list[Pointer]:
         if not line.strip():
             continue
         guid, _, name = line.partition("\t")
-        out.append(Pointer(id=guid, summary=name.strip() or "(chat)", deeplink=""))
+        summary = clean_summary(name) or "(chat)"
+        out.append(Pointer(id=guid, summary=summary, deeplink=""))
     return out
 
 

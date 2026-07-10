@@ -16,6 +16,7 @@ practice.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import threading
 import unicodedata
@@ -170,6 +171,75 @@ def norm_text(v) -> str | None:
         return None
     s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
     return s or None
+
+
+# --- output hygiene (#52) ------------------------------------------------------------
+# Raw native text reaches the model two ways: as a one-line Pointer.summary and as an
+# opt-in hydrated body. Both are control-stripped and bounded here — in ONE place, one
+# uniform rule (no per-tool truncation knobs) — so a pathological item can neither
+# corrupt the client (control chars / U+2028-9 blanked Claude Desktop conversations
+# retroactively, carterlasalle #2) nor blow the buffer/context (a 150k-char body failed
+# *silently* at maxBuffer, FradSer #66/#69). ponytail: the three MAX constants are
+# tuning knobs — change the numbers, not the mechanism.
+SUMMARY_MAX = 200  # a one-line citable extract
+BODY_MAX = 4000  # per-item hydrated body — soft cap: truncate + marker past this
+BODY_HARD_MAX = 50_000  # a body past this is a dump, not a note → OutputOverflow
+
+# Fold every kind of line break to one char first: CRLF/CR, VT, FF, NEL (U+0085), and
+# the Unicode LINE/PARAGRAPH SEPARATORS (U+2028/9) that historically blank JS/JSON
+# consumers. \r\n is one alternative so a Windows newline folds to a single char.
+_LINE_BREAKS = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
+# Disallowed chars remaining after breaks are folded: C0 controls (minus TAB \x09 and
+# the fold char \n \x0a, both kept), DEL \x7f, and C1 \x80-\x9f. \x0b-\x0d never survive
+# folding, so the class starts at \x0e.
+_CTRL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f-\x9f]")
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Cap ``text`` at ``limit`` chars, appending an explicit ``[truncated N chars]``
+    marker (N = chars dropped) so the model never mistakes a clip for the whole."""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]} [truncated {len(text) - limit} chars]"
+
+
+def sanitize_line(text: object) -> str:
+    """Collapse ``text`` to one control-char-free line (NO truncation): every line break
+    → space, C0/C1/DEL controls removed, whitespace runs collapsed. For anything that
+    lands in a one-line ``Pointer.summary``. ``None`` → ``""``."""
+    folded = _LINE_BREAKS.sub(" ", str(text) if text is not None else "")
+    return re.sub(r"\s+", " ", _CTRL.sub("", folded)).strip()
+
+
+def sanitize_block(text: object) -> str:
+    """Strip control chars from multi-line ``text``, preserving line structure (NO
+    truncation): every line break → ``\\n``, TAB kept, other C0/C1/DEL removed. For
+    opt-in hydrated bodies (a body legitimately spans lines — do not flatten it)."""
+    folded = _LINE_BREAKS.sub("\n", str(text) if text is not None else "")
+    return _CTRL.sub("", folded)
+
+
+def clean_summary(text: object) -> str:
+    """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
+    return _truncate(sanitize_line(text), SUMMARY_MAX)
+
+
+def clean_body(
+    text: object, limit: int = BODY_MAX, hard: int | None = BODY_HARD_MAX
+) -> str:
+    """Control-free, line-preserving body truncated at ``limit`` with a marker.
+
+    Raises ``OutputOverflow`` when the sanitized body exceeds ``hard``: a single item
+    that large is a pasted dump, not a note, and truncating it to a few KB would just
+    hand back misleading noise — the model should open it in-app instead. Pass
+    ``hard=None`` to always truncate (where one huge item must not fail a batch)."""
+    s = sanitize_block(text)
+    if hard is not None and len(s) > hard:
+        raise OutputOverflow(
+            f"this item is {len(s)} chars — too large to hydrate (cap {hard}). Open it "
+            "in the app instead of fetching its body; do not retry the hydrate."
+        )
+    return _truncate(s, limit)
 
 
 def _decide(status: int) -> None:

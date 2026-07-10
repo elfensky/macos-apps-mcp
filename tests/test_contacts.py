@@ -101,9 +101,12 @@ def test_parse_tolerates_tab_and_newline_in_field():
     # — fields/records are delimited by control chars, not tab/newline.
     raw = _rec("C-1", "Jane\tDoe", "Ev\nil Corp")
     ptrs = _parse(raw)
-    assert len(ptrs) == 1
+    assert len(ptrs) == 1  # the record is NOT split by the embedded tab/newline
     assert ptrs[0].id == "C-1"
-    assert "Jane\tDoe" in ptrs[0].summary  # the tab is data, not a delimiter
+    # #52: the summary is sanitized — the tab/newline collapse to spaces (never a raw
+    # control char reaches the model), but the field data survives as text.
+    assert ptrs[0].summary == "Jane Doe — Ev il Corp"
+    assert "\t" not in ptrs[0].summary and "\n" not in ptrs[0].summary
 
 
 # --- verify-after-write (#49) --------------------------------------------------------

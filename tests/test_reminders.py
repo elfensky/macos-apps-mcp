@@ -10,6 +10,7 @@ import pytest
 from mac_mcp.adapters.reminders import (
     _due_tuple,
     _expected_due_tuple,
+    _list_pointer,
     _reminder_deeplink,
     _reminder_pointer,
     _reminder_summary,
@@ -41,6 +42,24 @@ def test_summary_with_due():
 
 def test_summary_without_due():
     assert _reminder_summary(_fake_reminder("Buy milk", "R-2")) == "Buy milk"
+
+
+def test_reminder_pointer_summary_is_sanitized():
+    # #52 routing: a control char in the title is stripped from the pointer summary
+    # (deleting clean_summary from _reminder_pointer would fail this).
+    p = _reminder_pointer(_fake_reminder("Call\x07 dentist", "R-1"))
+    assert p.summary == "Call dentist" and "\x07" not in p.summary
+
+
+def test_list_pointer_summary_is_the_raw_write_key():
+    # #52 review: a reminder-list summary IS its write-resolution key (_resolve_list
+    # matches title exactly, no id fallback), so it must stay RAW — trimming a trailing
+    # space would make the list untargetable via its own displayed name.
+    cal = SimpleNamespace(calendarIdentifier=lambda: "L-1", title=lambda: "Shopping ")
+    p = _list_pointer(cal)
+    assert p.summary == "Shopping "  # not trimmed to "Shopping"
+    store = SimpleNamespace(calendarsForEntityType_=lambda _e: [cal])
+    assert _resolve_list(store, p.summary) is cal  # round-trips by the displayed name
 
 
 def test_deeplink_format():

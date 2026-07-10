@@ -15,6 +15,7 @@ from ..runtime import (
     RecurrenceRequired,
     VerificationFailed,
     WriteRefused,
+    clean_summary,
     due_components,
     norm_text,
     persisted_recurrence_signature,
@@ -52,15 +53,22 @@ def _reminder_deeplink(ident: str) -> str:
 def _reminder_pointer(item) -> Pointer:
     ident = item.calendarItemIdentifier()
     return Pointer(
-        id=ident, summary=_reminder_summary(item), deeplink=_reminder_deeplink(ident)
+        id=ident,
+        summary=clean_summary(_reminder_summary(item)),
+        deeplink=_reminder_deeplink(ident),
     )
 
 
 def _list_pointer(cal) -> Pointer:
     # A reminder list (container) has no verified open-in-app URL; id + name (summary)
-    # are what the projection resolves a write target against. ponytail: deeplink empty
-    # by design — if on-device testing finds a working list URL, set it here (deeplinks
-    # are a calibration knob).
+    # are what the projection resolves a write target against. The title is kept RAW
+    # (NOT routed through clean_summary, unlike item summaries): _resolve_list matches
+    # `c.title() == name` exactly with no id fallback, so the summary IS the write key —
+    # sanitizing it (e.g. trimming a trailing space, collapsing a double space) would
+    # desync the displayed name from the resolvable one and make the list untargetable
+    # (#52 review). Container names are short user-typed text, so the hygiene risk a
+    # sanitized summary would guard is negligible here. ponytail: deeplink empty by
+    # design — set a working list URL here if on-device testing finds one.
     return Pointer(id=cal.calendarIdentifier(), summary=cal.title(), deeplink="")
 
 
