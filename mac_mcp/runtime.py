@@ -617,6 +617,13 @@ def bootstrap() -> None:
 # importing the module or running unit tests never starts a watcher or grabs SIGTERM.
 _PPID_POLL = 1.0  # seconds — well inside the 5s orphan-exit budget
 
+# The launching parent's pid, captured at IMPORT — deliberately NOT at
+# install_lifecycle_guards() time. bootstrap() blocks up to 120s on the TCC permission
+# prompt *before* the guards install; if the parent died during that wait, an
+# install-time os.getppid() would already read 1 (reparented) and the watcher could
+# never fire (1 == 1 forever). Import runs right after the parent spawns us (alive).
+_LAUNCH_PPID = os.getppid()
+
 
 def _parent_died(original_ppid: int) -> bool:
     """True once our launching parent is gone: its pid was reaped and we were reparented
@@ -645,10 +652,10 @@ def install_lifecycle_guards() -> None:
     with contextlib.suppress(ValueError):
         signal.signal(signal.SIGTERM, lambda *_: (_terminate_children(), os._exit(0)))
 
-    original_ppid = os.getppid()
-
     def _watch() -> None:
-        while not _parent_died(original_ppid):
+        # compare against the import-time launch ppid (see _LAUNCH_PPID) so a parent
+        # that died during bootstrap's permission prompt is still detected as gone.
+        while not _parent_died(_LAUNCH_PPID):
             time.sleep(_PPID_POLL)
         # parent gone: kill any in-flight child, then hard-exit (skip Python teardown —
         # its stdio pipes point at a dead parent and could block).

@@ -892,16 +892,20 @@ _ORPHAN_CHILD = """
 import os, sys, time
 from mac_mcp.runtime import install_lifecycle_guards
 install_lifecycle_guards()
+# print our pid AFTER the guards are installed — this is the test's readiness signal, so
+# the parent is only killed once we've captured our launching-parent pid. (If the test
+# killed the parent DURING our slow import, we'd already be reparented to 1 and the
+# watcher could never detect it — the exact bug on-device testing caught.)
 sys.stdout.write(str(os.getpid()) + "\\n"); sys.stdout.flush()
 time.sleep(60)
 """
 
-# intermediate: spawn the watched child, report ITS pid to the test, then wait. Killing
-# THIS process orphans the child so the watcher's reparent detection fires.
+# intermediate: spawn the watched child, then wait. It prints NOTHING — the child
+# inherits our stdout (the test's pipe) and reports its own readiness. Killing THIS
+# process orphans the child so the watcher's reparent detection fires.
 _ORPHAN_INTERMEDIATE = """
 import subprocess, sys
 child = subprocess.Popen([sys.executable, "-c", {child!r}])
-sys.stdout.write(str(child.pid) + "\\n"); sys.stdout.flush()
 child.wait()
 """
 
