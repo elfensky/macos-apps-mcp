@@ -84,14 +84,25 @@ def _guard(fn):
     return wrapper
 
 
+# MCP tool annotations (#57) — derived MECHANICALLY from the read/write seam, no
+# per-tool judgment: a host (Claude Code's permission system) can then gate safari_tabs
+# differently from delete_event. Reads are read-only + additive; writes are marked
+# destructive conservatively (a host should treat any write as needing consent — we
+# don't split create-vs-delete here). ping/now use these too; doctor is a read.
+_READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
+_WRITE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
+
+
 def _read_tool(fn):
-    """Register a read tool, wrapped so typed native failures surface as directives."""
-    return mcp.tool()(_guard(fn))
+    """Register a read tool, wrapped so typed native failures surface as directives.
+    Annotated read-only (#57)."""
+    return mcp.tool(annotations=_READ_ANNOTATIONS)(_guard(fn))
 
 
 def _write_tool(fn):
-    """Register a destructive tool — skipped in read-only mode (safe-deploy guard)."""
-    return fn if _read_only() else mcp.tool()(_guard(fn))
+    """Register a destructive tool — skipped in read-only mode (safe-deploy guard).
+    Annotated not-read-only + destructive (#57)."""
+    return fn if _read_only() else mcp.tool(annotations=_WRITE_ANNOTATIONS)(_guard(fn))
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
@@ -131,10 +142,10 @@ class UntrustedDataNotice(Middleware):
 mcp.add_middleware(UntrustedDataNotice())
 
 
-# no native call → registered without _guard
-@mcp.tool()
+# no native call → registered without _guard (but still read-only-annotated, #57)
+@mcp.tool(annotations=_READ_ANNOTATIONS)
 def ping() -> str:
-    """Health check — confirms mac-mcp is alive."""
+    """Health check — confirms mac-mcp is alive. No permission needed."""
     return "mac-mcp ok"
 
 
@@ -148,9 +159,9 @@ def doctor(request: bool = False) -> dict:
     return diagnose(request=request)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ANNOTATIONS)
 def now() -> dict:
-    """Current local date, time, timezone, UTC offset, and weekday.
+    """Current local date, time, timezone, UTC offset, weekday. No permission needed.
 
     Call this FIRST to ground any relative date ("today", "tomorrow", "next Friday") —
     never guess the date from memory. Every date parameter on the write tools is
@@ -161,43 +172,50 @@ def now() -> dict:
 
 @_read_tool
 def reminders(due: str = "today") -> list[dict]:
-    """List reminders as pointers. `due`: today | overdue | this-week | a list name."""
+    """List reminders as pointers. `due`: today | overdue | this-week | a list name.
+    Read-only; needs EventKit (Reminders) access. Hydrate none — pointers only."""
     return [_emit(p) for p in _reminders.get_pointers(due)]
 
 
 @_read_tool
 def events(when: str = "today") -> list[dict]:
-    """List calendar events as pointers. `when`: today | week | YYYY-MM-DD."""
+    """List calendar events as pointers. `when`: today | week | YYYY-MM-DD.
+    Read-only; needs EventKit (Calendar) access."""
     return [_emit(p) for p in _calendar.get_pointers(when)]
 
 
 @_read_tool
 def reminder_lists() -> list[dict]:
-    """List reminder lists as pointers (id + name); use a name to target writes."""
+    """List reminder lists as pointers (id + name); use a name to target writes.
+    Read-only; needs EventKit (Reminders) access. See create_reminder to write."""
     return [_emit(p) for p in _reminders.get_lists()]
 
 
 @_read_tool
 def calendars() -> list[dict]:
-    """List calendars as pointers (id + name); use a name to target writes."""
+    """List calendars as pointers (id + name); use a name to target writes.
+    Read-only; needs EventKit (Calendar) access. See create_event to write."""
     return [_emit(p) for p in _calendar.get_calendars()]
 
 
 @_read_tool
 def contacts(name: str) -> list[dict]:
-    """Find contacts by name (substring). Returns pointers (id + name/org)."""
+    """Find contacts by name (substring). Returns pointers (id + name/org).
+    Read-only; needs Automation access for Contacts. See create_contact to write."""
     return [_emit(p) for p in _contacts.get_pointers(name)]
 
 
 @_read_tool
 def mail(subject: str) -> list[dict]:
-    """Search the Mail inbox by subject substring. Pointers (id + subject/sender)."""
+    """Search the Mail inbox by subject substring. Pointers (id + subject/sender).
+    Read-only; needs Automation access for Mail. Bodies are never fetched."""
     return [_emit(p) for p in _mail.get_pointers(subject)]
 
 
 @_read_tool
 def notes(title: str) -> list[dict]:
-    """Search Notes by title substring. Returns pointers (id + title)."""
+    """Search Notes by title substring. Returns pointers (id + title).
+    Read-only; needs Automation access for Notes. See notes_all, note_bodies."""
     return [_emit(p) for p in _notes.get_pointers(title)]
 
 
@@ -205,38 +223,43 @@ def notes(title: str) -> list[dict]:
 def notes_all() -> list[dict]:
     """List every note as pointers (id + "Account / Folder" + title), excluding
     Recently Deleted. No cap; very large libraries can hit the osascript timeout
-    (all-or-nothing)."""
+    (all-or-nothing). Read-only; needs Automation access for Notes. See note_bodies."""
     return [_emit(p) for p in _notes.get_all()]
 
 
 @_read_tool
 def note_bodies(ids: list[str]) -> list[dict]:
     """Hydrate plaintext bodies for up to 50 note ids (opt-in; search stays
-    pointer-only). Returns [{"id", "body"}]; unknown ids are silently skipped."""
+    pointer-only). Returns [{"id", "body"}]; unknown ids are silently skipped.
+    Read-only; needs Automation access for Notes. Get ids from notes / notes_all."""
     return _notes.get_bodies(ids)
 
 
 @_read_tool
 def safari_tabs() -> list[dict]:
-    """List open Safari tabs as pointers (url + title)."""
+    """List open Safari tabs as pointers (url + title).
+    Read-only; needs Automation access for Safari. See safari_open to open a URL."""
     return [_emit(p) for p in _safari.get_tabs()]
 
 
 @_read_tool
 def photos(query: str) -> list[dict]:
-    """Search Photos (filename, place, date). Returns pointers (id + filename)."""
+    """Search Photos (filename, place, date). Returns pointers (id + filename).
+    Read-only; needs Automation access for Photos."""
     return [_emit(p) for p in _photos.get_pointers(query)]
 
 
 @_read_tool
 def messages_chats() -> list[dict]:
-    """List Messages conversations (id + name). No content; sending isn't supported."""
+    """List Messages conversations (id + name). No content; sending isn't supported.
+    Read-only; needs Automation access for Messages."""
     return [_emit(p) for p in _messages.get_chats()]
 
 
 @_read_tool
 def shortcuts(name: str = "") -> list[dict]:
-    """List/search Shortcuts by name (empty lists all). Pointers (name)."""
+    """List/search Shortcuts by name (empty lists all). Pointers (name).
+    Read-only; uses the Shortcuts CLI (no TCC prompt). See run_shortcut to invoke."""
     return [_emit(p) for p in _shortcuts.get_pointers(name)]
 
 
@@ -304,7 +327,9 @@ def create_reminder(
     recurrence: str | None = None,
 ) -> dict:
     """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
-    first; `priority` 0–9; `recurrence` an RRULE."""
+    first; `priority` 0–9; `recurrence` an RRULE.
+    Side effect (creates); needs EventKit (Reminders) access. Target a list by name via
+    `list_name` (from reminder_lists); an ambiguous name is refused, not guessed."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -331,7 +356,9 @@ def update_reminder(
     """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
     `recurrence`: RRULE to set; 'none' to stop repeating. REQUIRED (rule or 'none')
     when the target reminder repeats — omitting it is refused so a rename can't
-    silently kill the series."""
+    silently kill the series.
+    Side effect (full-replace update); needs EventKit (Reminders) access. `id` from
+    reminders."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -346,7 +373,8 @@ def update_reminder(
 
 @_write_tool
 def complete_reminder(id: str) -> dict:
-    """Mark a reminder complete by id."""
+    """Mark a reminder complete by id.
+    Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
     return _emit(_reminders.complete_reminder(id))
 
 
@@ -363,7 +391,9 @@ def create_event(
 ) -> dict:
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
     first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
-    with a UTC offset is rejected."""
+    with a UTC offset is rejected.
+    Side effect (creates); needs EventKit (Calendar) access. Target a calendar by name
+    via `calendar` (from calendars); an ambiguous name is refused, not guessed."""
     parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
@@ -394,7 +424,9 @@ def update_event(
     """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
     `all_day` takes a DATE (2026-07-01); a timestamp with a UTC offset is rejected.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
-    'future-events' (this + all later); ignored for single events."""
+    'future-events' (this + all later); ignored for single events.
+    Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
+    events."""
     parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
@@ -414,7 +446,8 @@ def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dic
     """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
     'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
     for single events. `dry_run=True` previews the event that WOULD be deleted (pointer,
-    no mutation) — call it first to confirm the target before the real delete."""
+    no mutation) — call it first to confirm the target before the real delete.
+    Destructive; needs EventKit (Calendar) access. `id` from events."""
     if dry_run:
         return {
             "dry_run": True,
@@ -430,7 +463,8 @@ def delete_note(
 ) -> dict:
     """Delete a note by id → Recently Deleted (recoverable ~30 days). Destructive.
     Pass expect_title to verify the target before deleting (content-verify first).
-    `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation)."""
+    `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation).
+    Needs Automation access for Notes. `id` from notes / notes_all."""
     if dry_run:
         return {
             "dry_run": True,
@@ -446,7 +480,8 @@ def create_contact(
     family_name: str | None = None,
     organization: str | None = None,
 ) -> dict:
-    """Create a contact (given/family name + organization)."""
+    """Create a contact (given/family name + organization).
+    Side effect (creates); needs Automation access for Contacts."""
     data = ContactData(
         given_name=given_name, family_name=family_name, organization=organization
     )
@@ -455,13 +490,16 @@ def create_contact(
 
 @_write_tool
 def run_shortcut(name: str, input_text: str | None = None) -> dict:
-    """Run a Shortcut by name; optional `input_text` piped in. Returns a pointer."""
+    """Run a Shortcut by name; optional `input_text` piped in. Returns a pointer.
+    Side effect (runs arbitrary automation the user owns); uses the Shortcuts CLI (no
+    TCC prompt). List names via shortcuts. An ambiguous name is resolved by the CLI."""
     return _emit(_shortcuts.run_shortcut(name, input_text))
 
 
 @_write_tool
 def safari_open(url: str) -> dict:
-    """Open a URL in a new Safari tab; adds https:// if no scheme."""
+    """Open a URL in a new Safari tab; adds https:// if no scheme (http/https only).
+    Side effect (opens a tab); needs Automation access for Safari. See safari_tabs."""
     return _emit(_safari.open_url(url))
 
 
