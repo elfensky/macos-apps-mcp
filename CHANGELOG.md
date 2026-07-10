@@ -4,6 +4,44 @@ All notable changes to mac-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [0.3.0] - 2026-07-09 — Reliability, safety & depth
+
+Trust hardening: loud typed failures, self-diagnosis, and verify-after-write.
+
+### Added
+
+- **Typed error taxonomy** (#47) — every native failure is a loud, agent-directed
+  `NativeError` subclass; the dispatch layer turns it into a tool result carrying the
+  remediation directive, never a silent empty list masquerading as "no matches".
+- **`doctor` tool** (#48) — per-surface macOS permission + health self-diagnosis with
+  exact remediation; read-only and prompt-free by default.
+- **`now()` tool + timezone normalization** (#50) — grounds relative dates ("tomorrow");
+  every date parameter is interpreted in local wall-time at the contracts boundary, so a
+  naive ISO datetime is never silently read as UTC (the ecosystem's day-shift bug).
+
+### Changed
+
+- **Verify-after-write** (#49) — every create/update re-fetches the item by id and diffs
+  the persisted fields, failing loudly on a fabricated id or a dropped/reverted field
+  (iCloud can revert a write ~1s later).
+- **Explicit span on recurring update/delete** (#51) — editing or deleting a recurring
+  event requires an explicit `this-event` / `future-events` span, so one occurrence is
+  never silently rewritten as the whole series.
+
+### Fixed
+
+- **Trust-core hardening** (#72) — fixes from a multi-agent adversarial review:
+  recurrence presence-vs-cadence comparison, a DST fall-back fold shifting an instant by
+  an hour, and `str.strip` eating control-char field separators.
+
+## [0.2.0] - 2026-06-29 — Rebrand
+
+### Changed
+
+- Renamed the project and distribution **apple-mcp → mac-mcp** (package `mac_mcp`, the
+  env var, and all imports); added an MIT license, packaging metadata, and a
+  TestPyPI → PyPI publish workflow.
+
 ## [0.1.2] - 2026-06-28
 
 ### Fixed

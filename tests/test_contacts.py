@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mac_mcp.adapters.contacts import (
     _FIELD,
     _RECORD,
@@ -10,8 +12,10 @@ from mac_mcp.adapters.contacts import (
     _deeplink,
     _parse,
     _summary,
+    _verify_contact,
 )
-from mac_mcp.contracts import Pointer
+from mac_mcp.contracts import ContactData, Pointer
+from mac_mcp.runtime import VerificationFailed
 
 
 def test_get_pointers_passes_cap_into_applescript(monkeypatch):
@@ -100,3 +104,46 @@ def test_parse_tolerates_tab_and_newline_in_field():
     assert len(ptrs) == 1
     assert ptrs[0].id == "C-1"
     assert "Jane\tDoe" in ptrs[0].summary  # the tab is data, not a delimiter
+
+
+# --- verify-after-write (#49) --------------------------------------------------------
+
+
+def _verify_raw(fn: str, ln: str, org: str) -> str:
+    return _FIELD.join((fn, ln, org))
+
+
+def test_verify_contact_passes_on_match():
+    data = ContactData(given_name="Jane", family_name="Doe", organization="Acme")
+    _verify_contact(_verify_raw("Jane", "Doe", "Acme"), "C-1", data)  # no raise
+
+
+def test_verify_contact_empty_raw_is_not_found():
+    data = ContactData(given_name="Jane")
+    with pytest.raises(VerificationFailed, match="could not be re-read"):
+        _verify_contact("", "C-1", data)
+
+
+def test_verify_contact_dropped_org_raises():
+    data = ContactData(given_name="Jane", family_name="Doe", organization="Acme")
+    with pytest.raises(VerificationFailed, match="organization"):
+        _verify_contact(_verify_raw("Jane", "Doe", ""), "C-1", data)  # org dropped
+
+
+def test_verify_contact_dropped_family_name_raises():
+    data = ContactData(given_name="Jane", family_name="Doe")
+    with pytest.raises(VerificationFailed, match="family_name"):
+        _verify_contact(_verify_raw("Jane", "", ""), "C-1", data)
+
+
+def test_verify_contact_given_name_only_matches():
+    # optional fields absent on both sides ("" ↔ None) must not read as a drop.
+    data = ContactData(given_name="Jane")
+    _verify_contact(_verify_raw("Jane", "", ""), "C-1", data)  # no raise
+
+
+def test_verify_contact_empty_given_name_does_not_false_fail():
+    # #49 review: an org-only contact (empty given_name) that persisted correctly must
+    # not false-fail — given_name must normalize "" ↔ None on BOTH sides.
+    data = ContactData(given_name="", organization="Acme")
+    _verify_contact(_verify_raw("", "", "Acme"), "C-1", data)  # no raise

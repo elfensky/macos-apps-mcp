@@ -6,10 +6,12 @@ register reads only (the destructive write tools are skipped) — a safe-deploy 
 
 from __future__ import annotations
 
+import functools
 import os
 from datetime import datetime
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
@@ -21,12 +23,19 @@ from .adapters.reminders import RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
 from .contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
     Pointer,
     Recurrence,
     ReminderData,
+    _ClearRecurrence,
+    now_local,
+    parse_all_day,
+    parse_datetime,
 )
+from .doctor import diagnose
+from .runtime import NativeError
 
 mcp = FastMCP("mac-mcp")
 
@@ -54,60 +63,106 @@ def _read_only() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _guard(fn):
+    """Convert a typed native failure into a loud, agent-directed tool result (#47).
+
+    Errors-as-results, never exceptions through the protocol: a ``NativeError`` becomes
+    a FastMCP ``ToolError`` carrying the remediation directive, so the model sees an
+    ``isError`` result with *what to do* — never a masked stack trace, and never an
+    empty list masquerading as "no matches". A real empty result stays a plain ``[]``.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except NativeError as e:
+            raise ToolError(str(e)) from e
+
+    return wrapper
+
+
+def _read_tool(fn):
+    """Register a read tool, wrapped so typed native failures surface as directives."""
+    return mcp.tool()(_guard(fn))
+
+
 def _write_tool(fn):
     """Register a destructive tool — skipped in read-only mode (safe-deploy guard)."""
-    return fn if _read_only() else mcp.tool()(fn)
+    return fn if _read_only() else mcp.tool()(_guard(fn))
 
 
+# no native call → registered without _guard
 @mcp.tool()
 def ping() -> str:
     """Health check — confirms mac-mcp is alive."""
     return "mac-mcp ok"
 
 
+@_read_tool
+def doctor(request: bool = False) -> dict:
+    """Diagnose per-surface macOS permissions + health with exact remediation.
+
+    Read-only and prompt-free by default. `request=True` also triggers permission
+    prompts (EventKit consent + per-app Automation probes) — use it once to grant.
+    """
+    return diagnose(request=request)
+
+
 @mcp.tool()
+def now() -> dict:
+    """Current local date, time, timezone, UTC offset, and weekday.
+
+    Call this FIRST to ground any relative date ("today", "tomorrow", "next Friday") —
+    never guess the date from memory. Every date parameter on the write tools is
+    interpreted in THIS timezone (naive ISO = local time).
+    """
+    return now_local()
+
+
+@_read_tool
 def reminders(due: str = "today") -> list[dict]:
     """List reminders as pointers. `due`: today | overdue | this-week | a list name."""
     return [_emit(p) for p in _reminders.get_pointers(due)]
 
 
-@mcp.tool()
+@_read_tool
 def events(when: str = "today") -> list[dict]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD."""
     return [_emit(p) for p in _calendar.get_pointers(when)]
 
 
-@mcp.tool()
+@_read_tool
 def reminder_lists() -> list[dict]:
     """List reminder lists as pointers (id + name); use a name to target writes."""
     return [_emit(p) for p in _reminders.get_lists()]
 
 
-@mcp.tool()
+@_read_tool
 def calendars() -> list[dict]:
     """List calendars as pointers (id + name); use a name to target writes."""
     return [_emit(p) for p in _calendar.get_calendars()]
 
 
-@mcp.tool()
+@_read_tool
 def contacts(name: str) -> list[dict]:
     """Find contacts by name (substring). Returns pointers (id + name/org)."""
     return [_emit(p) for p in _contacts.get_pointers(name)]
 
 
-@mcp.tool()
+@_read_tool
 def mail(subject: str) -> list[dict]:
     """Search the Mail inbox by subject substring. Pointers (id + subject/sender)."""
     return [_emit(p) for p in _mail.get_pointers(subject)]
 
 
-@mcp.tool()
+@_read_tool
 def notes(title: str) -> list[dict]:
     """Search Notes by title substring. Returns pointers (id + title)."""
     return [_emit(p) for p in _notes.get_pointers(title)]
 
 
-@mcp.tool()
+@_read_tool
 def notes_all() -> list[dict]:
     """List every note as pointers (id + "Account / Folder" + title), excluding
     Recently Deleted. No cap; very large libraries can hit the osascript timeout
@@ -115,54 +170,63 @@ def notes_all() -> list[dict]:
     return [_emit(p) for p in _notes.get_all()]
 
 
-@mcp.tool()
+@_read_tool
 def note_bodies(ids: list[str]) -> list[dict]:
     """Hydrate plaintext bodies for up to 50 note ids (opt-in; search stays
     pointer-only). Returns [{"id", "body"}]; unknown ids are silently skipped."""
     return _notes.get_bodies(ids)
 
 
-@mcp.tool()
+@_read_tool
 def safari_tabs() -> list[dict]:
     """List open Safari tabs as pointers (url + title)."""
     return [_emit(p) for p in _safari.get_tabs()]
 
 
-@mcp.tool()
+@_read_tool
 def photos(query: str) -> list[dict]:
     """Search Photos (filename, place, date). Returns pointers (id + filename)."""
     return [_emit(p) for p in _photos.get_pointers(query)]
 
 
-@mcp.tool()
+@_read_tool
 def messages_chats() -> list[dict]:
     """List Messages conversations (id + name). No content; sending isn't supported."""
     return [_emit(p) for p in _messages.get_chats()]
 
 
-@mcp.tool()
+@_read_tool
 def shortcuts(name: str = "") -> list[dict]:
     """List/search Shortcuts by name (empty lists all). Pointers (name)."""
     return [_emit(p) for p in _shortcuts.get_pointers(name)]
 
 
 def _parse(s: str | None) -> datetime | None:
-    """Optional ISO datetime (reminder due). Empty/absent → None."""
-    return datetime.fromisoformat(s) if s else None
+    """Optional ISO datetime → naive local (contracts.parse_datetime). Empty/absent →
+    None."""
+    return parse_datetime(s) if s else None
 
 
 def _parse_required(label: str, s: str) -> datetime:
-    """Required ISO datetime (event start/end).
+    """Required ISO datetime (event start/end) → naive local.
 
     Bad/empty input fails clearly at the tool boundary.
     """
     try:
-        return datetime.fromisoformat(s)
-    except (TypeError, ValueError) as e:
-        raise ValueError(
-            f"{label} must be an ISO datetime string "
-            f"(e.g. 2026-06-24T09:00:00), got {s!r}"
-        ) from e
+        return parse_datetime(s)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
+def _parse_all_day(label: str, s: str) -> datetime:
+    """Required all-day date (a calendar DATE, not an instant) → naive datetime.
+
+    A timestamp with a UTC offset fails clearly at the tool boundary.
+    """
+    try:
+        return parse_all_day(s)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
 
 
 def _priority(n: int) -> int:
@@ -173,8 +237,21 @@ def _priority(n: int) -> int:
 
 
 def _recurrence(rrule: str | None) -> Recurrence | None:
-    """Optional RFC-5545 RRULE string → Recurrence. Empty/absent → None."""
-    return Recurrence.from_rrule(rrule) if rrule else None
+    """Optional RFC-5545 RRULE string → Recurrence. Empty/absent/'none' → None."""
+    if not rrule or rrule.strip().lower() == "none":
+        return None  # 'none' is taught by update_reminder — accept it everywhere
+    return Recurrence.from_rrule(rrule)
+
+
+def _recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | None:
+    """update_reminder's tri-state recurrence: absent/empty → None (unspecified —
+    refused downstream when the target repeats); the literal 'none' →
+    CLEAR_RECURRENCE (explicit stop); anything else parses as an RRULE."""
+    if not rrule:
+        return None
+    if rrule.strip().lower() == "none":
+        return CLEAR_RECURRENCE
+    return Recurrence.from_rrule(rrule)
 
 
 @_write_tool
@@ -187,7 +264,8 @@ def create_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict:
-    """Create a reminder. `due`/`start` ISO; `priority` 0–9; `recurrence` an RRULE."""
+    """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
+    first; `priority` 0–9; `recurrence` an RRULE."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -211,7 +289,10 @@ def update_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict:
-    """Update a reminder by id (full replace from the given fields)."""
+    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
+    `recurrence`: RRULE to set; 'none' to stop repeating. REQUIRED (rule or 'none')
+    when the target reminder repeats — omitting it is refused so a rename can't
+    silently kill the series."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -219,7 +300,7 @@ def update_reminder(
         notes=notes,
         priority=_priority(priority),
         start=_parse(start),
-        recurrence=_recurrence(recurrence),
+        recurrence=_recurrence_update(recurrence),
     )
     return _emit(_reminders.update_reminder(id, data))
 
@@ -241,11 +322,14 @@ def create_event(
     all_day: bool = False,
     recurrence: str | None = None,
 ) -> dict:
-    """Create an event. `start`/`end` ISO; `all_day` flag; `recurrence` an RRULE."""
+    """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
+    first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
+    with a UTC offset is rejected."""
+    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=_parse_required("start", start),
-        end=_parse_required("end", end),
+        start=parse("start", start),
+        end=parse("end", end),
         calendar=calendar,
         location=location,
         notes=notes,
@@ -266,25 +350,32 @@ def update_event(
     notes: str | None = None,
     all_day: bool = False,
     recurrence: str | None = None,
+    span: str | None = None,
 ) -> dict:
-    """Update an event by id (full replace from the given fields)."""
+    """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
+    `all_day` takes a DATE (2026-07-01); a timestamp with a UTC offset is rejected.
+    `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
+    'future-events' (this + all later); ignored for single events."""
+    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=_parse_required("start", start),
-        end=_parse_required("end", end),
+        start=parse("start", start),
+        end=parse("end", end),
         calendar=calendar,
         location=location,
         notes=notes,
         all_day=all_day,
         recurrence=_recurrence(recurrence),
     )
-    return _emit(_calendar.update_event(id, data))
+    return _emit(_calendar.update_event(id, data, span=span))
 
 
 @_write_tool
-def delete_event(id: str) -> dict:
-    """Delete a calendar event by id."""
-    _calendar.delete_event(id)
+def delete_event(id: str, span: str | None = None) -> dict:
+    """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
+    'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
+    for single events."""
+    _calendar.delete_event(id, span=span)
     return {"deleted": id}
 
 

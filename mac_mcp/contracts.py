@@ -19,8 +19,103 @@ never the full body.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
+
+
+def _to_naive_local(dt: datetime) -> datetime:
+    """Canonicalize to naive **local** wall-time — the codebase's one datetime form
+    (``from_nsdate`` returns naive-local, ``due_components`` reads wall-clock fields).
+
+    An aware value is *converted* to local before the tz is dropped (never just
+    stripped), so the caller's instant is preserved rather than shifted by the local
+    offset. A naive value is already local by convention and passes through untouched —
+    in particular it is **not** reinterpreted as UTC (parsing a date as UTC is the
+    ecosystem's day-shift bug).
+    """
+    if dt.tzinfo is None:
+        return dt
+    local = dt.astimezone()
+    naive = local.replace(tzinfo=None)
+    # During a fall-back DST fold the wall-clock is ambiguous and ``astimezone`` leaves
+    # ``fold=0``, so a later naive ``dt.timestamp()`` (via to_nsdate) would resolve to
+    # the *earlier* occurrence — silently shifting the instant an hour. If the naive
+    # value read back as local doesn't re-derive the original offset, it's the second
+    # occurrence: set ``fold=1`` so the caller's instant survives the tz drop.
+    if naive.astimezone().utcoffset() != local.utcoffset():
+        naive = naive.replace(fold=1)
+    return naive
+
+
+def parse_datetime(value: str) -> datetime:
+    """Parse an ISO-8601 datetime (or date) to naive local — the canonical form (#50).
+
+    Accepts naive ISO (``2026-06-24T09:00:00``), deliberately read as **local** time
+    (not UTC — "remind me at 9" means 9 where the user is), and aware ISO (trailing
+    ``Z`` or ``±HH:MM``), converted to local. A date-only string (``2026-06-24``) is
+    local midnight; all-day tools snap it to a pure date downstream, so it never drifts.
+    """
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "expected an ISO-8601 datetime (e.g. 2026-06-24T09:00:00) or date "
+            f"(2026-06-24); got {value!r}"
+        ) from e
+    return _to_naive_local(dt)
+
+
+def parse_all_day(value: str) -> datetime:
+    """Parse an all-day date param — a calendar DATE, not an instant (#50 review).
+
+    Accepts a date-only string (2026-07-01) or a naive datetime (floored downstream).
+    A timezone-aware value is REJECTED: converting an instant across timezones can
+    shift the calendar day (midnight-Z parses to the previous local day west of UTC),
+    and RFC 5545 forbids timezones on all-day DATE values.
+    """
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            "expected an ISO-8601 date (e.g. 2026-07-01) or naive datetime; "
+            f"got {value!r}"
+        ) from e
+    if dt.tzinfo is not None:
+        raise ValueError(
+            "all-day events take a calendar date, not a timestamp with a UTC "
+            f"offset — send a date-only string like {dt.date().isoformat()!r} "
+            f"(got {value!r})"
+        )
+    return dt
+
+
+def _format_offset(offset: timedelta | None) -> str:
+    """A UTC offset as ``±HH:MM`` (``+00:00`` if unknown)."""
+    total = int((offset or timedelta()).total_seconds())
+    sign = "+" if total >= 0 else "-"
+    total = abs(total)
+    return f"{sign}{total // 3600:02d}:{total % 3600 // 60:02d}"
+
+
+def now_local(clock: datetime | None = None) -> dict:
+    """Local date/time context for grounding relative dates ("tomorrow") — the model
+    must not guess today from training data (#50). ``clock`` is injectable for tests.
+
+    Returns the local ISO datetime, the plain date, the tz name, the UTC offset, and the
+    weekday. All date params to the write tools are interpreted in *this* timezone.
+    """
+    dt = clock or datetime.now()
+    # the default clock and a naive injected clock both lack a tz — attach the local
+    # one so tzname/utcoffset resolve
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return {
+        "datetime": dt.isoformat(timespec="seconds"),
+        "date": dt.date().isoformat(),
+        "timezone": dt.tzname(),
+        "utc_offset": _format_offset(dt.utcoffset()),
+        "weekday": dt.strftime("%A"),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +174,8 @@ def _rrule_until(v: str) -> datetime:
                 continue
     if parsed is None:
         raise ValueError(f"recurrence UNTIL is not a recognizable date: {v!r}")
-    # tz-aware: convert to local, then go naive — don't just drop the offset
-    if parsed.tzinfo is not None:
-        parsed = parsed.astimezone().replace(tzinfo=None)
+    # tz-aware: convert to local, then go naive — the shared canonical form (#50)
+    parsed = _to_naive_local(parsed)
     if "T" not in s.upper():  # date-only → include the whole final day
         parsed = parsed.replace(hour=23, minute=59, second=59, microsecond=0)
     return parsed
@@ -144,6 +238,13 @@ class Recurrence:
         return cls(frequency=freq, interval=interval, count=count, until=until)
 
 
+class _ClearRecurrence:
+    """Sentinel: explicitly stop a reminder repeating (recurrence='none')."""
+
+
+CLEAR_RECURRENCE = _ClearRecurrence()
+
+
 @dataclass(frozen=True, slots=True)
 class ReminderData:
     """Payload for creating/updating an Apple Reminder."""
@@ -154,12 +255,14 @@ class ReminderData:
     notes: str | None = None
     priority: int = 0  # 0 none, 1–9 (1 highest); enforced in __post_init__
     start: datetime | None = None  # start date, distinct from due (None clears)
-    recurrence: Recurrence | None = None  # repeat rule (None clears)
+    # repeat rule: None = unspecified (an update REFUSES on a repeating target),
+    # CLEAR_RECURRENCE = explicit stop, Recurrence = set/replace the rule
+    recurrence: Recurrence | _ClearRecurrence | None = None
 
     def __post_init__(self) -> None:
         # EventKit rejects a repeating reminder with no due date (EKError 18) — surface
         # it at the boundary as a clear ValueError, not a deep native save failure.
-        if self.recurrence is not None and self.due is None:
+        if isinstance(self.recurrence, Recurrence) and self.due is None:
             raise ValueError("a recurring reminder needs a due date")
         # EventKit priority is 0 (none) or 1–9 (1 highest); enforce on the contract so
         # the invariant holds however ReminderData is built, not only via the MCP tool.
