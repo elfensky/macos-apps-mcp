@@ -84,13 +84,15 @@ def _guard(fn):
     return wrapper
 
 
-# MCP tool annotations (#57) — derived MECHANICALLY from the read/write seam, no
-# per-tool judgment: a host (Claude Code's permission system) can then gate safari_tabs
-# differently from delete_event. Reads are read-only + additive; writes are marked
-# destructive conservatively (a host should treat any write as needing consent — we
-# don't split create-vs-delete here). ping/now use these too; doctor is a read.
+# MCP tool annotations (#57) — a host (Claude Code's permission system) gates
+# safari_tabs differently from delete_event. Read-only comes straight from the
+# read/write seam. The destructive/additive split is the ONE per-tool judgment
+# (maintainer call): a write that only ADDS a new item (create_*, safari_open opens a
+# fresh tab) is additive; one that modifies/overwrites/deletes existing state — or runs
+# arbitrary automation (run_shortcut) — is destructive. ping/now read; doctor reads.
 _READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
-_WRITE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
+_ADDITIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": False}
+_DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
 
 
 def _read_tool(fn):
@@ -100,9 +102,21 @@ def _read_tool(fn):
 
 
 def _write_tool(fn):
-    """Register a destructive tool — skipped in read-only mode (safe-deploy guard).
-    Annotated not-read-only + destructive (#57)."""
-    return fn if _read_only() else mcp.tool(annotations=_WRITE_ANNOTATIONS)(_guard(fn))
+    """Register a write that modifies/overwrites/deletes existing state — skipped in
+    read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57)."""
+    return (
+        fn
+        if _read_only()
+        else mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(fn))
+    )
+
+
+def _additive_tool(fn):
+    """Register a write that only ADDS a new item (create/open) — not read-only, but not
+    destructive (#57). Also skipped in read-only mode."""
+    return (
+        fn if _read_only() else mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
+    )
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
@@ -316,7 +330,7 @@ def _recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | Non
     return Recurrence.from_rrule(rrule)
 
 
-@_write_tool
+@_additive_tool
 def create_reminder(
     title: str,
     due: str | None = None,
@@ -378,7 +392,7 @@ def complete_reminder(id: str) -> dict:
     return _emit(_reminders.complete_reminder(id))
 
 
-@_write_tool
+@_additive_tool
 def create_event(
     title: str,
     start: str,
@@ -474,7 +488,7 @@ def delete_note(
     return {"deleted": id}
 
 
-@_write_tool
+@_additive_tool
 def create_contact(
     given_name: str,
     family_name: str | None = None,
@@ -496,7 +510,7 @@ def run_shortcut(name: str, input_text: str | None = None) -> dict:
     return _emit(_shortcuts.run_shortcut(name, input_text))
 
 
-@_write_tool
+@_additive_tool
 def safari_open(url: str) -> dict:
     """Open a URL in a new Safari tab; adds https:// if no scheme (http/https only).
     Side effect (opens a tab); needs Automation access for Safari. See safari_tabs."""

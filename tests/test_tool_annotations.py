@@ -12,21 +12,23 @@ from fastmcp import Client
 
 import mac_mcp.server as srv
 
-# The write half of the read/write seam (@_write_tool). Everything else is read-only.
-_WRITE_TOOLS = frozenset(
+# Writes that only ADD a new item (create/open) — not read-only, but not destructive.
+_ADDITIVE_TOOLS = frozenset(
+    {"create_reminder", "create_event", "create_contact", "safari_open"}
+)
+# Writes that modify/overwrite/delete existing state, or run arbitrary automation.
+_DESTRUCTIVE_TOOLS = frozenset(
     {
-        "create_reminder",
         "update_reminder",
         "complete_reminder",
-        "create_event",
         "update_event",
         "delete_event",
         "delete_note",
-        "create_contact",
         "run_shortcut",
-        "safari_open",
     }
 )
+# The full write half of the read/write seam. Everything else is read-only.
+_WRITE_TOOLS = _ADDITIVE_TOOLS | _DESTRUCTIVE_TOOLS
 
 # The permission keyword each tool's docstring must name (None = meta tool, no keyword).
 _PERMISSION = {
@@ -76,9 +78,11 @@ def test_every_tool_is_annotated_from_the_read_write_seam():
         assert a.readOnlyHint is expected_readonly, (
             f"{t.name} readOnlyHint={a.readOnlyHint}, expected {expected_readonly}"
         )
-        # writes are conservatively marked destructive; reads are additive (not destr.)
-        assert a.destructiveHint is (not expected_readonly), (
-            f"{t.name} destructiveHint mismatch"
+        # reads + additive writes (create/open) are non-destructive; only
+        # modify/overwrite/delete/run-automation tools are destructive (#57).
+        want_destructive = t.name in _DESTRUCTIVE_TOOLS
+        assert a.destructiveHint is want_destructive, (
+            f"{t.name} destructiveHint={a.destructiveHint}, want {want_destructive}"
         )
 
 
