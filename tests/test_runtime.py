@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -28,6 +29,7 @@ from mac_mcp.runtime import (
     WriteRefused,
     _classify_osascript_failure,
     _decide,
+    _parent_died,
     clean_body,
     clean_summary,
     due_components,
@@ -469,3 +471,55 @@ def test_batch_too_large_kind():
 def test_ambiguous_target_kind():
     # the machine code doctor/agents branch on — pin the exact value, not just distinct.
     assert AmbiguousTarget.kind == "ambiguous_target"
+
+
+# --- lifecycle hygiene (#56) ---------------------------------------------------------
+
+
+def test_parent_died_false_when_ppid_unchanged():
+    # our real parent is alive and unchanged → not orphaned.
+    assert _parent_died(os.getppid()) is False
+
+
+def test_parent_died_true_when_reparented():
+    # getppid() no longer equals the launch-time pid → parent gone, we're orphaned.
+    assert _parent_died(os.getppid() + 999_999) is True
+
+
+class _FakeProc:  # hashable (real object identity) so it can live in the _children set
+    def __init__(self, on_terminate):
+        self._on = on_terminate
+
+    def terminate(self):
+        self._on()
+
+
+def test_terminate_children_terminates_tracked_child():
+    import mac_mcp.runtime as rt
+
+    killed = []
+    fake = _FakeProc(lambda: killed.append(True))
+    with rt._children_lock:
+        rt._children.add(fake)
+    try:
+        rt._terminate_children()
+    finally:
+        with rt._children_lock:
+            rt._children.discard(fake)
+    assert killed == [True]
+
+
+def test_terminate_children_ignores_an_already_dead_child():
+    import mac_mcp.runtime as rt
+
+    def boom():
+        raise OSError("no such process")  # terminate() on a reaped child
+
+    fake = _FakeProc(boom)
+    with rt._children_lock:
+        rt._children.add(fake)
+    try:
+        rt._terminate_children()  # must swallow OSError, not propagate
+    finally:
+        with rt._children_lock:
+            rt._children.discard(fake)

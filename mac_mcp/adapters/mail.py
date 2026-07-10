@@ -18,11 +18,13 @@ MAX_MAILS = 25
 # whole match set back and slicing in Python. The `whose` filter still scans the inbox
 # (AppleScript has no LIMIT), but the *output* is capped at the source, so a common
 # subject can't return thousands of records and blow the buffer (FradSer #66/#69).
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin Mail.
 _SEARCH = """on run argv
   set q to item 1 of argv
   set maxN to (item 2 of argv) as integer
   set out to ""
   set c to 0
+  with timeout of 120 seconds
   tell application "Mail"
     repeat with m in (messages of inbox whose subject contains q)
       set c to c + 1
@@ -31,6 +33,7 @@ _SEARCH = """on run argv
       set out to out & (subject of m) & tab & (sender of m) & linefeed
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 

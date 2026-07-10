@@ -467,7 +467,8 @@ def safari_open(url: str) -> dict:
 
 def main() -> None:
     """Console entry point (`mac-mcp`) and `python -m mac_mcp`."""
-    from .runtime import bootstrap
+    from .runtime import bootstrap, install_lifecycle_guards
 
     bootstrap()
+    install_lifecycle_guards()  # orphan watcher + child cleanup (#56)
     mcp.run()  # stdio transport

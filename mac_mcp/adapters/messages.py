@@ -14,13 +14,16 @@ from ..runtime import clean_summary, run_osascript
 
 MAX_CHATS = 30
 
-_CHATS = """tell application "Messages"
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
+_CHATS = """with timeout of 120 seconds
+tell application "Messages"
   set out to ""
   repeat with c in chats
     set out to out & (id of c) & tab & (name of c) & linefeed
   end repeat
   return out
-end tell"""
+end tell
+end timeout"""
 
 
 def _parse(raw: str) -> list[Pointer]:

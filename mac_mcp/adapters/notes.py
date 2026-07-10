@@ -15,14 +15,18 @@ from ..runtime import OutputOverflow, clean_body, clean_summary, run_osascript
 MAX_NOTES = 25
 MAX_BODIES = 50
 
+# All templates carry `with timeout` (#56): bound the Apple Events so an orphaned
+# osascript self-terminates instead of pinning Notes.
 _SEARCH = """on run argv
   set q to item 1 of argv
   set out to ""
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with n in (notes whose name contains q)
       set out to out & (id of n) & tab & (name of n) & linefeed
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -34,6 +38,7 @@ end run"""
 # de-facto ceiling; a too-large library fails whole. Add pagination only if needed.
 _LIST_ALL = """on run argv
   set theLines to {}
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with acc in accounts
       set accName to name of acc
@@ -52,6 +57,7 @@ _LIST_ALL = """on run argv
       end repeat
     end repeat
   end tell
+  end timeout
   set AppleScript's text item delimiters to linefeed
   return theLines as text
 end run"""
@@ -66,6 +72,7 @@ _BODIES = """on run argv
   set us to character id 31
   set rs to character id 30
   set out to ""
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with theId in argv
       try
@@ -74,6 +81,7 @@ _BODIES = """on run argv
       end try
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -82,6 +90,7 @@ end run"""
 # exactly one note. expect_title (optional argv[2]) guards against stale/wrong ids: the
 # script errors before deleting if the live title doesn't match.
 _DELETE = """on run argv
+  with timeout of 120 seconds
   tell application "Notes"
     set n to note id (item 1 of argv)
     if (count of argv) > 1 then
@@ -91,6 +100,7 @@ _DELETE = """on run argv
     end if
     delete n
   end tell
+  end timeout
 end run"""
 
 # dry_run preview (#54): the real-delete guard EXACTLY — same `note id` lookup and same
@@ -100,6 +110,7 @@ end run"""
 # case AND whitespace, so the preview could report the opposite of what the real delete
 # does (#54 review). Errors on an unknown id or a title mismatch, exactly as _DELETE.
 _PREVIEW_DELETE = """on run argv
+  with timeout of 120 seconds
   tell application "Notes"
     set n to note id (item 1 of argv)
     if (count of argv) > 1 then
@@ -109,6 +120,7 @@ _PREVIEW_DELETE = """on run argv
     end if
     return name of n
   end tell
+  end timeout
 end run"""
 
 

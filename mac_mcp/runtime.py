@@ -15,10 +15,15 @@ practice.
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import logging
+import os
 import re
+import signal
 import subprocess
 import threading
+import time
 import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -345,6 +350,26 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     return NativeError(f"osascript failed: {detail}")
 
 
+# In-flight osascript children, tracked so exit paths (atexit / SIGTERM / orphan
+# watcher, #56) can terminate them — an orphaned synchronous Apple Event pinned Mail's
+# main thread indefinitely (patrickfreyer #58). The serialized worker means at most one
+# at a time, but a set + lock is robust and cheap. The AppleScript-level `with timeout`
+# in each template is the second line of defense: it self-terminates a hung child even
+# if the Python side died first and never got to call terminate().
+_children: set[subprocess.Popen] = set()
+_children_lock = threading.Lock()
+
+
+def _terminate_children() -> None:
+    """Terminate any in-flight osascript child. Idempotent; safe from any thread and at
+    shutdown (an already-dead child raises OSError on terminate, ignored)."""
+    with _children_lock:
+        children = list(_children)
+    for proc in children:
+        with contextlib.suppress(OSError):
+            proc.terminate()
+
+
 def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) -> str:
     """Run an AppleScript via ``osascript`` on the native worker; return stdout.
 
@@ -354,29 +379,47 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     Raises a typed ``NativeError`` (``AutomationDenied`` / ``AppNotRunning`` / generic)
     on a non-zero exit, and ``NativeTimeout`` on timeout — it never returns an empty
     string to mask a failure as "no result". Safe on or off the worker (dispatches via
-    run_native when called off it).
+    run_native when called off it). The child is tracked so an exit path can kill it
+    (#56); the AppleScript template's own ``with timeout`` bounds it if we can't.
     """
 
     def _run() -> str:
+        # Popen (not subprocess.run) so the live child is a handle exit paths can
+        # terminate; communicate(timeout) + kill-on-timeout mirrors run(timeout=).
+        started = time.monotonic()
+        proc = subprocess.Popen(
+            ["osascript", "-e", script, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        with _children_lock:
+            _children.add(proc)
         try:
-            proc = subprocess.run(
-                ["osascript", "-e", script, *args],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise NativeTimeout(
-                f"The macOS app didn't respond within {timeout}s (it may be blocked on "
-                "a dialog, or the query is too broad). Tell the user to dismiss any "
-                "stuck prompt, then retry with a narrower query. Do not retry "
-                "immediately."
-            ) from e
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as e:
+                proc.kill()
+                proc.communicate()  # reap so we don't leak a zombie
+                raise NativeTimeout(
+                    f"The macOS app didn't respond within {timeout}s (it may be "
+                    "blocked on a dialog, or the query is too broad). Tell the user to "
+                    "dismiss any stuck prompt, then retry with a narrower query. Do "
+                    "not retry immediately."
+                ) from e
+        finally:
+            with _children_lock:
+                _children.discard(proc)
         if proc.returncode != 0:
-            raise _classify_osascript_failure(proc.stderr)
+            raise _classify_osascript_failure(err)
+        # debug telemetry (#56): opt-in via logging level, zero cost otherwise.
+        log.debug(
+            "osascript %.0fms, %d bytes out",
+            (time.monotonic() - started) * 1000,
+            len(out),
+        )
         # trailing newlines inside the data must survive; remove only osascript's own
         # single terminating newline
-        out = proc.stdout
         return out[:-1] if out.endswith("\n") else out
 
     return _run() if _on_worker() else run_native(_run)
@@ -563,3 +606,53 @@ def bootstrap() -> None:
     disables only that adapter (which raises on use), never the server.
     """
     run_native(request_access_each)
+
+
+# --- lifecycle hygiene (#56) ---------------------------------------------------------
+# A stdio MCP server orphaned by its parent (Claude exits/crashes) must not linger,
+# re-launching Mail.app forever (patrickfreyer #58, python-sdk #526). We watch our
+# parent pid and hard-exit on reparent; on every exit path we also terminate any
+# in-flight osascript child (the AppleScript `with timeout` in each template is the
+# backstop for when we can't). Installed by the server entry point, NOT bootstrap(), so
+# importing the module or running unit tests never starts a watcher or grabs SIGTERM.
+_PPID_POLL = 1.0  # seconds — well inside the 5s orphan-exit budget
+
+
+def _parent_died(original_ppid: int) -> bool:
+    """True once our launching parent is gone: its pid was reaped and we were reparented
+    (``getppid`` changes, typically to 1/launchd). A process's parent never changes
+    while that parent is alive, so a changed ppid reliably means the parent died."""
+    return os.getppid() != original_ppid
+
+
+_lifecycle_installed = False
+
+
+def install_lifecycle_guards() -> None:
+    """Start the orphan watcher and register child-cleanup on exit (#56). Idempotent.
+
+    Call once from the server entry point (after bootstrap). The watcher is a daemon
+    thread; SIGTERM and normal exit both terminate any in-flight osascript child so a
+    graceful stop doesn't leave one hung until its AppleScript timeout.
+    """
+    global _lifecycle_installed
+    if _lifecycle_installed:
+        return
+    _lifecycle_installed = True
+
+    atexit.register(_terminate_children)
+    # signal.signal only works on the main thread — skip (suppress ValueError) if not.
+    with contextlib.suppress(ValueError):
+        signal.signal(signal.SIGTERM, lambda *_: (_terminate_children(), os._exit(0)))
+
+    original_ppid = os.getppid()
+
+    def _watch() -> None:
+        while not _parent_died(original_ppid):
+            time.sleep(_PPID_POLL)
+        # parent gone: kill any in-flight child, then hard-exit (skip Python teardown —
+        # its stdio pipes point at a dead parent and could block).
+        _terminate_children()
+        os._exit(0)
+
+    threading.Thread(target=_watch, name="mac-ppid-watch", daemon=True).start()

@@ -46,6 +46,7 @@ _SEARCH = """on run argv
   set rSep to character id 30
   set out to ""
   set n to 0
+  with timeout of 120 seconds
   tell application "Contacts"
     repeat with p in (people whose name contains q)
       set theOrg to organization of p
@@ -60,6 +61,7 @@ _SEARCH = """on run argv
       if n >= maxN then exit repeat
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -67,6 +69,7 @@ _CREATE = """on run argv
   set fn to item 1 of argv
   set ln to item 2 of argv
   set org to item 3 of argv
+  with timeout of 120 seconds
   tell application "Contacts"
     set p to make new person with properties {first name:fn}
     if ln is not "" then set last name of p to ln
@@ -74,6 +77,7 @@ _CREATE = """on run argv
     save
     return id of p
   end tell
+  end timeout
 end run"""
 
 # Re-read a person by the id we're about to return (#49) — proves the create persisted
@@ -84,6 +88,7 @@ end run"""
 _VERIFY = """on run argv
   set pid to item 1 of argv
   set uSep to character id 31
+  with timeout of 120 seconds
   tell application "Contacts"
     try
       set p to person id pid
@@ -98,6 +103,7 @@ _VERIFY = """on run argv
     if org is missing value then set org to ""
     return fn & uSep & ln & uSep & org
   end tell
+  end timeout
 end run"""
 
 

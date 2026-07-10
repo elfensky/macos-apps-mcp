@@ -10,7 +10,9 @@ from __future__ import annotations
 from ..contracts import Pointer
 from ..runtime import clean_summary, run_osascript
 
-_TABS = """tell application "Safari"
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
+_TABS = """with timeout of 120 seconds
+tell application "Safari"
   set out to ""
   repeat with w in windows
     repeat with t in tabs of w
@@ -18,11 +20,13 @@ _TABS = """tell application "Safari"
     end repeat
   end repeat
   return out
-end tell"""
+end tell
+end timeout"""
 
 # A new tab in the front window, or a fresh document if Safari has no window open.
 _OPEN = """on run argv
   set u to item 1 of argv
+  with timeout of 120 seconds
   tell application "Safari"
     if (count of windows) is 0 then
       make new document with properties {URL:u}
@@ -30,6 +34,7 @@ _OPEN = """on run argv
       tell front window to make new tab with properties {URL:u}
     end if
   end tell
+  end timeout
   return u
 end run"""
 
