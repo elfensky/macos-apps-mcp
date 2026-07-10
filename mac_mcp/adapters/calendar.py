@@ -13,6 +13,7 @@ import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer, parse_datetime
 from ..runtime import (
+    AmbiguousTarget,
     SpanRequired,
     VerificationFailed,
     WriteRefused,
@@ -93,12 +94,23 @@ def _calendar_pointer(cal) -> Pointer:
 
 
 def _resolve_calendar(s, name: str | None):
+    # Disambiguation rule (#55): a write never auto-picks among same-named calendars.
+    # Collect ALL exact-title matches; 0 → not found, 1 → the target, >1 →
+    # AmbiguousTarget (the mcp-ical #16 silent-mis-target bug, refused loudly instead).
     if name is None:
         return s.defaultCalendarForNewEvents()
-    for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent):
-        if c.title() == name:
-            return c
-    raise ValueError(f"no calendar named {name!r}")
+    matches = [
+        c for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent) if c.title() == name
+    ]
+    if not matches:
+        raise ValueError(f"no calendar named {name!r}")
+    if len(matches) > 1:
+        raise AmbiguousTarget(
+            f"{len(matches)} calendars are named {name!r} — refusing to guess which "
+            "one for a write (mac-mcp never auto-picks an ambiguous target). Rename "
+            "one so the calendar names are unique, then retry."
+        )
+    return matches[0]
 
 
 def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:

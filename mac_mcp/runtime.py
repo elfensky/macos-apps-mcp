@@ -144,6 +144,16 @@ class BatchTooLarge(NativeError):
     kind = "batch_too_large"
 
 
+class AmbiguousTarget(NativeError):
+    """A name/title matched more than one container, so a write cannot safely pick one.
+    The disambiguation rule (#55): never auto-pick an ambiguous target for a write —
+    fuzzy/first-match auto-pick sent iMessages to the wrong human (supermemoryai #48),
+    and duplicate calendar names silently mis-targeted writes (mcp-ical #16). ``str(e)``
+    tells the caller how to disambiguate."""
+
+    kind = "ambiguous_target"
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:

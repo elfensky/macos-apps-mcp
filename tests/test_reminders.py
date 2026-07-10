@@ -19,7 +19,7 @@ from mac_mcp.adapters.reminders import (
     _verify_reminder,
 )
 from mac_mcp.contracts import Pointer, Recurrence, ReminderData
-from mac_mcp.runtime import VerificationFailed
+from mac_mcp.runtime import AmbiguousTarget, VerificationFailed
 from tests._fakes import fake_rule
 
 
@@ -98,6 +98,20 @@ def test_resolve_missing_list_raises():
     s = _fake_store(["Work"])
     with pytest.raises(ValueError, match="no reminder list"):
         _resolve_list(s, "Nope")
+
+
+def test_resolve_ambiguous_list_refuses_instead_of_first_match():
+    # #55: two lists named "Home" must NOT silently first-match for a write — refuse
+    # loudly (the mcp-ical #16 duplicate-name mis-target, prevented).
+    s = _fake_store(["Home", "Work", "Home"])
+    with pytest.raises(AmbiguousTarget, match="2 reminder lists are named 'Home'"):
+        _resolve_list(s, "Home")
+
+
+def test_resolve_single_match_still_works_when_others_share_no_name():
+    # the rule only fires on DUPLICATES — a unique name among many still resolves.
+    s = _fake_store(["Home", "Work", "Errands"])
+    assert _resolve_list(s, "Work").title() == "Work"
 
 
 # --- verify-after-write (#49) --------------------------------------------------------

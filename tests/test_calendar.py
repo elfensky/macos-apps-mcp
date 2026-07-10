@@ -23,7 +23,7 @@ from mac_mcp.adapters.calendar import (
     _verify_event,
 )
 from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
-from mac_mcp.runtime import SpanRequired, VerificationFailed
+from mac_mcp.runtime import AmbiguousTarget, SpanRequired, VerificationFailed
 from tests._fakes import fake_rule
 
 
@@ -166,6 +166,21 @@ def test_resolve_missing_calendar_raises():
     s = _fake_store(["Work"])
     with pytest.raises(ValueError, match="no calendar named"):
         _resolve_calendar(s, "Nope")
+
+
+def test_resolve_ambiguous_calendar_refuses_instead_of_first_match():
+    # #55: duplicate calendar names must NOT silently first-match for a write — refuse
+    # loudly (the exact mcp-ical #16 bug this rule exists to prevent).
+    s = _fake_store(["Work", "Personal", "Work"])
+    with pytest.raises(AmbiguousTarget, match="2 calendars are named 'Work'"):
+        _resolve_calendar(s, "Work")
+
+
+def test_resolve_single_calendar_among_many_still_works():
+    # the rule fires only on DUPLICATES — a unique name at a non-zero index still
+    # resolves (guards against a "return the first calendar" regression).
+    s = _fake_store(["Work", "Personal", "Family"])
+    assert _resolve_calendar(s, "Family").title() == "Family"
 
 
 # --- verify-after-write (#49) --------------------------------------------------------

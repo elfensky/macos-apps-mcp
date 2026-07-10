@@ -14,6 +14,7 @@ from mac_mcp.runtime import (
     BODY_MAX,
     SUMMARY_MAX,
     AccessDenied,
+    AmbiguousTarget,
     AppNotRunning,
     AutomationDenied,
     BatchTooLarge,
@@ -153,6 +154,7 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         WriteRefused,
         RecurrenceRequired,
         BatchTooLarge,
+        AmbiguousTarget,
     ):
         assert issubclass(cls, NativeError)
         assert issubclass(cls, RuntimeError)
@@ -175,6 +177,7 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             WriteRefused,
             RecurrenceRequired,
             BatchTooLarge,
+            AmbiguousTarget,
         )
     ]
     assert len(kinds) == len(set(kinds))
@@ -461,3 +464,8 @@ def test_require_batch_within_raises_batch_too_large_naming_override():
 
 def test_batch_too_large_kind():
     assert BatchTooLarge.kind == "batch_too_large"
+
+
+def test_ambiguous_target_kind():
+    # the machine code doctor/agents branch on — pin the exact value, not just distinct.
+    assert AmbiguousTarget.kind == "ambiguous_target"

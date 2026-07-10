@@ -12,6 +12,7 @@ import EventKit as EK
 
 from ..contracts import Pointer, Recurrence, ReminderData
 from ..runtime import (
+    AmbiguousTarget,
     RecurrenceRequired,
     VerificationFailed,
     WriteRefused,
@@ -101,12 +102,25 @@ def _incomplete_due_pred(s, end: datetime | None, cals):
 
 
 def _resolve_list(s, name: str | None):
+    # Disambiguation rule (#55): a write never auto-picks among same-named lists.
+    # Collect ALL exact-title matches; 0 → not found, 1 → the target, >1 →
+    # AmbiguousTarget (the mcp-ical #16 silent-mis-target bug, refused loudly instead).
     if name is None:
         return s.defaultCalendarForNewReminders()
-    for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder):
-        if c.title() == name:
-            return c
-    raise ValueError(f"no reminder list named {name!r}")
+    matches = [
+        c
+        for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
+        if c.title() == name
+    ]
+    if not matches:
+        raise ValueError(f"no reminder list named {name!r}")
+    if len(matches) > 1:
+        raise AmbiguousTarget(
+            f"{len(matches)} reminder lists are named {name!r} — refusing to guess "
+            "which one for a write (mac-mcp never auto-picks an ambiguous target). "
+            "Rename one so the list names are unique, then retry."
+        )
+    return matches[0]
 
 
 def _apply_reminder(s, r, data: ReminderData) -> None:
