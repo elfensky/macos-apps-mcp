@@ -10,18 +10,21 @@ is slow — a cold search takes ~20s); user input via argv (no injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import clean_summary, run_osascript
 
 MAX_PHOTOS = 25
 
+# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin Photos.
 _SEARCH = """on run argv
   set q to item 1 of argv
   set out to ""
+  with timeout of 120 seconds
   tell application "Photos"
     repeat with m in (search for q)
       set out to out & (id of m) & tab & (filename of m) & linefeed
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -33,7 +36,7 @@ def _parse(raw: str) -> list[Pointer]:
             continue
         ident, _, filename = line.partition("\t")
         out.append(
-            Pointer(id=ident, summary=filename.strip() or "(photo)", deeplink="")
+            Pointer(id=ident, summary=clean_summary(filename) or "(photo)", deeplink="")
         )
     return out
 

@@ -123,3 +123,29 @@ def test_run_shortcut_rejects_empty_name(monkeypatch):
     _fake_run(monkeypatch)  # never reached — empty name fails first
     with pytest.raises(ValueError, match="needs a shortcut name"):
         ShortcutsAdapter().run_shortcut("   ")
+
+
+def test_pointer_summary_is_sanitized_but_id_stays_raw():
+    # #52 routing: the display summary is control-stripped, but id must stay the EXACT
+    # name (the run handle), so run-by-name still works for an oddly-named shortcut.
+    p = _pointer("Back\x07up")
+    assert p.summary == "Backup"
+    assert p.id == "Back\x07up"  # handle preserved verbatim
+
+
+def test_run_pointer_sanitizes_output_control_chars():
+    # #52: a shortcut's stdout can carry control chars/ANSI — stripped from the summary.
+    p = _run_pointer("Greet", "hello\x07\tworld")
+    assert p.summary == "ran Greet → hello world"
+
+
+def test_run_pointer_ellipsis_keys_off_raw_length_not_sanitized():
+    # #52 review (finding 4): run_shortcut reads only MAX_OUTPUT+1 chars; sanitize_line
+    # folds CRLFs so the sanitized snippet drops BELOW MAX_OUTPUT even when the read was
+    # truncated. The "…" marker must still appear (keyed off the RAW length). The old
+    # `len(sanitized) <= MAX_OUTPUT` check would have wrongly dropped it.
+    raw = ("line\r\n" * 80)[: MAX_OUTPUT + 1]  # > MAX_OUTPUT raw, folds much shorter
+    p = _run_pointer("Backup", raw)
+    assert p.summary.endswith("…")
+    # sanity: the sanitized snippet is really shorter than MAX_OUTPUT (old logic broke)
+    assert len(p.summary) < len("ran Backup → ") + MAX_OUTPUT

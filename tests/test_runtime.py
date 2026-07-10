@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -10,9 +11,14 @@ import pytest
 
 from mac_mcp.contracts import CLEAR_RECURRENCE, Recurrence
 from mac_mcp.runtime import (
+    BODY_HARD_MAX,
+    BODY_MAX,
+    SUMMARY_MAX,
     AccessDenied,
+    AmbiguousTarget,
     AppNotRunning,
     AutomationDenied,
+    BatchTooLarge,
     NativeError,
     NativeTimeout,
     OutputOverflow,
@@ -23,16 +29,22 @@ from mac_mcp.runtime import (
     WriteRefused,
     _classify_osascript_failure,
     _decide,
+    _parent_died,
+    clean_body,
+    clean_summary,
     due_components,
     epoch_nsdate,
     from_nsdate,
     norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    require_batch_within,
     rrule_text,
     run_native,
     run_native_async,
     run_osascript,
+    sanitize_block,
+    sanitize_line,
     store,
     to_nsdate,
     to_recurrence_rule,
@@ -143,6 +155,8 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         VerificationFailed,
         WriteRefused,
         RecurrenceRequired,
+        BatchTooLarge,
+        AmbiguousTarget,
     ):
         assert issubclass(cls, NativeError)
         assert issubclass(cls, RuntimeError)
@@ -164,6 +178,8 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             VerificationFailed,
             WriteRefused,
             RecurrenceRequired,
+            BatchTooLarge,
+            AmbiguousTarget,
         )
     ]
     assert len(kinds) == len(set(kinds))
@@ -346,3 +362,164 @@ def test_bootstrap_is_nonfatal_on_denied_surface(monkeypatch):
 
     monkeypatch.setattr(rt, "_request_one", deny)
     rt.bootstrap()  # returns without raising despite every surface being denied
+
+
+# --- output hygiene (#52) ------------------------------------------------------------
+# The shared sanitize/truncate helper every Pointer.summary and hydrated body routes
+# through. Two ecosystem bugs motivate it: control chars / U+2028-9 blanked Claude
+# Desktop conversations (carterlasalle #2); unbounded fetches hit maxBuffer (FradSer
+# #66/#69). U+2028/U+2029 are built via chr() so the source file can't mangle them.
+_LS = chr(0x2028)  # LINE SEPARATOR
+_PS = chr(0x2029)  # PARAGRAPH SEPARATOR
+
+
+def test_sanitize_line_strips_c0_del_and_c1_controls():
+    # NUL, BEL (C0), DEL, and a C1 control must all vanish; ordinary text survives.
+    assert sanitize_line("a\x00b\x07c\x7fd\x9ee") == "abcde"
+
+
+def test_sanitize_line_flattens_every_newline_kind_to_space():
+    # \n, \r\n, \r, VT, FF, NEL, LINE SEP, PARA SEP all collapse to a single space.
+    assert (
+        sanitize_line(f"a\nb\r\nc\rd\x0be\x0cf\x85g{_LS}h{_PS}i") == "a b c d e f g h i"
+    )
+
+
+def test_sanitize_line_collapses_whitespace_runs_and_trims():
+    assert sanitize_line("  x\t\t  y  ") == "x y"
+
+
+def test_sanitize_block_preserves_newlines_and_tabs():
+    # a body legitimately spans lines: \n and \t survive; other controls are stripped.
+    assert sanitize_block("line1\nline2\tcol\x00x") == "line1\nline2\tcolx"
+
+
+def test_sanitize_block_folds_exotic_breaks_to_newline():
+    # CR / CRLF / VT / FF / NEL / U+2028 / U+2029 all normalize to \n (never doubled).
+    assert (
+        sanitize_block(f"a\r\nb\rc\x0bd\x0ce\x85f{_LS}g{_PS}h")
+        == "a\nb\nc\nd\ne\nf\ng\nh"
+    )
+
+
+def test_none_is_treated_as_empty():
+    assert sanitize_line(None) == "" and sanitize_block(None) == ""
+    assert clean_summary(None) == "" and clean_body(None) == ""
+
+
+def test_clean_summary_truncates_with_explicit_marker():
+    text = "z" * (SUMMARY_MAX + 42)
+    out = clean_summary(text)
+    # the marker is exact and names the dropped count so the model knows what it missed
+    assert out == "z" * SUMMARY_MAX + " [truncated 42 chars]"
+
+
+def test_clean_summary_short_text_is_unchanged():
+    assert clean_summary("Groceries — due 2026-07-11") == "Groceries — due 2026-07-11"
+
+
+def test_clean_body_truncates_past_soft_cap_with_marker():
+    out = clean_body("y" * (BODY_MAX + 7))
+    assert out == "y" * BODY_MAX + " [truncated 7 chars]"
+
+
+def test_clean_body_raises_output_overflow_past_hard_cap():
+    with pytest.raises(OutputOverflow, match="too large to hydrate"):
+        clean_body("q" * (BODY_HARD_MAX + 1))
+
+
+def test_clean_body_hard_none_never_raises_only_truncates():
+    # the batch-safe path (note_bodies): one huge item truncates instead of failing.
+    out = clean_body("q" * (BODY_HARD_MAX + 100), hard=None)
+    assert out.startswith("q" * BODY_MAX) and "[truncated" in out
+
+
+def test_output_overflow_is_a_native_error_for_the_dispatch_seam():
+    # server._guard catches NativeError → ToolError, so OutputOverflow must subclass it.
+    assert issubclass(OutputOverflow, NativeError)
+    assert OutputOverflow.kind == "output_overflow"
+
+
+def test_clean_helpers_are_idempotent_on_clean_text():
+    clean = "Jane Doe — Acme"
+    assert sanitize_line(clean) == clean == clean_summary(clean)
+    body = "first line\nsecond line"
+    assert sanitize_block(body) == body == clean_body(body)
+
+
+# --- batch cap primitive (#54) -------------------------------------------------------
+
+
+def test_require_batch_within_allows_at_or_under_cap():
+    require_batch_within(0, 5, override_param="max_items")  # empty
+    require_batch_within(5, 5, override_param="max_items")  # exactly at cap — no raise
+
+
+def test_require_batch_within_raises_batch_too_large_naming_override():
+    # Acceptance: the typed error names the override param so the model knows how to
+    # deliberately raise the cap instead of blindly retrying the oversized batch.
+    with pytest.raises(BatchTooLarge, match="max_items") as exc:
+        require_batch_within(6, 5, override_param="max_items")
+    msg = str(exc.value)
+    assert "6" in msg and "5" in msg  # counts the model needs are surfaced
+
+
+def test_batch_too_large_kind():
+    assert BatchTooLarge.kind == "batch_too_large"
+
+
+def test_ambiguous_target_kind():
+    # the machine code doctor/agents branch on — pin the exact value, not just distinct.
+    assert AmbiguousTarget.kind == "ambiguous_target"
+
+
+# --- lifecycle hygiene (#56) ---------------------------------------------------------
+
+
+def test_parent_died_false_when_ppid_unchanged():
+    # our real parent is alive and unchanged → not orphaned.
+    assert _parent_died(os.getppid()) is False
+
+
+def test_parent_died_true_when_reparented():
+    # getppid() no longer equals the launch-time pid → parent gone, we're orphaned.
+    assert _parent_died(os.getppid() + 999_999) is True
+
+
+class _FakeProc:  # hashable (real object identity) so it can live in the _children set
+    def __init__(self, on_terminate):
+        self._on = on_terminate
+
+    def terminate(self):
+        self._on()
+
+
+def test_terminate_children_terminates_tracked_child():
+    import mac_mcp.runtime as rt
+
+    killed = []
+    fake = _FakeProc(lambda: killed.append(True))
+    with rt._children_lock:
+        rt._children.add(fake)
+    try:
+        rt._terminate_children()
+    finally:
+        with rt._children_lock:
+            rt._children.discard(fake)
+    assert killed == [True]
+
+
+def test_terminate_children_ignores_an_already_dead_child():
+    import mac_mcp.runtime as rt
+
+    def boom():
+        raise OSError("no such process")  # terminate() on a reaped child
+
+    fake = _FakeProc(boom)
+    with rt._children_lock:
+        rt._children.add(fake)
+    try:
+        rt._terminate_children()  # must swallow OSError, not propagate
+    finally:
+        with rt._children_lock:
+            rt._children.discard(fake)

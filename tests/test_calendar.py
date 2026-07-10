@@ -12,6 +12,7 @@ import pytest
 
 from mac_mcp.adapters.calendar import (
     _all_day_bounds,
+    _calendar_pointer,
     _event_pointer,
     _event_summary,
     _range,
@@ -22,7 +23,7 @@ from mac_mcp.adapters.calendar import (
     _verify_event,
 )
 from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
-from mac_mcp.runtime import SpanRequired, VerificationFailed
+from mac_mcp.runtime import AmbiguousTarget, SpanRequired, VerificationFailed
 from tests._fakes import fake_rule
 
 
@@ -62,6 +63,25 @@ def test_pointer_shape():
     assert isinstance(p, Pointer)
     assert p.id == f"E-1|{int(start.timestamp())}"
     assert p.deeplink.startswith("calshow:")
+
+
+def test_event_pointer_summary_is_sanitized():
+    # #52 routing: a control char in the event title is stripped from the pointer
+    # summary (deleting clean_summary from _event_pointer would fail this).
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Stand\x07up", "E-1", start, datetime(2026, 6, 23, 9, 15))
+    assert _event_pointer(e).summary == "Standup 09:00–09:15"
+
+
+def test_calendar_pointer_summary_is_the_raw_write_key():
+    # #52 review: a calendar summary IS its write-resolution key (_resolve_calendar
+    # matches title exactly, no id fallback), so it must stay RAW — a sanitized name
+    # would not resolve back to the calendar.
+    cal = SimpleNamespace(calendarIdentifier=lambda: "C-1", title=lambda: "Work  Cal")
+    p = _calendar_pointer(cal)
+    assert p.summary == "Work  Cal"  # internal double space preserved, not collapsed
+    store = SimpleNamespace(calendarsForEntityType_=lambda _e: [cal])
+    assert _resolve_calendar(store, p.summary) is cal  # round-trips by displayed name
 
 
 def test_range_today_is_one_day():
@@ -146,6 +166,21 @@ def test_resolve_missing_calendar_raises():
     s = _fake_store(["Work"])
     with pytest.raises(ValueError, match="no calendar named"):
         _resolve_calendar(s, "Nope")
+
+
+def test_resolve_ambiguous_calendar_refuses_instead_of_first_match():
+    # #55: duplicate calendar names must NOT silently first-match for a write — refuse
+    # loudly (the exact mcp-ical #16 bug this rule exists to prevent).
+    s = _fake_store(["Work", "Personal", "Work"])
+    with pytest.raises(AmbiguousTarget, match="2 calendars are named 'Work'"):
+        _resolve_calendar(s, "Work")
+
+
+def test_resolve_single_calendar_among_many_still_works():
+    # the rule fires only on DUPLICATES — a unique name at a non-zero index still
+    # resolves (guards against a "return the first calendar" regression).
+    s = _fake_store(["Work", "Personal", "Family"])
+    assert _resolve_calendar(s, "Family").title() == "Family"
 
 
 # --- verify-after-write (#49) --------------------------------------------------------
@@ -434,3 +469,60 @@ def test_refetch_event_missing_is_rollback():
     store = SimpleNamespace(calendarItemWithIdentifier_=lambda ident: None)
     with pytest.raises(VerificationFailed, match="could not be re-fetched"):
         _refetch_event(store, "E-404")
+
+
+# --- dry_run delete (#54) ------------------------------------------------------------
+
+
+def _fake_event_full(title, ident, start, end, *, recurring=False):
+    # everything _resolve_span + _event_pointer touch; recurrenceRules drives the span.
+    return SimpleNamespace(
+        title=lambda: title,
+        calendarItemIdentifier=lambda: ident,
+        startDate=lambda: _ns(start),
+        endDate=lambda: _ns(end),
+        isAllDay=lambda: False,
+        recurrenceRules=lambda: [object()] if recurring else None,
+    )
+
+
+def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
+    import mac_mcp.adapters.calendar as cal
+
+    removed = []
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,
+        removeEvent_span_commit_error_=lambda *a: (removed.append(a), (True, None))[1],
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    p = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert removed == []  # ACCEPTANCE: dry_run mutated nothing
+    assert isinstance(p, Pointer) and p.summary == "Standup 09:00–09:15"
+
+
+def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
+    # the preview must be faithful: a recurring target with no span refuses in dry_run
+    # exactly as the real delete would (SpanRequired), so the model can't be misled.
+    import mac_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Weekly",
+        "E-2",
+        datetime(2026, 6, 23, 9, 0),
+        datetime(2026, 6, 23, 9, 30),
+        recurring=True,
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,
+        removeEvent_span_commit_error_=lambda *a: (True, None),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    with pytest.raises(SpanRequired):
+        cal.CalendarAdapter().delete_event("E-2", dry_run=True)

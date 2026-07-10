@@ -10,19 +10,23 @@ timeout-bounded; user input goes via argv (no script injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import run_osascript
+from ..runtime import OutputOverflow, clean_body, clean_summary, run_osascript
 
 MAX_NOTES = 25
 MAX_BODIES = 50
 
+# All templates carry `with timeout` (#56): bound the Apple Events so an orphaned
+# osascript self-terminates instead of pinning Notes.
 _SEARCH = """on run argv
   set q to item 1 of argv
   set out to ""
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with n in (notes whose name contains q)
       set out to out & (id of n) & tab & (name of n) & linefeed
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -34,6 +38,7 @@ end run"""
 # de-facto ceiling; a too-large library fails whole. Add pagination only if needed.
 _LIST_ALL = """on run argv
   set theLines to {}
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with acc in accounts
       set accName to name of acc
@@ -52,6 +57,7 @@ _LIST_ALL = """on run argv
       end repeat
     end repeat
   end tell
+  end timeout
   set AppleScript's text item delimiters to linefeed
   return theLines as text
 end run"""
@@ -66,6 +72,7 @@ _BODIES = """on run argv
   set us to character id 31
   set rs to character id 30
   set out to ""
+  with timeout of 120 seconds
   tell application "Notes"
     repeat with theId in argv
       try
@@ -74,6 +81,7 @@ _BODIES = """on run argv
       end try
     end repeat
   end tell
+  end timeout
   return out
 end run"""
 
@@ -82,6 +90,7 @@ end run"""
 # exactly one note. expect_title (optional argv[2]) guards against stale/wrong ids: the
 # script errors before deleting if the live title doesn't match.
 _DELETE = """on run argv
+  with timeout of 120 seconds
   tell application "Notes"
     set n to note id (item 1 of argv)
     if (count of argv) > 1 then
@@ -91,6 +100,27 @@ _DELETE = """on run argv
     end if
     delete n
   end tell
+  end timeout
+end run"""
+
+# dry_run preview (#54): the real-delete guard EXACTLY — same `note id` lookup and same
+# AppleScript `is not` title comparison as _DELETE (case-insensitive + whitespace-
+# significant) — minus the `delete n`, plus `return name of n`. The expect_title check
+# MUST run here, not in Python: a Python `!=` on the title diverged from AppleScript on
+# case AND whitespace, so the preview could report the opposite of what the real delete
+# does (#54 review). Errors on an unknown id or a title mismatch, exactly as _DELETE.
+_PREVIEW_DELETE = """on run argv
+  with timeout of 120 seconds
+  tell application "Notes"
+    set n to note id (item 1 of argv)
+    if (count of argv) > 1 then
+      if (name of n) is not (item 2 of argv) then
+        error "note title does not match expect_title"
+      end if
+    end if
+    return name of n
+  end tell
+  end timeout
 end run"""
 
 
@@ -101,7 +131,11 @@ def _parse(raw: str) -> list[Pointer]:
             continue
         ident, _, name = line.partition("\t")
         out.append(
-            Pointer(id=ident, summary=name.strip() or "(untitled note)", deeplink="")
+            Pointer(
+                id=ident,
+                summary=clean_summary(name) or "(untitled note)",
+                deeplink="",
+            )
         )
     return out
 
@@ -118,7 +152,7 @@ def _parse_all(raw: str) -> list[Pointer]:
         out.append(
             Pointer(
                 id=ident,
-                summary=title.strip() or "(untitled note)",
+                summary=clean_summary(title) or "(untitled note)",
                 deeplink="",
                 folder=folder,
             )
@@ -155,7 +189,11 @@ class NotesAdapter:
     def get_bodies(self, ids: list[str]) -> list[dict]:
         """Hydrate plaintext bodies for up to MAX_BODIES ids → [{"id", "body"}].
 
-        Unknown ids are silently skipped; the caller diffs returned vs requested ids.
+        Each body is sanitized and per-item bounded through ``clean_body`` (#52): a
+        control-char-laden body can't corrupt the client and a long one is truncated
+        with a marker. A single pathological body (over the hard cap) is caught here so
+        it downgrades to a per-item notice instead of failing the whole batch. Unknown
+        ids are silently skipped; the caller diffs returned vs requested ids.
         """
         if not ids:
             raise ValueError("note_bodies needs at least one note id")
@@ -164,18 +202,42 @@ class NotesAdapter:
                 f"note_bodies accepts at most {MAX_BODIES} ids per call; "
                 f"got {len(ids)} — chunk your requests"
             )
-        return _parse_bodies(run_osascript(_BODIES, *ids))
+        out = []
+        for rec in _parse_bodies(run_osascript(_BODIES, *ids)):
+            try:
+                body = clean_body(rec["body"])
+            except OutputOverflow as e:
+                body = f"[not hydrated: {e}]"
+            out.append({"id": rec["id"], "body": body})
+        return out
 
-    def delete(self, ident: str, expect_title: str | None = None) -> None:
+    def delete(
+        self, ident: str, expect_title: str | None = None, dry_run: bool = False
+    ) -> Pointer | None:
         """Delete a note by id → Recently Deleted (recoverable).
 
         When expect_title is given, the note is deleted only if its current title
         matches — content-verify first by passing it. Without it, delete-by-id fires
         immediately (ids are globally unique, but a stale id deletes the wrong note).
+
+        ``dry_run=True`` runs the SAME id + expect_title guard as the real delete — in
+        AppleScript, so the case/whitespace semantics are byte-identical — but returns
+        the pointer that WOULD be deleted instead of deleting it. A title mismatch or
+        unknown id raises exactly as the real delete would, so the preview can never
+        disagree with the real op (#54).
         """
         if not ident.strip():
             raise ValueError("delete_note needs a note id")
+        if dry_run:
+            args = (ident,) if expect_title is None else (ident, expect_title)
+            title = run_osascript(_PREVIEW_DELETE, *args)
+            return Pointer(
+                id=ident,
+                summary=clean_summary(title) or "(untitled note)",
+                deeplink="",
+            )
         if expect_title is not None:
             run_osascript(_DELETE, ident, expect_title)
         else:
             run_osascript(_DELETE, ident)
+        return None

@@ -13,9 +13,11 @@ import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer, parse_datetime
 from ..runtime import (
+    AmbiguousTarget,
     SpanRequired,
     VerificationFailed,
     WriteRefused,
+    clean_summary,
     epoch_nsdate,
     from_nsdate,
     norm_text,
@@ -76,24 +78,39 @@ def _event_id(item) -> str:
 def _event_pointer(item) -> Pointer:
     return Pointer(
         id=_event_id(item),
-        summary=_event_summary(item),
+        summary=clean_summary(_event_summary(item)),
         deeplink=_event_deeplink(item),
     )
 
 
 def _calendar_pointer(cal) -> Pointer:
     # A calendar (container) has no public per-calendar URL scheme; id + name (summary)
-    # are what the projection resolves a write target against. deeplink empty by design.
+    # are what the projection resolves a write target against. The title is kept RAW
+    # (NOT routed through clean_summary, unlike event summaries): _resolve_calendar
+    # matches `c.title() == name` exactly with no id fallback, so the summary IS the
+    # write key — sanitizing it would desync the displayed name from the resolvable one
+    # and make the calendar untargetable (#52 review). deeplink empty by design.
     return Pointer(id=cal.calendarIdentifier(), summary=cal.title(), deeplink="")
 
 
 def _resolve_calendar(s, name: str | None):
+    # Disambiguation rule (#55): a write never auto-picks among same-named calendars.
+    # Collect ALL exact-title matches; 0 → not found, 1 → the target, >1 →
+    # AmbiguousTarget (the mcp-ical #16 silent-mis-target bug, refused loudly instead).
     if name is None:
         return s.defaultCalendarForNewEvents()
-    for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent):
-        if c.title() == name:
-            return c
-    raise ValueError(f"no calendar named {name!r}")
+    matches = [
+        c for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent) if c.title() == name
+    ]
+    if not matches:
+        raise ValueError(f"no calendar named {name!r}")
+    if len(matches) > 1:
+        raise AmbiguousTarget(
+            f"{len(matches)} calendars are named {name!r} — refusing to guess which "
+            "one for a write (mac-mcp never auto-picks an ambiguous target). Rename "
+            "one so the calendar names are unique, then retry."
+        )
+    return matches[0]
 
 
 def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:
@@ -356,13 +373,21 @@ class CalendarAdapter:
 
         return run_native(work)
 
-    def delete_event(self, ident: str, span: str | None = None) -> None:
+    def delete_event(
+        self, ident: str, span: str | None = None, dry_run: bool = False
+    ) -> Pointer | None:
+        """Delete an event by id. ``dry_run=True`` resolves the target — and its span,
+        so a recurring event still surfaces ``SpanRequired`` exactly as the real delete
+        would — then returns the pointer that WOULD be deleted, no mutation (#54)."""
+
         def work():
             s = store()
             e = _resolve_event(s, ident)
             ek_span = _resolve_span(
                 e, span
             )  # recurring + no span → SpanRequired, no write
+            if dry_run:
+                return _event_pointer(e)  # preview only — nothing is removed
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise WriteRefused(
@@ -371,5 +396,6 @@ class CalendarAdapter:
                     "rejected the change — do not retry the same target; tell the "
                     "user."
                 )
+            return None
 
-        run_native(work)
+        return run_native(work)

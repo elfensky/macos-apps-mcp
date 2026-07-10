@@ -49,3 +49,10 @@ def test_normalize_url_rejects_file_scheme():
 def test_normalize_url_rejects_app_scheme():
     with pytest.raises(ValueError, match="http/https"):
         _normalize_url("shortcuts://run-shortcut?name=Evil")
+
+
+def test_parse_sanitizes_control_chars_in_summary():
+    # #52 routing: a web page title (attacker-controllable) carrying a control char is
+    # stripped before it reaches the model (deleting clean_summary from _parse fails).
+    ptr = _parse("https://x.com/a\tBreaking\x07 News\n")[0]
+    assert ptr.summary == "Breaking News" and "\x07" not in ptr.summary

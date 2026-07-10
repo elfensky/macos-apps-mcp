@@ -7,6 +7,11 @@ title prefix and remove everything they create in teardown.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+import time
+
 import EventKit as EK
 import pytest
 
@@ -877,3 +882,61 @@ def test_recurring_reminder_update_requires_recurrence(created):
     recurs, title = run_native(state)
     assert not recurs  # the rule is gone from the store
     assert "stopped" in title
+
+
+# --- lifecycle hygiene (#56): orphan watcher --------------------------------------
+
+# child: install the orphan watcher, announce our pid, then idle. When our parent (the
+# intermediate below) is killed, the watcher must os._exit us within ~1-2s.
+_ORPHAN_CHILD = """
+import os, sys, time
+from mac_mcp.runtime import install_lifecycle_guards
+install_lifecycle_guards()
+# print our pid AFTER the guards are installed — this is the test's readiness signal, so
+# the parent is only killed once we've captured our launching-parent pid. (If the test
+# killed the parent DURING our slow import, we'd already be reparented to 1 and the
+# watcher could never detect it — the exact bug on-device testing caught.)
+sys.stdout.write(str(os.getpid()) + "\\n"); sys.stdout.flush()
+time.sleep(60)
+"""
+
+# intermediate: spawn the watched child, then wait. It prints NOTHING — the child
+# inherits our stdout (the test's pipe) and reports its own readiness. Killing THIS
+# process orphans the child so the watcher's reparent detection fires.
+_ORPHAN_INTERMEDIATE = """
+import subprocess, sys
+child = subprocess.Popen([sys.executable, "-c", {child!r}])
+child.wait()
+"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but not ours to signal — still alive
+
+
+@pytest.mark.integration
+def test_orphaned_server_exits_within_5s():
+    inter_src = _ORPHAN_INTERMEDIATE.format(child=_ORPHAN_CHILD)
+    inter = subprocess.Popen(
+        [sys.executable, "-c", inter_src], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        child_pid = int(inter.stdout.readline().strip())
+        assert _alive(child_pid), "child never started"
+        inter.kill()  # orphan the child — its ppid changes, watcher should fire
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if not _alive(child_pid):
+                break
+            time.sleep(0.2)
+        else:
+            os.kill(child_pid, 9)  # don't leak the child if the watcher failed
+            pytest.fail("orphaned child did not exit within 5s")
+    finally:
+        inter.wait()

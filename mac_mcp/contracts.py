@@ -144,6 +144,29 @@ class PointerSource(Protocol):
     def get_pointers(self, query: str) -> list[Pointer]: ...
 
 
+# --- disambiguation rule (#55) -------------------------------------------------------
+# Name/title addressing is a READ-side affordance ONLY. A name search returns candidate
+# Pointers; the model, or the user, picks one. A WRITE never auto-picks among matches:
+# fuzzy/first-match auto-pick sent iMessages to the wrong human (supermemoryai #48) and
+# duplicate calendar names silently mis-targeted writes (mcp-ical #16). Two results:
+#   1. Every item-targeting write already takes a `Pointer.id` (complete_reminder,
+#      delete_event/note, update_*) — the stable, unambiguous handle captured at read
+#      time. New destructive tools MUST do the same.
+#   2. The remaining name-addressed writes are CONTAINER selection only —
+#      create/update_reminder(list_name) and create/update_event(calendar). Their
+#      resolvers (reminders._resolve_list, calendar._resolve_calendar) collect ALL exact
+#      matches and raise runtime.AmbiguousTarget on >1 rather than picking the first, so
+#      an ambiguous target fails loudly instead of writing to the wrong container.
+# The rule is STATELESS by design: there is no server-side "recent matches" store to
+# resolve a later write against (carterlasalle's module-global version breaks concurrent
+# sessions — a negative lesson). A write carries its own unambiguous target.
+# AUDIT (#55): the only fully name-addressed writes are the two container params above
+# (now disambiguated); everything else is id-addressed, creates a fresh item
+# (create_contact, no lookup), or runs an OS-unique handle (run_shortcut, safari_open).
+# Migrating the container params to id-only (name-lookup as a separate read step) is
+# the rule's stricter form — a breaking tool-signature change, deferred to a maintainer.
+
+
 # --- per-adapter typed WRITE payloads (reads uniform, writes typed) ------------------
 
 _FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
