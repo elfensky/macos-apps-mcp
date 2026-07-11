@@ -1147,23 +1147,26 @@ def test_mail_create_draft_opens_and_never_sends():
         "nobody@example.invalid", subj, "test body — do not send"
     )
     assert result["created"] is True and result["mailbox"] == "Drafts"
-    # count + delete matching outgoing (draft) messages; an outgoing message is unsent
-    # by definition (a sent message leaves `outgoing messages` for the Sent mailbox).
-    check = (
-        "on run argv\n"
-        '  tell application "Mail"\n'
-        "    set n to 0\n"
-        "    repeat with m in outgoing messages\n"
-        "      if subject of m is (item 1 of argv) then\n"
-        "        set n to n + 1\n"
-        "        delete m\n"
-        "      end if\n"
-        "    end repeat\n"
-        "    return (n as text)\n"
-        "  end tell\n"
-        "end run"
+    # COUNT matching outgoing (unsent) messages via a whose-clause — never delete while
+    # iterating by index (that raises "can't get item N" as the set shrinks). An
+    # outgoing message is unsent by definition (a sent one leaves the collection).
+    count = (
+        'on run argv\n  tell application "Mail"\n'
+        "    return (count of (outgoing messages whose subject is (item 1 of argv)))"
+        " as text\n  end tell\nend run"
     )
-    assert int(run_osascript(check, subj)) >= 1  # draft created (and now cleaned up)
+    try:
+        assert int(run_osascript(count, subj)) >= 1  # the draft was created, unsent
+    finally:
+        # best-effort cleanup — Mail cannot reliably delete a compose-state outgoing
+        # message (no product delete-draft exists by design); leftover test drafts are
+        # empty + unsendable. Bulk whose-delete, tolerant of Mail refusing.
+        run_osascript(
+            'on run argv\n  tell application "Mail"\n    try\n'
+            "      delete (outgoing messages whose subject is (item 1 of argv))\n"
+            "    end try\n  end tell\nend run",
+            subj,
+        )
 
 
 @pytest.mark.integration
@@ -1200,17 +1203,16 @@ def test_list_attachments_finds_draft_attachment(created):
         assert any(path.split("/")[-1] in n or n.endswith(".txt") for n in names)
     finally:
         os.unlink(path)
+        # best-effort cleanup via the UNIFIED drafts mailbox (not per-account, which
+        # misses whichever account the draft actually landed in) AND the outgoing
+        # collection; both try-wrapped since Mail may refuse to delete a compose-state
+        # message. Leftover test drafts are empty + unsendable.
         run_osascript(
-            "on run argv\n"
-            '  tell application "Mail"\n'
-            "    repeat with acc in accounts\n"
-            "      try\n"
-            '        delete (messages of (mailbox "Drafts" of acc) whose subject is '
-            "(item 1 of argv))\n"
-            "      end try\n"
-            "    end repeat\n"
-            "  end tell\n"
-            "end run",
+            'on run argv\n  tell application "Mail"\n'
+            "    try\n      delete (messages of drafts mailbox whose subject is "
+            "(item 1 of argv))\n    end try\n"
+            "    try\n      delete (outgoing messages whose subject is "
+            "(item 1 of argv))\n    end try\n  end tell\nend run",
             subj,
         )
 
@@ -1231,27 +1233,23 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     ).strip()
     if not mid:
         pytest.skip("no messages in this Mac's inbox")
-    before = int(
-        run_osascript(
-            'tell application "Mail" to return (count of outgoing messages) as text'
-        )
+    marker = "mac-mcp-itest-reply-marker-do-not-send"
+    MailAdapter().reply(mid, marker, include_quote=True)
+    # assert the SPECIFIC reply draft exists as an UNSENT outgoing message (identify it
+    # by our marker in the body, not a fragile count delta over a mailbox that may hold
+    # other drafts). A sent message would have left the outgoing collection.
+    find = (
+        'on run argv\n  tell application "Mail"\n'
+        "    return (count of (outgoing messages whose content contains "
+        "(item 1 of argv))) as text\n  end tell\nend run"
     )
-    MailAdapter().reply(mid, "mac-mcp itest reply — do not send", include_quote=True)
     try:
-        after = int(
-            run_osascript(
-                'tell application "Mail" to return (count of outgoing messages) as text'
-            )
-        )
-        assert after == before + 1  # a draft was created, not sent
+        assert int(run_osascript(find, marker)) >= 1  # reply draft created, not sent
     finally:
+        # best-effort cleanup (Mail may refuse to delete a compose-state message)
         run_osascript(
-            "on run argv\n"
-            '  tell application "Mail"\n'
-            "    repeat with m in outgoing messages\n"
-            "      if content of m contains (item 1 of argv) then delete m\n"
-            "    end repeat\n"
-            "  end tell\n"
-            "end run",
-            "mac-mcp itest reply",
+            'on run argv\n  tell application "Mail"\n    try\n'
+            "      delete (outgoing messages whose content contains (item 1 of argv))\n"
+            "    end try\n  end tell\nend run",
+            marker,
         )
