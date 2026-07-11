@@ -404,6 +404,15 @@ def test_sqlite_search_empty_query_raises(notestore):
         NotesAdapter().get_pointers("  ")
 
 
+def test_sqlite_search_query_that_folds_to_empty_raises(fold_notestore):
+    # #64 review: a non-empty query made only of fold-away chars must NOT slip past the
+    # guard and match nearly every note. "¨" folds to a space, a lone combining accent
+    # folds to "" — both must raise, not return the whole store.
+    for degenerate in ("¨", "́"):  # spacing diaeresis → " "; combining accent → ""
+        with pytest.raises(ValueError, match="title substring"):
+            NotesAdapter().get_pointers(degenerate)
+
+
 def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
     # on drift, get_pointers falls back to the AppleScript enumeration and folds there
     # too: an ASCII query still finds a typographically-titled note (no FDA regression).
@@ -421,6 +430,27 @@ def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_pointers("cafe resume")
     assert [p.id for p in ptrs] == ["x-coredata://S/ICNote/p1"]
+
+
+def test_search_fallback_ignores_untitled_placeholder(tmp_path, monkeypatch):
+    # #64 review: an untitled note must NOT match "note"/"untitled" via the
+    # "(untitled note)" display placeholder — the fallback matches the RAW title, so an
+    # empty title folds to "" and matches nothing (as the sqlite path and old
+    # `whose name contains` did).
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = (
+        "x-coredata://S/ICNote/p1\tiCloud / Notes\t\n"  # untitled (empty title)
+        "x-coredata://S/ICNote/p2\tiCloud / Notes\tShopping\n"
+    )
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    assert NotesAdapter().get_pointers("note") == []  # placeholder must not match
+    assert NotesAdapter().get_pointers("untitled") == []
 
 
 def test_schema_drift_falls_back_to_applescript(tmp_path, monkeypatch):

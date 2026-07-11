@@ -93,6 +93,14 @@ def test_filter_folds_diacritics_and_smart_punctuation():
     assert _filter_entries(entries, "andrei's") == [("Andrei’s macro", "u2")]
 
 
+def test_filter_diacritic_only_query_folds_to_empty_lists_all():
+    # #64 review: "¨" folds to a bare space — it must NOT become a "contains-a-space"
+    # filter (which would drop single-word names). Folding to empty → list-all, matching
+    # the empty-query semantics and the notes.get_pointers guard.
+    entries = [("Timer", "u1"), ("Café timer", "u2"), ("Plain", "u3")]
+    assert _filter_entries(entries, "¨") == entries
+
+
 def test_filter_empty_returns_all():
     assert _filter_entries([("a", "u"), ("b", None)], "  ") == [("a", "u"), ("b", None)]
 

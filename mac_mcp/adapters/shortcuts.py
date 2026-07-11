@@ -95,7 +95,11 @@ def _filter_entries(
     # filter by the NAME substring (not the UUID — the id is a machine handle). Folded
     # (#64) so "cafe" finds a "Café" shortcut and ASCII "'" finds a U+2019 name; a read,
     # so a fold-superset is fine (run_shortcut still dispatches by the exact handle).
-    q = fold_text(query.strip())
+    # Fold THEN strip (matching notes.get_pointers, #64 review): a query of only
+    # fold-away chars — e.g. a lone diaeresis "¨" NFKD-decomposes to a space — would
+    # otherwise stay a truthy " " and filter to only space-containing names instead of
+    # the empty-query "list all" semantics.
+    q = fold_text(query).strip()
     if q:
         entries = [e for e in entries if q in fold_text(e[0])]
     return entries[:MAX_SHORTCUTS]

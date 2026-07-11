@@ -500,6 +500,42 @@ def test_notes_search_finds_created():
 
 
 @pytest.mark.integration
+def test_notes_search_folds_diacritics_and_smart_punctuation():
+    """#64 end-to-end: a note titled with an accent + a curly apostrophe is found by a
+    plain-ASCII query, on Apple's REAL store (sqlite fold path under FDA, or the folded
+    AppleScript fallback). The hyphen in the marker is preserved by fold_text, so the
+    hyphenated form still matches (acceptance: hyphenated titles unaffected)."""
+    from mac_mcp.adapters.notes import NotesAdapter
+    from mac_mcp.runtime import run_osascript
+
+    # typographic title: U+00E9 (é) + U+2019 (curly apostrophe); unique hyphen marker.
+    title = "mac-mcp-itest-fold Café’s résumé"
+    run_osascript(
+        "on run argv\n"
+        '  tell application "Notes"\n'
+        '    make new note with properties {name:(item 1 of argv), body:"x"}\n'
+        "  end tell\n"
+        "end run",
+        title,
+    )
+    try:
+        # ASCII query: no accents, straight apostrophe. Folds onto the stored glyphs.
+        hits = NotesAdapter().get_pointers("mac-mcp-itest-fold cafe's resume")
+        assert any("mac-mcp-itest-fold" in p.summary for p in hits), (
+            "ASCII query did not find the typographically-titled note (#64 fold)"
+        )
+    finally:
+        run_osascript(
+            "on run argv\n"
+            '  tell application "Notes"\n'
+            "    delete (every note whose name is (item 1 of argv))\n"
+            "  end tell\n"
+            "end run",
+            title,
+        )
+
+
+@pytest.mark.integration
 def test_safari_tabs_runs():
     """#22: Safari open-tabs read via osascript runs (Automation TCC)."""
     from mac_mcp.adapters.safari import SafariAdapter

@@ -371,10 +371,14 @@ class NotesAdapter:
         Falls back to the AppleScript enumeration, folded identically, on missing FDA /
         drift. ponytail: O(all-notes) fold per search; add a LIKE prefilter for the
         common ASCII case only if a huge library makes it show up."""
-        q = query.strip()
-        if not q:
+        # Guard on the FOLDED value, not the raw query (#64 review): a non-empty query
+        # made only of punctuation/combining marks folds to "" or " " (e.g. a lone
+        # diaeresis "¨" NFKD-decomposes to a space; a bare combining accent to nothing).
+        # A pre-fold `if not query` would let those through, and then `needle in title`
+        # matches nearly every note — the opposite of a search. Guard post-fold instead.
+        needle = fold_text(query).strip()
+        if not needle:
             raise ValueError("notes read needs a title substring (got an empty query)")
-        needle = fold_text(q)
 
         def sqlite(conn):
             uuid = _store_uuid(conn)
@@ -387,15 +391,22 @@ class NotesAdapter:
             return out
 
         def fallback():
-            # degraded path folds the same way; _parse_all carries no snippet, so this
-            # matches on title only — exactly what `whose name contains` matched before,
-            # now diacritic/punctuation-insensitive too.
-            hits = [
-                p
-                for p in _parse_all(run_osascript(_LIST_ALL))
-                if needle in fold_text(p.summary)
-            ]
-            return hits[:MAX_NOTES]
+            # degraded path folds the same way, matching on the RAW title only (no
+            # snippet — _LIST_ALL doesn't carry one). Filter on the raw title field
+            # (`parts[2]`, as _parse_all reads it) BEFORE building Pointers — NOT on
+            # the Pointer.summary, which for an untitled note is the display placeholder
+            # "(untitled note)" and would spuriously match "note"/"untitled" (#64
+            # review). An empty raw title folds to "" and matches nothing, like the
+            # sqlite path (raw ZTITLE1 → "") and the old `whose name contains`.
+            kept = []
+            for line in run_osascript(_LIST_ALL).splitlines():
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                title = parts[2] if len(parts) > 2 else ""
+                if needle in fold_text(title):
+                    kept.append(line)
+            return _parse_all("\n".join(kept))[:MAX_NOTES]
 
         return read_via_sqlite(
             NOTESTORE,

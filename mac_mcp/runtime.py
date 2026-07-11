@@ -272,6 +272,11 @@ def fold_text(v: object) -> str:
     folding a write target could collapse two real containers ("Café"/"Cafe") and
     silently mis-home the write — the exact opposite of the AmbiguousTarget guard's
     intent. Fold search results, never write targets.
+
+    ponytail: NFKD is *compatibility* decomposition, so it also folds ligatures/width/
+    superscripts (ﬁ→"fi", №→"no", ①→"1"). That only ever WIDENS a read match (a
+    harmless superset), never drops a legitimate one, and can't reach a write — fine
+    for search. Switch to NFD if a caller ever needs canonical-only folding.
     """
     s = str(v) if v is not None else ""
     s = s.translate(_PUNCT_FOLD)
