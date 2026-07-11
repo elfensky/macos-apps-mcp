@@ -251,10 +251,11 @@ def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
 @_additive_tool
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
-    its own. `to` a recipient address. Additive (creates a draft; does not
+    its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
+    "mailbox", "note"}) — an unsent draft has no stable id, so this says where to find
+    it (Drafts) instead of fabricating one. Additive (creates a draft; does not
     send/modify/delete); needs Automation access for Mail."""
-    _mail.create_draft(to, subject, body)
-    return {"status": "draft created and opened in Mail for your review — not sent"}
+    return _mail.create_draft(to, subject, body)
 
 
 @_read_tool

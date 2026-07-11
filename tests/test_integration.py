@@ -1143,9 +1143,10 @@ def test_mail_create_draft_opens_and_never_sends():
     from mac_mcp.runtime import run_osascript
 
     subj = "mac-mcp-test: draft (safe to delete)"
-    MailAdapter().create_draft(
+    result = MailAdapter().create_draft(
         "nobody@example.invalid", subj, "test body — do not send"
     )
+    assert result["created"] is True and result["mailbox"] == "Drafts"
     # count + delete matching outgoing (draft) messages; an outgoing message is unsent
     # by definition (a sent message leaves `outgoing messages` for the Sent mailbox).
     check = (

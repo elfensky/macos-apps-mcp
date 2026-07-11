@@ -139,6 +139,7 @@ def test_search_empty_query_raises():
 # --- mail_body + create_draft (#62) --------------------------------------------------
 
 import os  # noqa: E402
+import re  # noqa: E402
 
 from mac_mcp.adapters.mail import _BODY, _CREATE_DRAFT  # noqa: E402
 
@@ -232,6 +233,43 @@ def test_create_draft_cleans_up_tempfile(monkeypatch):
 def test_create_draft_empty_recipient_raises():
     with pytest.raises(ValueError, match="recipient"):
         MailAdapter().create_draft("  ", "Hi", "body")
+
+
+def test_create_draft_returns_locator_dict(monkeypatch):
+    # #43: an unsent draft has no stable Message-ID, so create_draft returns a locator
+    # (where to find it) instead of a fabricated id.
+    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", lambda *a: "")
+    out = MailAdapter().create_draft("x@example.com", "Hi", "body")
+    assert out["created"] is True
+    assert out["mailbox"] == "Drafts"
+    assert out["subject"] == "Hi"
+    assert "no stable id" in out["note"].lower()
+
+
+def test_create_draft_cleanup_on_failure_is_in_script():
+    # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
+    # deleted in the error path. Assert the STRUCTURE (delete msg between `on error` and
+    # the re-raise), not just the words: a substring check would pass even if the block
+    # were gutted and a stray "delete"/"on error" comment left behind (#43/#44 review).
+    assert re.search(r"on error errMsg\s+delete msg\s+error errMsg", _CREATE_DRAFT), (
+        "the on-error handler must delete the partial draft, then re-raise"
+    )
+
+
+def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
+    # #44 Python-side contract: if osascript surfaces the propagated error, create_draft
+    # re-raises AND does not leak the body tempfile (the finally unlinks it) — so a
+    # failed create leaves nothing behind on either side.
+    seen = {}
+
+    def boom(script, *args):
+        seen["path"] = args[2]  # argv: to, subject, tempfile-path
+        raise RuntimeError("osascript failed")
+
+    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", boom)
+    with pytest.raises(RuntimeError, match="osascript failed"):
+        MailAdapter().create_draft("x@example.com", "Hi", "body")
+    assert not os.path.exists(seen["path"])  # tempfile cleaned up despite the error
 
 
 # --- list_attachments (#45) -----------------------------------------------------------

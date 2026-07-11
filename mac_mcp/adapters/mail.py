@@ -108,7 +108,9 @@ _MISSING_VALUE = "missing value"
 # verb here (the two-tier safe gate — joshrutkowski/orchard/patrickfreyer). The body is
 # READ from a tempfile as «class utf8» (never interpolated into the script — the
 # supermemoryai pattern), so a long/multiline/unicode body can't break or inject the
-# script. to/subject/tempfile-path all arrive via argv.
+# script. to/subject/tempfile-path all arrive via argv. Atomic (#44): everything after
+# `make new outgoing message` is wrapped in a try; on any failure the partial outgoing
+# message is deleted before re-raising, so a retry can't strand a duplicate draft.
 _CREATE_DRAFT = """on run argv
   set recipientAddr to item 1 of argv
   set subj to item 2 of argv
@@ -116,10 +118,15 @@ _CREATE_DRAFT = """on run argv
   with timeout of 120 seconds
   tell application "Mail"
     set msg to make new outgoing message with properties {visible:true}
-    set subject of msg to subj
-    set content of msg to bodyText
-    tell msg to make new to recipient with properties {address:recipientAddr}
-    activate
+    try
+      set subject of msg to subj
+      set content of msg to bodyText
+      tell msg to make new to recipient with properties {address:recipientAddr}
+      activate
+    on error errMsg
+      delete msg
+      error errMsg
+    end try
   end tell
   end timeout
 end run"""
@@ -303,11 +310,15 @@ class MailAdapter:
             )
         return clean_body(body)
 
-    def create_draft(self, to: str, subject: str, body: str) -> None:
+    def create_draft(self, to: str, subject: str, body: str) -> dict:
         """Create a Mail draft and OPEN it for the human to review/send — NEVER sends.
-        The body is written to a 0600 tempfile and read by the script as «class utf8»
-        (never interpolated); to/subject go via argv. The tempfile is deleted after the
-        (synchronous) script has read its content into the draft."""
+        Atomic (#44): if any step after creation fails, the script deletes the partial
+        draft before erroring, so a retry can't strand a duplicate. Returns a locator
+        (#43): an unsent draft has no stable Message-ID (Mail stamps it only on send),
+        so we return where to find it, not a fabricated id. The body is written to a
+        0600 tempfile and read by the script as «class utf8» (never interpolated);
+        to/subject go via argv. The tempfile is deleted after the (synchronous) script
+        has read its content into the draft."""
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
@@ -319,6 +330,12 @@ class MailAdapter:
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(path)
+        return {
+            "created": True,
+            "subject": subject or "",
+            "mailbox": "Drafts",
+            "note": "unsent drafts have no stable id; find it in Drafts",
+        }
 
     def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:
         """List attachments of messages in `mailbox` (canonical inbox/sent/drafts/
