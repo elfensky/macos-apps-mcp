@@ -34,6 +34,7 @@ from mac_mcp.runtime import (
     clean_summary,
     due_components,
     epoch_nsdate,
+    fold_text,
     from_nsdate,
     norm_text,
     persisted_recurrence_signature,
@@ -285,6 +286,39 @@ def test_norm_text_stringifies_non_text():
     assert norm_text(42) == "42"
 
 
+# --- fold_text (#64): read-side diacritic/smart-punctuation folding ------------------
+
+
+def test_fold_text_strips_diacritics():
+    assert fold_text("Café résumé") == fold_text("cafe resume")
+
+
+def test_fold_text_folds_smart_apostrophe():
+    # the U+2019 culprit (#26): a curly apostrophe folds to the ASCII one.
+    assert fold_text("Andrei’s list") == fold_text("Andrei's list")
+
+
+def test_fold_text_folds_curly_quotes_and_ellipsis():
+    assert fold_text("“hi”…") == fold_text('"hi"...')
+
+
+def test_fold_text_is_case_insensitive():
+    assert fold_text("HELLO") == fold_text("hello")
+
+
+def test_fold_text_leaves_hyphens_alone():
+    # the explicit non-goal: hyphens/dashes are NOT folded (real names broke otherwise).
+    assert fold_text("well-known") != fold_text("wellknown")
+    assert "-" in fold_text("well-known")
+    # an em-dash is a distinct char and stays distinct — not collapsed to a hyphen.
+    assert fold_text("a—b") != fold_text("a-b")
+
+
+def test_fold_text_handles_none_and_nonstr():
+    assert fold_text(None) == ""
+    assert fold_text(42) == "42"
+
+
 def test_recurrence_signature_requested():
     assert recurrence_signature(None) is None
     assert recurrence_signature(CLEAR_RECURRENCE) is None  # explicit clear == no rule
@@ -512,6 +546,24 @@ def test_resolve_container_ambiguous_lists_all_candidate_ids():
     assert "2 reminder lists are named 'Home'" in msg
     assert "C0" in msg and "C2" in msg  # both candidates listed for recovery
     assert "C1" not in msg  # the non-matching container is not listed
+
+
+def test_resolve_container_does_not_fold_write_targets():
+    # #64 SAFETY: fold_text is READS-ONLY. A write target stays byte-exact, so an ASCII
+    # "cafe" does NOT silently resolve to an accented "Café" list — the caller gets a
+    # clear miss, never a wrong-container write (the whole point of not folding writes).
+    items = [("L0", "Café", "accented"), ("L1", "Bistro", "bistro")]
+    with pytest.raises(ValueError, match="no reminder list named 'cafe'"):
+        resolve_container(items, "cafe", noun="reminder list")
+    assert resolve_container(items, "Café", noun="reminder list") == "accented"
+
+
+def test_resolve_container_keeps_accented_variants_distinct():
+    # because writes don't fold, "Café" and "Cafe" are DISTINCT targets — each exact
+    # name hits its own list (folding would collapse them into an AmbiguousTarget).
+    items = [("L0", "Café", "accented"), ("L1", "Cafe", "plain")]
+    assert resolve_container(items, "Cafe", noun="list") == "plain"
+    assert resolve_container(items, "Café", noun="list") == "accented"
 
 
 # --- lifecycle hygiene (#56) ---------------------------------------------------------

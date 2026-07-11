@@ -17,6 +17,7 @@ from ..runtime import (
     WriteRefused,
     clean_summary,
     due_components,
+    fold_text,
     norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
@@ -217,7 +218,13 @@ class RemindersAdapter:
                 pred = _incomplete_due_pred(s, end, cals)
             else:
                 name = query.strip()
-                named = [c for c in cals if c.title() == name]
+                # READ-side list match folds diacritics/smart punctuation (#64): "cafe"
+                # finds the "Café" list, ASCII "'" finds a U+2019 name. A fold-collision
+                # ("Café" + "Cafe" lists) returns reminders from BOTH — fine for a
+                # search (a superset beats "found nothing"); unlike a WRITE it can't
+                # mis-home anything. resolve_container (writes) stays exact by design.
+                folded = fold_text(name)
+                named = [c for c in cals if fold_text(c.title()) == folded]
                 if not named:
                     raise ValueError(f"no reminder list named {name!r}")
                 # Incomplete-only (both bounds nil), same selector as the date

@@ -25,6 +25,7 @@ from ..runtime import (
     OutputOverflow,
     clean_body,
     clean_summary,
+    fold_text,
     read_via_sqlite,
     run_osascript,
 )
@@ -70,18 +71,10 @@ _BODY_FINGERPRINT = {
 
 # All templates carry `with timeout` (#56): bound the Apple Events so an orphaned
 # osascript self-terminates instead of pinning Notes.
-_SEARCH = """on run argv
-  set q to item 1 of argv
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Notes"
-    repeat with n in (notes whose name contains q)
-      set out to out & (id of n) & tab & (name of n) & linefeed
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
+#
+# There is no AppleScript title-SEARCH template: search folds diacritics/smart
+# punctuation (#64), which `whose name contains` can't express, so both backends
+# enumerate (_LIST_ALL / _ALL_SQL) and post-filter in Python (see get_pointers).
 
 # notes_all: every note across accounts, excluding Recently Deleted. id+name read in
 # one multi-property snapshot ({id, name} of (notes of f)) stay aligned — do NOT split
@@ -177,22 +170,6 @@ _PREVIEW_DELETE = """on run argv
 end run"""
 
 
-def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        ident, _, name = line.partition("\t")
-        out.append(
-            Pointer(
-                id=ident,
-                summary=clean_summary(name) or "(untitled note)",
-                deeplink="",
-            )
-        )
-    return out
-
-
 def _parse_all(raw: str) -> list[Pointer]:
     out = []
     for line in raw.splitlines():
@@ -253,17 +230,9 @@ _FROM = f"""FROM ZICCLOUDSYNCINGOBJECT o
       AND (o.ZMARKEDFORDELETION IS NULL OR o.ZMARKEDFORDELETION = 0)
       AND (f.ZTITLE2 IS NULL OR f.ZTITLE2 <> '{_TRASH}')"""
 
+# One enumeration query; search folds in Python (no _SEARCH_SQL LIKE — SQLite LIKE is
+# ASCII-only, so it can't do the diacritic/smart-punctuation fold #64 needs).
 _ALL_SQL = f"SELECT {_COLS} {_FROM} ORDER BY o.Z_PK DESC"
-_SEARCH_SQL = (
-    f"SELECT {_COLS} {_FROM} "
-    r"AND (o.ZTITLE1 LIKE ? ESCAPE '\' OR o.ZSNIPPET LIKE ? ESCAPE '\') "
-    "ORDER BY o.Z_PK DESC"
-)
-
-
-def _escape_like(term: str) -> str:
-    r"""Escape LIKE wildcards so a user's ``%``/``_`` is literal (ESCAPE ``\``)."""
-    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _store_uuid(conn) -> str:
@@ -395,22 +364,44 @@ _BODY_SQL = (
 class NotesAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
-        substring. Falls back to the AppleScript title search on missing FDA / drift."""
+        substring, matched diacritic- and smart-punctuation-insensitively via fold_text
+        (#64): "cafe" finds "café", ASCII "'" finds a U+2019 apostrophe. That fold can't
+        be expressed in SQL LIKE (ASCII-only), so the match is a Python post-filter over
+        the same rows get_all reads — bounded by library size (title/snippet strings).
+        Falls back to the AppleScript enumeration, folded identically, on missing FDA /
+        drift. ponytail: O(all-notes) fold per search; add a LIKE prefilter for the
+        common ASCII case only if a huge library makes it show up."""
         q = query.strip()
         if not q:
             raise ValueError("notes read needs a title substring (got an empty query)")
-        like = f"%{_escape_like(q)}%"
+        needle = fold_text(q)
 
         def sqlite(conn):
             uuid = _store_uuid(conn)
-            rows = conn.execute(_SEARCH_SQL, (like, like)).fetchall()
-            return [_note_pointer(r, uuid) for r in rows][:MAX_NOTES]
+            out = []
+            for r in conn.execute(_ALL_SQL):  # r: pk, title, snippet, pinned, locked...
+                if needle in fold_text(r[1]) or needle in fold_text(r[2]):
+                    out.append(_note_pointer(r, uuid))
+                    if len(out) >= MAX_NOTES:
+                        break
+            return out
+
+        def fallback():
+            # degraded path folds the same way; _parse_all carries no snippet, so this
+            # matches on title only — exactly what `whose name contains` matched before,
+            # now diacritic/punctuation-insensitive too.
+            hits = [
+                p
+                for p in _parse_all(run_osascript(_LIST_ALL))
+                if needle in fold_text(p.summary)
+            ]
+            return hits[:MAX_NOTES]
 
         return read_via_sqlite(
             NOTESTORE,
             _FINGERPRINT,
             sqlite,
-            fallback=lambda: _parse(run_osascript(_SEARCH, q))[:MAX_NOTES],
+            fallback=fallback,
             immutable=True,  # read past Notes' lock; see module note on WAL staleness
         )
 

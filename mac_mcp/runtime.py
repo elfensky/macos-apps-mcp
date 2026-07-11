@@ -240,6 +240,47 @@ def norm_text(v) -> str | None:
     return s or None
 
 
+# Typographic glyphs Apple's stores keep but users type ASCII for (#64). Curly single/
+# double quotes + primes → ASCII ' and ", ellipsis → "...". NOT hyphens/dashes: folding
+# the dash family broke real hyphenated names elsewhere, and the acceptance requires
+# hyphenated titles unaffected — so dashes pass through fold_text untouched.
+_PUNCT_FOLD = {
+    0x2018: "'",  # ‘ left single quote
+    0x2019: "'",  # ’ right single quote (the U+2019 apostrophe — the #26 culprit)
+    0x201A: "'",  # ‚ single low-9 quote
+    0x201B: "'",  # ‛ single high-reversed-9 quote
+    0x2032: "'",  # ′ prime
+    0x201C: '"',  # “ left double quote
+    0x201D: '"',  # ” right double quote
+    0x201E: '"',  # „ double low-9 quote
+    0x201F: '"',  # ‟ double high-reversed-9 quote
+    0x2033: '"',  # ″ double prime
+    0x2026: "...",  # … horizontal ellipsis
+}
+
+
+def fold_text(v: object) -> str:
+    """Case/diacritic/smart-punctuation-insensitive key for READ-side name/title
+    matching (#64). Apply to BOTH sides of a comparison so "café" matches "cafe" and
+    "Andrei's list" (U+2019) matches "Andrei's list" (ASCII) — Apple stores typographic
+    glyphs, models type ASCII, and the mismatch silently returned nothing (epheterson
+    #26). Steps: map curly quotes/apostrophes/ellipsis → ASCII, NFKD-decompose and drop
+    combining marks (strips diacritics), then casefold. Hyphens/dashes are LEFT ALONE
+    (see _PUNCT_FOLD). Pure / native-free; composes with norm_text (#49).
+
+    READS ONLY. Write-target resolution (resolve_container) stays byte-exact by design:
+    folding a write target could collapse two real containers ("Café"/"Cafe") and
+    silently mis-home the write — the exact opposite of the AmbiguousTarget guard's
+    intent. Fold search results, never write targets.
+    """
+    s = str(v) if v is not None else ""
+    s = s.translate(_PUNCT_FOLD)
+    s = "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+    return s.casefold()
+
+
 # --- output hygiene (#52) ------------------------------------------------------------
 # Raw native text reaches the model two ways: as a one-line Pointer.summary and as an
 # opt-in hydrated body. Both are control-stripped and bounded here — in ONE place, one

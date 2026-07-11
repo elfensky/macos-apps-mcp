@@ -135,6 +135,52 @@ def test_resolve_single_match_still_works_when_others_share_no_name():
     assert _resolve_list(s, "Work").title() == "Work"
 
 
+# --- #64: read-side list-name folding (get_pointers), writes stay exact ---------------
+
+
+def _patch_read(monkeypatch, list_names):
+    """Wire get_pointers' work() to fakes: store, run_native (inline), and a predicate/
+    fetch that returns one reminder per matched list so the count reflects the match."""
+    import mac_mcp.adapters.reminders as rem
+
+    s = _fake_store(list_names)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    monkeypatch.setattr(rem, "_incomplete_due_pred", lambda s, end, cals: cals)
+    monkeypatch.setattr(
+        rem,
+        "_fetch_reminders",
+        lambda s, cals: [_fake_reminder(c.title(), f"R-{c.title()}") for c in cals],
+    )
+
+
+def test_get_pointers_list_name_is_diacritic_insensitive(monkeypatch):
+    # #64: searching reminders in the "Café" list by typing ASCII "cafe" works.
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Café", "Work"])
+    ptrs = RemindersAdapter().get_pointers("cafe")
+    assert [p.summary for p in ptrs] == ["Café"]
+
+
+def test_get_pointers_fold_collision_returns_both_as_superset(monkeypatch):
+    # a fold-collision on a READ ("Café"/"Cafe") returns reminders from BOTH lists — a
+    # search superset is safe (unlike a write, it can't mis-home anything).
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Café", "Cafe", "Work"])
+    ptrs = RemindersAdapter().get_pointers("cafe")
+    assert sorted(p.summary for p in ptrs) == ["Cafe", "Café"]
+
+
+def test_get_pointers_unknown_list_still_raises(monkeypatch):
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Work"])
+    with pytest.raises(ValueError, match="no reminder list named"):
+        RemindersAdapter().get_pointers("cafe")
+
+
 # --- verify-after-write (#49) --------------------------------------------------------
 
 

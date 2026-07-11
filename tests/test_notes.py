@@ -7,31 +7,10 @@ import pytest
 from mac_mcp.adapters.notes import (
     MAX_BODIES,
     NotesAdapter,
-    _parse,
     _parse_all,
     _parse_bodies,
 )
 from mac_mcp.contracts import Pointer
-
-
-def test_parse_id_and_title():
-    raw = "x-coredata://S/ICNote/p1\tGroceries\nx-coredata://S/ICNote/p2\tIdeas\n"
-    ptrs = _parse(raw)
-    assert len(ptrs) == 2
-    assert isinstance(ptrs[0], Pointer)
-    assert ptrs[0].id == "x-coredata://S/ICNote/p1"
-    assert ptrs[0].summary == "Groceries"
-    assert ptrs[0].deeplink == ""
-    assert ptrs[1].summary == "Ideas"
-
-
-def test_parse_untitled():
-    ptrs = _parse("x-coredata://S/ICNote/p3\t\n")
-    assert ptrs[0].summary == "(untitled note)"
-
-
-def test_parse_skips_blank():
-    assert _parse("\n   \n") == []
 
 
 def test_parse_all_id_folder_title():
@@ -208,7 +187,6 @@ import sqlite3  # noqa: E402
 from mac_mcp.adapters import notes as notes_mod  # noqa: E402
 from mac_mcp.adapters.notes import (  # noqa: E402
     _decode_note_data,
-    _escape_like,
     _note_pointer,
     _pk_from_id,
 )
@@ -247,10 +225,12 @@ def _note_proto(text: bytes) -> bytes:
     return gzip.compress(_len_field(2, document))
 
 
-def _make_notestore(path, *, uuid="STORE-UUID", bodies=None):
+def _make_notestore(path, *, uuid="STORE-UUID", bodies=None, extra_notes=()):
     """A synthetic NoteStore: one account, folders (incl. trash), a few notes, and their
     ZICNOTEDATA body blobs. `bodies` maps a note's ZNOTEDATA fk → plain text (gzipped
-    protobuf); default gives p3/p4 bodies. Only the columns the reader queries."""
+    protobuf); default gives p3/p4 bodies. `extra_notes` is [(pk, title, snippet)] live
+    notes in the Groceries folder (for fold/search cases). Only the columns the reader
+    queries."""
     if bodies is None:
         bodies = {99: "Milk, eggs, bread — the full note body", 98: "Secret full body"}
     conn = sqlite3.connect(path)
@@ -299,6 +279,12 @@ def _make_notestore(path, *, uuid="STORE-UUID", bodies=None):
         # by folder, exactly as the AppleScript reader excludes it (#60 review).
         (7, "Trashed", "in the bin", 6, 96, 0, 0, 0, None, None, None),
     ]
+    # live notes in the Groceries folder (pk 2). ZNOTEDATA must be non-null (the
+    # note-row discriminator the query filters on) — reuse pk; no body needed here.
+    rows += [
+        (pk, title, snippet, 2, pk, 0, 0, 0, None, None, None)
+        for pk, title, snippet in extra_notes
+    ]
     conn.executemany(
         f"INSERT INTO ZICCLOUDSYNCINGOBJECT VALUES ({','.join('?' * 11)})", rows
     )
@@ -346,10 +332,6 @@ def test_sqlite_all_excludes_recently_deleted(notestore):
     }
 
 
-def test_escape_like_makes_wildcards_literal():
-    assert _escape_like("50%_off\\") == "50\\%\\_off\\\\"
-
-
 def test_note_pointer_folder_null_branches():
     # folder label degrades gracefully: no account → folder name only; no folder → None.
     row = (9, "T", "snip", 0, 0, "Work", None)  # folder present, account NULL
@@ -367,9 +349,78 @@ def test_sqlite_search_matches_title_or_snippet(notestore):
     assert ids == {"x-coredata://STORE-UUID/ICNote/p4"}
 
 
+@pytest.fixture
+def fold_notestore(tmp_path, monkeypatch):
+    # titles Apple would store typographically; queries a model would type in ASCII.
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite",
+        extra_notes=[
+            (20, "Café résumé", "morning notes"),  # diacritics
+            (21, "Andrei’s list", "todo"),  # U+2019 curly apostrophe
+            (22, "Quote “hello”", "…and more…"),  # curly quotes/ellipsis
+            (23, "well-known facts", "hyphen stays"),  # hyphen must NOT be folded away
+        ],
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    return path
+
+
+def test_search_is_diacritic_insensitive(fold_notestore):
+    # ASCII query finds the accented title (#64 café == cafe).
+    ids = {p.id for p in NotesAdapter().get_pointers("cafe resume")}
+    assert "x-coredata://STORE-UUID/ICNote/p20" in ids
+
+
+def test_search_folds_smart_apostrophe(fold_notestore):
+    # ASCII apostrophe finds the U+2019 title and vice-versa.
+    assert {p.id for p in NotesAdapter().get_pointers("andrei's list")} == {
+        "x-coredata://STORE-UUID/ICNote/p21"
+    }
+    assert {p.id for p in NotesAdapter().get_pointers("Andrei’s")} == {
+        "x-coredata://STORE-UUID/ICNote/p21"
+    }
+
+
+def test_search_folds_curly_quotes_and_ellipsis(fold_notestore):
+    assert {p.id for p in NotesAdapter().get_pointers('quote "hello"')} == {
+        "x-coredata://STORE-UUID/ICNote/p22"
+    }
+    assert {p.id for p in NotesAdapter().get_pointers("and more...")} == {
+        "x-coredata://STORE-UUID/ICNote/p22"
+    }
+
+
+def test_search_leaves_hyphens_intact(fold_notestore):
+    # a hyphenated title is found by its hyphenated form (acceptance: unaffected)...
+    assert {p.id for p in NotesAdapter().get_pointers("well-known")} == {
+        "x-coredata://STORE-UUID/ICNote/p23"
+    }
+    # ...and the fold does NOT collapse "well-known" into "wellknown".
+    assert NotesAdapter().get_pointers("wellknown") == []
+
+
 def test_sqlite_search_empty_query_raises(notestore):
     with pytest.raises(ValueError, match="title substring"):
         NotesAdapter().get_pointers("  ")
+
+
+def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
+    # on drift, get_pointers falls back to the AppleScript enumeration and folds there
+    # too: an ASCII query still finds a typographically-titled note (no FDA regression).
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = (
+        "x-coredata://S/ICNote/p1\tiCloud / Notes\tCafé résumé\n"
+        "x-coredata://S/ICNote/p2\tiCloud / Notes\tOther\n"
+    )
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    ptrs = NotesAdapter().get_pointers("cafe resume")
+    assert [p.id for p in ptrs] == ["x-coredata://S/ICNote/p1"]
 
 
 def test_schema_drift_falls_back_to_applescript(tmp_path, monkeypatch):

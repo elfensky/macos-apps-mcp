@@ -17,7 +17,13 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
-from ..runtime import NativeError, NativeTimeout, clean_summary, sanitize_line
+from ..runtime import (
+    NativeError,
+    NativeTimeout,
+    clean_summary,
+    fold_text,
+    sanitize_line,
+)
 
 MAX_SHORTCUTS = 100
 MAX_OUTPUT = 280  # pointers-not-payload: cite the run + a bounded snippet of any output
@@ -86,10 +92,12 @@ def _run_pointer(handle: str, output: str, display: str | None = None) -> Pointe
 def _filter_entries(
     entries: list[tuple[str, str | None]], query: str
 ) -> list[tuple[str, str | None]]:
-    # filter by the NAME substring (not the UUID — the id is a machine handle).
-    q = query.strip().lower()
+    # filter by the NAME substring (not the UUID — the id is a machine handle). Folded
+    # (#64) so "cafe" finds a "Café" shortcut and ASCII "'" finds a U+2019 name; a read,
+    # so a fold-superset is fine (run_shortcut still dispatches by the exact handle).
+    q = fold_text(query.strip())
     if q:
-        entries = [e for e in entries if q in e[0].lower()]
+        entries = [e for e in entries if q in fold_text(e[0])]
     return entries[:MAX_SHORTCUTS]
 
 

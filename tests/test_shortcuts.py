@@ -86,6 +86,13 @@ def test_filter_substring_case_insensitive():
     assert _filter_entries(entries, "track") == [("Track water", "u2")]
 
 
+def test_filter_folds_diacritics_and_smart_punctuation():
+    # #64: an ASCII query finds a diacritic/smart-punctuation shortcut name.
+    entries = [("Café timer", "u1"), ("Andrei’s macro", "u2"), ("Plain", "u3")]
+    assert _filter_entries(entries, "cafe") == [("Café timer", "u1")]
+    assert _filter_entries(entries, "andrei's") == [("Andrei’s macro", "u2")]
+
+
 def test_filter_empty_returns_all():
     assert _filter_entries([("a", "u"), ("b", None)], "  ") == [("a", "u"), ("b", None)]
 
