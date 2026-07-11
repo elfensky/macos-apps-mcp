@@ -413,7 +413,8 @@ class MailAdapter:
             "created": True,
             "subject": subject or "",
             "mailbox": "Drafts",
-            "note": "unsent drafts have no stable id; find it in Drafts",
+            "note": "opened in a Mail compose window for your review; save it to keep "
+            "it in Drafts. Unsent drafts have no stable id.",
         }
 
     def reply(
