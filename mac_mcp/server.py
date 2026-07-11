@@ -258,6 +258,17 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     return _mail.create_draft(to, subject, body)
 
 
+@_additive_tool
+def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> dict:
+    """Reply to an inbox message, opening a threaded draft for review (Automation).
+
+    NEVER sends. message_id: the RFC822 id from a mail read. Mail sets the threading
+    headers natively; include_quote appends the quoted original. Returns a locator
+    dict (unsent drafts have no stable id).
+    """
+    return _mail.reply(message_id, reply_body, include_quote)
+
+
 @_read_tool
 def notes(title: str) -> list[dict]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast

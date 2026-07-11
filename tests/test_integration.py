@@ -1213,3 +1213,45 @@ def test_list_attachments_finds_draft_attachment(created):
             "end run",
             subj,
         )
+
+
+@pytest.mark.integration
+def test_mail_reply_opens_threaded_draft_and_never_sends():
+    """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
+    message) with our body; delete it; confirm nothing sent. Threading headers can
+    only be proved post-send — see the manual step in the PR's 'needs manual
+    verification'."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    # newest inbox message id
+    mid = run_osascript(
+        'tell application "Mail" to return message id of '
+        "(item 1 of (messages of inbox))"
+    ).strip()
+    if not mid:
+        pytest.skip("no messages in this Mac's inbox")
+    before = int(
+        run_osascript(
+            'tell application "Mail" to return (count of outgoing messages) as text'
+        )
+    )
+    MailAdapter().reply(mid, "mac-mcp itest reply — do not send", include_quote=True)
+    try:
+        after = int(
+            run_osascript(
+                'tell application "Mail" to return (count of outgoing messages) as text'
+            )
+        )
+        assert after == before + 1  # a draft was created, not sent
+    finally:
+        run_osascript(
+            "on run argv\n"
+            '  tell application "Mail"\n'
+            "    repeat with m in outgoing messages\n"
+            "      if content of m contains (item 1 of argv) then delete m\n"
+            "    end repeat\n"
+            "  end tell\n"
+            "end run",
+            "mac-mcp itest reply",
+        )

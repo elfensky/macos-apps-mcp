@@ -338,3 +338,204 @@ def test_list_attachments_unknown_mailbox_raises():
 
     with pytest.raises(ValueError, match="unknown system mailbox"):
         MailAdapter().list_attachments("nope", "x")
+
+
+# --- reply (#42/#46) ------------------------------------------------------------------
+
+from mac_mcp.adapters.mail import _ORIGINAL, _REPLY, _build_quote  # noqa: E402
+
+
+def _is_reply_script(script: str) -> bool:
+    # _REPLY is the only one of the two templates that invokes the native reply verb;
+    # _ORIGINAL only fetches sender/date/content. Distinguish on that, not on "reply"
+    # substring in a comment (both docstrings/templates mention "reply" in prose).
+    return "reply (item 1 of matches)" in script
+
+
+def test_build_quote_prefixes_and_headers():
+    q = _build_quote("Jane <j@x.com>", "2026-07-01", "line one\nline two")
+    assert "On 2026-07-01, Jane <j@x.com> wrote:" in q
+    assert "> line one" in q and "> line two" in q
+
+
+def test_reply_quote_truncates_huge_original(monkeypatch):
+    # HIGH fix: _build_quote must TRUNCATE a huge original, not crash the whole reply
+    # (clean_body's default hard=BODY_HARD_MAX would raise OutputOverflow here).
+    import mac_mcp.adapters.mail as mail
+    from mac_mcp.runtime import BODY_HARD_MAX
+
+    huge = "z" * (BODY_HARD_MAX + 100)
+
+    def fake(script, *args):
+        if _is_reply_script(script):
+            return ""
+        # _ORIGINAL: sender, date, then a body over the hard cap
+        return f"Jane <j@x.com>\x1f2026-07-01\x1f{huge}"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().reply("<abc@x>", "thanks", include_quote=True)
+    assert out["created"] is True
+
+
+# --- _ORIGINAL sender/date framing hazard (#42/#46 review) ---------------------------
+
+
+def test_original_strips_framing_from_sender_and_date():
+    # MEDIUM fix: _ORIGINAL must apply the SAME stripFraming handler _ATTACHMENTS uses
+    # to the sender and date fields, so a display name containing a literal US/RS char
+    # can't desync reply()'s raw.partition("\x1f") parsing.
+    assert "my stripFraming(snd)" in _ORIGINAL
+    assert "my stripFraming(dt)" in _ORIGINAL
+    assert "on stripFraming" in _ORIGINAL
+
+
+def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
+    # Behavioral defense-in-depth: this mock bypasses the AppleScript stripFraming
+    # entirely (run_osascript is replaced outright), so it specifically tests the
+    # Python-side sanitize_line guard. The stray control char is BEL (\x07), not the
+    # \x1f field separator itself — a literal \x1f in a field would desync the
+    # partition-based parsing before sanitize_line ever runs, which is the scenario
+    # stripFraming (tested above) guards against; sanitize_line's job is catching
+    # OTHER control chars stripFraming doesn't touch.
+    import mac_mcp.adapters.mail as mail
+
+    bodies = []
+
+    def fake(script, *args):
+        if _is_reply_script(script):
+            with open(args[1], encoding="utf-8") as f:
+                bodies.append(f.read())
+            return ""
+        # sender carries a stray control char the AppleScript strip doesn't remove
+        return "Jane\x07 <j@x.com>\x1f2026-07-01\x1foriginal body"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    header_line = next(
+        line for line in bodies[0].splitlines() if line.startswith("On ")
+    )
+    assert "\x07" not in header_line
+
+
+def test_reply_composes_body_and_targets_id(monkeypatch):
+    import mac_mcp.adapters.mail as mail
+
+    calls = []
+    bodies = []
+
+    def fake(script, *args):
+        calls.append((script, args))
+        if not _is_reply_script(script):
+            # _ORIGINAL: return a US-framed sender/date/body triple
+            return "Jane <j@x.com>\x1f2026-07-01\x1foriginal body"
+        # _REPLY: the tempfile is deleted right after this call returns, so read it
+        # now (while it still exists) rather than after reply() has returned.
+        with open(args[1], encoding="utf-8") as f:
+            bodies.append(f.read())
+        return ""
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    assert out["created"] is True
+    assert out["mailbox"] == "Drafts"
+    # both scripts ran: _ORIGINAL then _REPLY
+    assert [c[0] is _ORIGINAL for c in calls] == [True, False]
+    assert calls[1][0] is _REPLY
+    reply_call = calls[1]
+    assert reply_call[1][0] == "abc@x"  # brackets stripped, bare id via argv
+    body_on_disk = bodies[0]
+    assert "my reply" in body_on_disk
+    assert "> original body" in body_on_disk
+    assert "On 2026-07-01, Jane <j@x.com> wrote:" in body_on_disk
+
+
+def test_reply_without_quote_omits_original(monkeypatch):
+    import mac_mcp.adapters.mail as mail
+
+    bodies = []
+
+    def fake(script, *args):
+        if _is_reply_script(script):
+            with open(args[1], encoding="utf-8") as f:
+                bodies.append(f.read())
+            return ""
+        # _ORIGINAL must NOT be called when include_quote=False
+        raise AssertionError("_ORIGINAL should not run when include_quote=False")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    mail.MailAdapter().reply("<abc@x>", "just this", include_quote=False)
+    assert bodies and bodies[0] == "just this"
+    assert ">" not in bodies[0]
+
+
+def test_reply_original_missing_value_skips_quote(monkeypatch):
+    # AppleScript coerces an unset property to the "missing value" literal — same guard
+    # as get_body (#62): must not surface it as sender/date/body, and must not blow up
+    # the reply — the quote is silently skipped and the reply still goes through.
+    import mac_mcp.adapters.mail as mail
+
+    bodies = []
+
+    def fake(script, *args):
+        if _is_reply_script(script):
+            with open(args[1], encoding="utf-8") as f:
+                bodies.append(f.read())
+            return ""
+        return "missing value"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    assert out["created"] is True
+    assert bodies[0] == "my reply"  # no quote appended
+
+
+def test_reply_cleans_up_tempfile(monkeypatch):
+    import mac_mcp.adapters.mail as mail
+
+    paths = []
+
+    def fake(script, *args):
+        if _is_reply_script(script):
+            paths.append(args[1])
+            return ""
+        return ""
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    mail.MailAdapter().reply("<abc@x>", "body", include_quote=False)
+    assert paths and not os.path.exists(paths[0])
+
+
+def test_reply_empty_id_raises():
+    import pytest
+
+    from mac_mcp.adapters.mail import MailAdapter
+
+    with pytest.raises(ValueError, match="message"):
+        MailAdapter().reply("", "body")
+
+
+def test_reply_empty_body_raises():
+    import pytest
+
+    from mac_mcp.adapters.mail import MailAdapter
+
+    with pytest.raises(ValueError, match="reply_body"):
+        MailAdapter().reply("<abc@x>", "  ")
+
+
+def test_reply_never_sends():
+    # the SAFETY invariant: neither template contains a `send` verb (as opposed to
+    # `sender`, which legitimately appears in _ORIGINAL) — a reply can only open a
+    # draft window for the human, never send on its own.
+    assert not re.search(r"\bsend\b", _ORIGINAL.lower())
+    assert not re.search(r"\bsend\b", _REPLY.lower())
+    assert "reply (" in _REPLY  # uses Mail's native reply verb (real threading)
+    assert "opening window yes" in _REPLY  # opens for human review
+
+
+def test_reply_cleanup_on_failure_is_in_script():
+    # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
+    # deleted in the error path, structurally (not just present as loose words).
+    assert re.search(r"on error errMsg\s+delete r\s+error errMsg", _REPLY), (
+        "the on-error handler must delete the partial reply, then re-raise"
+    )

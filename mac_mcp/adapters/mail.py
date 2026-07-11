@@ -21,7 +21,13 @@ import tempfile
 from urllib.parse import quote
 
 from ..contracts import Pointer
-from ..runtime import NativeError, clean_body, clean_summary, run_osascript
+from ..runtime import (
+    NativeError,
+    clean_body,
+    clean_summary,
+    run_osascript,
+    sanitize_line,
+)
 
 MAX_MAILS = 25
 
@@ -130,6 +136,79 @@ _CREATE_DRAFT = """on run argv
   end tell
   end timeout
 end run"""
+
+
+# reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
+# so Python can build the quoted block deterministically (Mail's auto-quote is NOT
+# visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
+# sender/date are stripped of raw framing bytes (stripFraming, the same handler
+# _ATTACHMENTS uses) before being joined, so a sender display name that happens to
+# contain a literal US/RS char can't desync reply()'s raw.partition("\x1f") parsing.
+# The body `c` is the LAST field and needs no stripping for parse-safety (clean_body
+# strips control chars from it in _build_quote).
+_ORIGINAL = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
+  set mid to item 1 of argv
+  set us to character id 31
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of inbox whose message id is mid)
+    if (count of matches) is 0 then error "no inbox message with that message id"
+    set m to item 1 of matches
+    set snd to sender of m
+    set dt to (date received of m) as text
+    set c to content of m
+    if c is missing value then set c to ""
+    return (my stripFraming(snd)) & us & (my stripFraming(dt)) & us & c
+  end tell
+  end timeout
+end run"""
+
+# reply builds a real reply via Mail's NATIVE reply verb (Mail owns In-Reply-To/
+# References threading — the only mechanism that threads; make-new-outgoing can't set
+# headers, spike 2026-07-11). The body (reply text + our quote) is set on the returned
+# outgoing message — keystroke-free (#46; no .eml). A window opens for the HUMAN to
+# review/send. NEVER sends. Atomic (#44): delete the draft on any post-creation
+# failure. body via tempfile as «class utf8»; message-id via argv.
+_REPLY = """on run argv
+  set mid to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of inbox whose message id is mid)
+    if (count of matches) is 0 then error "no inbox message with that message id"
+    set r to reply (item 1 of matches) opening window yes
+    try
+      set content of r to bodyText
+    on error errMsg
+      delete r
+      error errMsg
+    end try
+  end tell
+  end timeout
+end run"""
+
+
+def _build_quote(sender: str, date_str: str, original_body: str) -> str:
+    """Standard reply quote: `On <date>, <sender> wrote:` then the original body, each
+    line `> `-prefixed. Bounded via clean_body (hard=None: always truncate, never raise
+    — the quote is supplementary text, not the primary deliverable, so a huge original
+    must not abort the whole reply)."""
+    bounded = clean_body(original_body, hard=None)
+    quoted = "\n".join("> " + line for line in bounded.splitlines())
+    return f"On {date_str}, {sender} wrote:\n{quoted}"
 
 
 # list_attachments (#45): attachments of messages in a mailbox matching a subject query.
@@ -335,6 +414,49 @@ class MailAdapter:
             "subject": subject or "",
             "mailbox": "Drafts",
             "note": "unsent drafts have no stable id; find it in Drafts",
+        }
+
+    def reply(
+        self, message_id: str, reply_body: str, include_quote: bool = True
+    ) -> dict:
+        """Reply to an inbox message by its RFC822 message-id: opens a threaded draft
+        for the human to review/send — NEVER sends. Uses Mail's native reply verb so
+        In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
+        include_quote appends `On <date>, <sender> wrote:` + the `> `-quoted original.
+        Keystroke-free (#46); atomic (#44). Returns the same locator dict as
+        create_draft (an unsent draft has no stable id)."""
+        mid = message_id.strip().lstrip("<").rstrip(">")
+        if not mid:
+            raise ValueError("reply needs the original message's id")
+        if not reply_body.strip():
+            raise ValueError("reply needs a non-empty reply_body")
+        body = reply_body
+        if include_quote:
+            raw = run_osascript(_ORIGINAL, mid)
+            if raw.strip() and raw.strip() != _MISSING_VALUE:
+                sender, _, rest = raw.partition("\x1f")
+                date_str, _, original = rest.partition("\x1f")
+                # defense-in-depth (#42/#46 review): the AppleScript already strips raw
+                # framing bytes from sender/date, but sanitize_line ALSO strips any
+                # other control chars a display name/date could carry, keeping the
+                # quote header clean even if the AppleScript-side strip is bypassed
+                # (e.g. a mocked _ORIGINAL in tests).
+                sender = sanitize_line(sender)
+                date_str = sanitize_line(date_str)
+                body = reply_body + "\n\n" + _build_quote(sender, date_str, original)
+        fd, path = tempfile.mkstemp(prefix="mac-mcp-reply-", suffix=".txt")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(body)
+            run_osascript(_REPLY, mid, path)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        return {
+            "created": True,
+            "subject": "(reply)",
+            "mailbox": "Drafts",
+            "note": "reply draft opened for review; unsent drafts have no stable id",
         }
 
     def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:
