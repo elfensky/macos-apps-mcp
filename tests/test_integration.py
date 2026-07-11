@@ -1075,3 +1075,23 @@ def test_note_body_decoder_matches_applescript_real_store():
         conn.close()
     if checked == 0:
         pytest.skip("no note both decoded (sqlite) and hydrated (AppleScript)")
+
+
+# --- Mail id-first reads (#61) — needs Automation access -----------------------------
+
+
+@pytest.mark.integration
+def test_mail_reads_return_id_triple_real_inbox():
+    """Real inbox: every read returns the stable RFC822 message-id and a well-formed
+    message:// deeplink. Needs Automation access for Mail; skips if no match. (Actually
+    opening the deeplink to confirm it lands on the right message is a manual step.)"""
+    import re as _re
+
+    from mac_mcp.adapters.mail import MailAdapter
+
+    ptrs = MailAdapter().get_pointers("a")  # 'a' matches most subjects/senders
+    if not ptrs:
+        pytest.skip("no matching mail in this inbox")
+    for p in ptrs:
+        assert p.id  # the RFC822 message-id (stable citation)
+        assert _re.fullmatch(r"message://%3C.+%3E", p.deeplink), p.deeplink

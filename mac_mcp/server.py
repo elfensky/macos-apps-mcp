@@ -220,10 +220,11 @@ def contacts(name: str) -> list[dict]:
 
 
 @_read_tool
-def mail(subject: str) -> list[dict]:
-    """Search the Mail inbox by subject substring. Pointers (id + subject/sender).
+def mail(query: str) -> list[dict]:
+    """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
+    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL.
     Read-only; needs Automation access for Mail. Bodies are never fetched."""
-    return [_emit(p) for p in _mail.get_pointers(subject)]
+    return [_emit(p) for p in _mail.get_pointers(query)]
 
 
 @_read_tool
