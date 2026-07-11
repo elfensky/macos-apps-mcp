@@ -342,8 +342,9 @@ def create_reminder(
 ) -> dict:
     """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
     first; `priority` 0–9; `recurrence` an RRULE.
-    Side effect (creates); needs EventKit (Reminders) access. Target a list by name via
-    `list_name` (from reminder_lists); an ambiguous name is refused, not guessed."""
+    Side effect (creates); needs EventKit (Reminders) access. Target a list via
+    `list_name` — a list name OR a list Pointer id (from reminder_lists). An ambiguous
+    name is refused (with the candidate ids listed), never guessed."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -406,8 +407,9 @@ def create_event(
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
     first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
     with a UTC offset is rejected.
-    Side effect (creates); needs EventKit (Calendar) access. Target a calendar by name
-    via `calendar` (from calendars); an ambiguous name is refused, not guessed."""
+    Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
+    `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
+    name is refused (with the candidate ids listed), never guessed."""
     parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,

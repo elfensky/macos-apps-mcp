@@ -39,6 +39,7 @@ from mac_mcp.runtime import (
     persisted_recurrence_signature,
     recurrence_signature,
     require_batch_within,
+    resolve_container,
     rrule_text,
     run_native,
     run_native_async,
@@ -471,6 +472,37 @@ def test_batch_too_large_kind():
 def test_ambiguous_target_kind():
     # the machine code doctor/agents branch on — pin the exact value, not just distinct.
     assert AmbiguousTarget.kind == "ambiguous_target"
+
+
+# --- resolve_container (#55) — pure, plain-tuple tests -------------------------------
+
+
+def _items():
+    # (id, name, value); "Home" is duplicated (ids C0, C2) to exercise ambiguity.
+    return [("C0", "Home", "home-a"), ("C1", "Work", "work"), ("C2", "Home", "home-b")]
+
+
+def test_resolve_container_by_unique_name():
+    assert resolve_container(_items(), "Work", noun="calendar") == "work"
+
+
+def test_resolve_container_by_id_wins_over_name():
+    # id-first: even a duplicate-named container is reachable by its unambiguous id.
+    assert resolve_container(_items(), "C2", noun="calendar") == "home-b"
+
+
+def test_resolve_container_missing_raises_valueerror():
+    with pytest.raises(ValueError, match="no calendar named 'Nope'"):
+        resolve_container(_items(), "Nope", noun="calendar")
+
+
+def test_resolve_container_ambiguous_lists_all_candidate_ids():
+    with pytest.raises(AmbiguousTarget) as ei:
+        resolve_container(_items(), "Home", noun="reminder list")
+    msg = str(ei.value)
+    assert "2 reminder lists are named 'Home'" in msg
+    assert "C0" in msg and "C2" in msg  # both candidates listed for recovery
+    assert "C1" not in msg  # the non-matching container is not listed
 
 
 # --- lifecycle hygiene (#56) ---------------------------------------------------------

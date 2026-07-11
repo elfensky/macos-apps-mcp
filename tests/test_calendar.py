@@ -145,7 +145,12 @@ def test_all_day_bounds_drops_tzinfo_so_mixed_naive_aware_cannot_crash():
 
 
 def _fake_store(cal_names, default="Home"):
-    cals = [SimpleNamespace(title=lambda n=n: n) for n in cal_names]
+    # each calendar gets a stable, distinct id (C0, C1, …) so id-first resolution (#55)
+    # and candidate-listing on ambiguity work even when names collide.
+    cals = [
+        SimpleNamespace(calendarIdentifier=lambda i=i: f"C{i}", title=lambda n=n: n)
+        for i, n in enumerate(cal_names)
+    ]
     return SimpleNamespace(
         calendarsForEntityType_=lambda _e: cals,
         defaultCalendarForNewEvents=lambda: SimpleNamespace(title=lambda: default),
@@ -176,6 +181,22 @@ def test_resolve_ambiguous_calendar_refuses_instead_of_first_match():
         _resolve_calendar(s, "Work")
 
 
+def test_resolve_ambiguous_calendar_lists_candidate_ids():
+    # #55 DECISION: the refusal LISTS the candidate ids so the caller can recover by
+    # re-issuing the write targeting one (not a dead-end "rename them").
+    s = _fake_store(["Work", "Personal", "Work"])  # "Work" at index 0 and 2 → C0, C2
+    with pytest.raises(AmbiguousTarget) as ei:
+        _resolve_calendar(s, "Work")
+    assert "C0" in str(ei.value) and "C2" in str(ei.value)
+
+
+def test_resolve_calendar_by_pointer_id():
+    # #55 DECISION: a write may target a calendar by its Pointer.id directly — used
+    # as-is, so a duplicate-named calendar is still unambiguously reachable.
+    s = _fake_store(["Work", "Personal", "Work"])
+    assert _resolve_calendar(s, "C2") is s.calendarsForEntityType_(None)[2]
+
+
 def test_resolve_single_calendar_among_many_still_works():
     # the rule fires only on DUPLICATES — a unique name at a non-zero index still
     # resolves (guards against a "return the first calendar" regression).
@@ -194,6 +215,7 @@ def _fake_persisted_event(
     location=None,
     notes=None,
     cal_title="Work",
+    cal_id="C-Work",  # verify keys on the identifier now, not the title (#55 review)
     rule=None,
 ):
     return SimpleNamespace(
@@ -203,7 +225,9 @@ def _fake_persisted_event(
         isAllDay=lambda: all_day,
         location=lambda: location,
         notes=lambda: notes,
-        calendar=lambda: SimpleNamespace(title=lambda: cal_title),
+        calendar=lambda: SimpleNamespace(
+            title=lambda: cal_title, calendarIdentifier=lambda: cal_id
+        ),
         recurrenceRules=lambda: [rule] if rule is not None else None,
     )
 
@@ -215,7 +239,7 @@ def test_verify_event_passes_on_timed_match():
         end=datetime(2026, 6, 24, 9, 15),
         calendar="Work",
     )
-    _verify_event(_fake_persisted_event(), "E-1|x", data, "Work")  # no raise
+    _verify_event(_fake_persisted_event(), "E-1|x", data, "C-Work")  # no raise
 
 
 def test_verify_event_dropped_title_raises():
@@ -226,7 +250,7 @@ def test_verify_event_dropped_title_raises():
     )
     fresh = _fake_persisted_event(title="Untitled")
     with pytest.raises(VerificationFailed, match="title"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_dropped_notes_raises():
@@ -241,7 +265,7 @@ def test_verify_event_dropped_notes_raises():
     )
     fresh = _fake_persisted_event(location="Room 4")  # notes silently dropped
     with pytest.raises(VerificationFailed, match="notes"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_wrong_calendar_raises():
@@ -251,9 +275,26 @@ def test_verify_event_wrong_calendar_raises():
         end=datetime(2026, 6, 24, 9, 15),
         calendar="Work",
     )
-    fresh = _fake_persisted_event(cal_title="Personal")  # landed on wrong calendar
+    # landed on a differently-identified calendar (different name too)
+    fresh = _fake_persisted_event(cal_title="Personal", cal_id="C-Personal")
     with pytest.raises(VerificationFailed, match="calendar"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
+
+
+def test_verify_event_same_name_wrong_id_raises():
+    # #55 review: verify keys on the calendar IDENTIFIER, not its name. A re-home to a
+    # DIFFERENT calendar that happens to SHARE the name (the duplicate-named case that
+    # id-targeting exists to serve) must still fail loudly — a title-only compare would
+    # falsely pass here, silently confirming a write to the wrong container.
+    data = CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+    # targeted calendar id "C2"; store re-homed it to "C0" — SAME name "Work"
+    fresh = _fake_persisted_event(cal_title="Work", cal_id="C0")
+    with pytest.raises(VerificationFailed, match="calendar"):
+        _verify_event(fresh, "E-1|x", data, "C2")
 
 
 def test_verify_event_timed_end_drift_raises():
@@ -264,7 +305,7 @@ def test_verify_event_timed_end_drift_raises():
     )
     fresh = _fake_persisted_event(end=datetime(2026, 6, 24, 9, 30))  # end changed
     with pytest.raises(VerificationFailed, match="end"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_all_day_ignores_end_representation():
@@ -282,7 +323,7 @@ def test_verify_event_all_day_ignores_end_representation():
         end=datetime(2026, 7, 2),  # EventKit's exclusive-end representation
         all_day=True,
     )
-    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+    _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
 def test_verify_event_all_day_wrong_start_date_raises():
@@ -299,7 +340,7 @@ def test_verify_event_all_day_wrong_start_date_raises():
         all_day=True,
     )
     with pytest.raises(VerificationFailed, match="start_date"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_dropped_recurrence_raises():
@@ -311,7 +352,7 @@ def test_verify_event_dropped_recurrence_raises():
     )
     fresh = _fake_persisted_event()  # rule=None → the series rule was dropped
     with pytest.raises(VerificationFailed, match="recurs"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_wrong_frequency_raises():
@@ -327,7 +368,7 @@ def test_verify_event_wrong_frequency_raises():
         rule=fake_rule(freq=2)
     )  # persisted MONTHLY, not weekly
     with pytest.raises(VerificationFailed, match="recurs"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 def test_verify_event_matching_recurrence_passes():
@@ -338,7 +379,7 @@ def test_verify_event_matching_recurrence_passes():
         recurrence=Recurrence(frequency="weekly", interval=2),
     )
     fresh = _fake_persisted_event(rule=fake_rule(freq=1, interval=2))  # weekly/2 match
-    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+    _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
 def test_verify_event_nfd_title_matches_nfc_persisted():
@@ -350,7 +391,7 @@ def test_verify_event_nfd_title_matches_nfc_persisted():
         end=datetime(2026, 6, 24, 9, 15),
     )
     fresh = _fake_persisted_event(title="Caf\u00e9")  # NFC precomposed
-    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+    _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
 def test_verify_event_crlf_notes_match_lf_persisted():
@@ -362,7 +403,7 @@ def test_verify_event_crlf_notes_match_lf_persisted():
         notes="line one\r\nline two",
     )
     fresh = _fake_persisted_event(notes="line one\nline two")
-    _verify_event(fresh, "E-1|x", data, "Work")  # no raise
+    _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
 def test_verify_event_genuinely_different_notes_raise():
@@ -375,7 +416,7 @@ def test_verify_event_genuinely_different_notes_raise():
     )
     fresh = _fake_persisted_event(notes="agenda v1")
     with pytest.raises(VerificationFailed, match="notes"):
-        _verify_event(fresh, "E-1|x", data, "Work")
+        _verify_event(fresh, "E-1|x", data, "C-Work")
 
 
 # --- explicit span on recurring update/delete (#51) ----------------------------------

@@ -12,7 +12,6 @@ import EventKit as EK
 
 from ..contracts import Pointer, Recurrence, ReminderData
 from ..runtime import (
-    AmbiguousTarget,
     RecurrenceRequired,
     VerificationFailed,
     WriteRefused,
@@ -21,6 +20,7 @@ from ..runtime import (
     norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    resolve_container,
     rrule_text,
     run_native,
     run_native_async,
@@ -63,13 +63,14 @@ def _reminder_pointer(item) -> Pointer:
 def _list_pointer(cal) -> Pointer:
     # A reminder list (container) has no verified open-in-app URL; id + name (summary)
     # are what the projection resolves a write target against. The title is kept RAW
-    # (NOT routed through clean_summary, unlike item summaries): _resolve_list matches
-    # `c.title() == name` exactly with no id fallback, so the summary IS the write key —
-    # sanitizing it (e.g. trimming a trailing space, collapsing a double space) would
-    # desync the displayed name from the resolvable one and make the list untargetable
-    # (#52 review). Container names are short user-typed text, so the hygiene risk a
-    # sanitized summary would guard is negligible here. ponytail: deeplink empty by
-    # design — set a working list URL here if on-device testing finds one.
+    # (NOT routed through clean_summary, unlike item summaries): the resolver still
+    # matches `c.title() == name` exactly for the name path (a write may target the id
+    # or the name, #55), so the summary IS a write key — sanitizing it (e.g. trimming a
+    # trailing space, collapsing a double space) would desync the displayed name from
+    # the resolvable one and make the list name-untargetable (#52 review). Container
+    # names are short user-typed text, so the hygiene risk a sanitized summary would
+    # guard is negligible here. ponytail: deeplink empty by design — set a working list
+    # URL here if on-device testing finds one.
     return Pointer(id=cal.calendarIdentifier(), summary=cal.title(), deeplink="")
 
 
@@ -102,25 +103,16 @@ def _incomplete_due_pred(s, end: datetime | None, cals):
 
 
 def _resolve_list(s, name: str | None):
-    # Disambiguation rule (#55): a write never auto-picks among same-named lists.
-    # Collect ALL exact-title matches; 0 → not found, 1 → the target, >1 →
-    # AmbiguousTarget (the mcp-ical #16 silent-mis-target bug, refused loudly instead).
+    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
+    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
+    # logic — including listing candidate ids — lives in runtime.resolve_container.
     if name is None:
         return s.defaultCalendarForNewReminders()
-    matches = [
-        c
+    items = [
+        (c.calendarIdentifier(), c.title(), c)
         for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
-        if c.title() == name
     ]
-    if not matches:
-        raise ValueError(f"no reminder list named {name!r}")
-    if len(matches) > 1:
-        raise AmbiguousTarget(
-            f"{len(matches)} reminder lists are named {name!r} — refusing to guess "
-            "which one for a write (mac-mcp never auto-picks an ambiguous target). "
-            "Rename one so the list names are unique, then retry."
-        )
-    return matches[0]
+    return resolve_container(items, name, noun="reminder list")
 
 
 def _apply_reminder(s, r, data: ReminderData) -> None:
@@ -154,10 +146,15 @@ def _expected_due_tuple(dt: datetime | None) -> tuple | None:
     return None if dt is None else (dt.year, dt.month, dt.day, dt.hour, dt.minute)
 
 
-def _verify_reminder(fresh, ident: str, data: ReminderData, list_title: str) -> None:
+def _verify_reminder(fresh, ident: str, data: ReminderData, list_id: str) -> None:
     """Re-fetch-by-id verify (#49): fail loudly if the saved reminder can't be re-read
     or any requested field didn't persist. `fresh` is a fresh fetch by the id we return;
-    `list_title` is the requested list (the calendar _apply_reminder set)."""
+    `list_id` is the requested list's identifier (of the list _apply_reminder set).
+
+    The list is verified by IDENTIFIER, not title (#55 review): with id-targeting a
+    write can name a SPECIFIC one of several same-named lists, so a title compare would
+    falsely pass if the store re-homed the reminder to a different list sharing the name
+    — exactly the re-home this #49 guard exists to catch."""
     if fresh is None:
         raise VerificationFailed(
             f"reminder {ident!r} could not be re-fetched — the write did not persist "
@@ -170,7 +167,7 @@ def _verify_reminder(fresh, ident: str, data: ReminderData, list_title: str) -> 
         "priority": data.priority,
         "due": _expected_due_tuple(data.due),
         "start": _expected_due_tuple(data.start),
-        "list": norm_text(list_title),
+        "list": list_id,  # opaque UUID handle — compared raw, not norm_text
         # full-replace: None clears the rule, so verify the exact cadence both ways
         "recurs": recurrence_signature(data.recurrence),
     }
@@ -180,7 +177,7 @@ def _verify_reminder(fresh, ident: str, data: ReminderData, list_title: str) -> 
         "priority": fresh.priority(),
         "due": _due_tuple(fresh.dueDateComponents()),
         "start": _due_tuple(fresh.startDateComponents()),
-        "list": norm_text(fresh.calendar().title()),
+        "list": fresh.calendar().calendarIdentifier(),
         "recurs": persisted_recurrence_signature(fresh.recurrenceRules()),
     }
     verify_persisted("reminder", expected, actual)
@@ -249,9 +246,10 @@ class RemindersAdapter:
             r = EK.EKReminder.reminderWithEventStore_(s)
             _apply_reminder(s, r, data)
             # Read the EXPECTED list before the save — the commit may re-home the
-            # object, and post-save it would tautologically equal the actual.
+            # object, and post-save it would tautologically equal the actual. Capture
+            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
             cal = r.calendar()
-            list_title = cal.title() if cal is not None else None
+            list_id = cal.calendarIdentifier() if cal is not None else None
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise WriteRefused(
@@ -268,7 +266,7 @@ class RemindersAdapter:
             # pulls current DB state so the diff is against what actually persisted.
             if fresh is not None and not fresh.refresh():
                 fresh = None  # gone from the DB between save and verify
-            _verify_reminder(fresh, ident, data, list_title)
+            _verify_reminder(fresh, ident, data, list_id)
             return _reminder_pointer(fresh)
 
         return run_native(work)
@@ -291,9 +289,10 @@ class RemindersAdapter:
                 )
             _apply_reminder(s, r, data)
             # Read the EXPECTED list before the save — the commit may re-home the
-            # object, and post-save it would tautologically equal the actual.
+            # object, and post-save it would tautologically equal the actual. Capture
+            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
             cal = r.calendar()
-            list_title = cal.title() if cal is not None else None
+            list_id = cal.calendarIdentifier() if cal is not None else None
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise WriteRefused(
@@ -310,7 +309,7 @@ class RemindersAdapter:
             # pulls current DB state so the diff is against what actually persisted.
             if fresh is not None and not fresh.refresh():
                 fresh = None  # gone from the DB between save and verify
-            _verify_reminder(fresh, ident_after, data, list_title)
+            _verify_reminder(fresh, ident_after, data, list_id)
             return _reminder_pointer(fresh)
 
         return run_native(work)

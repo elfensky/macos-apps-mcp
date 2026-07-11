@@ -159,6 +159,38 @@ class AmbiguousTarget(NativeError):
     kind = "ambiguous_target"
 
 
+def resolve_container(items, target: str, *, noun: str):
+    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name (#55).
+
+    The disambiguation rule made concrete: a container-addressed write
+    (``create_event(calendar)``, ``create_reminder(list_name)``) accepts EITHER a
+    ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
+    name. An id wins (it is unambiguous by construction); a name matching >1 container
+    raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
+    the write targeting one of them rather than mac-mcp guessing (mcp-ical #16 silent
+    mis-target). id-first: a calendar/list identifier is a UUID, so it can't collide
+    with a human-typed name — the precedence is safe.
+
+    ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
+    container object) is returned. 0 name matches → ``ValueError``; >1 →
+    ``AmbiguousTarget``. Pure (no native imports) so it unit-tests with plain tuples.
+    """
+    for cid, _name, value in items:
+        if cid == target:  # id-first: an unambiguous handle is used directly
+            return value
+    matches = [(cid, value) for cid, name, value in items if name == target]
+    if not matches:
+        raise ValueError(f"no {noun} named {target!r}")
+    if len(matches) > 1:
+        ids = ", ".join(cid for cid, _ in matches)
+        raise AmbiguousTarget(
+            f"{len(matches)} {noun}s are named {target!r} — mac-mcp never auto-picks "
+            "an ambiguous write target. Re-issue the write targeting one of these ids "
+            f"instead: {ids} (or rename them so the names are unique)."
+        )
+    return matches[0][1]
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:
