@@ -318,7 +318,8 @@ def message_body(id: str) -> str:
 
 @_read_tool
 def shortcuts(name: str = "") -> list[dict]:
-    """List/search Shortcuts by name (empty lists all). Pointers (name).
+    """List/search Shortcuts by name (empty lists all). Pointers: id = the shortcut's
+    stable UUID (survives renames), summary = name, deeplink = shortcuts://run-shortcut.
     Read-only; uses the Shortcuts CLI (no TCC prompt). See run_shortcut to invoke."""
     return [_emit(p) for p in _shortcuts.get_pointers(name)]
 
@@ -552,9 +553,10 @@ def create_contact(
 
 @_write_tool
 def run_shortcut(name: str, input_text: str | None = None) -> dict:
-    """Run a Shortcut by name; optional `input_text` piped in. Returns a pointer.
-    Side effect (runs arbitrary automation the user owns); uses the Shortcuts CLI (no
-    TCC prompt). List names via shortcuts. An ambiguous name is resolved by the CLI."""
+    """Run a Shortcut by name OR its UUID id (from shortcuts — the id is unambiguous
+    across renames/duplicate names); optional `input_text` piped in. Returns a pointer
+    citing the run + a bounded output snippet. Side effect (runs arbitrary automation
+    the user owns); uses the Shortcuts CLI (no TCC prompt)."""
     return _emit(_shortcuts.run_shortcut(name, input_text))
 
 
