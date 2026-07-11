@@ -201,11 +201,17 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
 
 # --- sqlite read plane (#60) — synthetic NoteStore fixtures --------------------------
 
+import gzip  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
 
 from mac_mcp.adapters import notes as notes_mod  # noqa: E402
-from mac_mcp.adapters.notes import _escape_like, _note_pointer  # noqa: E402
+from mac_mcp.adapters.notes import (  # noqa: E402
+    _decode_note_data,
+    _escape_like,
+    _note_pointer,
+    _pk_from_id,
+)
 
 _NS_COLS = (
     "Z_PK INTEGER PRIMARY KEY, ZTITLE1 TEXT, ZSNIPPET TEXT, ZFOLDER INTEGER, "
@@ -214,13 +220,48 @@ _NS_COLS = (
 )
 
 
-def _make_notestore(path, *, uuid="STORE-UUID"):
-    """A synthetic NoteStore: one account, one folder, and a few notes (one pinned, one
-    locked, one tombstoned) — only the columns the reader queries."""
+# --- protobuf wire-format builders (craft the real ZDATA byte layout, not our output)
+def _varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | 0x80 if n else b)
+        if not n:
+            return bytes(out)
+
+
+def _len_field(field: int, payload: bytes) -> bytes:
+    return bytes([(field << 3) | 2]) + _varint(len(payload)) + payload
+
+
+def _varint_field(field: int, value: int) -> bytes:
+    return bytes([(field << 3) | 0]) + _varint(value)
+
+
+def _note_proto(text: bytes) -> bytes:
+    """gzip(NoteStoreProto): document(2){ version(2 varint), note(3){ note_text(2 str),
+    attribute_run(5) } } — with non-target fields the decoder must skip to reach it."""
+    note = _varint_field(1, 0) + _len_field(2, text) + _len_field(5, b"\x08\x01")
+    document = _varint_field(2, 1) + _len_field(3, note)  # version before note
+    return gzip.compress(_len_field(2, document))
+
+
+def _make_notestore(path, *, uuid="STORE-UUID", bodies=None):
+    """A synthetic NoteStore: one account, folders (incl. trash), a few notes, and their
+    ZICNOTEDATA body blobs. `bodies` maps a note's ZNOTEDATA fk → plain text (gzipped
+    protobuf); default gives p3/p4 bodies. Only the columns the reader queries."""
+    if bodies is None:
+        bodies = {99: "Milk, eggs, bread — the full note body", 98: "Secret full body"}
     conn = sqlite3.connect(path)
     conn.execute(f"CREATE TABLE ZICCLOUDSYNCINGOBJECT ({_NS_COLS})")
     conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.execute("CREATE TABLE ZICNOTEDATA (Z_PK INTEGER PRIMARY KEY, ZDATA BLOB)")
     conn.execute("INSERT INTO Z_METADATA (Z_UUID) VALUES (?)", (uuid,))
+    conn.executemany(
+        "INSERT INTO ZICNOTEDATA (Z_PK, ZDATA) VALUES (?, ?)",
+        [(pk, _note_proto(text.encode())) for pk, text in bodies.items()],
+    )
     # cols: Z_PK, ZTITLE1, ZSNIPPET, ZFOLDER, ZNOTEDATA, ZMARKEDFORDELETION, ZISPINNED,
     #       ZISPASSWORDPROTECTED, ZTITLE2, ZOWNER, ZNAME
     rows = [
@@ -367,3 +408,145 @@ def test_x_coredata_id_built_from_store_uuid(notestore):
     # across both backends) — built from Z_METADATA.Z_UUID + the note's Z_PK.
     ptrs = NotesAdapter().get_all()
     assert all(p.id.startswith("x-coredata://STORE-UUID/ICNote/p") for p in ptrs)
+
+
+# --- ZDATA gzip+protobuf body decode (#60 commit 2) ----------------------------------
+
+
+def test_decode_note_data_roundtrip():
+    assert _decode_note_data(_note_proto(b"Hello body")) == "Hello body"
+
+
+def test_decode_note_data_multibyte():
+    text = "café 🎉 note".encode()
+    assert _decode_note_data(_note_proto(text)) == "café 🎉 note"
+
+
+def test_decode_note_data_empty_text():
+    assert _decode_note_data(_note_proto(b"")) == ""
+
+
+def test_decode_note_data_non_gzip_declines():
+    assert _decode_note_data(b"not gzip at all") is None
+
+
+def test_decode_note_data_none_and_nonbytes_decline():
+    assert _decode_note_data(None) is None
+    assert _decode_note_data("a string") is None  # type: ignore[arg-type]
+
+
+def test_decode_note_data_truncated_gzip_declines():
+    full = _note_proto(b"Hello body")
+    assert _decode_note_data(full[: len(full) // 2]) is None  # cut mid-stream
+
+
+def test_decode_note_data_gzip_of_garbage_declines():
+    # valid gzip, but the payload isn't the expected protobuf → decline, not garbage.
+    assert _decode_note_data(gzip.compress(b"\xff\xff\xff not protobuf")) is None
+
+
+def test_decode_note_data_missing_text_field_declines():
+    # a well-formed proto whose Note has no note_text(2) field → None (no fabrication).
+    note = _len_field(5, b"\x08\x01")  # only an attribute_run, no note_text
+    document = _len_field(3, note)
+    assert _decode_note_data(gzip.compress(_len_field(2, document))) is None
+
+
+def test_pk_from_id():
+    assert _pk_from_id("x-coredata://STORE-UUID/ICNote/p42") == 42
+    assert _pk_from_id("garbage") is None
+    assert _pk_from_id("x-coredata://S/ICNote/pABC") is None
+
+
+def test_get_bodies_decodes_via_sqlite(notestore):
+    out = NotesAdapter().get_bodies(["x-coredata://STORE-UUID/ICNote/p3"])
+    assert out == [
+        {
+            "id": "x-coredata://STORE-UUID/ICNote/p3",
+            "body": "Milk, eggs, bread — the full note body",
+        }
+    ]
+
+
+def test_get_bodies_gap_fills_undecodable_via_applescript(notestore, monkeypatch):
+    # p5's ZNOTEDATA fk (97) has no ZICNOTEDATA row → sqlite can't decode it → the id is
+    # gap-filled via AppleScript, so it is NOT silently dropped.
+    pid = "x-coredata://STORE-UUID/ICNote/p5"
+    monkeypatch.setattr(
+        notes_mod, "run_osascript", lambda *a: f"{pid}\x1ffrom applescript\x1e"
+    )
+    out = NotesAdapter().get_bodies([pid])
+    assert out == [{"id": pid, "body": "from applescript"}]
+
+
+def test_get_bodies_store_unavailable_falls_back_whole_batch(tmp_path, monkeypatch):
+    # a drifted store (no ZICNOTEDATA table) → SchemaDrift → the whole batch degrades to
+    # the AppleScript body reader.
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    monkeypatch.setattr(
+        notes_mod, "run_osascript", lambda *a: "N-1\x1ffallback body\x1e"
+    )
+    out = NotesAdapter().get_bodies(["N-1"])
+    assert out == [{"id": "N-1", "body": "fallback body"}]
+
+
+def test_get_bodies_foreign_uuid_id_not_mis_attributed(notestore, monkeypatch):
+    # a stale/foreign id whose pN collides with a local note must NOT get that local
+    # note's body — the store UUID must match. Here AppleScript resolves nothing → the
+    # foreign id is simply absent (never the local p3 body).
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")
+    out = NotesAdapter().get_bodies(["x-coredata://OTHER-UUID/ICNote/p3"])
+    assert out == []  # not [{'…OTHER…/p3', 'Milk, eggs, bread — …'}]
+
+
+def test_get_bodies_gap_fill_failure_keeps_sqlite_bodies(notestore, monkeypatch):
+    # a gap-fill (AppleScript) failure must NOT discard bodies sqlite already decoded.
+    from mac_mcp.runtime import AutomationDenied
+
+    def boom(*a):
+        raise AutomationDenied("Automation not granted")
+
+    monkeypatch.setattr(notes_mod, "run_osascript", boom)
+    # p3 decodes via sqlite (ZICNOTEDATA 99); p5 has no body row → gap-fill → raises →
+    # suppressed, so p3 still comes back.
+    out = NotesAdapter().get_bodies(
+        [
+            "x-coredata://STORE-UUID/ICNote/p3",
+            "x-coredata://STORE-UUID/ICNote/p5",
+        ]
+    )
+    assert out == [
+        {
+            "id": "x-coredata://STORE-UUID/ICNote/p3",
+            "body": "Milk, eggs, bread — the full note body",
+        }
+    ]
+
+
+def test_body_table_drift_keeps_enumeration_working(tmp_path, monkeypatch):
+    # the body-table fingerprint is decoupled from the enumeration fingerprint (#60
+    # review): dropping ZICNOTEDATA drifts get_bodies (→ AppleScript) but get_all keeps
+    # working on sqlite.
+    path = _make_notestore(tmp_path / "NoteStore.sqlite")
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE ZICNOTEDATA")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")  # inert for get_all
+    ids = {p.id for p in NotesAdapter().get_all()}  # sqlite still serves enumeration
+    assert "x-coredata://STORE-UUID/ICNote/p3" in ids
+    # get_bodies drifts (needs ZICNOTEDATA) → AppleScript fallback
+    monkeypatch.setattr(
+        notes_mod,
+        "run_osascript",
+        lambda *a: "x-coredata://STORE-UUID/ICNote/p3\x1ffallback body\x1e",
+    )
+    out = NotesAdapter().get_bodies(["x-coredata://STORE-UUID/ICNote/p3"])
+    assert out == [{"id": "x-coredata://STORE-UUID/ICNote/p3", "body": "fallback body"}]

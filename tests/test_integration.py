@@ -1034,3 +1034,44 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
         f"sqlite returned ids AppleScript does not: {phantom} — wrong x-coredata id "
         "construction or a leaked (e.g. Recently Deleted) note"
     )
+
+
+@pytest.mark.integration
+def test_note_body_decoder_matches_applescript_real_store():
+    """The real validation for the ZDATA gzip+protobuf body decoder. Decodes the real
+    ZDATA blob DIRECTLY (not via get_bodies, which would gap-fill to AppleScript and
+    mask a broken decoder — #60 review) and asserts it matches AppleScript. Needs
+    Full Disk Access; skips if nothing both decodes and hydrates."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
+
+    adapter = notes_mod.NotesAdapter()
+    ptrs = adapter.get_all()
+    if not ptrs:
+        pytest.skip("no notes in this Mac's library")
+    conn = sqlite3.connect(f"file:{notes_mod.NOTESTORE}?mode=ro&immutable=1", uri=True)
+    checked = 0
+    try:
+        for p in ptrs[:20]:
+            pk = notes_mod._pk_from_id(p.id)
+            row = conn.execute(
+                "SELECT d.ZDATA FROM ZICCLOUDSYNCINGOBJECT o "
+                "JOIN ZICNOTEDATA d ON o.ZNOTEDATA = d.Z_PK WHERE o.Z_PK = ?",
+                (pk,),
+            ).fetchone()
+            if not row or row[0] is None:
+                continue
+            decoded = notes_mod._decode_note_data(bytes(row[0]))  # the decoder itself
+            applescript = adapter._applescript_bodies([p.id])
+            if decoded is None or not applescript:
+                continue
+            # stripped compare — attribute-run/trailing-whitespace diffs are immaterial
+            assert decoded.strip() == applescript[0]["body"].strip(), (
+                f"decoder != AppleScript plaintext for {p.id}"
+            )
+            checked += 1
+    finally:
+        conn.close()
+    if checked == 0:
+        pytest.skip("no note both decoded (sqlite) and hydrated (AppleScript)")
