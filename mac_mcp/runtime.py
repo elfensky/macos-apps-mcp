@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import threading
 import time
@@ -28,7 +29,9 @@ import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import TypeVar
+from urllib.parse import quote
 
 import EventKit as EK
 import Foundation as F
@@ -157,6 +160,16 @@ class AmbiguousTarget(NativeError):
     tells the caller how to disambiguate."""
 
     kind = "ambiguous_target"
+
+
+class FullDiskAccessDenied(NativeError):
+    """A native sqlite store (chat.db, NoteStore.sqlite, …) couldn't be opened because
+    Full Disk Access is not granted. ``str(e)`` is the remediation; doctor (#48) reports
+    the same surface. Part of the dual-backend policy (#58): the adapter falls back to
+    its AppleScript reader if it has one (Notes), else this surfaces loudly — never a
+    silent empty (Messages content)."""
+
+    kind = "full_disk_access_denied"
 
 
 def resolve_container(items, target: str, *, noun: str):
@@ -486,6 +499,152 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
             "service may be hung. Tell the user; do not retry immediately."
         )
     return box.get("result")
+
+
+# --- dual-backend read plane: read-only sqlite opener + schema fingerprint (#58) -----
+# The escape from AppleScript-as-query-engine (the ecosystem's death spiral: reads get
+# slow → get stubbed → project abandoned). Native stores answer QUERIES; AppleScript
+# only performs ACTIONS. chat.db / NoteStore.sqlite are read through ONE read-only
+# opener, serialized on the native worker for consistency with EventKit/osascript (these
+# reads are user-latency-bound, not throughput-bound — same rationale as the
+# max_workers=1 fence). A schema fingerprint guards every parser against a silent macOS
+# schema change. This is the shared plumbing the sqlite read planes (#59 Messages, #60
+# Notes) build on with no new plumbing of their own.
+
+
+def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
+    """Open a system sqlite store STRICTLY read-only.
+
+    Preflights with a raw read so a Full-Disk-Access denial surfaces as a typed
+    ``FullDiskAccessDenied`` — sqlite3 alone gives only an opaque "unable to open
+    database file" that can't be told apart from a missing file. ``mode=ro`` never
+    creates the file and forbids writes at the SQLite layer.
+
+    ``immutable=1`` is OPT-IN and unsafe for a live store: it tells SQLite the file
+    never changes, so it ignores the ``-wal`` and returns pre-WAL data — recent items
+    would silently vanish. Pass it only for a store known static. Call inside
+    run_native: the connection is thread-bound, so the whole query must run on the
+    worker.
+    """
+    p = Path(path)
+    try:
+        with open(p, "rb") as f:  # preflight: classify FDA-denied vs genuinely-absent
+            f.read(1)
+    except PermissionError as e:
+        raise FullDiskAccessDenied(
+            "mac-mcp could not read a macOS data store — Full Disk Access is not "
+            "granted. Grant it in System Settings → Privacy & Security → Full Disk "
+            "Access to the app that launched mac-mcp, then restart mac-mcp. Do not "
+            "retry until the next user message."
+        ) from e
+    except FileNotFoundError as e:
+        raise NativeError(
+            f"the macOS data store {p.name!r} does not exist (the app may never have "
+            "been used). This is not a Full Disk Access problem; do not retry."
+        ) from e
+    except OSError as e:  # dir-as-path, ELOOP, ENOTDIR, EIO … stay typed, never raw
+        raise NativeError(
+            f"the macOS data store at {p} could not be opened: {e}. Do not retry."
+        ) from e
+    uri = f"file:{quote(str(p))}?mode=ro" + ("&immutable=1" if immutable else "")
+    try:
+        return sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as e:  # rare (preflight passed) → treat as store-unavailable
+        raise SchemaDrift(
+            f"the sqlite store {p.name!r} could not be opened ({e}). Falling back or "
+            "surfacing rather than trusting an unreadable store."
+        ) from e
+
+
+def verify_sqlite_schema(conn: sqlite3.Connection, fingerprint: dict) -> None:
+    """Raise ``SchemaDrift`` unless each expected table has every expected column (#58).
+
+    ``fingerprint`` maps table name → the columns the parser reads. macOS updates move
+    these schemas; catching drift here means the dual-backend falls back (or fails
+    loudly) instead of mis-parsing renamed/dropped columns into garbage Pointers. Table
+    names come from adapter code, but are still BOUND via the ``pragma_table_info``
+    table-valued function (never string-formatted) so the helper is injection-safe.
+    """
+    for table, columns in fingerprint.items():
+        try:
+            # SQLite identifiers are case-INSENSITIVE (a query on `guid` hits a column
+            # DEFINED as `GUID`), but pragma_table_info returns the defined case — so
+            # compare case-folded, else a mere capitalization change is a false drift.
+            present = {
+                row[0].lower()
+                for row in conn.execute(
+                    "SELECT name FROM pragma_table_info(?)", (table,)
+                )
+            }
+        except sqlite3.DatabaseError as e:  # corrupt / not-a-db → can't parse → drift
+            raise SchemaDrift(
+                "could not read the sqlite store's schema (corrupt or not a database): "
+                f"{e}. Falling back or surfacing rather than mis-parsing. Do not retry."
+            ) from e
+        if not present:
+            raise SchemaDrift(
+                f"expected table {table!r} is absent — macOS likely changed the "
+                "schema. The parser would mis-read the store; do not trust a sqlite "
+                "result until the fingerprint is updated."
+            )
+        missing = sorted(c for c in columns if c.lower() not in present)
+        if missing:
+            raise SchemaDrift(
+                f"table {table!r} is missing column(s) {missing} — macOS likely "
+                "changed the schema. Do not trust a sqlite result until the "
+                "fingerprint is updated."
+            )
+
+
+# Missing FDA and schema drift are the two "store unavailable" signals the dual-backend
+# degrades on (Andrei's #58 policy). A genuinely-absent store (bare NativeError)
+# surfaces loudly instead — not an FDA problem, and a wrong "grant FDA" nudge misleads.
+_STORE_UNAVAILABLE = (FullDiskAccessDenied, SchemaDrift)
+
+
+def read_via_sqlite(
+    path, fingerprint: dict, query, *, fallback=None, immutable: bool = False
+):
+    """Dual-backend read (#58): query a native sqlite store read-only, degrading to the
+    adapter's AppleScript reader when the store is unavailable.
+
+    Policy (Andrei-approved): sqlite-primary. On unavailability — missing Full Disk
+    Access OR a schema-fingerprint mismatch — call ``fallback`` if the adapter has one
+    (Notes does), else re-raise the typed error so the model gets a remediation, never a
+    silent empty (Messages content has no fallback → it raises). ``query(conn) -> T``
+    does the reads on the open read-only connection and must return plain data (the
+    connection is thread-bound and closed here); ``fallback() -> T`` is the AppleScript
+    path.
+
+    Everything runs on the single native worker (serialization consistency). This is the
+    ONE helper the sqlite read planes (#59/#60) build on — they add no new plumbing.
+    """
+
+    def work():
+        try:
+            conn = _open_sqlite_ro(path, immutable=immutable)
+            try:
+                verify_sqlite_schema(conn, fingerprint)
+                return query(conn)
+            except sqlite3.Error as e:
+                # A sqlite error surfacing during the read (a data page corrupt past
+                # the schema pages verify touched, an unreadable store) is "store
+                # unavailable" — route it through SchemaDrift so it degrades to fallback
+                # / surfaces as a typed directive, never a raw exception past
+                # server._guard (#47). A non-sqlite error from query() (a parser bug) is
+                # NOT caught here — it must propagate, never be masked as a fallback.
+                raise SchemaDrift(
+                    f"the sqlite store could not be read ({e}) — corrupt, or an "
+                    "unexpected sqlite error. Do not trust a partial result."
+                ) from e
+            finally:
+                conn.close()
+        except _STORE_UNAVAILABLE:
+            if fallback is not None:
+                return fallback()
+            raise
+
+    return work() if _on_worker() else run_native(work)
 
 
 def to_nsdate(dt: datetime) -> F.NSDate:
