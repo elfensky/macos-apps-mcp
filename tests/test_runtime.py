@@ -139,6 +139,15 @@ def test_run_osascript_raises_on_error():
         run_osascript('error "boom"')
 
 
+def test_run_osascript_leading_dash_arg_is_data_not_option():
+    # #62 review: a leading-'-' arg (e.g. a mail search "-- Original") must reach
+    # `on run argv` as DATA, not be parsed by osascript's getopt as an option. The `--`
+    # separator makes it work; without it osascript aborts with "illegal option".
+    script = "on run argv\nreturn item 1 of argv\nend run"
+    assert run_osascript(script, "-- Original Message") == "-- Original Message"
+    assert run_osascript(script, "-n") == "-n"
+
+
 # --- typed error taxonomy (#47) ------------------------------------------------------
 
 

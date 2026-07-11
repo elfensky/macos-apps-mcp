@@ -421,19 +421,25 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     The sanctioned escape hatch for framework-less apps (Mail/Notes/Contacts).
     ``args`` are passed to the script's ``on run argv`` handler — put any user input
     (names, ids) there so values are never interpolated into the script (no injection).
-    Raises a typed ``NativeError`` (``AutomationDenied`` / ``AppNotRunning`` / generic)
-    on a non-zero exit, and ``NativeTimeout`` on timeout — it never returns an empty
-    string to mask a failure as "no result". Safe on or off the worker (dispatches via
-    run_native when called off it). The child is tracked so an exit path can kill it
-    (#56); the AppleScript template's own ``with timeout`` bounds it if we can't.
+    A ``--`` separates the script from ``args`` so a value starting with ``-`` (e.g. a
+    mail search for "-- Original Message") is delivered as script DATA, not parsed by
+    osascript's getopt as its own option (#62 review). Raises a typed ``NativeError``
+    (``AutomationDenied`` / ``AppNotRunning`` / generic) on a non-zero exit, and
+    ``NativeTimeout`` on timeout — it never returns an empty string to mask a failure as
+    "no result". Safe on or off the worker (dispatches via run_native off it). The child
+    is tracked so an exit path can kill it (#56); the AppleScript template's own
+    ``with timeout`` bounds it if we can't.
     """
 
     def _run() -> str:
         # Popen (not subprocess.run) so the live child is a handle exit paths can
-        # terminate; communicate(timeout) + kill-on-timeout mirrors run(timeout=).
+        # terminate; communicate(timeout) + kill-on-timeout mirrors run(timeout=). The
+        # `--` stops osascript option scanning so a leading-'-' arg is positional data,
+        # not a flag (#62 review). It is consumed by getopt, not delivered into `on run
+        # argv`, so every existing template's argv indices are unchanged.
         started = time.monotonic()
         proc = subprocess.Popen(
-            ["osascript", "-e", script, *args],
+            ["osascript", "-e", script, "--", *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

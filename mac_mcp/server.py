@@ -228,6 +228,22 @@ def mail(query: str) -> list[dict]:
 
 
 @_read_tool
+def mail_body(id: str) -> str:
+    """Full plaintext body of one inbox message by id (bounded + truncation-marked).
+    Read-only; needs Automation access for Mail. `id` is a message-id from `mail`."""
+    return _mail.get_body(id)
+
+
+@_additive_tool
+def create_draft(to: str, subject: str = "", body: str = "") -> dict:
+    """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
+    its own. `to` a recipient address. Additive (creates a draft; does not
+    send/modify/delete); needs Automation access for Mail."""
+    _mail.create_draft(to, subject, body)
+    return {"status": "draft created and opened in Mail for your review — not sent"}
+
+
+@_read_tool
 def notes(title: str) -> list[dict]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
     path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to

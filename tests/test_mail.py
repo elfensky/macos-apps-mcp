@@ -134,3 +134,101 @@ def test_search_matches_subject_or_sender(monkeypatch):
 def test_search_empty_query_raises():
     with pytest.raises(ValueError, match="search substring"):
         MailAdapter().get_pointers("   ")
+
+
+# --- mail_body + create_draft (#62) --------------------------------------------------
+
+import os  # noqa: E402
+
+from mac_mcp.adapters.mail import _BODY, _CREATE_DRAFT  # noqa: E402
+
+
+def test_get_body_resolves_and_bounds(monkeypatch):
+    # body-by-id: the RFC id is passed via argv (injection-safe) and the result is
+    # hygiene-budgeted via clean_body (control-stripped here).
+    seen = {}
+
+    def fake(script, *a):
+        seen["call"] = (script, a)
+        return "Hello\x00 body"
+
+    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", fake)
+    out = MailAdapter().get_body("<abc@host>")
+    assert out == "Hello body"  # NUL stripped by clean_body
+    assert seen["call"][0] is _BODY
+    assert seen["call"][1] == ("abc@host",)  # brackets stripped, bare id via argv
+
+
+def test_get_body_empty_id_raises():
+    with pytest.raises(ValueError, match="message id"):
+        MailAdapter().get_body("   ")
+
+
+def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
+    # #62 review: an HTML-only / not-yet-downloaded message yields AppleScript `missing
+    # value`, coerced to the literal string — it must NOT be handed back as the body.
+    from mac_mcp.runtime import NativeError
+
+    monkeypatch.setattr(
+        "mac_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
+    )
+    with pytest.raises(NativeError, match="not available locally"):
+        MailAdapter().get_body("abc@host")
+
+
+def test_get_body_huge_body_overflows(monkeypatch):
+    # a pasted-dump body over the hard cap surfaces OutputOverflow (open it in Mail),
+    # not a silently-truncated blob.
+    from mac_mcp.runtime import BODY_HARD_MAX, OutputOverflow
+
+    monkeypatch.setattr(
+        "mac_mcp.adapters.mail.run_osascript", lambda *a: "z" * (BODY_HARD_MAX + 1)
+    )
+    with pytest.raises(OutputOverflow):
+        MailAdapter().get_body("abc@host")
+
+
+def test_create_draft_never_sends():
+    # the SAFETY invariant: the draft script has NO `send` verb anywhere — it can only
+    # create-and-open, never send (joshrutkowski's two-tier gate; the #62 acceptance).
+    assert "send" not in _CREATE_DRAFT.lower()
+    assert "make new outgoing message" in _CREATE_DRAFT
+    assert "visible:true" in _CREATE_DRAFT  # opens for human review
+
+
+def test_create_draft_passes_body_via_tempfile(monkeypatch, tmp_path):
+    # body must be READ from a tempfile as «class utf8», never interpolated into the
+    # script; to/subject/path go via argv. Assert the body reaches a real file and the
+    # path is argv[3].
+    captured = {}
+
+    def fake(script, *args):
+        captured["script"] = script
+        captured["args"] = args
+        # the tempfile must exist and hold the body at call time (script reads it)
+        with open(args[2], encoding="utf-8") as f:
+            captured["body_on_disk"] = f.read()
+        return ""
+
+    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", fake)
+    MailAdapter().create_draft("bob@x.com", "Hi", "multi\nline © body")
+    assert captured["script"] is _CREATE_DRAFT
+    assert captured["args"][0] == "bob@x.com" and captured["args"][1] == "Hi"
+    assert captured["body_on_disk"] == "multi\nline © body"  # never interpolated
+    assert "«class utf8»" in _CREATE_DRAFT  # read as utf8, not string-built
+
+
+def test_create_draft_cleans_up_tempfile(monkeypatch):
+    # the tempfile is deleted after the (synchronous) script read it.
+    paths = []
+    monkeypatch.setattr(
+        "mac_mcp.adapters.mail.run_osascript",
+        lambda script, *a: paths.append(a[2]) or "",
+    )
+    MailAdapter().create_draft("bob@x.com", "Hi", "body")
+    assert paths and not os.path.exists(paths[0])  # cleaned up
+
+
+def test_create_draft_empty_recipient_raises():
+    with pytest.raises(ValueError, match="recipient"):
+        MailAdapter().create_draft("  ", "Hi", "body")

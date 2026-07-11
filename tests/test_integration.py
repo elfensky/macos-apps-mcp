@@ -1095,3 +1095,35 @@ def test_mail_reads_return_id_triple_real_inbox():
     for p in ptrs:
         assert p.id  # the RFC822 message-id (stable citation)
         assert _re.fullmatch(r"message://%3C.+%3E", p.deeplink), p.deeplink
+
+
+@pytest.mark.integration
+def test_mail_create_draft_opens_and_never_sends():
+    """create_draft opens a real draft and NEVER sends. Uses an unroutable
+    example.invalid recipient (RFC 2606) as belt-and-suspenders, verifies the draft
+    exists as an OUTGOING (unsent) message, then deletes it so nothing lingers. Needs
+    Automation access for Mail."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    subj = "mac-mcp-test: draft (safe to delete)"
+    MailAdapter().create_draft(
+        "nobody@example.invalid", subj, "test body — do not send"
+    )
+    # count + delete matching outgoing (draft) messages; an outgoing message is unsent
+    # by definition (a sent message leaves `outgoing messages` for the Sent mailbox).
+    check = (
+        "on run argv\n"
+        '  tell application "Mail"\n'
+        "    set n to 0\n"
+        "    repeat with m in outgoing messages\n"
+        "      if subject of m is (item 1 of argv) then\n"
+        "        set n to n + 1\n"
+        "        delete m\n"
+        "      end if\n"
+        "    end repeat\n"
+        "    return (n as text)\n"
+        "  end tell\n"
+        "end run"
+    )
+    assert int(run_osascript(check, subj)) >= 1  # draft created (and now cleaned up)
