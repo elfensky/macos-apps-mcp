@@ -999,3 +999,38 @@ def test_attributedbody_decoder_matches_foundation():
 
     if checked == 0:
         pytest.skip("no attributedBody message both decoders could read")
+
+
+# --- Notes dual-backend (#60) — needs Full Disk Access -------------------------------
+
+
+@pytest.mark.integration
+def test_notes_sqlite_is_subset_of_applescript_real_store():
+    """The real schema validation: every note the sqlite plane returns must be one the
+    AppleScript reader also knows (same x-coredata id) — proves the NoteStore
+    schema/query/id-construction against Apple's real store, and that sqlite does NOT
+    leak notes AppleScript hides (e.g. Recently Deleted). Needs Full Disk Access.
+
+    SUBSET, not equality: immutable=1 ignores the -wal, so a just-created note not yet
+    checkpointed is legitimately visible to AppleScript (live) but not sqlite — that
+    direction is accepted staleness, not a bug. A sqlite id ABSENT from AppleScript is
+    the real defect (a wrong id, or a leaked deleted note)."""
+    from mac_mcp.adapters import notes as notes_mod
+
+    adapter = notes_mod.NotesAdapter()
+    sqlite_ptrs = adapter.get_all()  # sqlite path (FDA granted)
+    applescript_ptrs = notes_mod._parse_all(  # the fallback path, called directly
+        notes_mod.run_osascript(notes_mod._LIST_ALL)
+    )
+    if not applescript_ptrs:
+        pytest.skip("no notes in this Mac's library")
+    sqlite_ids = {p.id for p in sqlite_ptrs}
+    applescript_ids = {p.id for p in applescript_ptrs}
+    assert sqlite_ids, "sqlite path returned no notes despite a non-empty library"
+    phantom = sqlite_ids - applescript_ids
+    assert (
+        not phantom
+    ), (  # a sqlite id AppleScript doesn't know = wrong id or leaked note
+        f"sqlite returned ids AppleScript does not: {phantom} — wrong x-coredata id "
+        "construction or a leaked (e.g. Recently Deleted) note"
+    )

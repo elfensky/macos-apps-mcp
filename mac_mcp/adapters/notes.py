@@ -1,19 +1,59 @@
-"""Notes adapter — Notes.app via osascript (Automation TCC). Read-only v1: title search.
+"""Notes adapter — dual-backend (#60): NoteStore.sqlite for reads, osascript for writes.
 
-Notes is scriptable. ``get_pointers(query)`` searches notes whose name (title) contains
-the query. ``Pointer.id`` is the note's ``x-coredata://…`` id; ``summary`` is the title.
-``deeplink`` is empty — Notes has no verified open-by-id URL scheme, so id + title are
-the handle. Pointers, not bodies (the body is never fetched). Capped and osascript-
-timeout-bounded; user input goes via argv (no script injection).
+Enumeration reads (get_all, get_pointers search) go through the fast read-only sqlite
+plane over NoteStore.sqlite — Apple precomputes ZSNIPPET (the summary) and the stable
+x-coredata://…/ICNote/pN id the vault sync needs, so reads are far cheaper than
+AppleScript's O(n) enumeration (the sin that hollowed out apple-mcp). Per the FDA
+policy, Notes DEGRADES: on missing Full Disk Access OR a schema-fingerprint mismatch,
+read_via_sqlite falls back to the AppleScript reader (still works without FDA — no
+regression). Writes (delete) and body hydration (get_bodies) stay on osascript.
+Pointer.id is the x-coredata:// id, summary the snippet, folder the "Account / Folder"
+label; deeplink empty (no open-by-id scheme). User input goes via argv (no injection);
+templates are timeout-bounded.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..contracts import Pointer
-from ..runtime import OutputOverflow, clean_body, clean_summary, run_osascript
+from ..runtime import (
+    OutputOverflow,
+    clean_body,
+    clean_summary,
+    read_via_sqlite,
+    run_osascript,
+)
 
 MAX_NOTES = 25
 MAX_BODIES = 50
+
+NOTESTORE = (
+    Path.home() / "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"
+)
+
+# NoteStore is Core Data: notes, folders, and accounts all live in
+# ZICCLOUDSYNCINGOBJECT (single-table inheritance). Only the columns the queries below
+# read are fingerprinted — a macOS schema move that renames/drops any of them trips
+# SchemaDrift and the read DEGRADES to the AppleScript fallback (never a hard error,
+# never a mis-parse). The exact schema is version-variable (sirmews recipe) — the
+# @integration cross-check validates it against the real store.
+_FINGERPRINT = {
+    "ZICCLOUDSYNCINGOBJECT": {
+        "Z_PK",
+        "ZTITLE1",  # note title
+        "ZSNIPPET",  # Apple's precomputed preview → Pointer.summary
+        "ZFOLDER",  # → folder row's Z_PK
+        "ZNOTEDATA",  # set on notes (not folders/accounts) → distinguishes a note row
+        "ZMARKEDFORDELETION",  # tombstone flag
+        "ZISPINNED",
+        "ZISPASSWORDPROTECTED",  # locked
+        "ZTITLE2",  # folder name (on a folder row)
+        "ZOWNER",  # folder → account row's Z_PK
+        "ZNAME",  # account name (on an account row)
+    },
+    "Z_METADATA": {"Z_UUID"},  # the store UUID for the x-coredata:// id
+}
 
 # All templates carry `with timeout` (#56): bound the Apple Events so an orphaned
 # osascript self-terminates instead of pinning Notes.
@@ -170,21 +210,111 @@ def _parse_bodies(raw: str) -> list[dict]:
     return out
 
 
+# --- sqlite read plane (#60) ---------------------------------------------------------
+# A note row: ZNOTEDATA set (folders/accounts have none) and not tombstoned. Newest
+# first via Z_PK DESC (higher pk ≈ more recent; avoids depending on a date column that
+# varies by macOS version). Folder + account resolved by self-join (Core Data keeps
+# notes/folders/accounts in the same table).
+#
+# Recently Deleted: a trashed note is NOT ZMARKEDFORDELETION=1 (that flag is the
+# CloudKit PERMANENT-purge tombstone) — it stays a live row that just MOVES to the
+# "Recently Deleted" folder for ~30 days. So we also exclude notes whose folder is named
+# "Recently Deleted", exactly as the AppleScript reader does — otherwise the sqlite path
+# leaks trashed notes the AppleScript path hides (#60 review). ponytail: matching by the
+# English folder name mirrors the AppleScript path's own localization limitation, so the
+# two backends AGREE (the @integration cross-check needs that); a locale-independent
+# ZFOLDERTYPE-based exclusion is the upgrade path if a non-English store needs it.
+#
+# WAL staleness: reads use immutable=1 (per the #60 Design + the sirmews recipe) so they
+# open past the lock Notes.app holds on the live store. The tradeoff is that immutable
+# ignores the -wal, so a just-typed note not yet checkpointed can be briefly missing —
+# acceptable staleness for search/list, and the AppleScript fallback always sees current
+# state. (Messages, #59, uses mode=ro without immutable — chat.db isn't held locked.)
+_TRASH = "Recently Deleted"
+_COLS = """o.Z_PK, o.ZTITLE1, o.ZSNIPPET, o.ZISPINNED, o.ZISPASSWORDPROTECTED,
+       f.ZTITLE2, a.ZNAME"""
+_FROM = f"""FROM ZICCLOUDSYNCINGOBJECT o
+    LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON o.ZFOLDER = f.Z_PK
+    LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON f.ZOWNER = a.Z_PK
+    WHERE o.ZNOTEDATA IS NOT NULL
+      AND (o.ZMARKEDFORDELETION IS NULL OR o.ZMARKEDFORDELETION = 0)
+      AND (f.ZTITLE2 IS NULL OR f.ZTITLE2 <> '{_TRASH}')"""
+
+_ALL_SQL = f"SELECT {_COLS} {_FROM} ORDER BY o.Z_PK DESC"
+_SEARCH_SQL = (
+    f"SELECT {_COLS} {_FROM} "
+    r"AND (o.ZTITLE1 LIKE ? ESCAPE '\' OR o.ZSNIPPET LIKE ? ESCAPE '\') "
+    "ORDER BY o.Z_PK DESC"
+)
+
+
+def _escape_like(term: str) -> str:
+    r"""Escape LIKE wildcards so a user's ``%``/``_`` is literal (ESCAPE ``\``)."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _store_uuid(conn) -> str:
+    row = conn.execute("SELECT Z_UUID FROM Z_METADATA LIMIT 1").fetchone()
+    return row[0] if row and row[0] else ""
+
+
+def _note_pointer(row, uuid: str) -> Pointer:
+    """(Z_PK, title, snippet, pinned, locked, folder_name, account) → note Pointer.
+
+    id is the x-coredata URL AppleScript returns for the same note (so a note has ONE id
+    across both backends — the @integration cross-check asserts it). Pinned/locked ride
+    as a prefix on the summary (Pointer has no dedicated flag field). folder is
+    "Account / Folder"."""
+    pk, title, snippet, pinned, locked, folder_name, account = row
+    prefix = ("📌 " if pinned else "") + ("🔒 " if locked else "")
+    label = snippet or title or ""
+    folder = " / ".join(x for x in (account, folder_name) if x) or None
+    return Pointer(
+        id=f"x-coredata://{uuid}/ICNote/p{pk}",
+        summary=clean_summary(prefix + label) or "(untitled note)",
+        deeplink="",
+        folder=folder,
+    )
+
+
 class NotesAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
-        """query: a title substring to find."""
+        """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
+        substring. Falls back to the AppleScript title search on missing FDA / drift."""
         q = query.strip()
         if not q:
             raise ValueError("notes read needs a title substring (got an empty query)")
-        return _parse(run_osascript(_SEARCH, q))[:MAX_NOTES]
+        like = f"%{_escape_like(q)}%"
+
+        def sqlite(conn):
+            uuid = _store_uuid(conn)
+            rows = conn.execute(_SEARCH_SQL, (like, like)).fetchall()
+            return [_note_pointer(r, uuid) for r in rows][:MAX_NOTES]
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _FINGERPRINT,
+            sqlite,
+            fallback=lambda: _parse(run_osascript(_SEARCH, q))[:MAX_NOTES],
+            immutable=True,  # read past Notes' lock; see module note on WAL staleness
+        )
 
     def get_all(self) -> list[Pointer]:
-        """Every note (excludes Recently Deleted) as account-qualified pointers.
+        """Every live note (excludes Recently Deleted + tombstoned) as account-qualified
+        pointers (sqlite, read-only, newest first). Folder is "Account / Folder". Falls
+        back to the AppleScript enumeration on missing FDA / schema drift."""
 
-        Folder is "Account / Folder". No cap: a very large library can exceed the
-        osascript 30s timeout, in which case the whole call fails (no partial results).
-        """
-        return _parse_all(run_osascript(_LIST_ALL))
+        def sqlite(conn):
+            uuid = _store_uuid(conn)
+            return [_note_pointer(r, uuid) for r in conn.execute(_ALL_SQL).fetchall()]
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _FINGERPRINT,
+            sqlite,
+            fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
+            immutable=True,  # read past Notes' lock; see module note on WAL staleness
+        )
 
     def get_bodies(self, ids: list[str]) -> list[dict]:
         """Hydrate plaintext bodies for up to MAX_BODIES ids → [{"id", "body"}].

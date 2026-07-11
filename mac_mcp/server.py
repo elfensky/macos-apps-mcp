@@ -228,16 +228,19 @@ def mail(subject: str) -> list[dict]:
 
 @_read_tool
 def notes(title: str) -> list[dict]:
-    """Search Notes by title substring. Returns pointers (id + title).
-    Read-only; needs Automation access for Notes. See notes_all, note_bodies."""
+    """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
+    path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to
+    Automation (Notes) title search — Automation access is the floor. See notes_all,
+    note_bodies."""
     return [_emit(p) for p in _notes.get_pointers(title)]
 
 
 @_read_tool
 def notes_all() -> list[dict]:
-    """List every note as pointers (id + "Account / Folder" + title), excluding
-    Recently Deleted. No cap; very large libraries can hit the osascript timeout
-    (all-or-nothing). Read-only; needs Automation access for Notes. See note_bodies."""
+    """List every note as pointers (id + "Account / Folder" + snippet), excluding
+    Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk
+    Access); degrades to Automation (Notes) enumeration without it (very large libraries
+    can hit the osascript timeout, all-or-nothing). See note_bodies."""
     return [_emit(p) for p in _notes.get_all()]
 
 
