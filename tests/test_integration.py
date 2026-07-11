@@ -940,3 +940,62 @@ def test_orphaned_server_exits_within_5s():
             pytest.fail("orphaned child did not exit within 5s")
     finally:
         inter.wait()
+
+
+# --- Messages content via chat.db (#59) — needs Full Disk Access ---------------------
+
+
+@pytest.mark.integration
+def test_messages_search_reads_real_store():
+    """Real chat.db: a broad search returns snippet Pointers obeying the contract. Needs
+    Full Disk Access; skips cleanly if the store has no messages. Never mutates."""
+    from mac_mcp.adapters.messages import MessagesAdapter
+
+    ptrs = MessagesAdapter().search_messages("a", limit=5)  # 'a' matches most chats
+    if not ptrs:
+        pytest.skip("no messages in this Mac's chat.db")
+    for p in ptrs:
+        assert p.id and isinstance(p.summary, str)
+
+
+@pytest.mark.integration
+def test_attributedbody_decoder_matches_foundation():
+    """The ONLY real proof the hand-rolled typedstream decoder matches Apple's byte
+    layout: decode real attributedBody blobs with our decoder AND with Apple's own
+    NSUnarchiver, and assert they agree. A fixture can't prove this (it bakes in the
+    same assumptions). Needs Full Disk Access; skips if neither side decodes."""
+    import sqlite3
+
+    import Foundation as F
+
+    from mac_mcp.adapters.messages import CHAT_DB, _decode_attributed_body
+
+    conn = sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT attributedBody FROM message WHERE attributedBody IS NOT NULL "
+            "AND (text IS NULL OR text = '') LIMIT 50"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    checked = 0
+    for (blob,) in rows:
+        blob = bytes(blob)
+        try:  # NSUnarchiver is Apple's own typedstream reader; skip a blob it rejects
+            data = F.NSData.dataWithBytes_length_(blob, len(blob))
+            obj = F.NSUnarchiver.unarchiveObjectWithData_(data)
+            apple = str(obj.string()) if obj is not None else None
+        except Exception:
+            apple = None
+        if not apple:
+            continue
+        ours = _decode_attributed_body(blob)
+        assert ours is not None, (
+            f"our decoder declined a blob Foundation read: {apple!r}"
+        )
+        assert ours == apple, f"decoder disagrees: ours={ours!r} foundation={apple!r}"
+        checked += 1
+
+    if checked == 0:
+        pytest.skip("no attributedBody message both decoders could read")

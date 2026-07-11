@@ -54,6 +54,7 @@ _PERMISSION = {
     "messages_chats": "Automation",
     "messages_search": "Full Disk Access",
     "messages_with": "Full Disk Access",
+    "message_body": "Full Disk Access",
     "safari_tabs": "Automation",
     "delete_note": "Automation",
     "create_contact": "Automation",

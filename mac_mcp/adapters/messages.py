@@ -20,7 +20,13 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts import Pointer
-from ..runtime import clean_summary, mac_region, read_via_sqlite, run_osascript
+from ..runtime import (
+    clean_body,
+    clean_summary,
+    mac_region,
+    read_via_sqlite,
+    run_osascript,
+)
 
 MAX_CHATS = 30
 MAX_MESSAGES = 40  # default cap on a content read
@@ -169,6 +175,53 @@ def _clamp(limit: int) -> int:
     return max(1, min(limit, _HARD_CAP))
 
 
+# the legacy typedstream header (NOT bplist / NSKeyedArchiver)
+_STREAMTYPED = b"streamtyped"
+
+
+def _decode_attributed_body(blob: bytes | None) -> str | None:
+    """Best-effort extract a message's text from a chat.db ``attributedBody`` blob.
+
+    ``attributedBody`` is an ``NSMutableAttributedString`` in the legacy *typedstream*
+    format (header ``streamtyped``), not NSKeyedArchiver/bplist. The backing string is
+    the FIRST ``NSString`` instance (the class name literal appears once; later ones
+    reference it by index), so: find ``NSString``, then the ``+`` (0x2b) type tag before
+    the value, then a typedstream length — one byte, or ``0x81`` + little-endian uint16
+    (``0x82`` + uint32 for very long) — then that many UTF-8 bytes.
+
+    Returns ``None`` on anything unparseable (wrong format, no string, truncated). The
+    caller prefers the ``text`` column and treats this as a fallback, so a mis-parse
+    must NEVER fabricate a wrong body — it declines. Length is a byte count; non-ASCII
+    is read as UTF-8 (errors replaced). ponytail: rich attribute runs are ignored — we
+    want the plain text, not the styling; add an attribute parser only if one is needed.
+    """
+    if not isinstance(blob, (bytes, bytearray)) or _STREAMTYPED not in blob[:16]:
+        return None  # None, a str, or a non-typedstream blob — decline, never crash
+    marker = blob.find(b"NSString")
+    if marker == -1:
+        return None
+    plus = blob.find(b"+", marker)  # 0x2b — the value's type tag after the class chain
+    if plus == -1 or plus + 1 >= len(blob):
+        return None
+    i = plus + 1
+    tag = blob[i]
+    if tag == 0x81:  # 0x81 marker → length is the next 2 bytes (LE uint16)
+        if i + 3 > len(blob):
+            return None
+        length, start = int.from_bytes(blob[i + 1 : i + 3], "little"), i + 3
+    elif tag == 0x82:  # 0x82 marker → length is the next 4 bytes (LE uint32)
+        if i + 5 > len(blob):
+            return None
+        length, start = int.from_bytes(blob[i + 1 : i + 5], "little"), i + 5
+    elif tag <= 0x7F:  # a single signed-char length: only 0x00-0x7f are valid
+        length, start = tag, i + 1
+    else:  # 0x80 / 0x83-0xFF: negative/invalid length byte → decline, don't fabricate
+        return None
+    if start + length > len(blob):  # truncated → decline, don't mis-parse a fragment
+        return None
+    return blob[start : start + length].decode("utf-8", errors="replace")
+
+
 # Real messages only: item_type=0 (not a group action), not an audio message, and
 # associated_message_type=0 (exclude tapbacks/reactions/stickers, which are message rows
 # too and would otherwise flood a LIMIT). Search matches `text` OR the `attributedBody`
@@ -196,6 +249,9 @@ _WITH_SQL = f"""
     ORDER BY m.date DESC
     LIMIT ?
 """
+
+# get-by-id fetches an EXACT message the caller cited, so no item_type filtering.
+_BODY_SQL = "SELECT text, attributedBody FROM message WHERE guid = ? LIMIT 1"
 
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
 _CHATS = """with timeout of 120 seconds
@@ -266,3 +322,24 @@ class MessagesAdapter:
             return [_message_pointer(r) for r in rows]
 
         return read_via_sqlite(CHAT_DB, _FINGERPRINT, run)  # no fallback → FDA raises
+
+    def message_body(self, guid: str) -> str:
+        """Full text of ONE message by id (chat.db, read-only), hygiene-budgeted.
+
+        Prefers ``message.text``; when it is NULL (the modern norm) decodes the
+        ``attributedBody`` typedstream. Returns "" for a message with no text (e.g. an
+        attachment-only row, or an undecodable body). Missing Full Disk Access raises a
+        typed FDA error. ``guid`` comes from messages_search / messages_with."""
+        g = guid.strip()
+        if not g:
+            raise ValueError("message_body needs a message id (guid)")
+
+        def run(conn):
+            return conn.execute(_BODY_SQL, (g,)).fetchone()
+
+        row = read_via_sqlite(CHAT_DB, _FINGERPRINT, run)  # no fallback → FDA raises
+        if row is None:
+            raise ValueError(f"no message with id {g!r}")
+        text, blob = row
+        body = text if text else _decode_attributed_body(blob)
+        return clean_body(body or "")  # bounds size; OutputOverflow on a pasted dump

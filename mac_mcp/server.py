@@ -288,6 +288,15 @@ def messages_with(contact: str, country: str = "", limit: int = 40) -> list[dict
 
 
 @_read_tool
+def message_body(id: str) -> str:
+    """Full text of one Message by id (chat.db, read-only). Decodes the attributedBody
+    typedstream when message.text is NULL (the modern norm); returns "" for a message
+    with no text. Needs Full Disk Access. `id` is a message guid from messages_search or
+    messages_with."""
+    return _messages.message_body(id)
+
+
+@_read_tool
 def shortcuts(name: str = "") -> list[dict]:
     """List/search Shortcuts by name (empty lists all). Pointers (name).
     Read-only; uses the Shortcuts CLI (no TCC prompt). See run_shortcut to invoke."""

@@ -17,6 +17,7 @@ from mac_mcp.adapters.messages import (
     _apple_date_to_dt,
     _calling_code_for_region,
     _clamp,
+    _decode_attributed_body,
     _escape_like,
     _handle_variants,
     _message_pointer,
@@ -328,3 +329,146 @@ def test_schema_drift_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(messages, "CHAT_DB", bad)
     with pytest.raises(SchemaDrift):
         messages.MessagesAdapter().search_messages("hello")
+
+
+# --- attributedBody typedstream decoder (commit 2) -----------------------------------
+
+
+# the header + class chain up to and including the '+' value tag — the real byte layout.
+_TS_HEAD = (
+    b"\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84"
+    b"\x19NSMutableAttributedString\x00\x84\x84\x08NSObject"
+    b"\x00\x85\x92\x84\x84\x84\x0fNSMutableString\x01\x94\x84"
+    b"\x84\x08NSString\x01\x95\x84\x01+"
+)
+_TS_TRAILER = b"\x86\x84\x02iI\x01\x00"  # attribute-run cruft the decoder must ignore
+
+
+def _typedstream(
+    text: bytes, *, long_prefix: bool = False, trailer: bytes = _TS_TRAILER
+) -> bytes:
+    """Craft a realistic ``streamtyped`` attributedBody: header + class chain, the ``+``
+    value tag, a typedstream length, the text bytes, then a trailer. Built from the real
+    byte layout the decoder parses — NOT the decoder's own output. ``trailer=b""`` puts
+    the text at the very end (exact-fit boundary)."""
+    if long_prefix:
+        prefix = b"\x81" + len(text).to_bytes(2, "little")
+    else:
+        prefix = bytes([len(text)])
+    return _TS_HEAD + prefix + text + trailer
+
+
+def test_decode_ascii():
+    assert _decode_attributed_body(_typedstream(b"Hello world")) == "Hello world"
+
+
+def test_decode_long_string_uses_two_byte_length():
+    text = b"x" * 200  # > 127 → 0x81 + LE uint16 length prefix
+    assert _decode_attributed_body(_typedstream(text, long_prefix=True)) == "x" * 200
+
+
+def test_decode_multibyte_utf8():
+    text = (
+        "café 🎉".encode()
+    )  # accent (2 bytes) + emoji (4 bytes); length is byte count
+    assert _decode_attributed_body(_typedstream(text)) == "café 🎉"
+
+
+def test_decode_empty_text():
+    assert _decode_attributed_body(_typedstream(b"")) == ""
+
+
+def test_decode_none_and_empty_blob():
+    assert _decode_attributed_body(None) is None
+    assert _decode_attributed_body(b"") is None
+
+
+def test_decode_not_streamtyped_declines():
+    # an NSKeyedArchiver/bplist blob is a different format — decline, don't mis-parse.
+    assert _decode_attributed_body(b"bplist00\xd1\x01\x02NSString+\x05Hello") is None
+
+
+def test_decode_no_nsstring_declines():
+    assert (
+        _decode_attributed_body(b"\x04\x0bstreamtyped\x81\xe8\x03 no string here")
+        is None
+    )
+
+
+def test_decode_truncated_declines_not_partial():
+    # length claims 50 bytes but only 3 follow → decline rather than return a fragment.
+    truncated = _TS_HEAD + b"\x32" + b"abc"  # says 0x32=50 bytes, only 3 present
+    assert _decode_attributed_body(truncated) is None
+
+
+def test_decode_invalid_length_tag_declines_not_fabricate():
+    # a single length byte is a signed char: only 0x00-0x7f are valid. 0x80 / 0x83-0xFF
+    # are negative/invalid — the decoder must DECLINE, not read that many bytes as a
+    # fabricated body (the decoder's "never fabricate a wrong body" contract).
+    for bad_tag in (b"\x80", b"\x83", b"\xff"):
+        blob = (
+            _TS_HEAD + bad_tag + (b"\x00\x01\x02" * 100)
+        )  # plenty of trailer to over-read
+        assert _decode_attributed_body(blob) is None
+
+
+def test_decode_exact_fit_no_trailer():
+    # the string is the LAST bytes of the blob (start+length == len): the boundary guard
+    # is `>` not `>=`, so a legitimate trailer-less body must still decode.
+    assert _decode_attributed_body(_typedstream(b"Hi", trailer=b"")) == "Hi"
+
+
+def test_decode_str_input_declines_not_crash():
+    # a str (not bytes) from an unexpected column type must decline, never raise.
+    assert _decode_attributed_body("streamtyped NSString+\x05Hello") is None  # type: ignore[arg-type]
+
+
+# --- message_body (get-by-id) --------------------------------------------------------
+
+
+@pytest.fixture
+def bodydb(tmp_path, monkeypatch):
+    d = _ns(datetime(2024, 5, 1))
+    path = _make_chatdb(
+        tmp_path / "chat.db",
+        handles=[(1, "+3210")],
+        messages_rows=[
+            ("g-text", "plain text here", None, d, 0, 0, 0, 0, 1),  # text present
+            (
+                "g-body",
+                None,
+                _typedstream(b"decoded body"),
+                d,
+                0,
+                0,
+                0,
+                0,
+                1,
+            ),  # NULL text
+            ("g-none", None, None, d, 0, 0, 0, 0, 1),  # no text, no body
+        ],
+    )
+    monkeypatch.setattr(messages, "CHAT_DB", path)
+    return path
+
+
+def test_message_body_prefers_text_column(bodydb):
+    assert messages.MessagesAdapter().message_body("g-text") == "plain text here"
+
+
+def test_message_body_decodes_attributedbody_when_text_null(bodydb):
+    assert messages.MessagesAdapter().message_body("g-body") == "decoded body"
+
+
+def test_message_body_empty_when_no_content(bodydb):
+    assert messages.MessagesAdapter().message_body("g-none") == ""
+
+
+def test_message_body_unknown_id_raises(bodydb):
+    with pytest.raises(ValueError, match="no message with id"):
+        messages.MessagesAdapter().message_body("nope")
+
+
+def test_message_body_empty_id_raises(bodydb):
+    with pytest.raises(ValueError, match="message id"):
+        messages.MessagesAdapter().message_body("  ")
