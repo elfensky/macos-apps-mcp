@@ -234,6 +234,20 @@ def mail_body(id: str) -> str:
     return _mail.get_body(id)
 
 
+@_read_tool
+def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
+    """List attachments on messages in a Mail mailbox (Automation).
+
+    mailbox: canonical system mailbox — "inbox" | "sent" | "drafts" | "trash" |
+    "junk" (resolved via Mail's unified, cross-account accessors). query: optional
+    subject substring — an empty/omitted query lists ALL messages in the mailbox
+    (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
+    confirm an attachment landed on a DRAFT (drafts have no stable id). Returns
+    [{summary, attachments: [{name, size, downloaded}]}], bounded.
+    """
+    return _mail.list_attachments(mailbox, query)
+
+
 @_additive_tool
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on

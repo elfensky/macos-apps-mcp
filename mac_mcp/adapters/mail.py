@@ -125,6 +125,116 @@ _CREATE_DRAFT = """on run argv
 end run"""
 
 
+# list_attachments (#45): attachments of messages in a mailbox matching a subject query.
+# Mailbox addressing uses Mail's UNIFIED, cross-account, locale-independent accessors
+# (verified on-device: `drafts mailbox`->"All Drafts", `sent mailbox`->"All Sent",
+# `trash mailbox`->"All Trash", `junk mailbox`->"All Junk", `inbox`->unified inbox) — no
+# per-account name search, so this can't pick the wrong (often empty) same-named mailbox
+# on a multi-account Mac the way a "first account with a matching mailbox name" loop
+# would. Since these accessors are locale-independent, only the canonical name travels
+# via argv — no localized candidate list needed. An empty query lists ALL messages in
+# the mailbox (bounded by maxN) rather than none — AppleScript's `contains ""` is
+# false, so that case is branched explicitly. Fields framed with US (\x1f)/RS (\x1e):
+# per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
+# subject and each attachment name are stripped of any raw framing bytes (stripFraming)
+# before being joined, so a message that happens to contain those control chars can't
+# desync the parser. Output capped at maxN records. with timeout (#56). All inputs via
+# argv (no interpolation).
+_ATTACHMENTS = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
+  set q to item 1 of argv
+  set maxN to (item 2 of argv) as integer
+  set canon to item 3 of argv
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  set c to 0
+  with timeout of 120 seconds
+  tell application "Mail"
+    if canon is "inbox" then
+      set mb to inbox
+    else if canon is "sent" then
+      set mb to sent mailbox
+    else if canon is "drafts" then
+      set mb to drafts mailbox
+    else if canon is "trash" then
+      set mb to trash mailbox
+    else if canon is "junk" then
+      set mb to junk mailbox
+    else
+      error "unknown mailbox " & canon
+    end if
+    if q is "" then
+      set msgs to messages of mb
+    else
+      set msgs to (messages of mb whose subject contains q)
+    end if
+    repeat with m in msgs
+      set c to c + 1
+      if c > maxN then exit repeat
+      set out to out & my stripFraming(subject of m)
+      repeat with a in (mail attachments of m)
+        set aSize to ""
+        try
+          set aSize to (file size of a) as text
+        end try
+        set aDown to ""
+        try
+          set aDown to (downloaded of a) as text
+        end try
+        set out to out & us & my stripFraming(name of a) & us & aSize & us & aDown
+      end repeat
+      set out to out & rs
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+
+def _parse_attachments(raw: str) -> list[dict]:
+    """Parse the _ATTACHMENTS payload: RS-separated records, each US-separated as
+    subject then (name, size, downloaded) triples. Malformed/partial trailing records
+    are skipped."""
+    out = []
+    for record in raw.split("\x1e"):
+        if not record.strip():
+            continue
+        parts = record.split("\x1f")
+        summary = clean_summary(parts[0])
+        atts = []
+        rest = parts[1:]
+        for i in range(0, len(rest) - 2, 3):
+            name = rest[i].strip()
+            if not name:
+                continue
+            size_s = rest[i + 1].strip()
+            down_s = rest[i + 2].strip().lower()
+            atts.append(
+                {
+                    "name": clean_summary(name),
+                    "size": int(size_s) if size_s.isdigit() else None,
+                    "downloaded": (down_s == "true")
+                    if down_s in ("true", "false")
+                    else None,
+                }
+            )
+        out.append({"summary": summary or "(no subject)", "attachments": atts})
+    return out
+
+
 def _summary(subject: str, sender: str) -> str:
     subject, sender = subject.strip(), sender.strip()
     if subject and sender:
@@ -209,3 +319,21 @@ class MailAdapter:
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(path)
+
+    def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:
+        """List attachments of messages in `mailbox` (canonical inbox/sent/drafts/
+        trash/junk) whose subject contains `query`. Works for Drafts (no message-id
+        needed); mailbox resolution uses Mail's unified, cross-account accessors
+        (`drafts mailbox`/`sent mailbox`/`trash mailbox`/`junk mailbox`/`inbox`), which
+        are locale-independent. query is optional: an empty/omitted query lists ALL
+        messages in the mailbox (bounded by MAX_MAILS) — this deliberately differs from
+        `get_pointers`, which rejects an empty query. Returns up to MAX_MAILS records:
+        [{"summary", "attachments": [{"name","size","downloaded"}]}]. A read — never
+        mutates."""
+        # system_mailbox_names raises ValueError on an unknown canonical name; kept
+        # purely as validation here since the script no longer needs localized
+        # candidates (the unified accessors are locale-independent).
+        system_mailbox_names(mailbox)
+        canon = mailbox.strip().lower()
+        raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
+        return _parse_attachments(raw)[:MAX_MAILS]

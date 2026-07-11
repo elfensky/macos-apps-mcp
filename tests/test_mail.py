@@ -232,3 +232,71 @@ def test_create_draft_cleans_up_tempfile(monkeypatch):
 def test_create_draft_empty_recipient_raises():
     with pytest.raises(ValueError, match="recipient"):
         MailAdapter().create_draft("  ", "Hi", "body")
+
+
+# --- list_attachments (#45) -----------------------------------------------------------
+
+
+def test_parse_attachments_groups_by_message():
+    from mac_mcp.adapters.mail import _parse_attachments
+
+    us, rs = "\x1f", "\x1e"
+    raw = (
+        f"Logo files{us}LOGO.zip{us}1200000{us}true{us}spec.pdf{us}0{us}false{rs}"
+        f"No attach subject{rs}"
+    )
+    out = _parse_attachments(raw)
+    assert out[0]["summary"] == "Logo files"
+    assert out[0]["attachments"] == [
+        {"name": "LOGO.zip", "size": 1200000, "downloaded": True},
+        {"name": "spec.pdf", "size": 0, "downloaded": False},
+    ]
+    assert out[1]["summary"] == "No attach subject"
+    assert out[1]["attachments"] == []
+
+
+def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
+    import mac_mcp.adapters.mail as mail
+
+    captured = {}
+
+    def fake(script, *args):
+        captured["script"] = script
+        captured["args"] = args
+        # more records than MAX_MAILS — the cap must actually bite
+        records = "".join(
+            f"Logo files {i}\x1fLOGO.zip\x1f100\x1ftrue\x1e"
+            for i in range(mail.MAX_MAILS + 5)
+        )
+        return records
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().list_attachments("drafts", "Logo")
+    # only query, cap, and canonical mailbox travel via argv now — no localized
+    # candidates (the unified `drafts mailbox` accessor is locale-independent)
+    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "drafts")
+    assert len(out) == mail.MAX_MAILS
+
+
+def test_list_attachments_empty_query_lists_all(monkeypatch):
+    import mac_mcp.adapters.mail as mail
+
+    def fake(script, *args):
+        return (
+            "First\x1fa.pdf\x1f10\x1ftrue\x1e"
+            "Second\x1fb.pdf\x1f20\x1ffalse\x1e"
+            "Third\x1e"
+        )
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().list_attachments("inbox")
+    assert [r["summary"] for r in out] == ["First", "Second", "Third"]
+
+
+def test_list_attachments_unknown_mailbox_raises():
+    import pytest
+
+    from mac_mcp.adapters.mail import MailAdapter
+
+    with pytest.raises(ValueError, match="unknown system mailbox"):
+        MailAdapter().list_attachments("nope", "x")

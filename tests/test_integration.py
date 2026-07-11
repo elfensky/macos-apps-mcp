@@ -1163,3 +1163,52 @@ def test_mail_create_draft_opens_and_never_sends():
         "end run"
     )
     assert int(run_osascript(check, subj)) >= 1  # draft created (and now cleaned up)
+
+
+@pytest.mark.integration
+def test_list_attachments_finds_draft_attachment(created):
+    """#45: create a draft with an attachment, list it from Drafts, confirm it appears.
+    Needs Automation access for Mail."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    subj = "mac-mcp-test: attach (safe to delete)"
+    # create a draft with an attachment via osascript (test-only helper)
+    make = (
+        "on run argv\n"
+        '  tell application "Mail"\n'
+        "    set d to make new outgoing message with properties "
+        "{subject:(item 1 of argv), visible:false}\n"
+        "    tell content of d to make new attachment with properties "
+        "{file name:(POSIX file (item 2 of argv))}\n"
+        "    save d\n"
+        "  end tell\n"
+        "end run"
+    )
+    # a small real file to attach
+    import os
+    import tempfile
+
+    fd, path = tempfile.mkstemp(prefix="mac-mcp-itest-", suffix=".txt")
+    os.write(fd, b"hello")
+    os.close(fd)
+    try:
+        run_osascript(make, subj, path)
+        recs = MailAdapter().list_attachments("drafts", "mac-mcp-test: attach")
+        names = [a["name"] for r in recs for a in r["attachments"]]
+        assert any(path.split("/")[-1] in n or n.endswith(".txt") for n in names)
+    finally:
+        os.unlink(path)
+        run_osascript(
+            "on run argv\n"
+            '  tell application "Mail"\n'
+            "    repeat with acc in accounts\n"
+            "      try\n"
+            '        delete (messages of (mailbox "Drafts" of acc) whose subject is '
+            "(item 1 of argv))\n"
+            "      end try\n"
+            "    end repeat\n"
+            "  end tell\n"
+            "end run",
+            subj,
+        )

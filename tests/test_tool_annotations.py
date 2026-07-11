@@ -48,6 +48,7 @@ _PERMISSION = {
     "contacts": "Automation",
     "mail": "Automation",
     "mail_body": "Automation",
+    "mail_attachments": "Automation",
     "create_draft": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
