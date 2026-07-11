@@ -647,6 +647,17 @@ def read_via_sqlite(
     return work() if _on_worker() else run_native(work)
 
 
+def mac_region() -> str | None:
+    """The Mac's locale region code (e.g. ``'BE'``), for the locale-derived phone
+    country-code default (#59 — never a hardcoded +1). ``None`` if unavailable.
+
+    A pure read of NSLocale: no EventKit thread affinity, no TCC — so it needs neither
+    run_native nor a permission. Kept here so Foundation stays out of the adapters.
+    """
+    region = F.NSLocale.currentLocale().objectForKey_(F.NSLocaleCountryCode)
+    return str(region) if region else None
+
+
 def to_nsdate(dt: datetime) -> F.NSDate:
     return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
 

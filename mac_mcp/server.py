@@ -271,6 +271,23 @@ def messages_chats() -> list[dict]:
 
 
 @_read_tool
+def messages_search(query: str, limit: int = 40) -> list[dict]:
+    """Search Messages by text content (chat.db, read-only), newest first. Pointers:
+    id=message guid, summary=`[date] sender: snippet`. Needs Full Disk Access (raises a
+    typed error if not granted). Text-only for now; sending isn't supported."""
+    return [_emit(p) for p in _messages.search_messages(query, limit)]
+
+
+@_read_tool
+def messages_with(contact: str, country: str = "", limit: int = 40) -> list[dict]:
+    """Recent Messages by phone or email (chat.db, read-only), newest-first.
+    `contact` a phone number or email; `country` an optional calling code or 2-letter
+    region (e.g. '+32' or 'BE') to resolve a national number — default from the Mac's
+    locale, never +1. Needs Full Disk Access (raises a typed error if not granted)."""
+    return [_emit(p) for p in _messages.messages_with(contact, country or None, limit)]
+
+
+@_read_tool
 def shortcuts(name: str = "") -> list[dict]:
     """List/search Shortcuts by name (empty lists all). Pointers (name).
     Read-only; uses the Shortcuts CLI (no TCC prompt). See run_shortcut to invoke."""
