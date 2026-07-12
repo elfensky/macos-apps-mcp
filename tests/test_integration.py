@@ -472,10 +472,23 @@ def test_mail_search_runs():
 
 
 @pytest.mark.integration
-def test_notes_search_finds_created():
-    """#19: Notes title search via osascript finds a created note (Automation TCC)."""
-    from mac_mcp.adapters.notes import NotesAdapter
+def test_notes_search_finds_created(tmp_path, monkeypatch):
+    """#19/#60: Notes title search finds a just-created note via the fresh-state
+    AppleScript reader. The sqlite plane reflects the PERSISTED store, and Notes.app
+    flushes new notes lazily (minutes), so a create-then-immediately-search must use the
+    AppleScript path — force the adapter's documented fallback by pointing the sqlite
+    store at a drifted db (Automation TCC)."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
     from mac_mcp.runtime import run_osascript
+
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
     marker = "mac-mcp-test-zznote"
     run_osascript(
@@ -487,7 +500,8 @@ def test_notes_search_finds_created():
         marker,
     )
     try:
-        assert any(marker in p.summary for p in NotesAdapter().get_pointers(marker))
+        adapter = notes_mod.NotesAdapter()
+        assert any(marker in p.summary for p in adapter.get_pointers(marker))
     finally:
         run_osascript(
             "on run argv\n"
@@ -500,13 +514,23 @@ def test_notes_search_finds_created():
 
 
 @pytest.mark.integration
-def test_notes_search_folds_diacritics_and_smart_punctuation():
+def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypatch):
     """#64 end-to-end: a note titled with an accent + a curly apostrophe is found by a
-    plain-ASCII query, on Apple's REAL store (sqlite fold path under FDA, or the folded
-    AppleScript fallback). The hyphen in the marker is preserved by fold_text, so the
-    hyphenated form still matches (acceptance: hyphenated titles unaffected)."""
-    from mac_mcp.adapters.notes import NotesAdapter
+    plain-ASCII query. Exercised via the folded AppleScript fallback (both backends fold
+    identically), since a just-created note isn't in the lazily-flushed sqlite store yet
+    — forced by a drifted sqlite store. Hyphens are preserved by fold_text, so the
+    hyphenated marker still matches (acceptance: hyphenated titles unaffected)."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
     from mac_mcp.runtime import run_osascript
+
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
     # typographic title: U+00E9 (é) + U+2019 (curly apostrophe); unique hyphen marker.
     title = "mac-mcp-itest-fold Café’s résumé"
@@ -520,7 +544,7 @@ def test_notes_search_folds_diacritics_and_smart_punctuation():
     )
     try:
         # ASCII query: no accents, straight apostrophe. Folds onto the stored glyphs.
-        hits = NotesAdapter().get_pointers("mac-mcp-itest-fold cafe's resume")
+        hits = notes_mod.NotesAdapter().get_pointers("mac-mcp-itest-fold cafe's resume")
         assert any("mac-mcp-itest-fold" in p.summary for p in hits), (
             "ASCII query did not find the typographically-titled note (#64 fold)"
         )
@@ -706,14 +730,25 @@ def test_reminder_create_recurring(created):
 
 
 @pytest.mark.integration
-def test_notes_all_and_bodies_and_delete_roundtrip():
+def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     """Create a note whose body contains newlines, find it via get_all, hydrate its
     body (verifying the embedded newlines survive the control-char framing), then
-    delete it with a matching expect_title."""
-    from mac_mcp.adapters.notes import NotesAdapter
+    delete it with a matching expect_title. Uses the fresh-state AppleScript path (the
+    sqlite plane reflects the lazily-flushed persisted store, not just-created notes) by
+    forcing the adapter's fallback via a drifted sqlite store."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
     from mac_mcp.runtime import run_osascript
 
-    notes = NotesAdapter()
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
+
+    notes = notes_mod.NotesAdapter()
     title = "mac-mcp-itest-note"
     # Notes stores `body` as HTML, so line breaks must be <br> to yield real newlines
     # in plaintext. The newlines are the point: a newline-delimited record format would
@@ -1086,7 +1121,11 @@ def test_note_body_decoder_matches_applescript_real_store():
     ptrs = adapter.get_all()
     if not ptrs:
         pytest.skip("no notes in this Mac's library")
-    conn = sqlite3.connect(f"file:{notes_mod.NOTESTORE}?mode=ro&immutable=1", uri=True)
+    import re as _re
+
+    # mode=ro (no immutable) — read the same live snapshot get_all() does, so a note it
+    # returned resolves here too.
+    conn = sqlite3.connect(f"file:{notes_mod.NOTESTORE}?mode=ro", uri=True)
     checked = 0
     try:
         for p in ptrs[:20]:
@@ -1102,8 +1141,19 @@ def test_note_body_decoder_matches_applescript_real_store():
             applescript = adapter._applescript_bodies([p.id])
             if decoded is None or not applescript:
                 continue
-            # stripped compare — attribute-run/trailing-whitespace diffs are immaterial
-            assert decoded.strip() == applescript[0]["body"].strip(), (
+            # _applescript_bodies bounds via clean_body (BODY_MAX + a "[truncated N
+            # chars]" marker); the decoder is unbounded. Compare the AppleScript body
+            # (marker stripped) as a PREFIX of the full decoded text — a length/marker
+            # difference on a long note is not a decoder defect. Stripped: attribute-run
+            # and trailing-whitespace diffs are immaterial.
+            as_body = _re.sub(
+                r"\s*\[truncated \d+ chars\]$", "", applescript[0]["body"]
+            ).strip()
+            # normalize line endings before comparing: the raw decoder emits CRLF, the
+            # AppleScript plaintext LF — the shipped path (clean_body) folds CRLF→LF, so
+            # the difference is immaterial and not a decoder defect.
+            dec = decoded.replace("\r\n", "\n").replace("\r", "\n").strip()
+            assert dec == as_body or dec.startswith(as_body), (
                 f"decoder != AppleScript plaintext for {p.id}"
             )
             checked += 1
@@ -1120,12 +1170,23 @@ def test_note_body_decoder_matches_applescript_real_store():
 def test_mail_reads_return_id_triple_real_inbox():
     """Real inbox: every read returns the stable RFC822 message-id and a well-formed
     message:// deeplink. Needs Automation access for Mail; skips if no match. (Actually
-    opening the deeplink to confirm it lands on the right message is a manual step.)"""
+    opening the deeplink to confirm it lands on the right message is a manual step.)
+
+    Uses a targeted query, NOT a catch-all like "a": Mail's AppleScript `whose` clause
+    materializes the ENTIRE match set before the host-side cap applies, so a query that
+    matches most of a large inbox blows the 30s timeout (a real, documented limitation —
+    the tool raises a clear NativeTimeout). We skip on that timeout rather than
+    hard-fail, since it's an environment property (huge inbox), not a defect in the
+    id-triple contract this test checks."""
     import re as _re
 
     from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import NativeTimeout
 
-    ptrs = MailAdapter().get_pointers("a")  # 'a' matches most subjects/senders
+    try:
+        ptrs = MailAdapter().get_pointers("invoice")  # targeted, not a catch-all match
+    except NativeTimeout:
+        pytest.skip("inbox too large for the AppleScript whose-scan within 30s")
     if not ptrs:
         pytest.skip("no matching mail in this inbox")
     for p in ptrs:

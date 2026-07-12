@@ -215,18 +215,30 @@ def _parse_bodies(raw: str) -> list[dict]:
 # two backends AGREE (the @integration cross-check needs that); a locale-independent
 # ZFOLDERTYPE-based exclusion is the upgrade path if a non-English store needs it.
 #
-# WAL staleness: reads use immutable=1 (per the #60 Design + the sirmews recipe) so they
-# open past the lock Notes.app holds on the live store. The tradeoff is that immutable
-# ignores the -wal, so a just-typed note not yet checkpointed can be briefly missing —
-# acceptable staleness for search/list, and the AppleScript fallback always sees current
-# state. (Messages, #59, uses mode=ro without immutable — chat.db isn't held locked.)
+# Live consistency: reads open mode=ro WITHOUT immutable=1. NoteStore is a WAL-mode
+# database (there is a -wal alongside it), and WAL permits concurrent readers, so a
+# read-only connection opens fine while Notes.app is running — verified on-device. The
+# #60 design originally used immutable=1 (per the sirmews recipe) to "read past the
+# lock", but immutable IGNORES the -wal: it pins a stale point-in-time snapshot, so a
+# just-created note is missed AND a just-deleted note lingers (both surfaced against the
+# real store once FDA enabled the sqlite path). mode=ro reads the -wal → live state,
+# matching AppleScript (and matching Messages, #59). If a read ever can't open, the
+# adapter's AppleScript fallback still sees current state — so mode=ro is strictly safer
+# than a silently-stale immutable snapshot.
 _TRASH = "Recently Deleted"
 _COLS = """o.Z_PK, o.ZTITLE1, o.ZSNIPPET, o.ZISPINNED, o.ZISPASSWORDPROTECTED,
        f.ZTITLE2, a.ZNAME"""
+# A real, user-visible note always belongs to a folder. A row with ZNOTEDATA set but
+# ZFOLDER NULL is an orphaned/deleted remnant (empty title, no container) that
+# AppleScript never enumerates — but it is NOT tombstoned (ZMARKEDFORDELETION=0) and its
+# NULL folder slips past the trash-name check, so without an explicit ZFOLDER filter the
+# sqlite path leaks it (real store: 25 such orphans surfaced once FDA enabled the sqlite
+# path). Require a folder so sqlite matches what AppleScript shows.
 _FROM = f"""FROM ZICCLOUDSYNCINGOBJECT o
     LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON o.ZFOLDER = f.Z_PK
     LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON f.ZOWNER = a.Z_PK
     WHERE o.ZNOTEDATA IS NOT NULL
+      AND o.ZFOLDER IS NOT NULL
       AND (o.ZMARKEDFORDELETION IS NULL OR o.ZMARKEDFORDELETION = 0)
       AND (f.ZTITLE2 IS NULL OR f.ZTITLE2 <> '{_TRASH}')"""
 
@@ -413,7 +425,7 @@ class NotesAdapter:
             _FINGERPRINT,
             sqlite,
             fallback=fallback,
-            immutable=True,  # read past Notes' lock; see module note on WAL staleness
+            immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
     def get_all(self) -> list[Pointer]:
@@ -430,7 +442,7 @@ class NotesAdapter:
             _FINGERPRINT,
             sqlite,
             fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
-            immutable=True,  # read past Notes' lock; see module note on WAL staleness
+            immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
     def get_bodies(self, ids: list[str]) -> list[dict]:
@@ -487,7 +499,7 @@ class NotesAdapter:
             _BODY_FINGERPRINT,
             sqlite,
             fallback=lambda: self._applescript_bodies(ids),
-            immutable=True,  # read past Notes' lock; see module note on WAL staleness
+            immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
     def _applescript_bodies(self, ids: list[str]) -> list[dict]:

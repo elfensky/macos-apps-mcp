@@ -278,6 +278,10 @@ def _make_notestore(path, *, uuid="STORE-UUID", bodies=None, extra_notes=()):
         # a note MOVED to Recently Deleted stays live (ZMARKEDFORDELETION=0) — excluded
         # by folder, exactly as the AppleScript reader excludes it (#60 review).
         (7, "Trashed", "in the bin", 6, 96, 0, 0, 0, None, None, None),
+        # orphaned/deleted remnant: has body data (ZNOTEDATA) but NO folder (ZFOLDER
+        # NULL) and is not tombstoned — AppleScript never shows it; the sqlite path must
+        # exclude it too (the real store leaked 25 of these once FDA was on).
+        (8, None, None, None, 95, 0, 0, 0, None, None, None),
     ]
     # live notes in the Groceries folder (pk 2). ZNOTEDATA must be non-null (the
     # note-row discriminator the query filters on) — reuse pk; no body needed here.
@@ -300,11 +304,17 @@ def notestore(tmp_path, monkeypatch):
     return path
 
 
+def test_sqlite_all_excludes_folderless_orphan(notestore):
+    # #60 retest: a folder-less remnant (ZFOLDER NULL, not tombstoned) must NOT appear —
+    # AppleScript never enumerates it, so the sqlite path must exclude it too.
+    assert all("/p8" not in p.id for p in NotesAdapter().get_all())
+
+
 def test_sqlite_all_maps_snippet_id_folder_and_flags(notestore):
     ptrs = NotesAdapter().get_all()
     assert [
         p.id for p in ptrs
-    ] == [  # newest (Z_PK DESC) first; folder/account/tombstone out
+    ] == [  # newest (Z_PK DESC) first; folder/account/tombstone/orphan out
         "x-coredata://STORE-UUID/ICNote/p4",
         "x-coredata://STORE-UUID/ICNote/p3",
     ]
