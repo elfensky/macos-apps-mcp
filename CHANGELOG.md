@@ -4,6 +4,49 @@ All notable changes to mac-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [0.5.0] - 2026-07-12 — Native data planes
+
+Reads move onto the native stores (`chat.db`, `NoteStore.sqlite`) for content that
+AppleScript enumeration made too slow or lossy; AppleScript stays for *actions* only. Writes
+gain id-first targeting, and Mail grows a small draft-and-open reply surface — nothing ever
+sends.
+
+### Added
+
+- **Messages content** (#59) — `messages_search` (by text), `messages_with` (by phone/email,
+  locale-aware calling code, never hardcodes +1), and `message_body` read `chat.db` directly
+  (read-only), decoding the `attributedBody` typedstream when `message.text` is NULL. Needs
+  Full Disk Access; raises a clear typed error without it. `messages_chats` (no content) still
+  works without FDA.
+- **Notes native reads + bodies** (#60) — `notes` / `notes_all` enumerate `NoteStore.sqlite`
+  (Apple's precomputed snippet + the stable `x-coredata://` id), and `note_bodies` hydrates
+  plaintext by decoding the gzip+protobuf `ZDATA`. Degrades to Automation without Full Disk
+  Access (no regression). Recently Deleted excluded.
+- **Mail body + drafts** (#61, #62) — id-first reads keyed on the stable RFC822 message-id with
+  encoded `message://` deeplinks and localized mailbox tables; `mail_body` (bounded) and
+  `create_draft` (draft-and-open, **no send path**).
+- **Mail reply/draft/attachment surface** (#42–#46) — `mail_reply` builds a threaded reply via
+  Mail's native `reply` verb (Mail sets `In-Reply-To`/`References`), quotes the original, and
+  opens a compose window for review — keystroke-free, **never sends**. `mail_attachments` lists
+  attachments by mailbox + query (works on Drafts). `create_draft`/`mail_reply` are atomic
+  (a failed create leaves no stray draft) and return an honest locator (an unsent draft has no
+  stable id).
+- **Shortcuts identity** (#63) — `Pointer.id` is the shortcut's stable UUID (survives renames),
+  with a `shortcuts://run-shortcut` deeplink; `run_shortcut` accepts a name **or** id.
+- **Read-only sqlite plane** (#58) — shared `read_via_sqlite` opens the store read-only, verifies
+  a schema fingerprint (→ `SchemaDrift` → fallback), and raises a typed `FullDiskAccessDenied`.
+
+### Changed
+
+- **Write targeting** (#55) — `create_event`/`create_reminder` accept a container by **name or
+  `Pointer.id`**; an ambiguous name raises `AmbiguousTarget` listing the candidate ids instead
+  of silently picking one.
+- **Diacritic- & smart-punctuation-insensitive matching** (#64) — read-side name/title search
+  folds curly quotes/apostrophes/ellipsis to ASCII and strips diacritics ("cafe" finds "café"),
+  via one shared `fold_text` helper. Write-target resolution stays byte-exact by design (folding
+  a write target could mis-home it).
+- Mail search now matches subject **OR** sender.
+
 ## [0.4.0] - 2026-07-10 — Safety rails
 
 Prompt-injection, blast-radius and lifecycle hardening across the tool surface.
