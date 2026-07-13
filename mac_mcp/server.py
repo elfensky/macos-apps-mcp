@@ -220,24 +220,70 @@ def contacts(name: str) -> list[dict]:
 
 
 @_read_tool
-def mail(subject: str) -> list[dict]:
-    """Search the Mail inbox by subject substring. Pointers (id + subject/sender).
+def mail(query: str) -> list[dict]:
+    """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
+    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL.
     Read-only; needs Automation access for Mail. Bodies are never fetched."""
-    return [_emit(p) for p in _mail.get_pointers(subject)]
+    return [_emit(p) for p in _mail.get_pointers(query)]
+
+
+@_read_tool
+def mail_body(id: str) -> str:
+    """Full plaintext body of one inbox message by id (bounded + truncation-marked).
+    Read-only; needs Automation access for Mail. `id` is a message-id from `mail`."""
+    return _mail.get_body(id)
+
+
+@_read_tool
+def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
+    """List attachments on messages in a Mail mailbox (Automation).
+
+    mailbox: canonical system mailbox — "inbox" | "sent" | "drafts" | "trash" |
+    "junk" (resolved via Mail's unified, cross-account accessors). query: optional
+    subject substring — an empty/omitted query lists ALL messages in the mailbox
+    (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
+    confirm an attachment landed on a DRAFT (drafts have no stable id). Returns
+    [{summary, attachments: [{name, size, downloaded}]}], bounded.
+    """
+    return _mail.list_attachments(mailbox, query)
+
+
+@_additive_tool
+def create_draft(to: str, subject: str = "", body: str = "") -> dict:
+    """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
+    its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
+    "mailbox", "note"}) — an unsent draft has no stable id, so this says where to find
+    it (Drafts) instead of fabricating one. Additive (creates a draft; does not
+    send/modify/delete); needs Automation access for Mail."""
+    return _mail.create_draft(to, subject, body)
+
+
+@_additive_tool
+def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> dict:
+    """Reply to an inbox message, opening a threaded draft for review (Automation).
+
+    NEVER sends. message_id: the RFC822 id from a mail read. Mail sets the threading
+    headers natively; include_quote appends the quoted original. Returns a locator
+    dict (unsent drafts have no stable id).
+    """
+    return _mail.reply(message_id, reply_body, include_quote)
 
 
 @_read_tool
 def notes(title: str) -> list[dict]:
-    """Search Notes by title substring. Returns pointers (id + title).
-    Read-only; needs Automation access for Notes. See notes_all, note_bodies."""
+    """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
+    path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to
+    Automation (Notes) title search — Automation access is the floor. See notes_all,
+    note_bodies."""
     return [_emit(p) for p in _notes.get_pointers(title)]
 
 
 @_read_tool
 def notes_all() -> list[dict]:
-    """List every note as pointers (id + "Account / Folder" + title), excluding
-    Recently Deleted. No cap; very large libraries can hit the osascript timeout
-    (all-or-nothing). Read-only; needs Automation access for Notes. See note_bodies."""
+    """List every note as pointers (id + "Account / Folder" + snippet), excluding
+    Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk
+    Access); degrades to Automation (Notes) enumeration without it (very large libraries
+    can hit the osascript timeout, all-or-nothing). See note_bodies."""
     return [_emit(p) for p in _notes.get_all()]
 
 
@@ -271,8 +317,35 @@ def messages_chats() -> list[dict]:
 
 
 @_read_tool
+def messages_search(query: str, limit: int = 40) -> list[dict]:
+    """Search Messages by text content (chat.db, read-only), newest first. Pointers:
+    id=message guid, summary=`[date] sender: snippet`. Needs Full Disk Access (raises a
+    typed error if not granted). Text-only for now; sending isn't supported."""
+    return [_emit(p) for p in _messages.search_messages(query, limit)]
+
+
+@_read_tool
+def messages_with(contact: str, country: str = "", limit: int = 40) -> list[dict]:
+    """Recent Messages by phone or email (chat.db, read-only), newest-first.
+    `contact` a phone number or email; `country` an optional calling code or 2-letter
+    region (e.g. '+32' or 'BE') to resolve a national number — default from the Mac's
+    locale, never +1. Needs Full Disk Access (raises a typed error if not granted)."""
+    return [_emit(p) for p in _messages.messages_with(contact, country or None, limit)]
+
+
+@_read_tool
+def message_body(id: str) -> str:
+    """Full text of one Message by id (chat.db, read-only). Decodes the attributedBody
+    typedstream when message.text is NULL (the modern norm); returns "" for a message
+    with no text. Needs Full Disk Access. `id` is a message guid from messages_search or
+    messages_with."""
+    return _messages.message_body(id)
+
+
+@_read_tool
 def shortcuts(name: str = "") -> list[dict]:
-    """List/search Shortcuts by name (empty lists all). Pointers (name).
+    """List/search Shortcuts by name (empty lists all). Pointers: id = the shortcut's
+    stable UUID (survives renames), summary = name, deeplink = shortcuts://run-shortcut.
     Read-only; uses the Shortcuts CLI (no TCC prompt). See run_shortcut to invoke."""
     return [_emit(p) for p in _shortcuts.get_pointers(name)]
 
@@ -342,8 +415,9 @@ def create_reminder(
 ) -> dict:
     """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
     first; `priority` 0–9; `recurrence` an RRULE.
-    Side effect (creates); needs EventKit (Reminders) access. Target a list by name via
-    `list_name` (from reminder_lists); an ambiguous name is refused, not guessed."""
+    Side effect (creates); needs EventKit (Reminders) access. Target a list via
+    `list_name` — a list name OR a list Pointer id (from reminder_lists). An ambiguous
+    name is refused (with the candidate ids listed), never guessed."""
     data = ReminderData(
         title=title,
         due=_parse(due),
@@ -406,8 +480,9 @@ def create_event(
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
     first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
     with a UTC offset is rejected.
-    Side effect (creates); needs EventKit (Calendar) access. Target a calendar by name
-    via `calendar` (from calendars); an ambiguous name is refused, not guessed."""
+    Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
+    `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
+    name is refused (with the candidate ids listed), never guessed."""
     parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
@@ -504,9 +579,10 @@ def create_contact(
 
 @_write_tool
 def run_shortcut(name: str, input_text: str | None = None) -> dict:
-    """Run a Shortcut by name; optional `input_text` piped in. Returns a pointer.
-    Side effect (runs arbitrary automation the user owns); uses the Shortcuts CLI (no
-    TCC prompt). List names via shortcuts. An ambiguous name is resolved by the CLI."""
+    """Run a Shortcut by name OR its UUID id (from shortcuts — the id is unambiguous
+    across renames/duplicate names); optional `input_text` piped in. Returns a pointer
+    citing the run + a bounded output snippet. Side effect (runs arbitrary automation
+    the user owns); uses the Shortcuts CLI (no TCC prompt)."""
     return _emit(_shortcuts.run_shortcut(name, input_text))
 
 

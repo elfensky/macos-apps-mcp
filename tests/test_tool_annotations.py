@@ -14,7 +14,14 @@ import mac_mcp.server as srv
 
 # Writes that only ADD a new item (create/open) — not read-only, but not destructive.
 _ADDITIVE_TOOLS = frozenset(
-    {"create_reminder", "create_event", "create_contact", "safari_open"}
+    {
+        "create_reminder",
+        "create_event",
+        "create_contact",
+        "safari_open",
+        "create_draft",
+        "mail_reply",
+    }
 )
 # Writes that modify/overwrite/delete existing state, or run arbitrary automation.
 _DESTRUCTIVE_TOOLS = frozenset(
@@ -47,11 +54,18 @@ _PERMISSION = {
     "delete_event": "EventKit",
     "contacts": "Automation",
     "mail": "Automation",
+    "mail_body": "Automation",
+    "mail_attachments": "Automation",
+    "create_draft": "Automation",
+    "mail_reply": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
     "note_bodies": "Automation",
     "photos": "Automation",
     "messages_chats": "Automation",
+    "messages_search": "Full Disk Access",
+    "messages_with": "Full Disk Access",
+    "message_body": "Full Disk Access",
     "safari_tabs": "Automation",
     "delete_note": "Automation",
     "create_contact": "Automation",

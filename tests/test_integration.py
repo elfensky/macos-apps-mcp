@@ -472,10 +472,23 @@ def test_mail_search_runs():
 
 
 @pytest.mark.integration
-def test_notes_search_finds_created():
-    """#19: Notes title search via osascript finds a created note (Automation TCC)."""
-    from mac_mcp.adapters.notes import NotesAdapter
+def test_notes_search_finds_created(tmp_path, monkeypatch):
+    """#19/#60: Notes title search finds a just-created note via the fresh-state
+    AppleScript reader. The sqlite plane reflects the PERSISTED store, and Notes.app
+    flushes new notes lazily (minutes), so a create-then-immediately-search must use the
+    AppleScript path — force the adapter's documented fallback by pointing the sqlite
+    store at a drifted db (Automation TCC)."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
     from mac_mcp.runtime import run_osascript
+
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
     marker = "mac-mcp-test-zznote"
     run_osascript(
@@ -487,7 +500,8 @@ def test_notes_search_finds_created():
         marker,
     )
     try:
-        assert any(marker in p.summary for p in NotesAdapter().get_pointers(marker))
+        adapter = notes_mod.NotesAdapter()
+        assert any(marker in p.summary for p in adapter.get_pointers(marker))
     finally:
         run_osascript(
             "on run argv\n"
@@ -496,6 +510,52 @@ def test_notes_search_finds_created():
             "  end tell\n"
             "end run",
             marker,
+        )
+
+
+@pytest.mark.integration
+def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypatch):
+    """#64 end-to-end: a note titled with an accent + a curly apostrophe is found by a
+    plain-ASCII query. Exercised via the folded AppleScript fallback (both backends fold
+    identically), since a just-created note isn't in the lazily-flushed sqlite store yet
+    — forced by a drifted sqlite store. Hyphens are preserved by fold_text, so the
+    hyphenated marker still matches (acceptance: hyphenated titles unaffected)."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
+    from mac_mcp.runtime import run_osascript
+
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
+
+    # typographic title: U+00E9 (é) + U+2019 (curly apostrophe); unique hyphen marker.
+    title = "mac-mcp-itest-fold Café’s résumé"
+    run_osascript(
+        "on run argv\n"
+        '  tell application "Notes"\n'
+        '    make new note with properties {name:(item 1 of argv), body:"x"}\n'
+        "  end tell\n"
+        "end run",
+        title,
+    )
+    try:
+        # ASCII query: no accents, straight apostrophe. Folds onto the stored glyphs.
+        hits = notes_mod.NotesAdapter().get_pointers("mac-mcp-itest-fold cafe's resume")
+        assert any("mac-mcp-itest-fold" in p.summary for p in hits), (
+            "ASCII query did not find the typographically-titled note (#64 fold)"
+        )
+    finally:
+        run_osascript(
+            "on run argv\n"
+            '  tell application "Notes"\n'
+            "    delete (every note whose name is (item 1 of argv))\n"
+            "  end tell\n"
+            "end run",
+            title,
         )
 
 
@@ -670,14 +730,25 @@ def test_reminder_create_recurring(created):
 
 
 @pytest.mark.integration
-def test_notes_all_and_bodies_and_delete_roundtrip():
+def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     """Create a note whose body contains newlines, find it via get_all, hydrate its
     body (verifying the embedded newlines survive the control-char framing), then
-    delete it with a matching expect_title."""
-    from mac_mcp.adapters.notes import NotesAdapter
+    delete it with a matching expect_title. Uses the fresh-state AppleScript path (the
+    sqlite plane reflects the lazily-flushed persisted store, not just-created notes) by
+    forcing the adapter's fallback via a drifted sqlite store."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
     from mac_mcp.runtime import run_osascript
 
-    notes = NotesAdapter()
+    drift = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(drift)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # missing columns
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
+
+    notes = notes_mod.NotesAdapter()
     title = "mac-mcp-itest-note"
     # Notes stores `body` as HTML, so line breaks must be <br> to yield real newlines
     # in plaintext. The newlines are the point: a newline-delimited record format would
@@ -940,3 +1011,306 @@ def test_orphaned_server_exits_within_5s():
             pytest.fail("orphaned child did not exit within 5s")
     finally:
         inter.wait()
+
+
+# --- Messages content via chat.db (#59) — needs Full Disk Access ---------------------
+
+
+@pytest.mark.integration
+def test_messages_search_reads_real_store():
+    """Real chat.db: a broad search returns snippet Pointers obeying the contract. Needs
+    Full Disk Access; skips cleanly if the store has no messages. Never mutates."""
+    from mac_mcp.adapters.messages import MessagesAdapter
+
+    ptrs = MessagesAdapter().search_messages("a", limit=5)  # 'a' matches most chats
+    if not ptrs:
+        pytest.skip("no messages in this Mac's chat.db")
+    for p in ptrs:
+        assert p.id and isinstance(p.summary, str)
+
+
+@pytest.mark.integration
+def test_attributedbody_decoder_matches_foundation():
+    """The ONLY real proof the hand-rolled typedstream decoder matches Apple's byte
+    layout: decode real attributedBody blobs with our decoder AND with Apple's own
+    NSUnarchiver, and assert they agree. A fixture can't prove this (it bakes in the
+    same assumptions). Needs Full Disk Access; skips if neither side decodes."""
+    import sqlite3
+
+    import Foundation as F
+
+    from mac_mcp.adapters.messages import CHAT_DB, _decode_attributed_body
+
+    conn = sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT attributedBody FROM message WHERE attributedBody IS NOT NULL "
+            "AND (text IS NULL OR text = '') LIMIT 50"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    checked = 0
+    for (blob,) in rows:
+        blob = bytes(blob)
+        try:  # NSUnarchiver is Apple's own typedstream reader; skip a blob it rejects
+            data = F.NSData.dataWithBytes_length_(blob, len(blob))
+            obj = F.NSUnarchiver.unarchiveObjectWithData_(data)
+            apple = str(obj.string()) if obj is not None else None
+        except Exception:
+            apple = None
+        if not apple:
+            continue
+        ours = _decode_attributed_body(blob)
+        assert ours is not None, (
+            f"our decoder declined a blob Foundation read: {apple!r}"
+        )
+        assert ours == apple, f"decoder disagrees: ours={ours!r} foundation={apple!r}"
+        checked += 1
+
+    if checked == 0:
+        pytest.skip("no attributedBody message both decoders could read")
+
+
+# --- Notes dual-backend (#60) — needs Full Disk Access -------------------------------
+
+
+@pytest.mark.integration
+def test_notes_sqlite_is_subset_of_applescript_real_store():
+    """The real schema validation: every note the sqlite plane returns must be one the
+    AppleScript reader also knows (same x-coredata id) — proves the NoteStore
+    schema/query/id-construction against Apple's real store, and that sqlite does NOT
+    leak notes AppleScript hides (e.g. Recently Deleted). Needs Full Disk Access.
+
+    SUBSET, not equality: immutable=1 ignores the -wal, so a just-created note not yet
+    checkpointed is legitimately visible to AppleScript (live) but not sqlite — that
+    direction is accepted staleness, not a bug. A sqlite id ABSENT from AppleScript is
+    the real defect (a wrong id, or a leaked deleted note)."""
+    from mac_mcp.adapters import notes as notes_mod
+
+    adapter = notes_mod.NotesAdapter()
+    sqlite_ptrs = adapter.get_all()  # sqlite path (FDA granted)
+    applescript_ptrs = notes_mod._parse_all(  # the fallback path, called directly
+        notes_mod.run_osascript(notes_mod._LIST_ALL)
+    )
+    if not applescript_ptrs:
+        pytest.skip("no notes in this Mac's library")
+    sqlite_ids = {p.id for p in sqlite_ptrs}
+    applescript_ids = {p.id for p in applescript_ptrs}
+    assert sqlite_ids, "sqlite path returned no notes despite a non-empty library"
+    phantom = sqlite_ids - applescript_ids
+    assert (
+        not phantom
+    ), (  # a sqlite id AppleScript doesn't know = wrong id or leaked note
+        f"sqlite returned ids AppleScript does not: {phantom} — wrong x-coredata id "
+        "construction or a leaked (e.g. Recently Deleted) note"
+    )
+
+
+@pytest.mark.integration
+def test_note_body_decoder_matches_applescript_real_store():
+    """The real validation for the ZDATA gzip+protobuf body decoder. Decodes the real
+    ZDATA blob DIRECTLY (not via get_bodies, which would gap-fill to AppleScript and
+    mask a broken decoder — #60 review) and asserts it matches AppleScript. Needs
+    Full Disk Access; skips if nothing both decodes and hydrates."""
+    import sqlite3
+
+    from mac_mcp.adapters import notes as notes_mod
+
+    adapter = notes_mod.NotesAdapter()
+    ptrs = adapter.get_all()
+    if not ptrs:
+        pytest.skip("no notes in this Mac's library")
+    import re as _re
+
+    # mode=ro (no immutable) — read the same live snapshot get_all() does, so a note it
+    # returned resolves here too.
+    conn = sqlite3.connect(f"file:{notes_mod.NOTESTORE}?mode=ro", uri=True)
+    checked = 0
+    try:
+        for p in ptrs[:20]:
+            pk = notes_mod._pk_from_id(p.id)
+            row = conn.execute(
+                "SELECT d.ZDATA FROM ZICCLOUDSYNCINGOBJECT o "
+                "JOIN ZICNOTEDATA d ON o.ZNOTEDATA = d.Z_PK WHERE o.Z_PK = ?",
+                (pk,),
+            ).fetchone()
+            if not row or row[0] is None:
+                continue
+            decoded = notes_mod._decode_note_data(bytes(row[0]))  # the decoder itself
+            applescript = adapter._applescript_bodies([p.id])
+            if decoded is None or not applescript:
+                continue
+            # _applescript_bodies bounds via clean_body (BODY_MAX + a "[truncated N
+            # chars]" marker); the decoder is unbounded. Compare the AppleScript body
+            # (marker stripped) as a PREFIX of the full decoded text — a length/marker
+            # difference on a long note is not a decoder defect. Stripped: attribute-run
+            # and trailing-whitespace diffs are immaterial.
+            as_body = _re.sub(
+                r"\s*\[truncated \d+ chars\]$", "", applescript[0]["body"]
+            ).strip()
+            # normalize line endings before comparing: the raw decoder emits CRLF, the
+            # AppleScript plaintext LF — the shipped path (clean_body) folds CRLF→LF, so
+            # the difference is immaterial and not a decoder defect.
+            dec = decoded.replace("\r\n", "\n").replace("\r", "\n").strip()
+            assert dec == as_body or dec.startswith(as_body), (
+                f"decoder != AppleScript plaintext for {p.id}"
+            )
+            checked += 1
+    finally:
+        conn.close()
+    if checked == 0:
+        pytest.skip("no note both decoded (sqlite) and hydrated (AppleScript)")
+
+
+# --- Mail id-first reads (#61) — needs Automation access -----------------------------
+
+
+@pytest.mark.integration
+def test_mail_reads_return_id_triple_real_inbox():
+    """Real inbox: every read returns the stable RFC822 message-id and a well-formed
+    message:// deeplink. Needs Automation access for Mail; skips if no match. (Actually
+    opening the deeplink to confirm it lands on the right message is a manual step.)
+
+    Uses a targeted query, NOT a catch-all like "a": Mail's AppleScript `whose` clause
+    materializes the ENTIRE match set before the host-side cap applies, so a query that
+    matches most of a large inbox blows the 30s timeout (a real, documented limitation —
+    the tool raises a clear NativeTimeout). We skip on that timeout rather than
+    hard-fail, since it's an environment property (huge inbox), not a defect in the
+    id-triple contract this test checks."""
+    import re as _re
+
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import NativeTimeout
+
+    try:
+        ptrs = MailAdapter().get_pointers("invoice")  # targeted, not a catch-all match
+    except NativeTimeout:
+        pytest.skip("inbox too large for the AppleScript whose-scan within 30s")
+    if not ptrs:
+        pytest.skip("no matching mail in this inbox")
+    for p in ptrs:
+        assert p.id  # the RFC822 message-id (stable citation)
+        assert _re.fullmatch(r"message://%3C.+%3E", p.deeplink), p.deeplink
+
+
+@pytest.mark.integration
+def test_mail_create_draft_opens_and_never_sends():
+    """create_draft opens a real draft and NEVER sends. Uses an unroutable
+    example.invalid recipient (RFC 2606) as belt-and-suspenders, verifies the draft
+    exists as an OUTGOING (unsent) message, then deletes it so nothing lingers. Needs
+    Automation access for Mail."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    subj = "mac-mcp-test: draft (safe to delete)"
+    result = MailAdapter().create_draft(
+        "nobody@example.invalid", subj, "test body — do not send"
+    )
+    assert result["created"] is True and result["mailbox"] == "Drafts"
+    # COUNT matching outgoing (unsent) messages via a whose-clause — never delete while
+    # iterating by index (that raises "can't get item N" as the set shrinks). An
+    # outgoing message is unsent by definition (a sent one leaves the collection).
+    count = (
+        'on run argv\n  tell application "Mail"\n'
+        "    return (count of (outgoing messages whose subject is (item 1 of argv)))"
+        " as text\n  end tell\nend run"
+    )
+    try:
+        assert int(run_osascript(count, subj)) >= 1  # the draft was created, unsent
+    finally:
+        # best-effort cleanup — Mail cannot reliably delete a compose-state outgoing
+        # message (no product delete-draft exists by design); leftover test drafts are
+        # empty + unsendable. Bulk whose-delete, tolerant of Mail refusing.
+        run_osascript(
+            'on run argv\n  tell application "Mail"\n    try\n'
+            "      delete (outgoing messages whose subject is (item 1 of argv))\n"
+            "    end try\n  end tell\nend run",
+            subj,
+        )
+
+
+@pytest.mark.integration
+def test_list_attachments_finds_draft_attachment(created):
+    """#45: create a draft with an attachment, list it from Drafts, confirm it appears.
+    Needs Automation access for Mail."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    subj = "mac-mcp-test: attach (safe to delete)"
+    # create a draft with an attachment via osascript (test-only helper)
+    make = (
+        "on run argv\n"
+        '  tell application "Mail"\n'
+        "    set d to make new outgoing message with properties "
+        "{subject:(item 1 of argv), visible:false}\n"
+        "    tell content of d to make new attachment with properties "
+        "{file name:(POSIX file (item 2 of argv))}\n"
+        "    save d\n"
+        "  end tell\n"
+        "end run"
+    )
+    # a small real file to attach
+    import os
+    import tempfile
+
+    fd, path = tempfile.mkstemp(prefix="mac-mcp-itest-", suffix=".txt")
+    os.write(fd, b"hello")
+    os.close(fd)
+    try:
+        run_osascript(make, subj, path)
+        recs = MailAdapter().list_attachments("drafts", "mac-mcp-test: attach")
+        names = [a["name"] for r in recs for a in r["attachments"]]
+        assert any(path.split("/")[-1] in n or n.endswith(".txt") for n in names)
+    finally:
+        os.unlink(path)
+        # best-effort cleanup via the UNIFIED drafts mailbox (not per-account, which
+        # misses whichever account the draft actually landed in) AND the outgoing
+        # collection; both try-wrapped since Mail may refuse to delete a compose-state
+        # message. Leftover test drafts are empty + unsendable.
+        run_osascript(
+            'on run argv\n  tell application "Mail"\n'
+            "    try\n      delete (messages of drafts mailbox whose subject is "
+            "(item 1 of argv))\n    end try\n"
+            "    try\n      delete (outgoing messages whose subject is "
+            "(item 1 of argv))\n    end try\n  end tell\nend run",
+            subj,
+        )
+
+
+@pytest.mark.integration
+def test_mail_reply_opens_threaded_draft_and_never_sends():
+    """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
+    message) with our body; delete it; confirm nothing sent. Threading headers can
+    only be proved post-send — see the manual step in the PR's 'needs manual
+    verification'."""
+    from mac_mcp.adapters.mail import MailAdapter
+    from mac_mcp.runtime import run_osascript
+
+    # newest inbox message id
+    mid = run_osascript(
+        'tell application "Mail" to return message id of '
+        "(item 1 of (messages of inbox))"
+    ).strip()
+    if not mid:
+        pytest.skip("no messages in this Mac's inbox")
+    marker = "mac-mcp-itest-reply-marker-do-not-send"
+    MailAdapter().reply(mid, marker, include_quote=True)
+    # assert the SPECIFIC reply draft exists as an UNSENT outgoing message (identify it
+    # by our marker in the body, not a fragile count delta over a mailbox that may hold
+    # other drafts). A sent message would have left the outgoing collection.
+    find = (
+        'on run argv\n  tell application "Mail"\n'
+        "    return (count of (outgoing messages whose content contains "
+        "(item 1 of argv))) as text\n  end tell\nend run"
+    )
+    try:
+        assert int(run_osascript(find, marker)) >= 1  # reply draft created, not sent
+    finally:
+        # best-effort cleanup (Mail may refuse to delete a compose-state message)
+        run_osascript(
+            'on run argv\n  tell application "Mail"\n    try\n'
+            "      delete (outgoing messages whose content contains (item 1 of argv))\n"
+            "    end try\n  end tell\nend run",
+            marker,
+        )

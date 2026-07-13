@@ -1,22 +1,62 @@
 # mac-mcp
 
 One consolidated [MCP](https://modelcontextprotocol.io) server for native macOS apps —
-**Calendar & Reminders** read/write, plus read-only context and a few actions across Mail,
-Notes, Contacts, Photos, Safari, Messages, and Shortcuts. Python +
+**Calendar & Reminders** read/write, **Messages & Notes** content search over the native
+stores, id-first **Mail** with draft-and-open replies, plus read-only context and a few
+actions across Contacts, Photos, Safari, and Shortcuts. Python +
 [FastMCP 2.0](https://github.com/PrefectHQ/fastmcp), managed with
 [uv](https://docs.astral.sh/uv/).
 
-Replaces the two Apple MCP servers a life-cockpit otherwise juggles (`apple-events` + a forked
-Apple Mail MCP) with a single modular adapter layer you own. Every read returns **pointers**
-(id + one-line summary + open-in-app deeplink), never full bodies — so it structurally avoids
-the context-bloat bug of the archived flagship server.
+Replaces the pile of Apple MCP servers a life-cockpit otherwise juggles with a single modular
+adapter layer you own. Every read returns **pointers** (id + one-line summary + open-in-app
+deeplink), never full bodies — so it structurally avoids the context-bloat bug of the archived
+flagship server; bodies are a separate, bounded, opt-in fetch.
 
-See [DESIGN.md](DESIGN.md) for the rationale and [CHANGELOG.md](CHANGELOG.md) for what's landed.
+macOS only. See [DESIGN.md](DESIGN.md) for the rationale and [CHANGELOG.md](CHANGELOG.md) for
+what's landed.
+
+## Install
+
+Requires macOS and Python ≥ 3.11.
+
+**From source (works today):**
+
+```sh
+git clone https://github.com/elfensky/mac-mcp && cd mac-mcp
+uv sync
+```
+
+Then point your MCP client at the project's own venv python — deterministic, and it carries the
+locked PyObjC wheels:
+
+```json
+{
+  "mcpServers": {
+    "mac-mcp": {
+      "command": "/absolute/path/to/mac-mcp/.venv/bin/python",
+      "args": ["-m", "mac_mcp"]
+    }
+  }
+}
+```
+
+**From PyPI** (once published — see the CHANGELOG): `uvx mac-mcp` runs the server with no clone,
+and the MCP config becomes `"command": "uvx", "args": ["mac-mcp"]`.
+
+### Permissions (macOS TCC)
+
+Grant access when macOS prompts — the first call to each app triggers its dialog:
+
+- **EventKit** — Calendar + Reminders (read/write).
+- **Automation** (per app) — Mail, Notes, Contacts, Photos, Safari, Messages actions/reads.
+- **Full Disk Access** — required for **Messages content** (`chat.db`) and the **fast Notes**
+  path (`NoteStore.sqlite`). Notes degrades to Automation without it; Messages content raises a
+  clear, typed error telling you to grant it. Run the `doctor` tool to see what's granted.
 
 ## Tools
 
-Reads return pointers; results are capped per adapter. Writes/actions are skipped entirely when
-`MAC_MCP_READ_ONLY` is set (see below).
+Reads return pointers; results are capped per adapter. Bodies/content are a separate bounded
+fetch. Writes/actions are skipped entirely when `MAC_MCP_READ_ONLY` is set (see below).
 
 ### Calendar & Reminders — read/write (EventKit)
 
@@ -24,42 +64,69 @@ Reads return pointers; results are capped per adapter. Writes/actions are skippe
 |------|------|-------|
 | `events` | `when` = `today` \| `week` \| `YYYY-MM-DD` | list events as pointers |
 | `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as pointers |
-| `calendars` | — | calendars (id + name) to target writes |
-| `reminder_lists` | — | reminder lists (id + name) to target writes |
+| `calendars` / `reminder_lists` | — | containers (id + name) to target writes |
 | `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence` | `update` is a full replace by id |
-| `delete_event` | id | |
+| `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting |
 | `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
 | `complete_reminder` | id | marks complete |
 
-**Recurrence** is an RFC 5545 `RRULE` string — the `FREQ` / `INTERVAL` / `COUNT` / `UNTIL`
-subset (e.g. `FREQ=WEEKLY;INTERVAL=2;COUNT=10`). A recurring reminder requires a due date;
-unsupported parts (`BYDAY`, …) are rejected rather than silently ignored.
+A write targets its container by **name or `Pointer.id`**; an ambiguous name raises rather than
+guessing. **Recurrence** is an RFC 5545 `RRULE` (`FREQ`/`INTERVAL`/`COUNT`/`UNTIL` subset, e.g.
+`FREQ=WEEKLY;INTERVAL=2;COUNT=10`); a recurring reminder needs a due date; unsupported parts
+(`BYDAY`, …) are rejected, not ignored.
 
-### Read-only context (AppleScript / CLI)
+### Mail — id-first read + draft-and-open (Automation)
+
+Nothing here ever **sends** — replies and drafts open a compose window for you to review.
+
+| Tool | Args | Notes |
+|------|------|-------|
+| `mail` | subject-OR-sender substring | inbox matches; id = stable RFC822 message-id, `message://` deeplink |
+| `mail_body` | id | one message's plaintext, bounded + truncation-marked |
+| `mail_attachments` | mailbox (`inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
+| `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
+| `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+
+### Messages — content via chat.db (read-only; Full Disk Access)
+
+| Tool | Args | Notes |
+|------|------|-------|
+| `messages_chats` | — | conversation list (id + name); no content, no FDA needed |
+| `messages_search` | query, `limit` | search message **text** (decodes `attributedBody`), newest first |
+| `messages_with` | contact (phone/email), `country`, `limit` | recent messages with one person; `country` = calling code or 2-letter region (locale default, never +1) |
+| `message_body` | id | full text of one message by guid |
+
+### Notes — NoteStore.sqlite reads + opt-in bodies
+
+| Tool | Args | Notes |
+|------|------|-------|
+| `notes` | title/snippet substring | matching notes (id + snippet); diacritic- & smart-punctuation-insensitive |
+| `notes_all` | — | every live note (id + "Account / Folder" + snippet), Recently Deleted excluded |
+| `note_bodies` | ids (≤ 50) | opt-in plaintext hydration → `[{id, body}]` |
+| `delete_note` | id, `expect_title`, `dry_run` | moves to Recently Deleted; `dry_run` previews |
+
+### Other read-only context
 
 | Tool | Args | Returns |
 |------|------|---------|
-| `mail` | subject substring | inbox matches (subject + sender) |
-| `notes` | title substring | matching notes (id + title) |
 | `contacts` | name substring | cards (name, org, first phone + email) |
 | `photos` | search string | media (filename); matches the Photos search field |
 | `safari_tabs` | — | every open tab (url + title) |
-| `messages_chats` | — | conversation list (id + name; **no message content**) |
-| `shortcuts` | name substring (empty = all) | the user's Shortcuts (name) |
-| `ping` | — | health check |
+| `shortcuts` | name substring (empty = all) | the user's Shortcuts; id = stable UUID, `shortcuts://` deeplink |
+| `ping` / `now` / `doctor` | — | health check / time / permission diagnostics |
 
 ### Actions (writes)
 
 | Tool | Args | Notes |
 |------|------|-------|
 | `create_contact` | given_name, family_name, organization | |
-| `run_shortcut` | name, optional `input_text` | runs a Shortcut; returns a bounded output snippet |
+| `run_shortcut` | name **or** id, optional `input_text` | runs a Shortcut; returns a bounded output snippet |
 | `safari_open` | url | opens in a new tab; bare host → `https://`; only `http`/`https` allowed |
 
 ### Read-only mode
 
 Set `MAC_MCP_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
-tool above is skipped, a safe-deploy guard.
+tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
 
 ## Develop
 
@@ -69,33 +136,14 @@ uv run pytest                   # unit tests (mock at the adapter boundary)
 uv run pytest -m integration    # real macOS / EventKit / TCC — run manually, never in CI
 uv run ruff check .             # lint (config in pyproject.toml)
 uv run ruff format .            # format
-uv run mac-mcp            # run the server (stdio)
+uv run mac-mcp                  # run the server (stdio)
 ```
 
 ruff (lint + format, line-length 88) and pytest gate CI — full workflow in
 [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Use as an MCP server
-
-Launch off the project's own venv python — deterministic, and it carries the locked PyObjC wheels:
-
-```json
-{
-  "mcpServers": {
-    "mac-mcp": {
-      "command": "/Users/you/Developer/mac-mcp/.venv/bin/python",
-      "args": ["-m", "mac_mcp"]
-    }
-  }
-}
-```
-
-macOS only. Calendar/Reminders use EventKit; the other adapters script their apps via Automation.
-Grant access when macOS prompts (TCC) — the first call to each app triggers its permission dialog.
 
 ## Prior art & credits
 
 mac-mcp builds on prior work — the Apple Mail MCP it draws from, the EventKit/Photos servers it
 references, the project that pioneered the unified-Apple-MCP pattern, and FastMCP / PyObjC / the MCP
 spec it depends on. See [CREDITS.md](CREDITS.md).
-</content>
