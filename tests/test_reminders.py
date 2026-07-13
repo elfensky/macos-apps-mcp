@@ -77,7 +77,12 @@ def test_pointer_shape():
 
 
 def _fake_store(list_names, default="Inbox"):
-    cals = [SimpleNamespace(title=lambda n=n: n) for n in list_names]
+    # each list gets a stable, distinct id (L0, L1, …) so id-first resolution (#55) and
+    # the candidate-listing on ambiguity can be exercised even with duplicate names.
+    cals = [
+        SimpleNamespace(calendarIdentifier=lambda i=i: f"L{i}", title=lambda n=n: n)
+        for i, n in enumerate(list_names)
+    ]
     return SimpleNamespace(
         calendarsForEntityType_=lambda _e: cals,
         defaultCalendarForNewReminders=lambda: SimpleNamespace(title=lambda: default),
@@ -108,10 +113,72 @@ def test_resolve_ambiguous_list_refuses_instead_of_first_match():
         _resolve_list(s, "Home")
 
 
+def test_resolve_ambiguous_list_lists_candidate_ids():
+    # #55 DECISION: the refusal must LIST the candidate ids so the caller can recover by
+    # re-issuing the write with one — not just "rename your lists" (a dead end).
+    s = _fake_store(["Home", "Work", "Home"])  # "Home" at index 0 and 2 → ids L0, L2
+    with pytest.raises(AmbiguousTarget) as ei:
+        _resolve_list(s, "Home")
+    assert "L0" in str(ei.value) and "L2" in str(ei.value)
+
+
+def test_resolve_list_by_pointer_id():
+    # #55 DECISION: a write may target a list by its Pointer.id directly — used as-is,
+    # no name lookup, so even a duplicate-named list is unambiguously reachable.
+    s = _fake_store(["Home", "Work", "Home"])
+    assert _resolve_list(s, "L2") is s.calendarsForEntityType_(None)[2]
+
+
 def test_resolve_single_match_still_works_when_others_share_no_name():
     # the rule only fires on DUPLICATES — a unique name among many still resolves.
     s = _fake_store(["Home", "Work", "Errands"])
     assert _resolve_list(s, "Work").title() == "Work"
+
+
+# --- #64: read-side list-name folding (get_pointers), writes stay exact ---------------
+
+
+def _patch_read(monkeypatch, list_names):
+    """Wire get_pointers' work() to fakes: store, run_native (inline), and a predicate/
+    fetch that returns one reminder per matched list so the count reflects the match."""
+    import mac_mcp.adapters.reminders as rem
+
+    s = _fake_store(list_names)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    monkeypatch.setattr(rem, "_incomplete_due_pred", lambda s, end, cals: cals)
+    monkeypatch.setattr(
+        rem,
+        "_fetch_reminders",
+        lambda s, cals: [_fake_reminder(c.title(), f"R-{c.title()}") for c in cals],
+    )
+
+
+def test_get_pointers_list_name_is_diacritic_insensitive(monkeypatch):
+    # #64: searching reminders in the "Café" list by typing ASCII "cafe" works.
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Café", "Work"])
+    ptrs = RemindersAdapter().get_pointers("cafe")
+    assert [p.summary for p in ptrs] == ["Café"]
+
+
+def test_get_pointers_fold_collision_returns_both_as_superset(monkeypatch):
+    # a fold-collision on a READ ("Café"/"Cafe") returns reminders from BOTH lists — a
+    # search superset is safe (unlike a write, it can't mis-home anything).
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Café", "Cafe", "Work"])
+    ptrs = RemindersAdapter().get_pointers("cafe")
+    assert sorted(p.summary for p in ptrs) == ["Cafe", "Café"]
+
+
+def test_get_pointers_unknown_list_still_raises(monkeypatch):
+    from mac_mcp.adapters.reminders import RemindersAdapter
+
+    _patch_read(monkeypatch, ["Work"])
+    with pytest.raises(ValueError, match="no reminder list named"):
+        RemindersAdapter().get_pointers("cafe")
 
 
 # --- verify-after-write (#49) --------------------------------------------------------
@@ -133,6 +200,7 @@ def _fake_persisted(
     priority=0,
     due=None,
     list_title="Home",
+    list_id="L-Home",  # verify keys on the identifier now, not the title (#55 review)
     rule=None,
     completed=False,
 ):
@@ -142,7 +210,9 @@ def _fake_persisted(
         priority=lambda: priority,
         dueDateComponents=lambda: due,
         startDateComponents=lambda: None,
-        calendar=lambda: SimpleNamespace(title=lambda: list_title),
+        calendar=lambda: SimpleNamespace(
+            title=lambda: list_title, calendarIdentifier=lambda: list_id
+        ),
         recurrenceRules=lambda: [rule] if rule is not None else None,
         isCompleted=lambda: completed,
     )
@@ -162,29 +232,44 @@ def test_verify_reminder_passes_on_full_match():
     fresh = _fake_persisted(
         title="Pay rent", priority=1, due=_comps(2026, 6, 25, 9, 0), list_title="Home"
     )
-    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+    _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
 def test_verify_reminder_none_fresh_is_rollback():
     data = ReminderData(title="x")
     with pytest.raises(VerificationFailed, match="could not be re-fetched"):
-        _verify_reminder(None, "R-1", data, "Home")
+        _verify_reminder(None, "R-1", data, "L-Home")
 
 
 def test_verify_reminder_dropped_due_raises():
     data = ReminderData(title="Pay rent", due=datetime(2026, 6, 25, 9, 0))
-    fresh = _fake_persisted(title="Pay rent", due=None, list_title="Inbox")
+    # list matches (L-Inbox) so only the dropped due can trip verify
+    fresh = _fake_persisted(
+        title="Pay rent", due=None, list_title="Inbox", list_id="L-Inbox"
+    )
     with pytest.raises(VerificationFailed, match="due"):
-        _verify_reminder(fresh, "R-1", data, "Inbox")
+        _verify_reminder(fresh, "R-1", data, "L-Inbox")
 
 
 def test_verify_reminder_wrong_list_raises():
     data = ReminderData(title="Pay rent", list_name="Home")
     fresh = _fake_persisted(
-        title="Pay rent", list_title="Inbox"
+        title="Pay rent", list_title="Inbox", list_id="L-Inbox"
     )  # landed in wrong list
     with pytest.raises(VerificationFailed, match="list"):
-        _verify_reminder(fresh, "R-1", data, "Home")
+        _verify_reminder(fresh, "R-1", data, "L-Home")
+
+
+def test_verify_reminder_same_name_wrong_id_raises():
+    # #55 review: verify keys on the list IDENTIFIER, not its name. A re-home to a
+    # DIFFERENT list that happens to SHARE the name (the duplicate-named case that
+    # id-targeting exists to serve) must still fail loudly — a title-only compare would
+    # falsely pass, silently confirming a write to the wrong list.
+    data = ReminderData(title="Pay rent", list_name="L2")
+    # targeted list id "L2"; store re-homed it to "L0" — SAME name "Home"
+    fresh = _fake_persisted(title="Pay rent", list_title="Home", list_id="L0")
+    with pytest.raises(VerificationFailed, match="list"):
+        _verify_reminder(fresh, "R-1", data, "L2")
 
 
 def test_verify_reminder_dropped_recurrence_raises():
@@ -197,7 +282,7 @@ def test_verify_reminder_dropped_recurrence_raises():
         title="Water plants", due=_comps(2026, 6, 25, 9, 0)
     )
     with pytest.raises(VerificationFailed, match="recurs"):
-        _verify_reminder(fresh, "R-1", data, "Home")
+        _verify_reminder(fresh, "R-1", data, "L-Home")
 
 
 def test_verify_reminder_wrong_frequency_raises():
@@ -214,7 +299,7 @@ def test_verify_reminder_wrong_frequency_raises():
         rule=fake_rule(freq=0, interval=2),  # persisted DAILY, not weekly
     )
     with pytest.raises(VerificationFailed, match="recurs"):
-        _verify_reminder(fresh, "R-1", data, "Home")
+        _verify_reminder(fresh, "R-1", data, "L-Home")
 
 
 def test_verify_reminder_matching_recurrence_passes():
@@ -228,7 +313,7 @@ def test_verify_reminder_matching_recurrence_passes():
         due=_comps(2026, 6, 25, 9, 0),
         rule=fake_rule(freq=1, interval=2, count=10),  # weekly/2/10 — exact match
     )
-    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+    _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
 def test_verify_reminder_nfd_title_matches_nfc_persisted():
@@ -236,13 +321,13 @@ def test_verify_reminder_nfd_title_matches_nfc_persisted():
     # correct write (#49).
     data = ReminderData(title="Cafe\u0301 run")  # NFD: e + combining acute
     fresh = _fake_persisted(title="Caf\u00e9 run")  # persisted as NFC
-    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+    _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
 def test_verify_reminder_crlf_notes_match_lf_persisted():
     data = ReminderData(title="Pay rent", notes="first\r\nsecond")
     fresh = _fake_persisted(notes="first\nsecond")  # store folded CRLF → LF
-    _verify_reminder(fresh, "R-1", data, "Home")  # no raise
+    _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
 def test_verify_reminder_changed_notes_raises():
@@ -250,14 +335,14 @@ def test_verify_reminder_changed_notes_raises():
     data = ReminderData(title="Pay rent", notes="pay by the 1st")
     fresh = _fake_persisted(notes="pay by the 5th")
     with pytest.raises(VerificationFailed, match="notes"):
-        _verify_reminder(fresh, "R-1", data, "Home")
+        _verify_reminder(fresh, "R-1", data, "L-Home")
 
 
 def test_verify_reminder_dropped_notes_raises():
     data = ReminderData(title="Pay rent", notes="pay by the 1st")
     fresh = _fake_persisted(notes=None)
     with pytest.raises(VerificationFailed, match="notes"):
-        _verify_reminder(fresh, "R-1", data, "Home")
+        _verify_reminder(fresh, "R-1", data, "L-Home")
 
 
 def test_verify_completed_passes_when_completed():

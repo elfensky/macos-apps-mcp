@@ -1,34 +1,80 @@
-"""Notes adapter — Notes.app via osascript (Automation TCC). Read-only v1: title search.
+"""Notes adapter — dual-backend (#60): NoteStore.sqlite for reads, osascript for writes.
 
-Notes is scriptable. ``get_pointers(query)`` searches notes whose name (title) contains
-the query. ``Pointer.id`` is the note's ``x-coredata://…`` id; ``summary`` is the title.
-``deeplink`` is empty — Notes has no verified open-by-id URL scheme, so id + title are
-the handle. Pointers, not bodies (the body is never fetched). Capped and osascript-
-timeout-bounded; user input goes via argv (no script injection).
+Enumeration reads (get_all, get_pointers search) go through the fast read-only sqlite
+plane over NoteStore.sqlite — Apple precomputes ZSNIPPET (the summary) and the stable
+x-coredata://…/ICNote/pN id the vault sync needs, so reads are far cheaper than
+AppleScript's O(n) enumeration (the sin that hollowed out apple-mcp). Per the FDA
+policy, Notes DEGRADES: on missing Full Disk Access OR a schema-fingerprint mismatch,
+read_via_sqlite falls back to the AppleScript reader (still works without FDA — no
+regression). Writes (delete) and body hydration (get_bodies) stay on osascript.
+Pointer.id is the x-coredata:// id, summary the snippet, folder the "Account / Folder"
+label; deeplink empty (no open-by-id scheme). User input goes via argv (no injection);
+templates are timeout-bounded.
 """
 
 from __future__ import annotations
 
+import contextlib
+import gzip
+import zlib
+from pathlib import Path
+
 from ..contracts import Pointer
-from ..runtime import OutputOverflow, clean_body, clean_summary, run_osascript
+from ..runtime import (
+    NativeError,
+    OutputOverflow,
+    clean_body,
+    clean_summary,
+    fold_text,
+    read_via_sqlite,
+    run_osascript,
+)
 
 MAX_NOTES = 25
 MAX_BODIES = 50
 
+NOTESTORE = (
+    Path.home() / "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"
+)
+
+# NoteStore is Core Data: notes, folders, and accounts all live in
+# ZICCLOUDSYNCINGOBJECT (single-table inheritance). Only the columns the queries below
+# read are fingerprinted — a macOS schema move that renames/drops any of them trips
+# SchemaDrift and the read DEGRADES to the AppleScript fallback (never a hard error,
+# never a mis-parse). The exact schema is version-variable (sirmews recipe) — the
+# @integration cross-check validates it against the real store.
+_FINGERPRINT = {
+    "ZICCLOUDSYNCINGOBJECT": {
+        "Z_PK",
+        "ZTITLE1",  # note title
+        "ZSNIPPET",  # Apple's precomputed preview → Pointer.summary
+        "ZFOLDER",  # → folder row's Z_PK
+        "ZNOTEDATA",  # note-row discriminator AND fk → ZICNOTEDATA.Z_PK (body decode)
+        "ZMARKEDFORDELETION",  # tombstone flag
+        "ZISPINNED",
+        "ZISPASSWORDPROTECTED",  # locked
+        "ZTITLE2",  # folder name (on a folder row)
+        "ZOWNER",  # folder → account row's Z_PK
+        "ZNAME",  # account name (on an account row)
+    },
+    "Z_METADATA": {"Z_UUID"},  # the store UUID for the x-coredata:// id
+}
+
+# get_bodies has its OWN fingerprint (#60 review): the body table is NOT in the
+# enumeration fingerprint above, so a drift in ZICNOTEDATA/ZDATA degrades ONLY the body
+# read — the (independent) get_all/get_pointers enumeration keeps working on sqlite.
+_BODY_FINGERPRINT = {
+    "ZICCLOUDSYNCINGOBJECT": {"Z_PK", "ZNOTEDATA"},  # the note → body join
+    "ZICNOTEDATA": {"Z_PK", "ZDATA"},  # the gzip+protobuf note body
+    "Z_METADATA": {"Z_UUID"},  # the store UUID, to reject foreign/stale ids
+}
+
 # All templates carry `with timeout` (#56): bound the Apple Events so an orphaned
 # osascript self-terminates instead of pinning Notes.
-_SEARCH = """on run argv
-  set q to item 1 of argv
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Notes"
-    repeat with n in (notes whose name contains q)
-      set out to out & (id of n) & tab & (name of n) & linefeed
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
+#
+# There is no AppleScript title-SEARCH template: search folds diacritics/smart
+# punctuation (#64), which `whose name contains` can't express, so both backends
+# enumerate (_LIST_ALL / _ALL_SQL) and post-filter in Python (see get_pointers).
 
 # notes_all: every note across accounts, excluding Recently Deleted. id+name read in
 # one multi-property snapshot ({id, name} of (notes of f)) stay aligned — do NOT split
@@ -124,22 +170,6 @@ _PREVIEW_DELETE = """on run argv
 end run"""
 
 
-def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        ident, _, name = line.partition("\t")
-        out.append(
-            Pointer(
-                id=ident,
-                summary=clean_summary(name) or "(untitled note)",
-                deeplink="",
-            )
-        )
-    return out
-
-
 def _parse_all(raw: str) -> list[Pointer]:
     out = []
     for line in raw.splitlines():
@@ -170,30 +200,261 @@ def _parse_bodies(raw: str) -> list[dict]:
     return out
 
 
+# --- sqlite read plane (#60) ---------------------------------------------------------
+# A note row: ZNOTEDATA set (folders/accounts have none) and not tombstoned. Newest
+# first via Z_PK DESC (higher pk ≈ more recent; avoids depending on a date column that
+# varies by macOS version). Folder + account resolved by self-join (Core Data keeps
+# notes/folders/accounts in the same table).
+#
+# Recently Deleted: a trashed note is NOT ZMARKEDFORDELETION=1 (that flag is the
+# CloudKit PERMANENT-purge tombstone) — it stays a live row that just MOVES to the
+# "Recently Deleted" folder for ~30 days. So we also exclude notes whose folder is named
+# "Recently Deleted", exactly as the AppleScript reader does — otherwise the sqlite path
+# leaks trashed notes the AppleScript path hides (#60 review). ponytail: matching by the
+# English folder name mirrors the AppleScript path's own localization limitation, so the
+# two backends AGREE (the @integration cross-check needs that); a locale-independent
+# ZFOLDERTYPE-based exclusion is the upgrade path if a non-English store needs it.
+#
+# Live consistency: reads open mode=ro WITHOUT immutable=1. NoteStore is a WAL-mode
+# database (there is a -wal alongside it), and WAL permits concurrent readers, so a
+# read-only connection opens fine while Notes.app is running — verified on-device. The
+# #60 design originally used immutable=1 (per the sirmews recipe) to "read past the
+# lock", but immutable IGNORES the -wal: it pins a stale point-in-time snapshot, so a
+# just-created note is missed AND a just-deleted note lingers (both surfaced against the
+# real store once FDA enabled the sqlite path). mode=ro reads the -wal → live state,
+# matching AppleScript (and matching Messages, #59). If a read ever can't open, the
+# adapter's AppleScript fallback still sees current state — so mode=ro is strictly safer
+# than a silently-stale immutable snapshot.
+_TRASH = "Recently Deleted"
+_COLS = """o.Z_PK, o.ZTITLE1, o.ZSNIPPET, o.ZISPINNED, o.ZISPASSWORDPROTECTED,
+       f.ZTITLE2, a.ZNAME"""
+# A real, user-visible note always belongs to a folder. A row with ZNOTEDATA set but
+# ZFOLDER NULL is an orphaned/deleted remnant (empty title, no container) that
+# AppleScript never enumerates — but it is NOT tombstoned (ZMARKEDFORDELETION=0) and its
+# NULL folder slips past the trash-name check, so without an explicit ZFOLDER filter the
+# sqlite path leaks it (real store: 25 such orphans surfaced once FDA enabled the sqlite
+# path). Require a folder so sqlite matches what AppleScript shows.
+_FROM = f"""FROM ZICCLOUDSYNCINGOBJECT o
+    LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON o.ZFOLDER = f.Z_PK
+    LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON f.ZOWNER = a.Z_PK
+    WHERE o.ZNOTEDATA IS NOT NULL
+      AND o.ZFOLDER IS NOT NULL
+      AND (o.ZMARKEDFORDELETION IS NULL OR o.ZMARKEDFORDELETION = 0)
+      AND (f.ZTITLE2 IS NULL OR f.ZTITLE2 <> '{_TRASH}')"""
+
+# One enumeration query; search folds in Python (no _SEARCH_SQL LIKE — SQLite LIKE is
+# ASCII-only, so it can't do the diacritic/smart-punctuation fold #64 needs).
+_ALL_SQL = f"SELECT {_COLS} {_FROM} ORDER BY o.Z_PK DESC"
+
+
+def _store_uuid(conn) -> str:
+    row = conn.execute("SELECT Z_UUID FROM Z_METADATA LIMIT 1").fetchone()
+    return row[0] if row and row[0] else ""
+
+
+def _note_pointer(row, uuid: str) -> Pointer:
+    """(Z_PK, title, snippet, pinned, locked, folder_name, account) → note Pointer.
+
+    id is the x-coredata URL AppleScript returns for the same note (so a note has ONE id
+    across both backends — the @integration cross-check asserts it). Pinned/locked ride
+    as a prefix on the summary (Pointer has no dedicated flag field). folder is
+    "Account / Folder"."""
+    pk, title, snippet, pinned, locked, folder_name, account = row
+    prefix = ("📌 " if pinned else "") + ("🔒 " if locked else "")
+    label = snippet or title or ""
+    folder = " / ".join(x for x in (account, folder_name) if x) or None
+    return Pointer(
+        id=f"x-coredata://{uuid}/ICNote/p{pk}",
+        summary=clean_summary(prefix + label) or "(untitled note)",
+        deeplink="",
+        folder=folder,
+    )
+
+
+# --- note-body decode (#60 commit 2): gzip + protobuf ZDATA --------------------------
+# ZICNOTEDATA.ZDATA is a gzip-compressed protobuf (Apple's NoteStoreProto). The plain
+# text sits at a fixed field path: NoteStoreProto.document(2) → Document.note(3) →
+# Note.note_text(2, a string). We parse the protobuf WIRE FORMAT precisely (varint tags
+# + length-delimited nesting) and follow 2→3→2 — not a "longest string" byte heuristic —
+# so a real note decodes exactly and anything malformed DECLINES (returns None), never
+# fabricates. get_bodies gap-fills a decline via AppleScript, so there's no regression.
+# ponytail: attribute runs / tables / attachments are ignored — we want plain text; add
+# a richer walk only if a caller needs formatting.
+
+# the field path from the message root to the plain-text string
+_NOTE_TEXT_PATH = (2, 3, 2)  # document → note → note_text
+
+
+def _read_varint(data: bytes, pos: int) -> tuple[int, int]:
+    """Decode a base-128 varint at ``pos``; return (value, next_pos). Raises ValueError
+    on a truncated/over-long varint so the caller declines rather than mis-reads."""
+    result = shift = 0
+    while True:
+        if pos >= len(data) or shift > 63:  # truncated, or a >10-byte (bogus) varint
+            raise ValueError("bad varint")
+        byte = data[pos]
+        pos += 1
+        result |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return result, pos
+        shift += 7
+
+
+def _pb_field(data: bytes, want: int) -> bytes | None:
+    """The bytes of the FIRST length-delimited (wire type 2) field numbered ``want`` in
+    a protobuf message ``data`` — skipping other fields by wire type. Returns None if
+    absent; raises ValueError on a malformed stream (truncation / unknown wire type)."""
+    pos, n = 0, len(data)
+    while pos < n:
+        tag, pos = _read_varint(data, pos)
+        field, wire = tag >> 3, tag & 7
+        if wire == 2:  # length-delimited: bytes/string/nested message
+            length, pos = _read_varint(data, pos)
+            if pos + length > n:
+                raise ValueError("length-delimited field overruns the message")
+            chunk = data[pos : pos + length]
+            pos += length
+            if field == want:
+                return chunk
+        elif wire == 0:  # varint
+            _, pos = _read_varint(data, pos)
+        elif wire == 1:  # 64-bit
+            pos += 8
+        elif wire == 5:  # 32-bit
+            pos += 4
+        else:  # 3/4 = deprecated groups → can't skip reliably; decline
+            raise ValueError(f"unsupported protobuf wire type {wire}")
+    return None
+
+
+def _decode_note_data(blob) -> str | None:
+    """Best-effort plain text of a note from its gzip+protobuf ``ZDATA`` blob.
+
+    Declines (None) on a non-bytes input, a non-gzip / corrupt payload, or a protobuf
+    that lacks the note-text field — the caller prefers AppleScript for those, so a
+    mis-parse must NEVER fabricate a body. Text is read as UTF-8 (errors replaced)."""
+    if not isinstance(blob, (bytes, bytearray)):
+        return None
+    if len(blob) < 2 or blob[0] != 0x1F or blob[1] != 0x8B:  # gzip magic
+        return None
+    try:
+        msg = gzip.decompress(blob)
+    except (OSError, EOFError, zlib.error, ValueError):
+        return None
+    try:
+        for field in _NOTE_TEXT_PATH:
+            if msg is None:
+                return None
+            msg = _pb_field(msg, field)
+    except ValueError:
+        return None  # malformed wire format → decline
+    return msg.decode("utf-8", errors="replace") if msg is not None else None
+
+
+def _pk_from_id(ident: str) -> int | None:
+    """The Z_PK from an ``x-coredata://…/ICNote/p<N>`` id; None if not that shape."""
+    _head, sep, tail = ident.rpartition("/p")
+    return int(tail) if sep and tail.isdigit() else None
+
+
+def _hydrate_body(body: str) -> str:
+    """Bound a note body for output (#52): ``clean_body`` truncates + control-strips; a
+    body over the hard cap downgrades to a per-item notice, not a batch failure."""
+    try:
+        return clean_body(body)
+    except OutputOverflow as e:
+        return f"[not hydrated: {e}]"
+
+
+# get-by-id body: join the note to its ZICNOTEDATA row for the gzip+protobuf blob.
+_BODY_SQL = (
+    "SELECT o.Z_PK, d.ZDATA FROM ZICCLOUDSYNCINGOBJECT o "
+    "JOIN ZICNOTEDATA d ON o.ZNOTEDATA = d.Z_PK WHERE o.Z_PK IN ({placeholders})"
+)
+
+
 class NotesAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
-        """query: a title substring to find."""
-        q = query.strip()
-        if not q:
+        """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
+        substring, matched diacritic- and smart-punctuation-insensitively via fold_text
+        (#64): "cafe" finds "café", ASCII "'" finds a U+2019 apostrophe. That fold can't
+        be expressed in SQL LIKE (ASCII-only), so the match is a Python post-filter over
+        the same rows get_all reads — bounded by library size (title/snippet strings).
+        Falls back to the AppleScript enumeration, folded identically, on missing FDA /
+        drift. ponytail: O(all-notes) fold per search; add a LIKE prefilter for the
+        common ASCII case only if a huge library makes it show up."""
+        # Guard on the FOLDED value, not the raw query (#64 review): a non-empty query
+        # made only of punctuation/combining marks folds to "" or " " (e.g. a lone
+        # diaeresis "¨" NFKD-decomposes to a space; a bare combining accent to nothing).
+        # A pre-fold `if not query` would let those through, and then `needle in title`
+        # matches nearly every note — the opposite of a search. Guard post-fold instead.
+        needle = fold_text(query).strip()
+        if not needle:
             raise ValueError("notes read needs a title substring (got an empty query)")
-        return _parse(run_osascript(_SEARCH, q))[:MAX_NOTES]
+
+        def sqlite(conn):
+            uuid = _store_uuid(conn)
+            out = []
+            for r in conn.execute(_ALL_SQL):  # r: pk, title, snippet, pinned, locked...
+                if needle in fold_text(r[1]) or needle in fold_text(r[2]):
+                    out.append(_note_pointer(r, uuid))
+                    if len(out) >= MAX_NOTES:
+                        break
+            return out
+
+        def fallback():
+            # degraded path folds the same way, matching on the RAW title only (no
+            # snippet — _LIST_ALL doesn't carry one). Filter on the raw title field
+            # (`parts[2]`, as _parse_all reads it) BEFORE building Pointers — NOT on
+            # the Pointer.summary, which for an untitled note is the display placeholder
+            # "(untitled note)" and would spuriously match "note"/"untitled" (#64
+            # review). An empty raw title folds to "" and matches nothing, like the
+            # sqlite path (raw ZTITLE1 → "") and the old `whose name contains`.
+            kept = []
+            for line in run_osascript(_LIST_ALL).splitlines():
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                title = parts[2] if len(parts) > 2 else ""
+                if needle in fold_text(title):
+                    kept.append(line)
+            return _parse_all("\n".join(kept))[:MAX_NOTES]
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _FINGERPRINT,
+            sqlite,
+            fallback=fallback,
+            immutable=False,  # mode=ro reads the -wal (live); see module note
+        )
 
     def get_all(self) -> list[Pointer]:
-        """Every note (excludes Recently Deleted) as account-qualified pointers.
+        """Every live note (excludes Recently Deleted + tombstoned) as account-qualified
+        pointers (sqlite, read-only, newest first). Folder is "Account / Folder". Falls
+        back to the AppleScript enumeration on missing FDA / schema drift."""
 
-        Folder is "Account / Folder". No cap: a very large library can exceed the
-        osascript 30s timeout, in which case the whole call fails (no partial results).
-        """
-        return _parse_all(run_osascript(_LIST_ALL))
+        def sqlite(conn):
+            uuid = _store_uuid(conn)
+            return [_note_pointer(r, uuid) for r in conn.execute(_ALL_SQL).fetchall()]
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _FINGERPRINT,
+            sqlite,
+            fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
+            immutable=False,  # mode=ro reads the -wal (live); see module note
+        )
 
     def get_bodies(self, ids: list[str]) -> list[dict]:
         """Hydrate plaintext bodies for up to MAX_BODIES ids → [{"id", "body"}].
 
-        Each body is sanitized and per-item bounded through ``clean_body`` (#52): a
-        control-char-laden body can't corrupt the client and a long one is truncated
-        with a marker. A single pathological body (over the hard cap) is caught here so
-        it downgrades to a per-item notice instead of failing the whole batch. Unknown
-        ids are silently skipped; the caller diffs returned vs requested ids.
+        sqlite-primary: decode each note's gzip+protobuf ZDATA (fast, no Notes launch).
+        Any id the decoder can't handle (a non-x-coredata id, a note not in the store,
+        or an undecodable body) is GAP-FILLED via AppleScript, so this never returns
+        fewer bodies than the AppleScript path alone would. Missing FDA / schema drift →
+        the whole batch degrades to AppleScript. Each body is bounded via ``clean_body``
+        (#52): an over-hard-cap body downgrades to a per-item notice, not a batch fail.
+        Unknown ids are silently skipped; the caller diffs returned vs requested.
         """
         if not ids:
             raise ValueError("note_bodies needs at least one note id")
@@ -202,14 +463,54 @@ class NotesAdapter:
                 f"note_bodies accepts at most {MAX_BODIES} ids per call; "
                 f"got {len(ids)} — chunk your requests"
             )
-        out = []
-        for rec in _parse_bodies(run_osascript(_BODIES, *ids)):
-            try:
-                body = clean_body(rec["body"])
-            except OutputOverflow as e:
-                body = f"[not hydrated: {e}]"
-            out.append({"id": rec["id"], "body": body})
-        return out
+
+        def sqlite(conn) -> list[dict]:
+            # Only map ids belonging to THIS store: the bare pN is not unique across
+            # stores, so a stale/foreign id with a colliding pN must NOT resolve to a
+            # local note's body (#60 review). Match the full x-coredata prefix.
+            prefix = f"x-coredata://{_store_uuid(conn)}/ICNote/p"
+            pk_to_id = {
+                pk: i
+                for i in ids
+                if i.startswith(prefix) and (pk := _pk_from_id(i)) is not None
+            }
+            hydrated: dict[str, str] = {}
+            if pk_to_id:
+                ph = ",".join("?" for _ in pk_to_id)
+                rows = conn.execute(
+                    _BODY_SQL.format(placeholders=ph), tuple(pk_to_id)
+                ).fetchall()
+                for zpk, zdata in rows:
+                    body = _decode_note_data(zdata)
+                    if body is not None:
+                        hydrated[pk_to_id[zpk]] = _hydrate_body(body)
+            # gap-fill what sqlite couldn't decode via AppleScript. BEST-EFFORT: if the
+            # gap-fill raises (e.g. Automation not granted), keep the bodies sqlite
+            # already decoded rather than failing the whole batch (#60 review).
+            rest = [i for i in ids if i not in hydrated]
+            if rest:
+                with contextlib.suppress(NativeError):
+                    for rec in self._applescript_bodies(rest):
+                        hydrated.setdefault(rec["id"], rec["body"])
+            return [{"id": i, "body": hydrated[i]} for i in ids if i in hydrated]
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _BODY_FINGERPRINT,
+            sqlite,
+            fallback=lambda: self._applescript_bodies(ids),
+            immutable=False,  # mode=ro reads the -wal (live); see module note
+        )
+
+    def _applescript_bodies(self, ids: list[str]) -> list[dict]:
+        """The osascript body reader (fallback + gap-fill path). Unknown ids skipped;
+        each body ``clean_body``-bounded, a huge one downgraded to a per-item notice."""
+        if not ids:
+            return []
+        return [
+            {"id": rec["id"], "body": _hydrate_body(rec["body"])}
+            for rec in _parse_bodies(run_osascript(_BODIES, *ids))
+        ]
 
     def delete(
         self, ident: str, expect_title: str | None = None, dry_run: bool = False

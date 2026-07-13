@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import signal
+import sqlite3
 import subprocess
 import threading
 import time
@@ -28,7 +29,9 @@ import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import TypeVar
+from urllib.parse import quote
 
 import EventKit as EK
 import Foundation as F
@@ -159,6 +162,48 @@ class AmbiguousTarget(NativeError):
     kind = "ambiguous_target"
 
 
+class FullDiskAccessDenied(NativeError):
+    """A native sqlite store (chat.db, NoteStore.sqlite, …) couldn't be opened because
+    Full Disk Access is not granted. ``str(e)`` is the remediation; doctor (#48) reports
+    the same surface. Part of the dual-backend policy (#58): the adapter falls back to
+    its AppleScript reader if it has one (Notes), else this surfaces loudly — never a
+    silent empty (Messages content)."""
+
+    kind = "full_disk_access_denied"
+
+
+def resolve_container(items, target: str, *, noun: str):
+    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name (#55).
+
+    The disambiguation rule made concrete: a container-addressed write
+    (``create_event(calendar)``, ``create_reminder(list_name)``) accepts EITHER a
+    ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
+    name. An id wins (it is unambiguous by construction); a name matching >1 container
+    raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
+    the write targeting one of them rather than mac-mcp guessing (mcp-ical #16 silent
+    mis-target). id-first: a calendar/list identifier is a UUID, so it can't collide
+    with a human-typed name — the precedence is safe.
+
+    ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
+    container object) is returned. 0 name matches → ``ValueError``; >1 →
+    ``AmbiguousTarget``. Pure (no native imports) so it unit-tests with plain tuples.
+    """
+    for cid, _name, value in items:
+        if cid == target:  # id-first: an unambiguous handle is used directly
+            return value
+    matches = [(cid, value) for cid, name, value in items if name == target]
+    if not matches:
+        raise ValueError(f"no {noun} named {target!r}")
+    if len(matches) > 1:
+        ids = ", ".join(cid for cid, _ in matches)
+        raise AmbiguousTarget(
+            f"{len(matches)} {noun}s are named {target!r} — mac-mcp never auto-picks "
+            "an ambiguous write target. Re-issue the write targeting one of these ids "
+            f"instead: {ids} (or rename them so the names are unique)."
+        )
+    return matches[0][1]
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:
@@ -193,6 +238,52 @@ def norm_text(v) -> str | None:
         return None
     s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
     return s or None
+
+
+# Typographic glyphs Apple's stores keep but users type ASCII for (#64). Curly single/
+# double quotes + primes → ASCII ' and ", ellipsis → "...". NOT hyphens/dashes: folding
+# the dash family broke real hyphenated names elsewhere, and the acceptance requires
+# hyphenated titles unaffected — so dashes pass through fold_text untouched.
+_PUNCT_FOLD = {
+    0x2018: "'",  # ‘ left single quote
+    0x2019: "'",  # ’ right single quote (the U+2019 apostrophe — the #26 culprit)
+    0x201A: "'",  # ‚ single low-9 quote
+    0x201B: "'",  # ‛ single high-reversed-9 quote
+    0x2032: "'",  # ′ prime
+    0x201C: '"',  # “ left double quote
+    0x201D: '"',  # ” right double quote
+    0x201E: '"',  # „ double low-9 quote
+    0x201F: '"',  # ‟ double high-reversed-9 quote
+    0x2033: '"',  # ″ double prime
+    0x2026: "...",  # … horizontal ellipsis
+}
+
+
+def fold_text(v: object) -> str:
+    """Case/diacritic/smart-punctuation-insensitive key for READ-side name/title
+    matching (#64). Apply to BOTH sides of a comparison so "café" matches "cafe" and
+    "Andrei's list" (U+2019) matches "Andrei's list" (ASCII) — Apple stores typographic
+    glyphs, models type ASCII, and the mismatch silently returned nothing (epheterson
+    #26). Steps: map curly quotes/apostrophes/ellipsis → ASCII, NFKD-decompose and drop
+    combining marks (strips diacritics), then casefold. Hyphens/dashes are LEFT ALONE
+    (see _PUNCT_FOLD). Pure / native-free; composes with norm_text (#49).
+
+    READS ONLY. Write-target resolution (resolve_container) stays byte-exact by design:
+    folding a write target could collapse two real containers ("Café"/"Cafe") and
+    silently mis-home the write — the exact opposite of the AmbiguousTarget guard's
+    intent. Fold search results, never write targets.
+
+    ponytail: NFKD is *compatibility* decomposition, so it also folds ligatures/width/
+    superscripts (ﬁ→"fi", №→"no", ①→"1"). That only ever WIDENS a read match (a
+    harmless superset), never drops a legitimate one, and can't reach a write — fine
+    for search. Switch to NFD if a caller ever needs canonical-only folding.
+    """
+    s = str(v) if v is not None else ""
+    s = s.translate(_PUNCT_FOLD)
+    s = "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+    return s.casefold()
 
 
 # --- output hygiene (#52) ------------------------------------------------------------
@@ -376,19 +467,25 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     The sanctioned escape hatch for framework-less apps (Mail/Notes/Contacts).
     ``args`` are passed to the script's ``on run argv`` handler — put any user input
     (names, ids) there so values are never interpolated into the script (no injection).
-    Raises a typed ``NativeError`` (``AutomationDenied`` / ``AppNotRunning`` / generic)
-    on a non-zero exit, and ``NativeTimeout`` on timeout — it never returns an empty
-    string to mask a failure as "no result". Safe on or off the worker (dispatches via
-    run_native when called off it). The child is tracked so an exit path can kill it
-    (#56); the AppleScript template's own ``with timeout`` bounds it if we can't.
+    A ``--`` separates the script from ``args`` so a value starting with ``-`` (e.g. a
+    mail search for "-- Original Message") is delivered as script DATA, not parsed by
+    osascript's getopt as its own option (#62 review). Raises a typed ``NativeError``
+    (``AutomationDenied`` / ``AppNotRunning`` / generic) on a non-zero exit, and
+    ``NativeTimeout`` on timeout — it never returns an empty string to mask a failure as
+    "no result". Safe on or off the worker (dispatches via run_native off it). The child
+    is tracked so an exit path can kill it (#56); the AppleScript template's own
+    ``with timeout`` bounds it if we can't.
     """
 
     def _run() -> str:
         # Popen (not subprocess.run) so the live child is a handle exit paths can
-        # terminate; communicate(timeout) + kill-on-timeout mirrors run(timeout=).
+        # terminate; communicate(timeout) + kill-on-timeout mirrors run(timeout=). The
+        # `--` stops osascript option scanning so a leading-'-' arg is positional data,
+        # not a flag (#62 review). It is consumed by getopt, not delivered into `on run
+        # argv`, so every existing template's argv indices are unchanged.
         started = time.monotonic()
         proc = subprocess.Popen(
-            ["osascript", "-e", script, *args],
+            ["osascript", "-e", script, "--", *args],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -454,6 +551,163 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
             "service may be hung. Tell the user; do not retry immediately."
         )
     return box.get("result")
+
+
+# --- dual-backend read plane: read-only sqlite opener + schema fingerprint (#58) -----
+# The escape from AppleScript-as-query-engine (the ecosystem's death spiral: reads get
+# slow → get stubbed → project abandoned). Native stores answer QUERIES; AppleScript
+# only performs ACTIONS. chat.db / NoteStore.sqlite are read through ONE read-only
+# opener, serialized on the native worker for consistency with EventKit/osascript (these
+# reads are user-latency-bound, not throughput-bound — same rationale as the
+# max_workers=1 fence). A schema fingerprint guards every parser against a silent macOS
+# schema change. This is the shared plumbing the sqlite read planes (#59 Messages, #60
+# Notes) build on with no new plumbing of their own.
+
+
+def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
+    """Open a system sqlite store STRICTLY read-only.
+
+    Preflights with a raw read so a Full-Disk-Access denial surfaces as a typed
+    ``FullDiskAccessDenied`` — sqlite3 alone gives only an opaque "unable to open
+    database file" that can't be told apart from a missing file. ``mode=ro`` never
+    creates the file and forbids writes at the SQLite layer.
+
+    ``immutable=1`` is OPT-IN and unsafe for a live store: it tells SQLite the file
+    never changes, so it ignores the ``-wal`` and returns pre-WAL data — recent items
+    would silently vanish. Pass it only for a store known static. Call inside
+    run_native: the connection is thread-bound, so the whole query must run on the
+    worker.
+    """
+    p = Path(path)
+    try:
+        with open(p, "rb") as f:  # preflight: classify FDA-denied vs genuinely-absent
+            f.read(1)
+    except PermissionError as e:
+        raise FullDiskAccessDenied(
+            "mac-mcp could not read a macOS data store — Full Disk Access is not "
+            "granted. Grant it in System Settings → Privacy & Security → Full Disk "
+            "Access to the app that launched mac-mcp, then restart mac-mcp. Do not "
+            "retry until the next user message."
+        ) from e
+    except FileNotFoundError as e:
+        raise NativeError(
+            f"the macOS data store {p.name!r} does not exist (the app may never have "
+            "been used). This is not a Full Disk Access problem; do not retry."
+        ) from e
+    except OSError as e:  # dir-as-path, ELOOP, ENOTDIR, EIO … stay typed, never raw
+        raise NativeError(
+            f"the macOS data store at {p} could not be opened: {e}. Do not retry."
+        ) from e
+    uri = f"file:{quote(str(p))}?mode=ro" + ("&immutable=1" if immutable else "")
+    try:
+        return sqlite3.connect(uri, uri=True)
+    except sqlite3.Error as e:  # rare (preflight passed) → treat as store-unavailable
+        raise SchemaDrift(
+            f"the sqlite store {p.name!r} could not be opened ({e}). Falling back or "
+            "surfacing rather than trusting an unreadable store."
+        ) from e
+
+
+def verify_sqlite_schema(conn: sqlite3.Connection, fingerprint: dict) -> None:
+    """Raise ``SchemaDrift`` unless each expected table has every expected column (#58).
+
+    ``fingerprint`` maps table name → the columns the parser reads. macOS updates move
+    these schemas; catching drift here means the dual-backend falls back (or fails
+    loudly) instead of mis-parsing renamed/dropped columns into garbage Pointers. Table
+    names come from adapter code, but are still BOUND via the ``pragma_table_info``
+    table-valued function (never string-formatted) so the helper is injection-safe.
+    """
+    for table, columns in fingerprint.items():
+        try:
+            # SQLite identifiers are case-INSENSITIVE (a query on `guid` hits a column
+            # DEFINED as `GUID`), but pragma_table_info returns the defined case — so
+            # compare case-folded, else a mere capitalization change is a false drift.
+            present = {
+                row[0].lower()
+                for row in conn.execute(
+                    "SELECT name FROM pragma_table_info(?)", (table,)
+                )
+            }
+        except sqlite3.DatabaseError as e:  # corrupt / not-a-db → can't parse → drift
+            raise SchemaDrift(
+                "could not read the sqlite store's schema (corrupt or not a database): "
+                f"{e}. Falling back or surfacing rather than mis-parsing. Do not retry."
+            ) from e
+        if not present:
+            raise SchemaDrift(
+                f"expected table {table!r} is absent — macOS likely changed the "
+                "schema. The parser would mis-read the store; do not trust a sqlite "
+                "result until the fingerprint is updated."
+            )
+        missing = sorted(c for c in columns if c.lower() not in present)
+        if missing:
+            raise SchemaDrift(
+                f"table {table!r} is missing column(s) {missing} — macOS likely "
+                "changed the schema. Do not trust a sqlite result until the "
+                "fingerprint is updated."
+            )
+
+
+# Missing FDA and schema drift are the two "store unavailable" signals the dual-backend
+# degrades on (Andrei's #58 policy). A genuinely-absent store (bare NativeError)
+# surfaces loudly instead — not an FDA problem, and a wrong "grant FDA" nudge misleads.
+_STORE_UNAVAILABLE = (FullDiskAccessDenied, SchemaDrift)
+
+
+def read_via_sqlite(
+    path, fingerprint: dict, query, *, fallback=None, immutable: bool = False
+):
+    """Dual-backend read (#58): query a native sqlite store read-only, degrading to the
+    adapter's AppleScript reader when the store is unavailable.
+
+    Policy (Andrei-approved): sqlite-primary. On unavailability — missing Full Disk
+    Access OR a schema-fingerprint mismatch — call ``fallback`` if the adapter has one
+    (Notes does), else re-raise the typed error so the model gets a remediation, never a
+    silent empty (Messages content has no fallback → it raises). ``query(conn) -> T``
+    does the reads on the open read-only connection and must return plain data (the
+    connection is thread-bound and closed here); ``fallback() -> T`` is the AppleScript
+    path.
+
+    Everything runs on the single native worker (serialization consistency). This is the
+    ONE helper the sqlite read planes (#59/#60) build on — they add no new plumbing.
+    """
+
+    def work():
+        try:
+            conn = _open_sqlite_ro(path, immutable=immutable)
+            try:
+                verify_sqlite_schema(conn, fingerprint)
+                return query(conn)
+            except sqlite3.Error as e:
+                # A sqlite error surfacing during the read (a data page corrupt past
+                # the schema pages verify touched, an unreadable store) is "store
+                # unavailable" — route it through SchemaDrift so it degrades to fallback
+                # / surfaces as a typed directive, never a raw exception past
+                # server._guard (#47). A non-sqlite error from query() (a parser bug) is
+                # NOT caught here — it must propagate, never be masked as a fallback.
+                raise SchemaDrift(
+                    f"the sqlite store could not be read ({e}) — corrupt, or an "
+                    "unexpected sqlite error. Do not trust a partial result."
+                ) from e
+            finally:
+                conn.close()
+        except _STORE_UNAVAILABLE:
+            if fallback is not None:
+                return fallback()
+            raise
+
+    return work() if _on_worker() else run_native(work)
+
+
+def mac_region() -> str | None:
+    """The Mac's locale region code (e.g. ``'BE'``), for the locale-derived phone
+    country-code default (#59 — never a hardcoded +1). ``None`` if unavailable.
+
+    A pure read of NSLocale: no EventKit thread affinity, no TCC — so it needs neither
+    run_native nor a permission. Kept here so Foundation stays out of the adapters.
+    """
+    region = F.NSLocale.currentLocale().objectForKey_(F.NSLocaleCountryCode)
+    return str(region) if region else None
 
 
 def to_nsdate(dt: datetime) -> F.NSDate:

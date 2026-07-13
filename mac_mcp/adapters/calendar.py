@@ -13,7 +13,6 @@ import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer, parse_datetime
 from ..runtime import (
-    AmbiguousTarget,
     SpanRequired,
     VerificationFailed,
     WriteRefused,
@@ -23,6 +22,7 @@ from ..runtime import (
     norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    resolve_container,
     run_native,
     store,
     to_nsdate,
@@ -85,32 +85,25 @@ def _event_pointer(item) -> Pointer:
 
 def _calendar_pointer(cal) -> Pointer:
     # A calendar (container) has no public per-calendar URL scheme; id + name (summary)
-    # are what the projection resolves a write target against. The title is kept RAW
-    # (NOT routed through clean_summary, unlike event summaries): _resolve_calendar
-    # matches `c.title() == name` exactly with no id fallback, so the summary IS the
+    # are what a write resolves against — a write may target EITHER (#55). The title is
+    # kept RAW (NOT routed through clean_summary, unlike event summaries): the resolver
+    # still matches `c.title() == name` exactly for the name path, so the summary IS a
     # write key — sanitizing it would desync the displayed name from the resolvable one
-    # and make the calendar untargetable (#52 review). deeplink empty by design.
+    # and make the calendar name-untargetable (#52 review). deeplink empty by design.
     return Pointer(id=cal.calendarIdentifier(), summary=cal.title(), deeplink="")
 
 
 def _resolve_calendar(s, name: str | None):
-    # Disambiguation rule (#55): a write never auto-picks among same-named calendars.
-    # Collect ALL exact-title matches; 0 → not found, 1 → the target, >1 →
-    # AmbiguousTarget (the mcp-ical #16 silent-mis-target bug, refused loudly instead).
+    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
+    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
+    # logic — including listing candidate ids — lives in runtime.resolve_container.
     if name is None:
         return s.defaultCalendarForNewEvents()
-    matches = [
-        c for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent) if c.title() == name
+    items = [
+        (c.calendarIdentifier(), c.title(), c)
+        for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent)
     ]
-    if not matches:
-        raise ValueError(f"no calendar named {name!r}")
-    if len(matches) > 1:
-        raise AmbiguousTarget(
-            f"{len(matches)} calendars are named {name!r} — refusing to guess which "
-            "one for a write (mac-mcp never auto-picks an ambiguous target). Rename "
-            "one so the calendar names are unique, then retry."
-        )
-    return matches[0]
+    return resolve_container(items, name, noun="calendar")
 
 
 def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:
@@ -227,11 +220,16 @@ def _resolve_event(s, ident: str):
     raise ValueError(f"no event occurrence for id {ident!r}")
 
 
-def _verify_event(fresh, ident: str, data: CalendarEventData, cal_title: str) -> None:
+def _verify_event(fresh, ident: str, data: CalendarEventData, cal_id: str) -> None:
     """Re-fetch-by-id verify (#49): fail loudly if the saved event didn't persist as
     requested. `fresh` is a fresh re-resolve of the occurrence we're about to return
-    (from _refetch_event — never None; a missed re-fetch raised there); `cal_title` is
-    the requested calendar (what _apply_event set)."""
+    (from _refetch_event — never None; a missed re-fetch raised there); `cal_id` is the
+    requested calendar's identifier (of the calendar _apply_event set).
+
+    The calendar is verified by IDENTIFIER, not title (#55 review): with id-targeting a
+    write can name a SPECIFIC one of several same-named calendars, so a title compare
+    would falsely pass if the store re-homed the event to a different calendar that
+    happens to share the name — exactly the re-home this #49 guard exists to catch."""
     # free text through norm_text: NFC/NFD + CRLF folds are the store normalizing, not
     # a dropped field; "" and None both mean "unset" (norm_text folds "" → None).
     expected = {
@@ -239,14 +237,14 @@ def _verify_event(fresh, ident: str, data: CalendarEventData, cal_title: str) ->
         "all_day": data.all_day,
         "location": norm_text(data.location),
         "notes": norm_text(data.notes),
-        "calendar": norm_text(cal_title),
+        "calendar": cal_id,  # opaque UUID handle — compared raw, not norm_text
     }
     actual = {
         "title": norm_text(fresh.title()),
         "all_day": bool(fresh.isAllDay()),
         "location": norm_text(fresh.location()),
         "notes": norm_text(fresh.notes()),
-        "calendar": norm_text(fresh.calendar().title()),
+        "calendar": fresh.calendar().calendarIdentifier(),
     }
     fresh_start = from_nsdate(fresh.startDate())
     if data.all_day:
@@ -318,9 +316,10 @@ class CalendarAdapter:
             _apply_event(s, e, data)
             # read before save — the commit may re-home the object, and post-save it
             # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused.
+            # calendar account); let the save below surface the WriteRefused. Capture
+            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
             cal = e.calendar()
-            cal_title = cal.title() if cal is not None else None
+            cal_id = cal.calendarIdentifier() if cal is not None else None
             ok, err = s.saveEvent_span_commit_error_(e, span, True, None)
             if not ok:
                 raise WriteRefused(
@@ -333,7 +332,7 @@ class CalendarAdapter:
             # event (#49): prove the id resolves and the fields persisted.
             ident = _event_id(e)
             fresh = _refetch_event(s, ident)
-            _verify_event(fresh, ident, data, cal_title)
+            _verify_event(fresh, ident, data, cal_id)
             return _event_pointer(fresh)
 
         return run_native(work)
@@ -353,9 +352,10 @@ class CalendarAdapter:
             _apply_event(s, e, data)
             # read before save — the commit may re-home the object, and post-save it
             # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused.
+            # calendar account); let the save below surface the WriteRefused. Capture
+            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
             cal = e.calendar()
-            cal_title = cal.title() if cal is not None else None
+            cal_id = cal.calendarIdentifier() if cal is not None else None
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise WriteRefused(
@@ -368,7 +368,7 @@ class CalendarAdapter:
             # the new occurrence epoch, so we re-resolve (and cite) it as persisted.
             ident_after = _event_id(e)
             fresh = _refetch_event(s, ident_after)
-            _verify_event(fresh, ident_after, data, cal_title)
+            _verify_event(fresh, ident_after, data, cal_id)
             return _event_pointer(fresh)
 
         return run_native(work)
