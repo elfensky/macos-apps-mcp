@@ -32,7 +32,7 @@ jobs:
     runs-on: macos-latest
     environment:
       name: pypi
-      url: ${{ inputs.target == 'pypi' && 'https://pypi.org/project/mac-mcp/' || 'https://test.pypi.org/project/mac-mcp/' }}
+      url: ${{ inputs.target == 'pypi' && 'https://pypi.org/project/macos-apps-mcp/' || 'https://test.pypi.org/project/macos-apps-mcp/' }}
     permissions:
       id-token: write # required for Trusted Publishing (OIDC)
     steps:
