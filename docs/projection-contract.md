@@ -1,6 +1,6 @@
 # Outbound projection contract (#4)
 
-**Status:** contract only. mac-mcp provides the tools; the projection command is built in the
+**Status:** contract only. macos-apps-mcp provides the tools; the projection command is built in the
 life-cockpit repo (this repo does not touch the cockpit vault).
 
 ## Grammar (cockpit `conventions.md` extension)
@@ -13,7 +13,7 @@ Tasks-plugin ordering gotcha — fields after the emoji are mis-parsed):
 - [ ] Submit taxes [cal:: <event-id>] 📅 2026-06-23
 ```
 
-`<reminder-id>` / `<event-id>` is the `Pointer.id` returned by the mac-mcp write tools
+`<reminder-id>` / `<event-id>` is the `Pointer.id` returned by the macos-apps-mcp write tools
 (EventKit `calendarItemIdentifier`).
 
 ## Idempotent algorithm (run by the cockpit command)
@@ -22,7 +22,7 @@ For each vault task with a deadline:
 1. **No `[rem::]`/`[cal::]`** → call `create_reminder` / `create_event`; write the returned `id`
    back into the task line as `[rem:: id]` / `[cal:: id]`.
 2. **Has the id** → call `update_reminder` / `update_event` with the current task fields
-   (full replace — mac-mcp writes are idempotent re-derivations; an absent due date/notes is
+   (full replace — macos-apps-mcp writes are idempotent re-derivations; an absent due date/notes is
    *cleared*, not left stale).
 3. **Vault task checked done** → call `complete_reminder`.
 4. **Reminder completed in Apple** (seen via the `reminders` read) → check the vault task off.

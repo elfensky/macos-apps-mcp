@@ -1,4 +1,4 @@
-# Contributing to mac-mcp
+# Contributing to macos-apps-mcp
 
 ## Setup
 ```sh
@@ -13,7 +13,7 @@ uv run pytest -m integration  # real EventKit / TCC — this Mac only, grant acc
 
 ## Run the server
 ```sh
-uv run mac-mcp          # stdio transport
+uv run macos-apps-mcp          # stdio transport
 ```
 
 ## Lint & format
@@ -51,7 +51,7 @@ Commits follow conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, 
 - **The `EKEventStore` is owned by `runtime`, not by an adapter.** One adapter must never import or reach into another.
 - **Reads return `Pointer`s** (`get_pointers(query) -> list[Pointer]`); **writes take typed dataclasses** (`ReminderData`, `CalendarEventData`). Tools in `server.py` are thin dispatch only.
 - **Pointers, not payload** — `id` + one-line `summary` + `deeplink`, never full bodies.
-- One adapter module per app under `mac_mcp/adapters/`. Adding an app = add a module + mount its tools in `server.py`.
+- One adapter module per app under `macos_apps_mcp/adapters/`. Adding an app = add a module + mount its tools in `server.py`.
 
 ## Compatibility
 Latest stable macOS only (rolling). We use the macOS 14+ full-access APIs; we do not carry back-compat shims.

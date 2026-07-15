@@ -1,4 +1,4 @@
-# mac-mcp
+# macos-apps-mcp
 
 One consolidated [MCP](https://modelcontextprotocol.io) server for native macOS apps —
 **Calendar & Reminders** read/write, **Messages & Notes** content search over the native
@@ -22,7 +22,7 @@ Requires macOS and Python ≥ 3.11.
 **From source (works today):**
 
 ```sh
-git clone https://github.com/elfensky/mac-mcp && cd mac-mcp
+git clone https://github.com/elfensky/macos-apps-mcp && cd macos-apps-mcp
 uv sync
 ```
 
@@ -32,16 +32,16 @@ locked PyObjC wheels:
 ```json
 {
   "mcpServers": {
-    "mac-mcp": {
-      "command": "/absolute/path/to/mac-mcp/.venv/bin/python",
-      "args": ["-m", "mac_mcp"]
+    "macos-apps": {
+      "command": "/absolute/path/to/macos-apps-mcp/.venv/bin/python",
+      "args": ["-m", "macos_apps_mcp"]
     }
   }
 }
 ```
 
-**From PyPI** (once published — see the CHANGELOG): `uvx mac-mcp` runs the server with no clone,
-and the MCP config becomes `"command": "uvx", "args": ["mac-mcp"]`.
+**From PyPI** (once published — see the CHANGELOG): `uvx macos-apps-mcp` runs the server with no clone,
+and the MCP config becomes `"command": "uvx", "args": ["macos-apps-mcp"]` (same `"macos-apps"` key).
 
 ### Permissions (macOS TCC)
 
@@ -56,7 +56,7 @@ Grant access when macOS prompts — the first call to each app triggers its dial
 ## Tools
 
 Reads return pointers; results are capped per adapter. Bodies/content are a separate bounded
-fetch. Writes/actions are skipped entirely when `MAC_MCP_READ_ONLY` is set (see below).
+fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (see below).
 
 ### Calendar & Reminders — read/write (EventKit)
 
@@ -125,7 +125,7 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 
 ### Read-only mode
 
-Set `MAC_MCP_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
+Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
 
 ## Develop
@@ -136,7 +136,7 @@ uv run pytest                   # unit tests (mock at the adapter boundary)
 uv run pytest -m integration    # real macOS / EventKit / TCC — run manually, never in CI
 uv run ruff check .             # lint (config in pyproject.toml)
 uv run ruff format .            # format
-uv run mac-mcp                  # run the server (stdio)
+uv run macos-apps-mcp                  # run the server (stdio)
 ```
 
 ruff (lint + format, line-length 88) and pytest gate CI — full workflow in
@@ -144,6 +144,6 @@ ruff (lint + format, line-length 88) and pytest gate CI — full workflow in
 
 ## Prior art & credits
 
-mac-mcp builds on prior work — the Apple Mail MCP it draws from, the EventKit/Photos servers it
+macos-apps-mcp builds on prior work — the Apple Mail MCP it draws from, the EventKit/Photos servers it
 references, the project that pioneered the unified-Apple-MCP pattern, and FastMCP / PyObjC / the MCP
 spec it depends on. See [CREDITS.md](CREDITS.md).
