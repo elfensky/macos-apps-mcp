@@ -157,7 +157,7 @@ class PointerSource(Protocol):
 #      EITHER a Pointer.id OR an exact name (runtime.resolve_container): an id is used
 #      directly (unambiguous by construction), and a name matching >1 container raises
 #      runtime.AmbiguousTarget LISTING the candidate ids — so the caller re-issues the
-#      write with one of them, instead of mac-mcp writing to the wrong container.
+#      write with one of them, instead of macos-apps-mcp writing to the wrong container.
 # The rule is STATELESS by design: there is no server-side "recent matches" store to
 # resolve a later write against (carterlasalle's module-global version breaks concurrent
 # sessions — a negative lesson). A write carries its own unambiguous target.

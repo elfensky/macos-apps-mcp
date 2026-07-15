@@ -9,7 +9,7 @@ import sqlite3
 
 import pytest
 
-from mac_mcp.runtime import (
+from macos_apps_mcp.runtime import (
     FullDiskAccessDenied,
     NativeError,
     SchemaDrift,
@@ -102,7 +102,7 @@ def test_open_ro_uri_reflects_immutable(db, monkeypatch):
     seen = []
     real = sqlite3.connect
     monkeypatch.setattr(
-        "mac_mcp.runtime.sqlite3.connect",
+        "macos_apps_mcp.runtime.sqlite3.connect",
         lambda database, **k: seen.append(database) or real(database, **k),
     )
     _open_sqlite_ro(db, immutable=False).close()
@@ -282,7 +282,7 @@ def test_read_via_sqlite_closes_conn_on_schema_drift(db, monkeypatch):
         spies.append(s)
         return s
 
-    monkeypatch.setattr("mac_mcp.runtime.sqlite3.connect", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.sqlite3.connect", fake)
     with pytest.raises(SchemaDrift):
         read_via_sqlite(db, {"message": {"absent_col"}}, _query)
     assert spies and spies[0].closed

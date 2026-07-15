@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from mac_mcp.adapters.shortcuts import (
+from macos_apps_mcp.adapters.shortcuts import (
     MAX_OUTPUT,
     MAX_SHORTCUTS,
     ShortcutsAdapter,
@@ -20,7 +20,7 @@ from mac_mcp.adapters.shortcuts import (
     _parse_list,
     _run_pointer,
 )
-from mac_mcp.contracts import Pointer
+from macos_apps_mcp.contracts import Pointer
 
 _UUID = "40AE7C31-B301-4488-889D-44DB6E8FF542"
 
@@ -40,7 +40,7 @@ def _fake_run(monkeypatch, *, returncode=0, stdout="", stderr=""):
                 f.write(stdout)
         return subprocess.CompletedProcess(cmd, returncode, "", stderr)
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", fake)
     return seen
 
 
@@ -159,7 +159,7 @@ def test_run_shortcut_tolerates_directory_output(monkeypatch):
         os.mkdir(cmd[cmd.index("--output-path") + 1])
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", fake)
     assert ShortcutsAdapter().run_shortcut("Folder").summary == "ran Folder"
 
 
@@ -219,7 +219,7 @@ def test_get_pointers_uses_show_identifiers_and_maps_uuid(monkeypatch):
         out = f"Driving Mode ({_UUID})\nTrack water ({u2})\n"
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", fake)
     ptrs = ShortcutsAdapter().get_pointers("driving")  # filters by NAME
     assert "--show-identifiers" in seen["cmd"]
     assert len(ptrs) == 1
@@ -242,7 +242,7 @@ def test_run_shortcut_by_uuid_resolves_name_for_citation(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, 0, f"Driving Mode ({_UUID})\n", "")
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", fake)
     p = ShortcutsAdapter().run_shortcut(_UUID)
     run_cmd = next(c for c in calls if "run" in c)
     assert _UUID in run_cmd and p.id == _UUID  # ran by the UUID, id is the UUID
@@ -271,10 +271,10 @@ def test_run_shortcut_hostile_name_is_a_single_argv_element(monkeypatch):
 
 def test_get_pointers_nonzero_raises_native_error(monkeypatch):
     monkeypatch.setattr(
-        "mac_mcp.adapters.shortcuts.subprocess.run",
+        "macos_apps_mcp.adapters.shortcuts.subprocess.run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
     )
-    from mac_mcp.runtime import NativeError
+    from macos_apps_mcp.runtime import NativeError
 
     with pytest.raises(NativeError, match="shortcuts CLI failed"):
         ShortcutsAdapter().get_pointers()
@@ -284,8 +284,8 @@ def test_get_pointers_timeout_raises_native_timeout(monkeypatch):
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 10)
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", boom)
-    from mac_mcp.runtime import NativeTimeout
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", boom)
+    from macos_apps_mcp.runtime import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
         ShortcutsAdapter().get_pointers()
@@ -295,8 +295,8 @@ def test_run_shortcut_timeout_raises_native_timeout(monkeypatch):
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 30)
 
-    monkeypatch.setattr("mac_mcp.adapters.shortcuts.subprocess.run", boom)
-    from mac_mcp.runtime import NativeTimeout
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", boom)
+    from macos_apps_mcp.runtime import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
         ShortcutsAdapter().run_shortcut("Slow")
@@ -305,7 +305,7 @@ def test_run_shortcut_timeout_raises_native_timeout(monkeypatch):
 def test_get_pointers_no_shell(monkeypatch):
     seen = {}
     monkeypatch.setattr(
-        "mac_mcp.adapters.shortcuts.subprocess.run",
+        "macos_apps_mcp.adapters.shortcuts.subprocess.run",
         lambda cmd, **kw: (
             seen.update(cmd=cmd, kw=kw) or subprocess.CompletedProcess(cmd, 0, "", "")
         ),

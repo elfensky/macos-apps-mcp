@@ -11,8 +11,8 @@ from datetime import datetime
 
 import pytest
 
-from mac_mcp.adapters import messages
-from mac_mcp.adapters.messages import (
+from macos_apps_mcp.adapters import messages
+from macos_apps_mcp.adapters.messages import (
     _APPLE_EPOCH,
     _apple_date_to_dt,
     _calling_code_for_region,
@@ -24,8 +24,8 @@ from mac_mcp.adapters.messages import (
     _parse,
     _resolve_calling_code,
 )
-from mac_mcp.contracts import Pointer
-from mac_mcp.runtime import FullDiskAccessDenied, SchemaDrift
+from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.runtime import FullDiskAccessDenied, SchemaDrift
 
 # --- chat list (osascript) — unchanged -----------------------------------------------
 
