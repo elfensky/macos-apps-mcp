@@ -4,7 +4,7 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
-## [0.6.0] - 2026-07-14
+## [0.6.0] - 2026-07-15
 
 ### Changed
 
