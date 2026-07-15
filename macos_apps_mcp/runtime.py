@@ -180,9 +180,9 @@ def resolve_container(items, target: str, *, noun: str):
     ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
     name. An id wins (it is unambiguous by construction); a name matching >1 container
     raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
-    the write targeting one of them rather than mac-mcp guessing (mcp-ical #16 silent
-    mis-target). id-first: a calendar/list identifier is a UUID, so it can't collide
-    with a human-typed name — the precedence is safe.
+    the write targeting one of them rather than macos-apps-mcp guessing (mcp-ical #16
+    silent mis-target). id-first: a calendar/list identifier is a UUID, so it can't
+    collide with a human-typed name — the precedence is safe.
 
     ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
     container object) is returned. 0 name matches → ``ValueError``; >1 →
@@ -197,9 +197,9 @@ def resolve_container(items, target: str, *, noun: str):
     if len(matches) > 1:
         ids = ", ".join(cid for cid, _ in matches)
         raise AmbiguousTarget(
-            f"{len(matches)} {noun}s are named {target!r} — mac-mcp never auto-picks "
-            "an ambiguous write target. Re-issue the write targeting one of these ids "
-            f"instead: {ids} (or rename them so the names are unique)."
+            f"{len(matches)} {noun}s are named {target!r} — macos-apps-mcp never "
+            "auto-picks an ambiguous write target. Re-issue the write targeting one of "
+            f"these ids instead: {ids} (or rename them so the names are unique)."
         )
     return matches[0][1]
 
@@ -375,9 +375,9 @@ def _decide(status: int) -> None:
     if status == _FULL_ACCESS:
         return
     raise AccessDenied(
-        "mac-mcp needs Calendar + Reminders access. Grant it in "
+        "macos-apps-mcp needs Calendar + Reminders access. Grant it in "
         "System Settings → Privacy & Security → Calendars and Reminders, then "
-        "restart mac-mcp."
+        "restart macos-apps-mcp."
     )
 
 
@@ -428,10 +428,11 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     detail = stderr.strip() or "osascript failed with no stderr"
     if _AUTOMATION_DENIED in stderr:
         return AutomationDenied(
-            "macOS blocked mac-mcp from controlling the app (Automation consent not "
-            "granted). Tell the user to enable it in System Settings → Privacy & "
-            "Security → Automation, for whichever app launched mac-mcp, then restart "
-            f"mac-mcp. Do not retry until the next user message. [{detail}]"
+            "macOS blocked macos-apps-mcp from controlling the app (Automation consent "
+            "not granted). Tell the user to enable it in System Settings → Privacy & "
+            "Security → Automation, for whichever app launched macos-apps-mcp, then "
+            "restart macos-apps-mcp. Do not retry until the next user message. "
+            f"[{detail}]"
         )
     if any(code in stderr for code in _APP_NOT_RUNNING):
         return AppNotRunning(
@@ -584,10 +585,10 @@ def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
             f.read(1)
     except PermissionError as e:
         raise FullDiskAccessDenied(
-            "mac-mcp could not read a macOS data store — Full Disk Access is not "
-            "granted. Grant it in System Settings → Privacy & Security → Full Disk "
-            "Access to the app that launched mac-mcp, then restart mac-mcp. Do not "
-            "retry until the next user message."
+            "macos-apps-mcp could not read a macOS data store — Full Disk Access is "
+            "not granted. Grant it in System Settings → Privacy & Security → Full "
+            "Disk Access to the app that launched macos-apps-mcp, then restart "
+            "macos-apps-mcp. Do not retry until the next user message."
         ) from e
     except FileNotFoundError as e:
         raise NativeError(
@@ -803,7 +804,7 @@ def rrule_text(rule) -> str:
     return ";".join(parts)
 
 
-log = logging.getLogger("mac_mcp")
+log = logging.getLogger("macos_apps_mcp")
 
 
 def _request_one(s: EK.EKEventStore, entity: int) -> None:

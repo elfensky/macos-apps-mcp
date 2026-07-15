@@ -401,7 +401,7 @@ class MailAdapter:
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
-        fd, path = tempfile.mkstemp(prefix="mac-mcp-draft-", suffix=".txt")
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-draft-", suffix=".txt")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(body or "")
@@ -445,7 +445,7 @@ class MailAdapter:
                 sender = sanitize_line(sender)
                 date_str = sanitize_line(date_str)
                 body = reply_body + "\n\n" + _build_quote(sender, date_str, original)
-        fd, path = tempfile.mkstemp(prefix="mac-mcp-reply-", suffix=".txt")
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-reply-", suffix=".txt")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(body)

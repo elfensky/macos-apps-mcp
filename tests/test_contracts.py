@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from mac_mcp.contracts import (
+from macos_apps_mcp.contracts import (
     CalendarEventData,
     Pointer,
     PointerSource,
@@ -19,7 +19,7 @@ from mac_mcp.contracts import (
     parse_all_day,
     parse_datetime,
 )
-from mac_mcp.runtime import run_native
+from macos_apps_mcp.runtime import run_native
 
 
 class FakeReminders:

@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import EventKit as EK
 import pytest
 
-from mac_mcp.contracts import CLEAR_RECURRENCE, Recurrence
-from mac_mcp.runtime import (
+from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence
+from macos_apps_mcp.runtime import (
     BODY_HARD_MAX,
     BODY_MAX,
     SUMMARY_MAX,
@@ -399,7 +399,7 @@ def test_run_native_async_timeout_raises_native_timeout():
 
 def test_bootstrap_is_nonfatal_on_denied_surface(monkeypatch):
     # #13 safe-mode: a denied TCC surface must not crash startup.
-    import mac_mcp.runtime as rt
+    import macos_apps_mcp.runtime as rt
 
     def deny(_s, _entity):
         raise rt.AccessDenied("denied")
@@ -588,7 +588,7 @@ class _FakeProc:  # hashable (real object identity) so it can live in the _child
 
 
 def test_terminate_children_terminates_tracked_child():
-    import mac_mcp.runtime as rt
+    import macos_apps_mcp.runtime as rt
 
     killed = []
     fake = _FakeProc(lambda: killed.append(True))
@@ -603,7 +603,7 @@ def test_terminate_children_terminates_tracked_child():
 
 
 def test_terminate_children_ignores_an_already_dead_child():
-    import mac_mcp.runtime as rt
+    import macos_apps_mcp.runtime as rt
 
     def boom():
         raise OSError("no such process")  # terminate() on a reaped child

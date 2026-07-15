@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from mac_mcp.adapters.notes import (
+from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
     NotesAdapter,
     _parse_all,
     _parse_bodies,
 )
-from mac_mcp.contracts import Pointer
+from macos_apps_mcp.contracts import Pointer
 
 
 def test_parse_all_id_folder_title():
@@ -83,7 +83,7 @@ def test_delete_rejects_whitespace():
 def test_delete_passes_id_and_title(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "mac_mcp.adapters.notes.run_osascript",
+        "macos_apps_mcp.adapters.notes.run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
     NotesAdapter().delete("N-1", expect_title="Milk")
@@ -93,7 +93,7 @@ def test_delete_passes_id_and_title(monkeypatch):
 def test_delete_without_title_passes_only_id(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "mac_mcp.adapters.notes.run_osascript",
+        "macos_apps_mcp.adapters.notes.run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
     NotesAdapter().delete("N-1")
@@ -104,7 +104,7 @@ def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
     # #52: a hydrated body is control-stripped but keeps its line/tab structure (it is
     # legitimately multi-line — unlike a one-line summary, it must not be flattened).
     raw = "N-1\x1fLine1\nLine2\x00\tend\x1e"
-    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", lambda *a: raw)
     out = NotesAdapter().get_bodies(["N-1"])
     assert out == [{"id": "N-1", "body": "Line1\nLine2\tend"}]
 
@@ -112,11 +112,11 @@ def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
 def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
     # a single pathological body (a pasted dump) must not fail the whole batch: it
     # downgrades to a per-item notice while the sibling note hydrates normally.
-    from mac_mcp.runtime import BODY_HARD_MAX
+    from macos_apps_mcp.runtime import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 1)
     raw = f"N-1\x1f{huge}\x1eN-2\x1fok body\x1e"
-    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", lambda *a: raw)
     out = NotesAdapter().get_bodies(["N-1", "N-2"])
     assert out[0]["id"] == "N-1" and out[0]["body"].startswith("[not hydrated:")
     assert out[1] == {"id": "N-2", "body": "ok body"}
@@ -126,7 +126,7 @@ def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
 
 
 def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
-    from mac_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
+    from macos_apps_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
 
     calls = []
 
@@ -134,7 +134,7 @@ def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
         calls.append((script, args))
         return "Groceries"  # the preview script returns the live title
 
-    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
     p = NotesAdapter().delete("N-1", dry_run=True)
     assert isinstance(p, Pointer) and p.id == "N-1" and p.summary == "Groceries"
     assert calls == [(_PREVIEW_DELETE, ("N-1",))]  # only id passed, no expect_title
@@ -146,11 +146,11 @@ def test_delete_dry_run_delegates_expect_title_guard_to_applescript(monkeypatch)
     # as _DELETE — case-insensitive, whitespace-significant), NOT a Python `!=`, or the
     # preview can report the OPPOSITE of the real delete. Assert expect_title is
     # forwarded to the preview script as argv so the guard is delegated, not re-done.
-    from mac_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
+    from macos_apps_mcp.adapters.notes import _DELETE, _PREVIEW_DELETE
 
     calls = []
     monkeypatch.setattr(
-        "mac_mcp.adapters.notes.run_osascript",
+        "macos_apps_mcp.adapters.notes.run_osascript",
         lambda script, *a: calls.append((script, a)) or "Groceries",
     )
     NotesAdapter().delete("N-1", expect_title="groceries", dry_run=True)
@@ -163,8 +163,8 @@ def test_delete_dry_run_delegates_expect_title_guard_to_applescript(monkeypatch)
 def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
     # the AppleScript guard raises on mismatch (via run_osascript → NativeError), just
     # as the real delete does — the preview must not swallow it into a "would delete".
-    from mac_mcp.adapters.notes import _DELETE
-    from mac_mcp.runtime import NativeError
+    from macos_apps_mcp.adapters.notes import _DELETE
+    from macos_apps_mcp.runtime import NativeError
 
     scripts = []
 
@@ -172,7 +172,7 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
         scripts.append(script)
         raise NativeError("osascript failed: note title does not match expect_title")
 
-    monkeypatch.setattr("mac_mcp.adapters.notes.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
     with pytest.raises(NativeError, match="does not match expect_title"):
         NotesAdapter().delete("N-1", expect_title="Wrong", dry_run=True)
     assert _DELETE not in scripts  # a mismatch previews nothing and deletes nothing
@@ -184,8 +184,8 @@ import gzip  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
 
-from mac_mcp.adapters import notes as notes_mod  # noqa: E402
-from mac_mcp.adapters.notes import (  # noqa: E402
+from macos_apps_mcp.adapters import notes as notes_mod  # noqa: E402
+from macos_apps_mcp.adapters.notes import (  # noqa: E402
     _decode_note_data,
     _note_pointer,
     _pk_from_id,
@@ -598,7 +598,7 @@ def test_get_bodies_foreign_uuid_id_not_mis_attributed(notestore, monkeypatch):
 
 def test_get_bodies_gap_fill_failure_keeps_sqlite_bodies(notestore, monkeypatch):
     # a gap-fill (AppleScript) failure must NOT discard bodies sqlite already decoded.
-    from mac_mcp.runtime import AutomationDenied
+    from macos_apps_mcp.runtime import AutomationDenied
 
     def boom(*a):
         raise AutomationDenied("Automation not granted")

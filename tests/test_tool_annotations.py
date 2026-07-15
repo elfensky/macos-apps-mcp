@@ -10,7 +10,7 @@ import asyncio
 
 from fastmcp import Client
 
-import mac_mcp.server as srv
+import macos_apps_mcp.server as srv
 
 # Writes that only ADD a new item (create/open) — not read-only, but not destructive.
 _ADDITIVE_TOOLS = frozenset(
@@ -102,8 +102,8 @@ def test_every_tool_is_annotated_from_the_read_write_seam():
 
 def test_permission_map_matches_registered_tools():
     # a new tool that isn't classified here (read/write + permission) fails loudly.
-    # Robust to MAC_MCP_READ_ONLY=1 (writes unregistered): only unclassified tools or a
-    # missing READ tool are failures.
+    # Robust to MACOS_APPS_READ_ONLY=1 (writes unregistered): only unclassified tools
+    # or a missing READ tool are failures.
     live = {t.name for t in _tools()}
     unclassified = live - set(_PERMISSION)
     assert not unclassified, (

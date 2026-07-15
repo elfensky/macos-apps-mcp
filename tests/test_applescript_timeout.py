@@ -9,13 +9,13 @@ from __future__ import annotations
 import importlib
 import pkgutil
 
-import mac_mcp.adapters as adapters_pkg
+import macos_apps_mcp.adapters as adapters_pkg
 
 
 def _osascript_templates():
     """(label, source) for each module-level string that drives an app via osascript."""
     for mod_info in pkgutil.iter_modules(adapters_pkg.__path__):
-        mod = importlib.import_module(f"mac_mcp.adapters.{mod_info.name}")
+        mod = importlib.import_module(f"macos_apps_mcp.adapters.{mod_info.name}")
         for name in dir(mod):
             val = getattr(mod, name)
             if isinstance(val, str) and "tell application" in val and "\n" in val:

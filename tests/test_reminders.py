@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mac_mcp.adapters.reminders import (
+from macos_apps_mcp.adapters.reminders import (
     _due_tuple,
     _expected_due_tuple,
     _list_pointer,
@@ -18,8 +18,8 @@ from mac_mcp.adapters.reminders import (
     _verify_completed,
     _verify_reminder,
 )
-from mac_mcp.contracts import Pointer, Recurrence, ReminderData
-from mac_mcp.runtime import AmbiguousTarget, VerificationFailed
+from macos_apps_mcp.contracts import Pointer, Recurrence, ReminderData
+from macos_apps_mcp.runtime import AmbiguousTarget, VerificationFailed
 from tests._fakes import fake_rule
 
 
@@ -141,7 +141,7 @@ def test_resolve_single_match_still_works_when_others_share_no_name():
 def _patch_read(monkeypatch, list_names):
     """Wire get_pointers' work() to fakes: store, run_native (inline), and a predicate/
     fetch that returns one reminder per matched list so the count reflects the match."""
-    import mac_mcp.adapters.reminders as rem
+    import macos_apps_mcp.adapters.reminders as rem
 
     s = _fake_store(list_names)
     monkeypatch.setattr(rem, "store", lambda: s)
@@ -156,7 +156,7 @@ def _patch_read(monkeypatch, list_names):
 
 def test_get_pointers_list_name_is_diacritic_insensitive(monkeypatch):
     # #64: searching reminders in the "Café" list by typing ASCII "cafe" works.
-    from mac_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
     _patch_read(monkeypatch, ["Café", "Work"])
     ptrs = RemindersAdapter().get_pointers("cafe")
@@ -166,7 +166,7 @@ def test_get_pointers_list_name_is_diacritic_insensitive(monkeypatch):
 def test_get_pointers_fold_collision_returns_both_as_superset(monkeypatch):
     # a fold-collision on a READ ("Café"/"Cafe") returns reminders from BOTH lists — a
     # search superset is safe (unlike a write, it can't mis-home anything).
-    from mac_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
     _patch_read(monkeypatch, ["Café", "Cafe", "Work"])
     ptrs = RemindersAdapter().get_pointers("cafe")
@@ -174,7 +174,7 @@ def test_get_pointers_fold_collision_returns_both_as_superset(monkeypatch):
 
 
 def test_get_pointers_unknown_list_still_raises(monkeypatch):
-    from mac_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
     _patch_read(monkeypatch, ["Work"])
     with pytest.raises(ValueError, match="no reminder list named"):

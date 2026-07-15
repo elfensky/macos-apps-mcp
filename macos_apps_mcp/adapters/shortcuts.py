@@ -138,7 +138,7 @@ class ShortcutsAdapter:
         name = name.strip()
         if not name:
             raise ValueError("run_shortcut needs a shortcut name (got an empty name)")
-        with tempfile.TemporaryDirectory(prefix="mac-mcp-shortcut-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="macos-apps-mcp-shortcut-") as tmp:
             # ponytail: --output-path bounds *memory* (we read back only a snippet,
             # see below), not disk — a huge result writes fully here first. Fine: the
             # dir is torn down on block exit and the write is capped by _RUN_TIMEOUT.

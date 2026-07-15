@@ -1,6 +1,6 @@
-"""mac-mcp — FastMCP server.
+"""macos-apps-mcp — FastMCP server.
 
-Tools are *thin dispatch* to adapters (see contracts.py). Set MAC_MCP_READ_ONLY=1 to
+Tools are *thin dispatch* to adapters (see contracts.py). Set MACOS_APPS_READ_ONLY=1 to
 register reads only (the destructive write tools are skipped) — a safe-deploy guard.
 """
 
@@ -39,7 +39,7 @@ from .contracts import (
 from .doctor import diagnose
 from .runtime import NativeError
 
-mcp = FastMCP("mac-mcp")
+mcp = FastMCP("macos-apps-mcp")
 
 _reminders = RemindersAdapter()
 _calendar = CalendarAdapter()
@@ -60,8 +60,8 @@ def _emit(p: Pointer) -> dict[str, str]:
 
 
 def _read_only() -> bool:
-    """True when MAC_MCP_READ_ONLY is set; writes are then not registered."""
-    val = os.environ.get("MAC_MCP_READ_ONLY", "").strip().lower()
+    """True when MACOS_APPS_READ_ONLY is set; writes are then not registered."""
+    val = os.environ.get("MACOS_APPS_READ_ONLY", "").strip().lower()
     return val in ("1", "true", "yes")
 
 
@@ -159,8 +159,8 @@ mcp.add_middleware(UntrustedDataNotice())
 # no native call → registered without _guard (but still read-only-annotated, #57)
 @mcp.tool(annotations=_READ_ANNOTATIONS)
 def ping() -> str:
-    """Health check — confirms mac-mcp is alive. No permission needed."""
-    return "mac-mcp ok"
+    """Health check — confirms macos-apps-mcp is alive. No permission needed."""
+    return "macos-apps-mcp ok"
 
 
 @_read_tool
@@ -594,7 +594,7 @@ def safari_open(url: str) -> dict:
 
 
 def main() -> None:
-    """Console entry point (`mac-mcp`) and `python -m mac_mcp`."""
+    """Console entry point (`macos-apps-mcp`) and `python -m macos_apps_mcp`."""
     from .runtime import bootstrap, install_lifecycle_guards
 
     bootstrap()

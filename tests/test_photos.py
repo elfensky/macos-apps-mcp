@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mac_mcp.adapters.photos import _parse
-from mac_mcp.contracts import Pointer
+from macos_apps_mcp.adapters.photos import _parse
+from macos_apps_mcp.contracts import Pointer
 
 
 def test_parse_id_and_filename():
