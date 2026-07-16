@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-import mac_mcp.doctor as doc
-from mac_mcp.runtime import AppNotRunning, AutomationDenied
+import macos_apps_mcp.doctor as doc
+from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
 
 
 def _boom_osascript(*args, **kwargs):
@@ -225,7 +225,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
     def denied_automation(*a, **k):
         raise AutomationDenied(
-            "grant Automation in System Settings, then restart mac-mcp"
+            "grant Automation in System Settings, then restart macos-apps-mcp"
         )
 
     def denied_open(*a, **k):

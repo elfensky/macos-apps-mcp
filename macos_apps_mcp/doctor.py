@@ -103,7 +103,10 @@ def _eventkit_surfaces(request: bool) -> list[dict]:
         remediation = (
             None
             if ok
-            else f"Grant full access in {_PRIVACY} → {pane}, then restart mac-mcp."
+            else (
+                f"Grant full access in {_PRIVACY} → {pane}, then restart "
+                "macos-apps-mcp."
+            )
         )
         out.append(_surface(name, "eventkit", ok, status, remediation))
     return out
@@ -160,7 +163,7 @@ def _fda_surface() -> dict:
             False,
             "denied",
             f"Grant Full Disk Access in {_PRIVACY} → Full Disk Access to the app that "
-            "launched mac-mcp, then restart it (needed for sqlite read planes).",
+            "launched macos-apps-mcp, then restart it (needed for sqlite read planes).",
         )
     except FileNotFoundError:
         return _surface(
@@ -225,8 +228,8 @@ def diagnose(request: bool = False) -> dict:
     return {
         "responsible_process": _responsible_process(),
         "note": (
-            "TCC attributes permissions to the process that launched mac-mcp (above). "
-            "Grant each permission to THAT app, then restart mac-mcp."
+            "TCC attributes permissions to the process that launched macos-apps-mcp "
+            "(above). Grant each permission to THAT app, then restart macos-apps-mcp."
         ),
         "probed_automation": request,
         "summary": summary,

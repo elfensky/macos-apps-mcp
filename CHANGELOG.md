@@ -1,8 +1,23 @@
 # Changelog
 
-All notable changes to mac-mcp are documented here. The format follows
+All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
+
+## [0.6.0] - 2026-07-15
+
+### Changed
+
+- **Renamed `mac-mcp` → `macos-apps-mcp`** across the board: the PyPI distribution,
+  the GitHub repo (`elfensky/macos-apps-mcp`), the import package (`macos_apps_mcp`),
+  the console script (`macos-apps-mcp`), and the FastMCP server name. Two reasons:
+  `mac-mcp` collides with unrelated projects on GitHub, and `mac(os)-mcp`-shaped
+  names read as macOS *control* (mouse/keyboard automation) — this server is native
+  *apps* data. The read-only guard env var is now **`MACOS_APPS_READ_ONLY`** (was
+  `MAC_MCP_READ_ONLY`) — no backward-compat alias; `mac-mcp` was never published to
+  production PyPI, so there are no public installs to migrate. Suggested MCP config
+  key: `"macos-apps"`. Decision record:
+  `docs/superpowers/specs/2026-07-14-rename-macos-apps-mcp-design.md`.
 
 ## [0.5.0] - 2026-07-12 — Native data planes
 

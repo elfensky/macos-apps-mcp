@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mac_mcp.adapters.mail import (
+from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
     _deeplink,
@@ -12,7 +12,7 @@ from mac_mcp.adapters.mail import (
     _summary,
     system_mailbox_names,
 )
-from mac_mcp.contracts import Pointer
+from macos_apps_mcp.contracts import Pointer
 
 
 def test_summary_subject_and_sender():
@@ -84,7 +84,7 @@ def test_get_pointers_bounds_host_side(monkeypatch):
     # stops emitting after MAX_MAILS — not fetched whole then sliced in Python.
     seen = {}
     monkeypatch.setattr(
-        "mac_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.adapters.mail.run_osascript",
         lambda script, *args: seen.setdefault("args", args) and "" or "",
     )
     MailAdapter().get_pointers("invoice")
@@ -124,7 +124,7 @@ def test_search_matches_subject_or_sender(monkeypatch):
     # script contains both predicates (the search is no longer subject-only).
     seen = {}
     monkeypatch.setattr(
-        "mac_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.adapters.mail.run_osascript",
         lambda script, *args: seen.setdefault("script", script) and "" or "",
     )
     MailAdapter().get_pointers("acme")
@@ -141,7 +141,7 @@ def test_search_empty_query_raises():
 import os  # noqa: E402
 import re  # noqa: E402
 
-from mac_mcp.adapters.mail import _BODY, _CREATE_DRAFT  # noqa: E402
+from macos_apps_mcp.adapters.mail import _BODY, _CREATE_DRAFT  # noqa: E402
 
 
 def test_get_body_resolves_and_bounds(monkeypatch):
@@ -153,7 +153,7 @@ def test_get_body_resolves_and_bounds(monkeypatch):
         seen["call"] = (script, a)
         return "Hello\x00 body"
 
-    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", fake)
     out = MailAdapter().get_body("<abc@host>")
     assert out == "Hello body"  # NUL stripped by clean_body
     assert seen["call"][0] is _BODY
@@ -168,10 +168,10 @@ def test_get_body_empty_id_raises():
 def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
     # #62 review: an HTML-only / not-yet-downloaded message yields AppleScript `missing
     # value`, coerced to the literal string — it must NOT be handed back as the body.
-    from mac_mcp.runtime import NativeError
+    from macos_apps_mcp.runtime import NativeError
 
     monkeypatch.setattr(
-        "mac_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
+        "macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
     )
     with pytest.raises(NativeError, match="not available locally"):
         MailAdapter().get_body("abc@host")
@@ -180,10 +180,11 @@ def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
 def test_get_body_huge_body_overflows(monkeypatch):
     # a pasted-dump body over the hard cap surfaces OutputOverflow (open it in Mail),
     # not a silently-truncated blob.
-    from mac_mcp.runtime import BODY_HARD_MAX, OutputOverflow
+    from macos_apps_mcp.runtime import BODY_HARD_MAX, OutputOverflow
 
     monkeypatch.setattr(
-        "mac_mcp.adapters.mail.run_osascript", lambda *a: "z" * (BODY_HARD_MAX + 1)
+        "macos_apps_mcp.adapters.mail.run_osascript",
+        lambda *a: "z" * (BODY_HARD_MAX + 1),
     )
     with pytest.raises(OutputOverflow):
         MailAdapter().get_body("abc@host")
@@ -211,7 +212,7 @@ def test_create_draft_passes_body_via_tempfile(monkeypatch, tmp_path):
             captured["body_on_disk"] = f.read()
         return ""
 
-    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", fake)
     MailAdapter().create_draft("bob@x.com", "Hi", "multi\nline © body")
     assert captured["script"] is _CREATE_DRAFT
     assert captured["args"][0] == "bob@x.com" and captured["args"][1] == "Hi"
@@ -223,7 +224,7 @@ def test_create_draft_cleans_up_tempfile(monkeypatch):
     # the tempfile is deleted after the (synchronous) script read it.
     paths = []
     monkeypatch.setattr(
-        "mac_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.adapters.mail.run_osascript",
         lambda script, *a: paths.append(a[2]) or "",
     )
     MailAdapter().create_draft("bob@x.com", "Hi", "body")
@@ -238,7 +239,7 @@ def test_create_draft_empty_recipient_raises():
 def test_create_draft_returns_locator_dict(monkeypatch):
     # #43: an unsent draft has no stable Message-ID, so create_draft returns a locator
     # (where to find it) instead of a fabricated id.
-    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", lambda *a: "")
+    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "")
     out = MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
@@ -266,7 +267,7 @@ def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
         seen["path"] = args[2]  # argv: to, subject, tempfile-path
         raise RuntimeError("osascript failed")
 
-    monkeypatch.setattr("mac_mcp.adapters.mail.run_osascript", boom)
+    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", boom)
     with pytest.raises(RuntimeError, match="osascript failed"):
         MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert not os.path.exists(seen["path"])  # tempfile cleaned up despite the error
@@ -276,7 +277,7 @@ def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
 
 
 def test_parse_attachments_groups_by_message():
-    from mac_mcp.adapters.mail import _parse_attachments
+    from macos_apps_mcp.adapters.mail import _parse_attachments
 
     us, rs = "\x1f", "\x1e"
     raw = (
@@ -294,7 +295,7 @@ def test_parse_attachments_groups_by_message():
 
 
 def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     captured = {}
 
@@ -317,7 +318,7 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
 
 
 def test_list_attachments_empty_query_lists_all(monkeypatch):
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     def fake(script, *args):
         return (
@@ -334,7 +335,7 @@ def test_list_attachments_empty_query_lists_all(monkeypatch):
 def test_list_attachments_unknown_mailbox_raises():
     import pytest
 
-    from mac_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.adapters.mail import MailAdapter
 
     with pytest.raises(ValueError, match="unknown system mailbox"):
         MailAdapter().list_attachments("nope", "x")
@@ -342,7 +343,7 @@ def test_list_attachments_unknown_mailbox_raises():
 
 # --- reply (#42/#46) ------------------------------------------------------------------
 
-from mac_mcp.adapters.mail import _ORIGINAL, _REPLY, _build_quote  # noqa: E402
+from macos_apps_mcp.adapters.mail import _ORIGINAL, _REPLY, _build_quote  # noqa: E402
 
 
 def _is_reply_script(script: str) -> bool:
@@ -361,8 +362,8 @@ def test_build_quote_prefixes_and_headers():
 def test_reply_quote_truncates_huge_original(monkeypatch):
     # HIGH fix: _build_quote must TRUNCATE a huge original, not crash the whole reply
     # (clean_body's default hard=BODY_HARD_MAX would raise OutputOverflow here).
-    import mac_mcp.adapters.mail as mail
-    from mac_mcp.runtime import BODY_HARD_MAX
+    import macos_apps_mcp.adapters.mail as mail
+    from macos_apps_mcp.runtime import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 100)
 
@@ -397,7 +398,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
     # partition-based parsing before sanitize_line ever runs, which is the scenario
     # stripFraming (tested above) guards against; sanitize_line's job is catching
     # OTHER control chars stripFraming doesn't touch.
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     bodies = []
 
@@ -418,7 +419,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
 
 
 def test_reply_composes_body_and_targets_id(monkeypatch):
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     calls = []
     bodies = []
@@ -450,7 +451,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
 
 
 def test_reply_without_quote_omits_original(monkeypatch):
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     bodies = []
 
@@ -472,7 +473,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
     # AppleScript coerces an unset property to the "missing value" literal — same guard
     # as get_body (#62): must not surface it as sender/date/body, and must not blow up
     # the reply — the quote is silently skipped and the reply still goes through.
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     bodies = []
 
@@ -490,7 +491,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
 
 
 def test_reply_cleans_up_tempfile(monkeypatch):
-    import mac_mcp.adapters.mail as mail
+    import macos_apps_mcp.adapters.mail as mail
 
     paths = []
 
@@ -508,7 +509,7 @@ def test_reply_cleans_up_tempfile(monkeypatch):
 def test_reply_empty_id_raises():
     import pytest
 
-    from mac_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.adapters.mail import MailAdapter
 
     with pytest.raises(ValueError, match="message"):
         MailAdapter().reply("", "body")
@@ -517,7 +518,7 @@ def test_reply_empty_id_raises():
 def test_reply_empty_body_raises():
     import pytest
 
-    from mac_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.adapters.mail import MailAdapter
 
     with pytest.raises(ValueError, match="reply_body"):
         MailAdapter().reply("<abc@x>", "  ")

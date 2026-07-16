@@ -10,7 +10,7 @@ import EventKit as EK
 import Foundation as F
 import pytest
 
-from mac_mcp.adapters.calendar import (
+from macos_apps_mcp.adapters.calendar import (
     _all_day_bounds,
     _calendar_pointer,
     _event_pointer,
@@ -22,8 +22,8 @@ from mac_mcp.adapters.calendar import (
     _resolve_span,
     _verify_event,
 )
-from mac_mcp.contracts import CalendarEventData, Pointer, Recurrence
-from mac_mcp.runtime import AmbiguousTarget, SpanRequired, VerificationFailed
+from macos_apps_mcp.contracts import CalendarEventData, Pointer, Recurrence
+from macos_apps_mcp.runtime import AmbiguousTarget, SpanRequired, VerificationFailed
 from tests._fakes import fake_rule
 
 
@@ -528,7 +528,7 @@ def _fake_event_full(title, ident, start, end, *, recurring=False):
 
 
 def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
-    import mac_mcp.adapters.calendar as cal
+    import macos_apps_mcp.adapters.calendar as cal
 
     removed = []
     event = _fake_event_full(
@@ -549,7 +549,7 @@ def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
 def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
     # the preview must be faithful: a recurring target with no span refuses in dry_run
     # exactly as the real delete would (SpanRequired), so the model can't be misled.
-    import mac_mcp.adapters.calendar as cal
+    import macos_apps_mcp.adapters.calendar as cal
 
     event = _fake_event_full(
         "Weekly",

@@ -1,6 +1,6 @@
 [project]
-name = "mac-mcp"
-version = "0.5.0"
+name = "macos-apps-mcp"
+version = "0.6.0"
 description = "One consolidated MCP server for native macOS apps (Calendar, Reminders, Mail, ...)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,7 +38,7 @@ dependencies = [
 # Media lives in Immich anyway — revisit only if an Apple Photos adapter is ever truly needed.
 
 [project.scripts]
-mac-mcp = "mac_mcp:main"
+macos-apps-mcp = "macos_apps_mcp:main"
 
 # Dev deps with >=major,<next pins mirror the sibling repos' uv discipline (lintle, descent-engine).
 # Runtime deps stay unbounded above — capping them downgraded EventKit/fastmcp, so don't.
@@ -54,10 +54,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mac_mcp"]
+packages = ["macos_apps_mcp"]
 
 # ruff config imported verbatim from the sibling repos (same rule set + line length for cross-repo
-# consistency). No src= (mac-mcp is flat-layout, not src/). No mypy — neither sibling uses one.
+# consistency). No src= (macos-apps-mcp is flat-layout, not src/). No mypy — neither sibling uses one.
 [tool.ruff]
 target-version = "py311"
 line-length = 88

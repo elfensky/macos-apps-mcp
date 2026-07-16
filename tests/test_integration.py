@@ -1,7 +1,7 @@
 """Integration tests — REAL EventKit on this Mac. Run with: uv run pytest -m integration
 
 Never run in CI (no macOS / TCC there). Grant Calendar + Reminders access when first
-prompted. Tests create items in the DEFAULT list/calendar with an 'mac-mcp-test:'
+prompted. Tests create items in the DEFAULT list/calendar with an 'macos-apps-mcp-test:'
 title prefix and remove everything they create in teardown.
 """
 
@@ -15,9 +15,9 @@ import time
 import EventKit as EK
 import pytest
 
-from mac_mcp.runtime import request_access, run_native, store
+from macos_apps_mcp.runtime import request_access, run_native, store
 
-TITLE_PREFIX = "mac-mcp-test:"
+TITLE_PREFIX = "macos-apps-mcp-test:"
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def test_request_access_grants_full():
 
 @pytest.mark.integration
 def test_reminders_read_today():
-    from mac_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
     run_native(request_access)
     ptrs = RemindersAdapter().get_pointers("today")
@@ -64,7 +64,7 @@ def test_reminders_read_today():
 
 @pytest.mark.integration
 def test_calendar_read_week():
-    from mac_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
 
     run_native(request_access)
     ptrs = CalendarAdapter().get_pointers("week")
@@ -77,8 +77,8 @@ def test_calendar_read_week():
 def test_reminder_create_update_complete(created):
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import ReminderData
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import ReminderData
 
     run_native(request_access)
     a = RemindersAdapter()
@@ -104,8 +104,8 @@ def test_reminder_create_update_complete(created):
 def test_event_create_update_delete(created):
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -143,8 +143,8 @@ def test_all_day_event_round_trips_date(created):
     calendar day — never shifted a day by the UTC offset."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData, parse_datetime
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData, parse_datetime
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -171,8 +171,8 @@ def test_named_list_read_excludes_completed(created):
     item to see the leak. Guards the fix routing the named-list path through the
     incomplete-only selector.
     """
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import ReminderData
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import ReminderData
 
     run_native(request_access)
     a = RemindersAdapter()
@@ -196,7 +196,7 @@ def test_named_list_read_excludes_completed(created):
 @pytest.mark.integration
 def test_reminder_lists_enumerate():
     """Parity row 8: enumerate lists; the default list is discoverable by name."""
-    from mac_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
     run_native(request_access)
     ptrs = RemindersAdapter().get_lists()
@@ -208,7 +208,7 @@ def test_reminder_lists_enumerate():
 @pytest.mark.integration
 def test_calendars_enumerate():
     """Parity row 9: enumerate calendars; the default is discoverable by name."""
-    from mac_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
 
     run_native(request_access)
     ptrs = CalendarAdapter().get_calendars()
@@ -228,9 +228,9 @@ def test_recurring_event_update_targets_one_occurrence(created):
     """
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
-    from mac_mcp.runtime import to_nsdate
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.runtime import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -301,9 +301,9 @@ def test_recurring_update_omitted_span_raises_and_does_not_write(created):
     leave the series untouched (no silent whole-series rewrite)."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
-    from mac_mcp.runtime import SpanRequired, to_nsdate
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.runtime import SpanRequired, to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -363,9 +363,9 @@ def test_recurring_update_future_events_propagates(created):
     earlier occurrences untouched."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
-    from mac_mcp.runtime import to_nsdate
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.runtime import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -433,16 +433,16 @@ def test_recurring_update_future_events_propagates(created):
 @pytest.mark.integration
 def test_contacts_create_find_delete():
     """#15: osascript Contacts — create, find by name, delete (Automation TCC)."""
-    from mac_mcp.adapters.contacts import ContactsAdapter
-    from mac_mcp.contracts import ContactData
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters.contacts import ContactsAdapter
+    from macos_apps_mcp.contracts import ContactData
+    from macos_apps_mcp.runtime import run_osascript
 
     a = ContactsAdapter()
     p = a.create_contact(
         ContactData(
-            given_name="mac-mcp-test",
+            given_name="macos-apps-mcp-test",
             family_name="ZZContact",
-            organization="mac-mcp",
+            organization="macos-apps-mcp",
         )
     )
     try:
@@ -463,9 +463,9 @@ def test_contacts_create_find_delete():
 @pytest.mark.integration
 def test_mail_search_runs():
     """#18: Mail subject search via osascript runs (Automation TCC)."""
-    from mac_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.adapters.mail import MailAdapter
 
-    ptrs = MailAdapter().get_pointers("mac-mcp-no-such-subject-zzz")
+    ptrs = MailAdapter().get_pointers("macos-apps-mcp-no-such-subject-zzz")
     assert isinstance(
         ptrs, list
     )  # runs without error (likely empty) — validates the path
@@ -480,8 +480,8 @@ def test_notes_search_finds_created(tmp_path, monkeypatch):
     store at a drifted db (Automation TCC)."""
     import sqlite3
 
-    from mac_mcp.adapters import notes as notes_mod
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters import notes as notes_mod
+    from macos_apps_mcp.runtime import run_osascript
 
     drift = tmp_path / "NoteStore.sqlite"
     conn = sqlite3.connect(drift)
@@ -490,7 +490,7 @@ def test_notes_search_finds_created(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
-    marker = "mac-mcp-test-zznote"
+    marker = "macos-apps-mcp-test-zznote"
     run_osascript(
         "on run argv\n"
         '  tell application "Notes"\n'
@@ -522,8 +522,8 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
     hyphenated marker still matches (acceptance: hyphenated titles unaffected)."""
     import sqlite3
 
-    from mac_mcp.adapters import notes as notes_mod
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters import notes as notes_mod
+    from macos_apps_mcp.runtime import run_osascript
 
     drift = tmp_path / "NoteStore.sqlite"
     conn = sqlite3.connect(drift)
@@ -533,7 +533,7 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
     monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
     # typographic title: U+00E9 (é) + U+2019 (curly apostrophe); unique hyphen marker.
-    title = "mac-mcp-itest-fold Café’s résumé"
+    title = "macos-apps-mcp-itest-fold Café’s résumé"
     run_osascript(
         "on run argv\n"
         '  tell application "Notes"\n'
@@ -544,8 +544,10 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
     )
     try:
         # ASCII query: no accents, straight apostrophe. Folds onto the stored glyphs.
-        hits = notes_mod.NotesAdapter().get_pointers("mac-mcp-itest-fold cafe's resume")
-        assert any("mac-mcp-itest-fold" in p.summary for p in hits), (
+        hits = notes_mod.NotesAdapter().get_pointers(
+            "macos-apps-mcp-itest-fold cafe's resume"
+        )
+        assert any("macos-apps-mcp-itest-fold" in p.summary for p in hits), (
             "ASCII query did not find the typographically-titled note (#64 fold)"
         )
     finally:
@@ -562,7 +564,7 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
 @pytest.mark.integration
 def test_safari_tabs_runs():
     """#22: Safari open-tabs read via osascript runs (Automation TCC)."""
-    from mac_mcp.adapters.safari import SafariAdapter
+    from macos_apps_mcp.adapters.safari import SafariAdapter
 
     assert isinstance(SafariAdapter().get_tabs(), list)
 
@@ -570,15 +572,17 @@ def test_safari_tabs_runs():
 @pytest.mark.integration
 def test_photos_search_runs():
     """#20: Photos search via osascript runs (Automation TCC)."""
-    from mac_mcp.adapters.photos import PhotosAdapter
+    from macos_apps_mcp.adapters.photos import PhotosAdapter
 
-    assert isinstance(PhotosAdapter().get_pointers("mac-mcp-no-such-photo-zzz"), list)
+    assert isinstance(
+        PhotosAdapter().get_pointers("macos-apps-mcp-no-such-photo-zzz"), list
+    )
 
 
 @pytest.mark.integration
 def test_messages_chats_runs():
     """#21: Messages chat list via osascript runs (Automation TCC)."""
-    from mac_mcp.adapters.messages import MessagesAdapter
+    from macos_apps_mcp.adapters.messages import MessagesAdapter
 
     assert isinstance(MessagesAdapter().get_chats(), list)
 
@@ -586,7 +590,7 @@ def test_messages_chats_runs():
 @pytest.mark.integration
 def test_shortcuts_list_runs():
     """#22: `shortcuts list` CLI enumerates shortcuts (no TCC)."""
-    from mac_mcp.adapters.shortcuts import ShortcutsAdapter
+    from macos_apps_mcp.adapters.shortcuts import ShortcutsAdapter
 
     ptrs = ShortcutsAdapter().get_pointers()
     assert isinstance(ptrs, list) and all(p.id and p.summary for p in ptrs)
@@ -595,19 +599,19 @@ def test_shortcuts_list_runs():
 @pytest.mark.integration
 def test_run_shortcut_missing_raises():
     """run_shortcut on an unknown name surfaces a clear RuntimeError."""
-    from mac_mcp.adapters.shortcuts import ShortcutsAdapter
+    from macos_apps_mcp.adapters.shortcuts import ShortcutsAdapter
 
     with pytest.raises(RuntimeError, match="shortcuts run"):
-        ShortcutsAdapter().run_shortcut("mac-mcp-no-such-shortcut-zzz")
+        ShortcutsAdapter().run_shortcut("macos-apps-mcp-no-such-shortcut-zzz")
 
 
 @pytest.mark.integration
 def test_safari_open_creates_tab():
     """open_url adds a tab whose URL we can find, then we close it."""
-    from mac_mcp.adapters.safari import SafariAdapter
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters.safari import SafariAdapter
+    from macos_apps_mcp.runtime import run_osascript
 
-    url = "https://example.com/mac-mcp-test"
+    url = "https://example.com/macos-apps-mcp-test"
     a = SafariAdapter()
     p = a.open_url(url)
     try:
@@ -633,8 +637,8 @@ def test_event_create_all_day(created):
     """all_day=True creates an all-day event (the summary renders it specially)."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
 
     run_native(request_access)
     day = (datetime.now() + timedelta(days=1)).replace(
@@ -655,8 +659,8 @@ def test_event_create_all_day(created):
 @pytest.mark.integration
 def test_reminder_create_with_priority(created):
     """priority is written through and reads back off the stored EKReminder."""
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import ReminderData
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import ReminderData
 
     run_native(request_access)
     p = RemindersAdapter().create_reminder(
@@ -676,8 +680,8 @@ def test_event_create_recurring_series(created):
     """
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData, Recurrence
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData, Recurrence
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -710,8 +714,8 @@ def test_reminder_create_recurring(created):
     """A recurring reminder stores a rule (and requires a due date)."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import Recurrence, ReminderData
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import Recurrence, ReminderData
 
     run_native(request_access)
     due = (datetime.now() + timedelta(days=1)).replace(microsecond=0)
@@ -738,8 +742,8 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     forcing the adapter's fallback via a drifted sqlite store."""
     import sqlite3
 
-    from mac_mcp.adapters import notes as notes_mod
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters import notes as notes_mod
+    from macos_apps_mcp.runtime import run_osascript
 
     drift = tmp_path / "NoteStore.sqlite"
     conn = sqlite3.connect(drift)
@@ -749,7 +753,7 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(notes_mod, "NOTESTORE", drift)  # → drift → AppleScript fallback
 
     notes = notes_mod.NotesAdapter()
-    title = "mac-mcp-itest-note"
+    title = "macos-apps-mcp-itest-note"
     # Notes stores `body` as HTML, so line breaks must be <br> to yield real newlines
     # in plaintext. The newlines are the point: a newline-delimited record format would
     # split on them — the \x1f/\x1e framing must not. (Tabs aren't preserved by Notes
@@ -803,8 +807,8 @@ def test_event_move_to_other_calendar_reresolves(created):
     verify-after-write (#49) already asserts the calendar field persisted."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.calendar import CalendarAdapter
-    from mac_mcp.contracts import CalendarEventData
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -860,8 +864,8 @@ def test_reminder_move_between_lists_reresolves(created):
     """C-REMIDMOVE: moving a reminder to another list must return the POST-save id —
     a list move may re-issue the identifier, so update_reminder re-keys its refetch
     (and the returned pointer) from the held object's post-save id."""
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import ReminderData
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import ReminderData
 
     run_native(request_access)
     a = RemindersAdapter()
@@ -910,9 +914,9 @@ def test_recurring_reminder_update_requires_recurrence(created):
     rule and verifies."""
     from datetime import datetime, timedelta
 
-    from mac_mcp.adapters.reminders import RemindersAdapter
-    from mac_mcp.contracts import CLEAR_RECURRENCE, Recurrence, ReminderData
-    from mac_mcp.runtime import RecurrenceRequired
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence, ReminderData
+    from macos_apps_mcp.runtime import RecurrenceRequired
 
     run_native(request_access)
     a = RemindersAdapter()
@@ -961,7 +965,7 @@ def test_recurring_reminder_update_requires_recurrence(created):
 # intermediate below) is killed, the watcher must os._exit us within ~1-2s.
 _ORPHAN_CHILD = """
 import os, sys, time
-from mac_mcp.runtime import install_lifecycle_guards
+from macos_apps_mcp.runtime import install_lifecycle_guards
 install_lifecycle_guards()
 # print our pid AFTER the guards are installed — this is the test's readiness signal, so
 # the parent is only killed once we've captured our launching-parent pid. (If the test
@@ -1020,7 +1024,7 @@ def test_orphaned_server_exits_within_5s():
 def test_messages_search_reads_real_store():
     """Real chat.db: a broad search returns snippet Pointers obeying the contract. Needs
     Full Disk Access; skips cleanly if the store has no messages. Never mutates."""
-    from mac_mcp.adapters.messages import MessagesAdapter
+    from macos_apps_mcp.adapters.messages import MessagesAdapter
 
     ptrs = MessagesAdapter().search_messages("a", limit=5)  # 'a' matches most chats
     if not ptrs:
@@ -1039,7 +1043,7 @@ def test_attributedbody_decoder_matches_foundation():
 
     import Foundation as F
 
-    from mac_mcp.adapters.messages import CHAT_DB, _decode_attributed_body
+    from macos_apps_mcp.adapters.messages import CHAT_DB, _decode_attributed_body
 
     conn = sqlite3.connect(f"file:{CHAT_DB}?mode=ro", uri=True)
     try:
@@ -1086,7 +1090,7 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     checkpointed is legitimately visible to AppleScript (live) but not sqlite — that
     direction is accepted staleness, not a bug. A sqlite id ABSENT from AppleScript is
     the real defect (a wrong id, or a leaked deleted note)."""
-    from mac_mcp.adapters import notes as notes_mod
+    from macos_apps_mcp.adapters import notes as notes_mod
 
     adapter = notes_mod.NotesAdapter()
     sqlite_ptrs = adapter.get_all()  # sqlite path (FDA granted)
@@ -1115,7 +1119,7 @@ def test_note_body_decoder_matches_applescript_real_store():
     Full Disk Access; skips if nothing both decodes and hydrates."""
     import sqlite3
 
-    from mac_mcp.adapters import notes as notes_mod
+    from macos_apps_mcp.adapters import notes as notes_mod
 
     adapter = notes_mod.NotesAdapter()
     ptrs = adapter.get_all()
@@ -1180,8 +1184,8 @@ def test_mail_reads_return_id_triple_real_inbox():
     id-triple contract this test checks."""
     import re as _re
 
-    from mac_mcp.adapters.mail import MailAdapter
-    from mac_mcp.runtime import NativeTimeout
+    from macos_apps_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.runtime import NativeTimeout
 
     try:
         ptrs = MailAdapter().get_pointers("invoice")  # targeted, not a catch-all match
@@ -1200,10 +1204,10 @@ def test_mail_create_draft_opens_and_never_sends():
     example.invalid recipient (RFC 2606) as belt-and-suspenders, verifies the draft
     exists as an OUTGOING (unsent) message, then deletes it so nothing lingers. Needs
     Automation access for Mail."""
-    from mac_mcp.adapters.mail import MailAdapter
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.runtime import run_osascript
 
-    subj = "mac-mcp-test: draft (safe to delete)"
+    subj = "macos-apps-mcp-test: draft (safe to delete)"
     result = MailAdapter().create_draft(
         "nobody@example.invalid", subj, "test body — do not send"
     )
@@ -1234,10 +1238,10 @@ def test_mail_create_draft_opens_and_never_sends():
 def test_list_attachments_finds_draft_attachment(created):
     """#45: create a draft with an attachment, list it from Drafts, confirm it appears.
     Needs Automation access for Mail."""
-    from mac_mcp.adapters.mail import MailAdapter
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.runtime import run_osascript
 
-    subj = "mac-mcp-test: attach (safe to delete)"
+    subj = "macos-apps-mcp-test: attach (safe to delete)"
     # create a draft with an attachment via osascript (test-only helper)
     make = (
         "on run argv\n"
@@ -1254,12 +1258,12 @@ def test_list_attachments_finds_draft_attachment(created):
     import os
     import tempfile
 
-    fd, path = tempfile.mkstemp(prefix="mac-mcp-itest-", suffix=".txt")
+    fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-itest-", suffix=".txt")
     os.write(fd, b"hello")
     os.close(fd)
     try:
         run_osascript(make, subj, path)
-        recs = MailAdapter().list_attachments("drafts", "mac-mcp-test: attach")
+        recs = MailAdapter().list_attachments("drafts", "macos-apps-mcp-test: attach")
         names = [a["name"] for r in recs for a in r["attachments"]]
         assert any(path.split("/")[-1] in n or n.endswith(".txt") for n in names)
     finally:
@@ -1284,8 +1288,8 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     message) with our body; delete it; confirm nothing sent. Threading headers can
     only be proved post-send — see the manual step in the PR's 'needs manual
     verification'."""
-    from mac_mcp.adapters.mail import MailAdapter
-    from mac_mcp.runtime import run_osascript
+    from macos_apps_mcp.adapters.mail import MailAdapter
+    from macos_apps_mcp.runtime import run_osascript
 
     # newest inbox message id
     mid = run_osascript(
@@ -1294,7 +1298,7 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     ).strip()
     if not mid:
         pytest.skip("no messages in this Mac's inbox")
-    marker = "mac-mcp-itest-reply-marker-do-not-send"
+    marker = "macos-apps-mcp-itest-reply-marker-do-not-send"
     MailAdapter().reply(mid, marker, include_quote=True)
     # assert the SPECIFIC reply draft exists as an UNSENT outgoing message (identify it
     # by our marker in the body, not a fragile count delta over a mailbox that may hold

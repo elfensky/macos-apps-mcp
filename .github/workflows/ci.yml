@@ -3,7 +3,7 @@ name: ci
 # Lint + format gate the tests (the ruff steps run before pytest, so a lint failure stops the job
 # early). Single job on macos-latest: PyObjC is macOS-only, so `uv sync` can't run on Linux, and
 # integration/TCC tests never run in CI (the default pytest addopts deselect them). Lint-gate practice
-# imported from the sibling repos (lintle, descent-engine); kept to one job because mac-mcp has no
+# imported from the sibling repos (lintle, descent-engine); kept to one job because macos-apps-mcp has no
 # Python-version matrix to fan a shared lint leg across.
 
 on:

@@ -13,8 +13,8 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import ToolResult
 from mcp.types import TextContent
 
-import mac_mcp.server as srv
-from mac_mcp.contracts import (
+import macos_apps_mcp.server as srv
+from macos_apps_mcp.contracts import (
     CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
@@ -22,7 +22,7 @@ from mac_mcp.contracts import (
     Recurrence,
     ReminderData,
 )
-from mac_mcp.runtime import AppNotRunning, AutomationDenied
+from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
 
 
 class _FakeSource:
@@ -478,18 +478,18 @@ def test_create_event_rejects_empty_start():
 
 @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "Yes"])
 def test_read_only_truthy(monkeypatch, val):
-    monkeypatch.setenv("MAC_MCP_READ_ONLY", val)
+    monkeypatch.setenv("MACOS_APPS_READ_ONLY", val)
     assert srv._read_only() is True
 
 
 @pytest.mark.parametrize("val", ["", "0", "no", "false", "off"])
 def test_read_only_falsy(monkeypatch, val):
-    monkeypatch.setenv("MAC_MCP_READ_ONLY", val)
+    monkeypatch.setenv("MACOS_APPS_READ_ONLY", val)
     assert srv._read_only() is False
 
 
 def test_read_only_unset_is_false(monkeypatch):
-    monkeypatch.delenv("MAC_MCP_READ_ONLY", raising=False)
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     assert srv._read_only() is False
 
 
@@ -545,7 +545,7 @@ class _DeniedSource:
     """A read adapter whose native call is TCC-denied — the failure #47 must surface."""
 
     def get_pointers(self, query: str) -> list[Pointer]:
-        raise AutomationDenied("grant Automation access, then restart mac-mcp")
+        raise AutomationDenied("grant Automation access, then restart macos-apps-mcp")
 
 
 class _EmptySource:
