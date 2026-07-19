@@ -20,7 +20,7 @@ where they exist; one adapter per app.
 - **v1** — Calendar + Reminders read/write (EventKit), RRULE subset · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/1)
 - **0.3.0 — Trust core** — typed errors, `doctor`, verify-after-write, `now`, EKSpan · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/2)
 - **0.4.0 — Safety rails** — output hygiene, dry-run + batch caps, untrusted-data notice, id-only writes, tool annotations · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/3)
-- **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4) (a few carry-over issues remain open there)
+- **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4)
 
 ## 0.6.0 — Differentiators ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5))
 
