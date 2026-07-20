@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
-from macos_apps_mcp.adapters.calendar import _merge_busy
+import EventKit as EK
+import Foundation as F
+
+from macos_apps_mcp.adapters.calendar import _busy_epochs, _merge_busy
 
 
 def test_overlapping_blocks_merge():
@@ -63,3 +67,45 @@ def test_dst_boundary_is_instant_based():
     assert busy == [(start, end)]
     assert free == [(lo, start), (end, hi)]
     assert all(s < e for s, e in busy + free)  # every interval ordered
+
+
+def _ns(dt: datetime):
+    return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
+
+
+def _ev(availability, start, end):
+    return SimpleNamespace(
+        availability=lambda: availability,
+        startDate=lambda: _ns(start),
+        endDate=lambda: _ns(end),
+    )
+
+
+def test_busy_event_included():
+    ev = _ev(
+        EK.EKEventAvailabilityBusy, datetime(2026, 7, 20, 9), datetime(2026, 7, 20, 10)
+    )
+    out = _busy_epochs([ev])
+    assert out == [
+        (
+            int(datetime(2026, 7, 20, 9).timestamp()),
+            int(datetime(2026, 7, 20, 10).timestamp()),
+        )
+    ]
+
+
+def test_free_marked_event_excluded():
+    ev = _ev(
+        EK.EKEventAvailabilityFree, datetime(2026, 7, 20, 9), datetime(2026, 7, 20, 10)
+    )
+    assert _busy_epochs([ev]) == []
+
+
+def test_not_supported_counts_as_busy():
+    # local calendars report NotSupported; != Free, so they block (safe default)
+    ev = _ev(
+        EK.EKEventAvailabilityNotSupported,
+        datetime(2026, 7, 20, 9),
+        datetime(2026, 7, 20, 10),
+    )
+    assert len(_busy_epochs([ev])) == 1
