@@ -7,8 +7,15 @@ from types import SimpleNamespace
 
 import EventKit as EK
 import Foundation as F
+import pytest
 
-from macos_apps_mcp.adapters.calendar import _busy_epochs, _merge_busy
+from macos_apps_mcp.adapters.calendar import (
+    CalendarAdapter,
+    _busy_epochs,
+    _iso_interval,
+    _merge_busy,
+    _resolve_calendars,
+)
 
 
 def test_overlapping_blocks_merge():
@@ -109,3 +116,71 @@ def test_not_supported_counts_as_busy():
         datetime(2026, 7, 20, 10),
     )
     assert len(_busy_epochs([ev])) == 1
+
+
+def _fake_store(events, calendars=()):
+    cals = list(calendars)
+
+    def predicate(a, b, c):
+        return ("pred", a, b, c)
+
+    return SimpleNamespace(
+        calendarsForEntityType_=lambda t: cals,
+        predicateForEventsWithStartDate_endDate_calendars_=predicate,
+        eventsMatchingPredicate_=lambda p: events,
+    )
+
+
+def _fake_cal(cid):
+    return SimpleNamespace(calendarIdentifier=lambda: cid)
+
+
+def test_iso_interval_naive_local():
+    epoch = int(datetime(2026, 7, 20, 9, 30).timestamp())
+    assert _iso_interval((epoch, epoch)) == {
+        "start": "2026-07-20T09:30:00",
+        "end": "2026-07-20T09:30:00",
+    }
+
+
+def test_resolve_calendars_none_means_all():
+    assert _resolve_calendars(_fake_store([]), None) is None
+
+
+def test_resolve_calendars_maps_ids():
+    s = _fake_store([], calendars=[_fake_cal("C-1"), _fake_cal("C-2")])
+    out = _resolve_calendars(s, ["C-2"])
+    assert [c.calendarIdentifier() for c in out] == ["C-2"]
+
+
+def test_resolve_calendars_unknown_id_raises():
+    s = _fake_store([], calendars=[_fake_cal("C-1")])
+    with pytest.raises(ValueError, match="C-9"):
+        _resolve_calendars(s, ["C-9"])
+
+
+def test_get_free_busy_end_to_end(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    busy_ev = _ev(
+        EK.EKEventAvailabilityBusy, datetime(2026, 7, 20, 9), datetime(2026, 7, 20, 10)
+    )
+    free_ev = _ev(
+        EK.EKEventAvailabilityFree, datetime(2026, 7, 20, 12), datetime(2026, 7, 20, 13)
+    )
+    monkeypatch.setattr(cal, "store", lambda: _fake_store([busy_ev, free_ev]))
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+
+    out = CalendarAdapter().get_free_busy("2026-07-20T08:00:00", "2026-07-20T11:00:00")
+    assert out == {
+        "busy": [{"start": "2026-07-20T09:00:00", "end": "2026-07-20T10:00:00"}],
+        "free": [
+            {"start": "2026-07-20T08:00:00", "end": "2026-07-20T09:00:00"},
+            {"start": "2026-07-20T10:00:00", "end": "2026-07-20T11:00:00"},
+        ],
+    }
+
+
+def test_get_free_busy_rejects_reversed_window():
+    with pytest.raises(ValueError, match="start.*before.*end"):
+        CalendarAdapter().get_free_busy("2026-07-20T11:00:00", "2026-07-20T08:00:00")
