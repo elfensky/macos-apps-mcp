@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import html
 import zlib
 from pathlib import Path
 
@@ -198,6 +199,18 @@ def _parse_bodies(raw: str) -> list[dict]:
             continue
         out.append({"id": ident.strip(), "body": body})
     return out
+
+
+def _compose_html(title: str, body: str) -> str:
+    """Plaintext title + body → note HTML `body`; injections-safe via escaping.
+
+    Everything is `html.escape`d so user markup renders as literal text (never
+    HTML/script). The title is the first line (how Notes derives ZTITLE1); body
+    newlines become <br>.
+    """
+    title_html = html.escape(title)
+    body_html = "<br>".join(html.escape(line) for line in body.split("\n"))
+    return f"<div>{title_html}</div><div>{body_html}</div>"
 
 
 # --- sqlite read plane (#60) ---------------------------------------------------------
