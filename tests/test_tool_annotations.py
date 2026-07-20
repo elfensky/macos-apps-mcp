@@ -44,6 +44,7 @@ _PERMISSION = {
     "doctor": None,
     "reminders": "EventKit",
     "events": "EventKit",
+    "free_busy": "EventKit",
     "reminder_lists": "EventKit",
     "calendars": "EventKit",
     "create_reminder": "EventKit",

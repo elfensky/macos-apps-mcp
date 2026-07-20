@@ -48,6 +48,13 @@ class _FakeSource:
             Pointer(id="N-1", summary="Milk", deeplink="", folder="iCloud / Groceries")
         ]
 
+    def get_free_busy(self, start, end, calendars=None):
+        self.queries.append((start, end, calendars))
+        return {
+            "busy": [{"start": start, "end": end}],
+            "free": [],
+        }
+
 
 def test_server_constructs():
     assert srv.mcp is not None
@@ -67,6 +74,17 @@ def test_events_tool_dispatches(monkeypatch):
     out = srv.events("week")
     assert fake.queries == ["week"]
     assert out[0]["id"] == "P-1"
+
+
+def test_free_busy_tool_dispatches(monkeypatch):
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    out = srv.free_busy("2026-07-20T08:00:00", "2026-07-20T17:00:00", ["C-1"])
+    assert fake.queries == [("2026-07-20T08:00:00", "2026-07-20T17:00:00", ["C-1"])]
+    assert out == {
+        "busy": [{"start": "2026-07-20T08:00:00", "end": "2026-07-20T17:00:00"}],
+        "free": [],
+    }
 
 
 def test_contacts_tool_dispatches(monkeypatch):

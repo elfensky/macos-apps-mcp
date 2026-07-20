@@ -74,6 +74,23 @@ def test_calendar_read_week():
 
 
 @pytest.mark.integration
+def test_free_busy_on_device():
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+
+    run_native(request_access)
+    # a wide window; asserts structure + invariants, not specific events (device varies)
+    out = CalendarAdapter().get_free_busy("2026-07-20T00:00:00", "2026-07-21T00:00:00")
+    assert set(out) == {"busy", "free"}
+    for block in out["busy"] + out["free"]:
+        assert set(block) == {"start", "end"}
+        assert block["start"] < block["end"]
+    # busy and free never overlap and both stay inside the window
+    for b in out["busy"]:
+        for f in out["free"]:
+            assert b["end"] <= f["start"] or f["end"] <= b["start"]
+
+
+@pytest.mark.integration
 def test_reminder_create_update_complete(created):
     from datetime import datetime, timedelta
 
