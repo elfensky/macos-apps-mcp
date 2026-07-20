@@ -122,6 +122,38 @@ def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]
     return s, e
 
 
+def _merge_busy(
+    intervals: list[tuple[int, int]], lo: int, hi: int
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Merge overlapping/adjacent busy intervals within [lo, hi]; return (busy, free).
+
+    All epoch seconds — pure int math, so it's fold-proof across DST (no naive-datetime
+    arithmetic crosses a boundary). `free` is the complement of the merged runs within
+    the window. `<=` on the merge test folds adjacency (back-to-back) into overlap.
+    """
+    clipped = []
+    for start, end in intervals:
+        start, end = max(start, lo), min(end, hi)
+        if start < end:  # drop zero-length and out-of-window intervals
+            clipped.append((start, end))
+    clipped.sort()
+    busy: list[tuple[int, int]] = []
+    for start, end in clipped:
+        if busy and start <= busy[-1][1]:
+            busy[-1] = (busy[-1][0], max(busy[-1][1], end))
+        else:
+            busy.append((start, end))
+    free: list[tuple[int, int]] = []
+    cursor = lo
+    for start, end in busy:
+        if start > cursor:
+            free.append((cursor, start))
+        cursor = end
+    if cursor < hi:
+        free.append((cursor, hi))
+    return busy, free
+
+
 def _apply_event(s, e, data: CalendarEventData) -> None:
     e.setTitle_(data.title)
     e.setAllDay_(data.all_day)
