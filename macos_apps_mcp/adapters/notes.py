@@ -20,15 +20,18 @@ import html
 import zlib
 from pathlib import Path
 
-from ..contracts import Pointer
+from ..contracts import NoteData, Pointer
 from ..runtime import (
     NativeError,
     OutputOverflow,
+    VerificationFailed,
     clean_body,
     clean_summary,
     fold_text,
+    norm_text,
     read_via_sqlite,
     run_osascript,
+    verify_persisted,
 )
 
 MAX_NOTES = 25
@@ -146,6 +149,15 @@ _DELETE = """on run argv
       end if
     end if
     delete n
+  end tell
+  end timeout
+end run"""
+
+# verify-fallback title read (no FDA path): name of a note by id.
+_TITLE_BY_ID = """on run argv
+  with timeout of 120 seconds
+  tell application "Notes"
+    return name of note id (item 1 of argv)
   end tell
   end timeout
 end run"""
@@ -386,6 +398,38 @@ _BODY_SQL = (
 )
 
 
+# verify read-back: the note's title by id. Its OWN small fingerprint — a drift here
+# degrades only the verify read (falls back to AppleScript), like the body read.
+_TITLE_FINGERPRINT = {
+    "ZICCLOUDSYNCINGOBJECT": {"Z_PK", "ZTITLE1"},
+    "Z_METADATA": {"Z_UUID"},
+}
+_TITLE_SQL = "SELECT ZTITLE1 FROM ZICCLOUDSYNCINGOBJECT WHERE Z_PK = ?"
+
+
+def _verify_note(
+    persisted_title: str | None,
+    ident: str,
+    data: NoteData,
+    *,
+    expected_id: str | None = None,
+) -> None:
+    """Verify-after-write (#49): the note must be re-readable by the returned id with
+    the requested title; on update the id must survive the edit. Raises
+    VerificationFailed naming the mismatch — the caller must not reuse the id."""
+    if persisted_title is None:
+        raise VerificationFailed(
+            f"note {ident!r} could not be re-read after the write — it did not persist "
+            "(a fabricated id or an iCloud rollback). Do not trust the id."
+        )
+    expected: dict[str, object] = {"title": norm_text(data.title)}
+    actual: dict[str, object] = {"title": norm_text(persisted_title)}
+    if expected_id is not None:  # update: Z_PK is stable, so the id must be unchanged
+        expected["id"] = expected_id
+        actual["id"] = ident
+    verify_persisted("note", expected, actual)
+
+
 class NotesAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
@@ -514,6 +558,33 @@ class NotesAdapter:
             fallback=lambda: self._applescript_bodies(ids),
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
+
+    def _read_title_by_id(self, ident: str) -> str | None:
+        """The note's ZTITLE1 by x-coredata id (sqlite primary, AppleScript fallback);
+        None if the id isn't this store's or the note isn't found."""
+
+        def sqlite(conn) -> str | None:
+            prefix = f"x-coredata://{_store_uuid(conn)}/ICNote/p"
+            if not ident.startswith(prefix):
+                return None  # foreign/stale id — a colliding pN must not resolve
+            pk = _pk_from_id(ident)
+            if pk is None:
+                return None
+            row = conn.execute(_TITLE_SQL, (pk,)).fetchone()
+            return row[0] if row else None
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _TITLE_FINGERPRINT,
+            sqlite,
+            fallback=lambda: self._applescript_title(ident),
+            immutable=False,
+        )
+
+    def _applescript_title(self, ident: str) -> str | None:
+        """Fallback title read (no FDA): `name of note id`. Unknown id → the osascript
+        error surfaces as a typed NativeError."""
+        return run_osascript(_TITLE_BY_ID, ident) or None
 
     def _applescript_bodies(self, ids: list[str]) -> list[dict]:
         """The osascript body reader (fallback + gap-fill path). Unknown ids skipped;
