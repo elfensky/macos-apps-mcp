@@ -22,7 +22,7 @@ where they exist; one adapter per app.
 - **0.4.0 — Safety rails** — output hygiene, dry-run + batch caps, untrusted-data notice, id-only writes, tool annotations · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/3)
 - **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4)
 
-## 0.6.0 — Differentiators ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5))
+## 0.7.0 — Differentiators ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5))
 
 Things **nobody** in the survey ships — greenfield value, not parity.
 
@@ -33,7 +33,7 @@ Things **nobody** in the survey ships — greenfield value, not parity.
 | [#67](https://github.com/elfensky/macos-apps-mcp/issues/67) | JSONL write audit trail with undo info |
 | [#68](https://github.com/elfensky/macos-apps-mcp/issues/68) | Mail triage reads — awaiting-reply / needs-response as ranked Pointers |
 
-## 0.7.0 — Engines & expansion ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6))
+## 0.8.0 — New adapters & expansion ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6))
 
 Infrastructure that later milestones sit on, plus the first new adapter.
 
@@ -43,7 +43,7 @@ Infrastructure that later milestones sit on, plus the first new adapter.
 | [#71](https://github.com/elfensky/macos-apps-mcp/issues/71) | launchd daemon + TCC-to-binary attachment (one grant, every client) | FradSer scoped binary; iMCP app as the ceiling |
 | [#69](https://github.com/elfensky/macos-apps-mcp/issues/69) | Music adapter | apple-mcp-pro |
 
-## 0.8.0 — Mail depth & outbound ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/7))
+## 0.9.0 — Mail depth & outbound ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/7))
 
 Close the gap to the deepest specialist ([patrickfreyer/apple-mail-mcp](https://github.com/patrickfreyer/apple-mail-mcp),
 22 tools) and introduce **gated** outbound. "Never sends" stays the default; send becomes an
@@ -68,7 +68,7 @@ not a ceiling.
 [#87](https://github.com/elfensky/macos-apps-mcp/issues/87) attachments via progressive disclosure ·
 [#88](https://github.com/elfensky/macos-apps-mcp/issues/88) unread + date-range read filters
 
-## 0.9.0 — Adapter depth parity ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/8))
+## 0.10.0 — Adapter depth parity ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/8))
 
 Depth for adapters we already ship, stealing the best single feature from each specialist.
 
@@ -84,7 +84,7 @@ Depth for adapters we already ship, stealing the best single feature from each s
 | [#96](https://github.com/elfensky/macos-apps-mcp/issues/96) | Photos albums, metadata, export | sweetrb, osxphotos |
 | [#97](https://github.com/elfensky/macos-apps-mcp/issues/97) | Safari bookmarks, reading list, history | apple-mcp-pro; history = survey gap |
 
-## 0.10.0 — New domains ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/9))
+## 0.11.0 — New domains ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/9))
 
 Domains we don't cover; iMCP parity is the anchor. Each is a new adapter module per the
 one-adapter-per-app rule.
@@ -101,7 +101,7 @@ one-adapter-per-app rule.
 ## Platform & DX ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/10))
 
 Cross-cutting, unversioned — pulled into whichever release needs them first
-([#104](https://github.com/elfensky/macos-apps-mcp/issues/104) gates 0.8.0's sends).
+([#104](https://github.com/elfensky/macos-apps-mcp/issues/104) gates 0.9.0's sends).
 
 | Issue | What | Prior art |
 |---|---|---|
