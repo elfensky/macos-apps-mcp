@@ -7,6 +7,7 @@ import pytest
 from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
     NotesAdapter,
+    _compose_html,
     _parse_all,
     _parse_bodies,
 )
@@ -641,3 +642,26 @@ def test_body_table_drift_keeps_enumeration_working(tmp_path, monkeypatch):
     )
     out = NotesAdapter().get_bodies(["x-coredata://STORE-UUID/ICNote/p3"])
     assert out == [{"id": "x-coredata://STORE-UUID/ICNote/p3", "body": "fallback body"}]
+
+
+# --- _compose_html pure helper -------------------------------------------------------
+
+
+def test_compose_html_title_and_body():
+    assert _compose_html("Shopping", "Milk") == "<div>Shopping</div><div>Milk</div>"
+
+
+def test_compose_html_multiline_body_uses_br():
+    assert _compose_html("T", "a\nb\nc") == "<div>T</div><div>a<br>b<br>c</div>"
+
+
+def test_compose_html_escapes_markup_injection():
+    # user text with markup must render as literal text, never as HTML/script
+    out = _compose_html("A & B", "<script>alert(1)</script>")
+    assert "&amp;" in out
+    assert "&lt;script&gt;" in out
+    assert "<script>" not in out
+
+
+def test_compose_html_empty_body():
+    assert _compose_html("Just a title", "") == "<div>Just a title</div><div></div>"
