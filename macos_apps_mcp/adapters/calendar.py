@@ -122,6 +122,27 @@ def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]
     return s, e
 
 
+def _busy_epochs(events) -> list[tuple[int, int]]:
+    """Epoch (start, end) for each event that blocks — i.e. NOT explicitly Free.
+
+    An event blocks unless its availability is `EKEventAvailabilityFree`. This one rule
+    also handles all-day events: EventKit marks them Free by default, so they drop out;
+    an all-day event a user set to busy still blocks. `NotSupported` (local calendars)
+    is `!= Free`, so it counts busy — the safe default.
+    """
+    out = []
+    for e in events:
+        if e.availability() == EK.EKEventAvailabilityFree:
+            continue
+        out.append(
+            (
+                int(e.startDate().timeIntervalSince1970()),
+                int(e.endDate().timeIntervalSince1970()),
+            )
+        )
+    return out
+
+
 def _merge_busy(
     intervals: list[tuple[int, int]], lo: int, hi: int
 ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
