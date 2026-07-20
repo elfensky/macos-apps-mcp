@@ -175,6 +175,35 @@ def _merge_busy(
     return busy, free
 
 
+def _resolve_calendars(s, ids: list[str] | None):
+    """None → all calendars (pass None to the predicate); a list → the matching
+    EKCalendars, raising loudly on any unknown id (resolve-or-raise)."""
+    if ids is None:
+        return None
+    by_id = {
+        c.calendarIdentifier(): c
+        for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent)
+    }
+    out = []
+    for cid in ids:
+        c = by_id.get(cid)
+        if c is None:
+            raise ValueError(
+                f"no calendar with id {cid!r} — call the `calendars` tool for valid ids"
+            )
+        out.append(c)
+    return out
+
+
+def _iso_interval(pair: tuple[int, int]) -> dict[str, str]:
+    """An epoch (start, end) as naive-local ISO — fold-proof via epoch_nsdate."""
+    lo, hi = pair
+    return {
+        "start": from_nsdate(epoch_nsdate(lo)).isoformat(),
+        "end": from_nsdate(epoch_nsdate(hi)).isoformat(),
+    }
+
+
 def _apply_event(s, e, data: CalendarEventData) -> None:
     e.setTitle_(data.title)
     e.setAllDay_(data.all_day)
@@ -356,6 +385,36 @@ class CalendarAdapter:
                 _calendar_pointer(c)
                 for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent)
             ]
+
+        return run_native(work)
+
+    def get_free_busy(
+        self, start: str, end: str, calendars: list[str] | None = None
+    ) -> dict:
+        """Merged busy intervals + free gaps in [start, end] (ISO-8601 naive-local).
+
+        calendars: optional Pointer ids to restrict to; None = all. No event details.
+        """
+        start_dt = parse_datetime(start)
+        end_dt = parse_datetime(end)
+        if start_dt >= end_dt:
+            raise ValueError(
+                f"start must be before end — got start={start!r}, end={end!r}"
+            )
+        lo, hi = int(start_dt.timestamp()), int(end_dt.timestamp())
+
+        def work():
+            s = store()
+            cals = _resolve_calendars(s, calendars)
+            pred = s.predicateForEventsWithStartDate_endDate_calendars_(
+                to_nsdate(start_dt), to_nsdate(end_dt), cals
+            )
+            events = s.eventsMatchingPredicate_(pred) or []
+            busy, free = _merge_busy(_busy_epochs(events), lo, hi)
+            return {
+                "busy": [_iso_interval(b) for b in busy],
+                "free": [_iso_interval(f) for f in free],
+            }
 
         return run_native(work)
 
