@@ -199,6 +199,15 @@ def events(when: str = "today") -> list[dict]:
 
 
 @_read_tool
+def free_busy(start: str, end: str, calendars: list[str] | None = None) -> dict:
+    """Availability in a window: merged busy intervals + free gaps. `start`/`end` are
+    ISO-8601 datetimes (naive local, e.g. 2026-07-20T09:00:00); `calendars` optional
+    Pointer ids (from `calendars`) to restrict to, else all. Returns {"busy": [...],
+    "free": [...]} of {start, end} — no event details. Read-only; needs EventKit."""
+    return _calendar.get_free_busy(start, end, calendars)
+
+
+@_read_tool
 def reminder_lists() -> list[dict]:
     """List reminder lists as pointers (id + name); use a name to target writes.
     Read-only; needs EventKit (Reminders) access. See create_reminder to write."""
