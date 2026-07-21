@@ -357,3 +357,12 @@ def test_verify_completed_raises_when_not_completed():
 def test_verify_completed_none_fresh_raises():
     with pytest.raises(VerificationFailed, match="could not be re-fetched"):
         _verify_completed(None, "R-1")
+
+
+def test_reminders_snapshot_missing_returns_none(monkeypatch):
+    import macos_apps_mcp.adapters.reminders as rem
+
+    monkeypatch.setattr(rem, "run_native", lambda fn: fn())
+    fake_store = SimpleNamespace(calendarItemWithIdentifier_=lambda i: None)
+    monkeypatch.setattr(rem, "store", lambda: fake_store)
+    assert rem.RemindersAdapter().snapshot("R-1") is None

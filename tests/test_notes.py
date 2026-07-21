@@ -743,3 +743,21 @@ def test_verify_note_title_whitespace_normalized():
     _verify_note("Report", "x-coredata://S/ICNote/p1", NoteData(title="Report "))
     _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A    B"))
     _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A\tB"))
+
+
+def test_notes_snapshot_found(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.notes as notes_mod
+
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite", rows=((1, "My note"),))
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    p = notes_mod.NotesAdapter().snapshot("x-coredata://STORE-UUID/ICNote/p1")
+    assert p is not None and p.id.endswith("/p1") and p.summary == "My note"
+
+
+def test_notes_snapshot_missing_returns_none(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.notes as notes_mod
+
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite")
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    ident = "x-coredata://STORE-UUID/ICNote/p999"
+    assert notes_mod.NotesAdapter().snapshot(ident) is None

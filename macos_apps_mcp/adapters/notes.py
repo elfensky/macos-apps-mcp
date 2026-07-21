@@ -640,6 +640,19 @@ class NotesAdapter:
             immutable=False,
         )
 
+    def snapshot(self, ident: str) -> Pointer | None:
+        """The note's current pointer by id (title only), or None if absent — audit
+        before-state. Pointer-level suffices for manual undo; a full-field snapshot is a
+        non-breaking later enhancement."""
+        title = self._read_title_by_id(ident)
+        if title is None:
+            return None
+        return Pointer(
+            id=ident,
+            summary=clean_summary(title) or "(untitled note)",
+            deeplink="",
+        )
+
     def _applescript_title(self, ident: str) -> str | None:
         """Fallback title read (no FDA): `name of note id`. Unknown id → the osascript
         error surfaces as a typed NativeError."""
