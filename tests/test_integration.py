@@ -1446,4 +1446,6 @@ def test_audit_records_update_with_before(tmp_path, monkeypatch):
         assert upd["after"] and "edited" in upd["after"]["summary"]
         assert upd["target_id"].split("|")[0] == created.id.split("|")[0]
     finally:
-        a.delete_event(created.id)
+        # the update moved the event's start, so its occurrence-suffixed id changed;
+        # delete by the stable base id (calendarItemIdentifier survives the edit).
+        a.delete_event(created.id.split("|")[0])
