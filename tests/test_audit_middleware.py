@@ -90,3 +90,18 @@ def test_non_write_tool_not_logged(monkeypatch):
     monkeypatch.setattr(srv, "audit_write", records.append)
     _run(srv.AuditMiddleware(), _ctx("events", {"when": "today"}), _Result([]))
     assert records == []
+
+
+def test_audit_write_failure_never_propagates(monkeypatch):
+    # the record-build/audit_write path must swallow its own errors too — a logging
+    # failure must never break the user's write (the load-bearing guarantee)
+    def _boom(_record):
+        raise RuntimeError("audit_write blew up")
+
+    monkeypatch.setattr(srv, "audit_write", _boom)
+    res = _run(
+        srv.AuditMiddleware(),
+        _ctx("create_event", {"title": "x"}),
+        _Result({"id": "E-1", "summary": "s", "deeplink": "d"}),
+    )
+    assert res.structured_content["id"] == "E-1"  # tool result returned unchanged
