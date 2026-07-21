@@ -735,3 +735,11 @@ def test_read_title_by_id_unknown_pk_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(notes_mod, "NOTESTORE", db)
     got = NotesAdapter()._read_title_by_id("x-coredata://STORE-UUID/ICNote/p999")
     assert got is None
+
+
+def test_verify_note_title_whitespace_normalized():
+    # Apple Notes collapses HTML whitespace deriving ZTITLE1; verify must not false-fail
+    # a correct write whose title had trailing/internal/tab whitespace.
+    _verify_note("Report", "x-coredata://S/ICNote/p1", NoteData(title="Report "))
+    _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A    B"))
+    _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A\tB"))
