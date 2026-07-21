@@ -28,6 +28,7 @@ from .contracts import (
     CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
+    NoteData,
     Pointer,
     Recurrence,
     ReminderData,
@@ -570,6 +571,17 @@ def delete_note(
         }
     _notes.delete(id, expect_title)
     return {"deleted": id}
+
+
+@_additive_tool
+def create_note(title: str, body: str = "", folder: str | None = None) -> dict:
+    """Create a note and return its STABLE x-coredata id (unique in the ecosystem —
+    immediately usable with note_bodies). `title`/`body` are plaintext (escaped, so
+    markup is inert); `folder` an existing folder name (across accounts) or omit for the
+    default folder — an unknown/ambiguous name is refused. Verified after write (#49).
+    Side effect (creates); needs Automation access for Notes (verify read-back also uses
+    Full Disk Access, falling back to Automation)."""
+    return _emit(_notes.create(NoteData(title=title, body=body, folder=folder)))
 
 
 @_additive_tool

@@ -17,6 +17,8 @@ from __future__ import annotations
 import contextlib
 import gzip
 import html
+import os
+import tempfile
 import zlib
 from pathlib import Path
 
@@ -178,6 +180,36 @@ _PREVIEW_DELETE = """on run argv
       end if
     end if
     return name of n
+  end tell
+  end timeout
+end run"""
+
+# create_note: make a note (body from the tempfile as «class utf8» — never interpolated,
+# so markup/newlines/unicode can't inject). folder "" → the default folder; else locate
+# a folder by name across accounts, erroring on 0 (not found) or >1 (ambiguous). Returns
+# the new note's x-coredata id — the canonical id (same one _LIST_ALL returns). No post-
+# make mutation, so nothing to roll back.
+_CREATE_NOTE = """on run argv
+  set folderName to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Notes"
+    if folderName is "" then
+      set newNote to make new note with properties {body:bodyText}
+    else
+      set matches to {}
+      repeat with acc in accounts
+        repeat with f in folders of acc
+          if name of f is folderName then set end of matches to f
+        end repeat
+      end repeat
+      if (count of matches) is 0 then error "no folder named " & folderName
+      if (count of matches) > 1 then ¬
+        error "folder name is ambiguous across accounts: " & folderName
+      set newNote to make new note at (item 1 of matches) ¬
+        with properties {body:bodyText}
+    end if
+    return id of newNote
   end tell
   end timeout
 end run"""
@@ -626,3 +658,28 @@ class NotesAdapter:
         else:
             run_osascript(_DELETE, ident)
         return None
+
+    def create(self, data: NoteData) -> Pointer:
+        """Create a note from plaintext title+body; return its stable x-coredata id.
+
+        Body is written to a 0600 tempfile and read by AppleScript as «class utf8»
+        (never interpolated). folder=None → the default folder; a name is resolved
+        across accounts (unknown/ambiguous → a loud error). The returned id is
+        verified by a re-read (#49) before it's trusted.
+        """
+        html_body = _compose_html(data.title, data.body)
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(html_body)
+            ident = run_osascript(_CREATE_NOTE, data.folder or "", path).strip()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        _verify_note(self._read_title_by_id(ident), ident, data)
+        return Pointer(
+            id=ident,
+            summary=clean_summary(data.title) or "(untitled note)",
+            deeplink="",
+            folder=data.folder,
+        )

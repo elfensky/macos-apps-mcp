@@ -21,6 +21,7 @@ _ADDITIVE_TOOLS = frozenset(
         "safari_open",
         "create_draft",
         "mail_reply",
+        "create_note",
     }
 )
 # Writes that modify/overwrite/delete existing state, or run arbitrary automation.
@@ -69,6 +70,7 @@ _PERMISSION = {
     "message_body": "Full Disk Access",
     "safari_tabs": "Automation",
     "delete_note": "Automation",
+    "create_note": "Automation",
     "create_contact": "Automation",
     "safari_open": "Automation",
     "shortcuts": "Shortcuts CLI",
