@@ -10,6 +10,7 @@ import functools
 import os
 from datetime import datetime
 
+import anyio
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
@@ -38,7 +39,7 @@ from .contracts import (
     parse_datetime,
 )
 from .doctor import diagnose
-from .runtime import NativeError
+from .runtime import NativeError, audit_write
 
 mcp = FastMCP("macos-apps-mcp")
 
@@ -95,6 +96,10 @@ _READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
 _ADDITIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": False}
 _DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
 
+# Names of every registered write tool (#67) — populated by _write_tool/_additive_tool
+# below, in the non-read-only branch only (writes aren't registered in read-only mode).
+_WRITE_TOOLS: set[str] = set()
+
 
 def _read_tool(fn):
     """Register a read tool, wrapped so typed native failures surface as directives.
@@ -105,19 +110,19 @@ def _read_tool(fn):
 def _write_tool(fn):
     """Register a write that modifies/overwrites/deletes existing state — skipped in
     read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57)."""
-    return (
-        fn
-        if _read_only()
-        else mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(fn))
-    )
+    if _read_only():
+        return fn
+    _WRITE_TOOLS.add(fn.__name__)
+    return mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(fn))
 
 
 def _additive_tool(fn):
     """Register a write that only ADDS a new item (create/open) — not read-only, but not
     destructive (#57). Also skipped in read-only mode."""
-    return (
-        fn if _read_only() else mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
-    )
+    if _read_only():
+        return fn
+    _WRITE_TOOLS.add(fn.__name__)
+    return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
@@ -155,6 +160,92 @@ class UntrustedDataNotice(Middleware):
 
 
 mcp.add_middleware(UntrustedDataNotice())
+
+
+# --- audit trail (#67) ----------------------------------------------------------------
+# The central write-audit seam: one middleware logs an envelope for EVERY write tool,
+# with before-state captured only for the id-addressed update/delete/complete tools
+# (create_* and non-id writes are envelope-only — there's no prior state to diff).
+# Adapters hold no audit logic; this is the only place it lives.
+_AUDIT_SNAPSHOT = {
+    "update_event": _calendar,
+    "delete_event": _calendar,
+    "update_reminder": _reminders,
+    "complete_reminder": _reminders,
+    "update_note": _notes,
+    "delete_note": _notes,
+}
+
+
+def _audit_op(tool: str) -> str:
+    for prefix in ("create", "update", "delete"):
+        if tool.startswith(prefix):
+            return prefix
+    return {
+        "complete_reminder": "complete",
+        "run_shortcut": "action",
+        "safari_open": "open",
+        "mail_reply": "reply",
+    }.get(tool, "write")
+
+
+def _audit_args(args: dict) -> dict:
+    # truncate long string values so a big note body can't bloat the log
+    return {
+        k: (v[:200] + "…" if isinstance(v, str) and len(v) > 200 else v)
+        for k, v in args.items()
+    }
+
+
+def _audit_after(result) -> dict | None:
+    sc = getattr(result, "structured_content", None)
+    if isinstance(sc, dict):
+        inner = sc.get("result", sc)  # FastMCP may wrap a scalar under "result"
+        if isinstance(inner, dict) and "id" in inner:
+            return inner
+    return None
+
+
+def _safe_snapshot(adapter, ident: str) -> dict | None:
+    try:
+        p = adapter.snapshot(ident)
+        return _emit(p) if p is not None else None
+    except Exception:  # noqa: BLE001 — audit must never break a write
+        return None
+
+
+class AuditMiddleware(Middleware):
+    """Append an audit record for every write; capture before-state on update/delete
+    (#67). Central seam — adapters hold no audit logic. All failures are swallowed."""
+
+    async def on_call_tool(self, context, call_next):
+        tool = context.message.name
+        args = dict(context.message.arguments or {})
+        before = None
+        adapter = _AUDIT_SNAPSHOT.get(tool)
+        if adapter is not None and args.get("id"):
+            before = await anyio.to_thread.run_sync(_safe_snapshot, adapter, args["id"])
+        result = await call_next(context)
+        if tool in _WRITE_TOOLS and not result.is_error:
+            try:
+                after = _audit_after(result)
+                audit_write(
+                    {
+                        "ts": datetime.now().isoformat(timespec="seconds"),
+                        "tool": tool,
+                        "op": _audit_op(tool),
+                        "args": _audit_args(args),
+                        "target_id": args.get("id") or (after or {}).get("id"),
+                        "before": before,
+                        "after": after,
+                    }
+                )
+            except Exception:  # noqa: BLE001 — audit must never break a write
+                pass
+        return result
+
+
+mcp.add_middleware(AuditMiddleware())
 
 
 # no native call → registered without _guard (but still read-only-annotated, #57)
