@@ -817,6 +817,25 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
 
 
 @pytest.mark.integration
+def test_create_note_returns_usable_id():
+    """T3 (#66): create writes via osascript and returns the note's stable x-coredata
+    id — immediately usable with get_bodies (no lazy-flush delay unlike the sqlite
+    read plane). Needs Automation access for Notes."""
+    from macos_apps_mcp.adapters.notes import NotesAdapter
+    from macos_apps_mcp.contracts import NoteData
+
+    adapter = NotesAdapter()
+    p = adapter.create(NoteData(title="mac-mcp itest note", body="line one\nline two"))
+    assert p.id.startswith("x-coredata://") and "/ICNote/p" in p.id
+    # the one platform assumption: id of the new note is the stable pN immediately
+    bodies = adapter.get_bodies([p.id])
+    assert bodies and bodies[0]["id"] == p.id
+    assert "line one" in bodies[0]["body"]
+    # cleanup
+    adapter.delete(p.id)
+
+
+@pytest.mark.integration
 def test_event_move_to_other_calendar_reresolves(created):
     """C-IDCHURN (variant c): a cross-calendar move must return the POST-save pointer —
     the store may re-issue the item identifier when an event changes calendars, so the
