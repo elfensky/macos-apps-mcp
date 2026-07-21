@@ -836,6 +836,25 @@ def test_create_note_returns_usable_id():
 
 
 @pytest.mark.integration
+def test_update_note_preserves_id():
+    """T4 (#66): update full-replaces a note's body by id, and the id (Z_PK-backed)
+    survives the edit — the returned id must equal the one passed in. Needs Automation
+    access for Notes."""
+    from macos_apps_mcp.adapters.notes import NotesAdapter
+    from macos_apps_mcp.contracts import NoteData
+
+    adapter = NotesAdapter()
+    created = adapter.create(NoteData(title="mac-mcp itest upd", body="before"))
+    updated = adapter.update(
+        created.id, NoteData(title="mac-mcp itest upd", body="after")
+    )
+    assert updated.id == created.id  # id survives a body edit
+    bodies = adapter.get_bodies([created.id])
+    assert "after" in bodies[0]["body"] and "before" not in bodies[0]["body"]
+    adapter.delete(created.id)
+
+
+@pytest.mark.integration
 def test_event_move_to_other_calendar_reresolves(created):
     """C-IDCHURN (variant c): a cross-calendar move must return the POST-save pointer —
     the store may re-issue the item identifier when an event changes calendars, so the

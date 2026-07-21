@@ -33,6 +33,7 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "delete_event",
         "delete_note",
         "run_shortcut",
+        "update_note",
     }
 )
 # The full write half of the read/write seam. Everything else is read-only.
@@ -71,6 +72,7 @@ _PERMISSION = {
     "safari_tabs": "Automation",
     "delete_note": "Automation",
     "create_note": "Automation",
+    "update_note": "Automation",
     "create_contact": "Automation",
     "safari_open": "Automation",
     "shortcuts": "Shortcuts CLI",

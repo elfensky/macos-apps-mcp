@@ -214,6 +214,21 @@ _CREATE_NOTE = """on run argv
   end timeout
 end run"""
 
+# update_note: full-replace a note's content by id (body from the tempfile as «class
+# utf8»). `note id` errors on an unknown id (surfaces as a typed NativeError). Returns
+# the id (Z_PK is stable across a body edit, so it's unchanged — verify asserts it).
+_UPDATE_NOTE = """on run argv
+  set noteId to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Notes"
+    set n to note id noteId
+    set body of n to bodyText
+    return id of n
+  end tell
+  end timeout
+end run"""
+
 
 def _parse_all(raw: str) -> list[Pointer]:
     out = []
@@ -682,4 +697,33 @@ class NotesAdapter:
             summary=clean_summary(data.title) or "(untitled note)",
             deeplink="",
             folder=data.folder,
+        )
+
+    def update(self, ident: str, data: NoteData) -> Pointer:
+        """Full-replace a note's title+body by id; the id must survive (verified, #49).
+
+        `data.folder` is IGNORED on update — moving a note between folders is a separate
+        op. Body transport and verify match `create`.
+        """
+        if not ident.strip():
+            raise ValueError("update_note needs a note id")
+        html_body = _compose_html(data.title, data.body)
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(html_body)
+            ident_after = run_osascript(_UPDATE_NOTE, ident, path).strip()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        _verify_note(
+            self._read_title_by_id(ident_after),
+            ident_after,
+            data,
+            expected_id=ident,
+        )
+        return Pointer(
+            id=ident_after,
+            summary=clean_summary(data.title) or "(untitled note)",
+            deeplink="",
         )
