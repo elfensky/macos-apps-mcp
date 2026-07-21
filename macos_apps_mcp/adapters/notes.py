@@ -261,7 +261,7 @@ def _parse_bodies(raw: str) -> list[dict]:
 
 
 def _compose_html(title: str, body: str) -> str:
-    """Plaintext title + body → note HTML `body`; injections-safe via escaping.
+    """Plaintext title + body → note HTML `body`; injection-safe via escaping.
 
     Everything is `html.escape`d so user markup renders as literal text (never
     HTML/script). The title is the first line (how Notes derives ZTITLE1); body
@@ -454,6 +454,16 @@ _TITLE_FINGERPRINT = {
 _TITLE_SQL = "SELECT ZTITLE1 FROM ZICCLOUDSYNCINGOBJECT WHERE Z_PK = ?"
 
 
+def _title_key(title: str | None) -> str | None:
+    """Compare-key for a note title. Apple Notes derives ZTITLE1 from the HTML-rendered
+    first line, which collapses whitespace (leading/trailing trimmed, internal runs and
+    tabs/newlines → one space). norm_text only does NFC/LF, so collapse whitespace too —
+    otherwise verify false-fails a correct write whose title had e.g. a trailing space.
+    """
+    n = norm_text(title)
+    return " ".join(n.split()) if n is not None else None
+
+
 def _verify_note(
     persisted_title: str | None,
     ident: str,
@@ -463,14 +473,16 @@ def _verify_note(
 ) -> None:
     """Verify-after-write (#49): the note must be re-readable by the returned id with
     the requested title; on update the id must survive the edit. Raises
-    VerificationFailed naming the mismatch — the caller must not reuse the id."""
+    VerificationFailed naming the mismatch — the caller must not reuse the id. Body
+    persistence is NOT checked here; it's covered only by the manual integration tests.
+    """
     if persisted_title is None:
         raise VerificationFailed(
             f"note {ident!r} could not be re-read after the write — it did not persist "
             "(a fabricated id or an iCloud rollback). Do not trust the id."
         )
-    expected: dict[str, object] = {"title": norm_text(data.title)}
-    actual: dict[str, object] = {"title": norm_text(persisted_title)}
+    expected: dict[str, object] = {"title": _title_key(data.title)}
+    actual: dict[str, object] = {"title": _title_key(persisted_title)}
     if expected_id is not None:  # update: Z_PK is stable, so the id must be unchanged
         expected["id"] = expected_id
         actual["id"] = ident
