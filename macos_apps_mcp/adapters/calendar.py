@@ -485,6 +485,19 @@ class CalendarAdapter:
 
         return run_native(work)
 
+    def snapshot(self, ident: str) -> Pointer | None:
+        """The event's current pointer by id, or None if it no longer resolves — the
+        before-state the audit layer captures just before an update/delete."""
+
+        def work():
+            s = store()
+            try:
+                return _event_pointer(_resolve_event(s, ident))
+            except ValueError:
+                return None
+
+        return run_native(work)
+
     def delete_event(
         self, ident: str, span: str | None = None, dry_run: bool = False
     ) -> Pointer | None:

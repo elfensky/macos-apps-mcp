@@ -321,6 +321,16 @@ class RemindersAdapter:
 
         return run_native(work)
 
+    def snapshot(self, ident: str) -> Pointer | None:
+        """The reminder's current pointer by id, or None if absent — audit
+        before-state."""
+
+        def work():
+            r = store().calendarItemWithIdentifier_(ident)
+            return _reminder_pointer(r) if r is not None else None
+
+        return run_native(work)
+
     def complete_reminder(self, ident: str) -> Pointer:
         def work():
             s = store()
