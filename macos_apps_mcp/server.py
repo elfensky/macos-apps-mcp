@@ -39,7 +39,7 @@ from .contracts import (
     parse_datetime,
 )
 from .doctor import diagnose
-from .runtime import NativeError, audit_write
+from .runtime import NativeError, audit_read, audit_write
 
 mcp = FastMCP("macos-apps-mcp")
 
@@ -274,6 +274,15 @@ def now() -> dict:
     interpreted in THIS timezone (naive ISO = local time).
     """
     return now_local()
+
+
+@_read_tool
+def audit(since: str | None = None) -> list[dict]:
+    """Recent write audit entries (newest first) — what macos-apps-mcp changed, with
+    before/after pointers, enough to reverse a change by hand. `since` optional ISO
+    datetime (call now() to ground it) drops older entries; bounded to the last 50.
+    Read-only; no permission (reads a local log at ~/.local/state/macos-apps-mcp)."""
+    return audit_read(since)
 
 
 @_read_tool

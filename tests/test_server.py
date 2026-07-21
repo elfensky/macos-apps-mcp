@@ -811,3 +811,24 @@ def test_delete_note_dry_run_dispatches_and_formats_preview(monkeypatch):
         "dry_run": True,
         "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
     }
+
+
+def test_audit_tool_reads(monkeypatch):
+    import macos_apps_mcp.server as srv2
+
+    monkeypatch.setattr(
+        srv2, "audit_read", lambda since=None: [{"tool": "create_event"}]
+    )
+    out = srv2.audit()
+    assert out == [{"tool": "create_event"}]
+
+
+def test_audit_tool_passes_since(monkeypatch):
+    import macos_apps_mcp.server as srv2
+
+    seen = {}
+    monkeypatch.setattr(
+        srv2, "audit_read", lambda since=None: seen.setdefault("since", since) or []
+    )
+    srv2.audit("2026-07-21T00:00:00")
+    assert seen["since"] == "2026-07-21T00:00:00"

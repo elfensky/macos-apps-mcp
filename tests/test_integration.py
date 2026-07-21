@@ -1399,3 +1399,51 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
             "    end try\n  end tell\nend run",
             marker,
         )
+
+
+@pytest.mark.integration
+def test_audit_records_update_with_before(tmp_path, monkeypatch):
+    """#67: driving a real write through the MCP Client records an audit entry with
+    before/after pointers — proves the middleware end-to-end, not just its unit
+    seams."""
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.runtime as rt
+    import macos_apps_mcp.server as srv
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
+
+    monkeypatch.setattr(rt, "state_dir", lambda: tmp_path)  # audit to a temp log
+    run_native(request_access)
+    a = CalendarAdapter()
+    start = datetime.now().replace(microsecond=0) + timedelta(days=1)
+    created = a.create_event(
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} audit", start=start, end=start + timedelta(hours=1)
+        )
+    )
+    try:
+
+        async def _drive():
+            async with Client(srv.mcp) as c:
+                await c.call_tool(
+                    "update_event",
+                    {
+                        "id": created.id,
+                        "title": f"{TITLE_PREFIX} audit (edited)",
+                        "start": (start + timedelta(hours=2)).isoformat(),
+                        "end": (start + timedelta(hours=3)).isoformat(),
+                    },
+                )
+
+        asyncio.run(_drive())
+        entries = rt.audit_read()
+        upd = next(e for e in entries if e["tool"] == "update_event")
+        assert upd["before"] and "audit" in upd["before"]["summary"]
+        assert upd["after"] and "edited" in upd["after"]["summary"]
+        assert upd["target_id"].split("|")[0] == created.id.split("|")[0]
+    finally:
+        a.delete_event(created.id)
