@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import json
 import logging
 import os
 import re
@@ -805,6 +806,57 @@ def rrule_text(rule) -> str:
 
 
 log = logging.getLogger("macos_apps_mcp")
+
+
+# --- write audit log storage (#67) ----------------------------------------------------
+AUDIT_LIMIT = 50
+_AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate past ~5 MB; one backup
+
+
+def state_dir() -> Path:
+    """The XDG state dir for this server, created on use."""
+    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
+    d = Path(base) / "macos-apps-mcp"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _audit_path() -> Path:
+    return state_dir() / "audit.jsonl"
+
+
+def audit_write(record: dict) -> None:
+    """Append one JSON record to the audit log. NEVER raises — auditing must not fail a
+    user's write, so a logging error (disk full, permission, missing dir) is
+    swallowed."""
+    try:
+        path = _audit_path()
+        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
+            path.replace(path.with_name(path.name + ".1"))  # rotate; one backup
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:  # noqa: BLE001 — audit must never break a write
+        log.debug("audit_write failed: %s", e)
+
+
+def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
+    """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
+    drops older entries by lexical ts compare (entries are naive-local, one format).
+    Malformed lines are skipped; a missing log is empty."""
+    path = _audit_path()
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue  # skip a truncated/corrupt line, never fail the read
+        if since and rec.get("ts", "") < since:
+            continue
+        out.append(rec)
+    out.reverse()  # newest first
+    return out[:limit]
 
 
 def _request_one(s: EK.EKEventStore, entity: int) -> None:
