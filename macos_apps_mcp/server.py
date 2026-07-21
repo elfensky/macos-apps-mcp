@@ -584,6 +584,15 @@ def create_note(title: str, body: str = "", folder: str | None = None) -> dict:
     return _emit(_notes.create(NoteData(title=title, body=body, folder=folder)))
 
 
+@_write_tool
+def update_note(id: str, title: str, body: str = "", folder: str | None = None) -> dict:
+    """Update a note by id (full-replace title+body); the stable id is preserved and
+    verified (#49). `title`/`body` plaintext (escaped). `folder` is ignored on update
+    (moving between folders is a separate op). Side effect (full-replace update); needs
+    Automation access for Notes. `id` from notes / notes_all / create_note."""
+    return _emit(_notes.update(id, NoteData(title=title, body=body, folder=folder)))
+
+
 @_additive_tool
 def create_contact(
     given_name: str,

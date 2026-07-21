@@ -59,6 +59,10 @@ class _FakeSource:
         self.queries.append(("create", data.title, data.body, data.folder))
         return Pointer(id="x-coredata://S/ICNote/p9", summary=data.title, deeplink="")
 
+    def update(self, ident, data):
+        self.queries.append(("update", ident, data.title, data.body))
+        return Pointer(id=ident, summary=data.title, deeplink="")
+
 
 def test_server_constructs():
     assert srv.mcp is not None
@@ -566,6 +570,14 @@ def test_create_note_tool_dispatches(monkeypatch):
     out = srv.create_note("Title", "Body", "Ideas")
     assert fake.queries == [("create", "Title", "Body", "Ideas")]
     assert out == {"id": "x-coredata://S/ICNote/p9", "summary": "Title", "deeplink": ""}
+
+
+def test_update_note_tool_dispatches(monkeypatch):
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_notes", fake)
+    out = srv.update_note("x-coredata://S/ICNote/p1", "New", "Body")
+    assert fake.queries == [("update", "x-coredata://S/ICNote/p1", "New", "Body")]
+    assert out == {"id": "x-coredata://S/ICNote/p1", "summary": "New", "deeplink": ""}
 
 
 # --- errors-as-results: the dispatch seam converts typed native failures (#47) --------
