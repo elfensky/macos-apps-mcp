@@ -337,6 +337,38 @@ def _deeplink(message_id: str) -> str:
     return f"message://%3C{quote(mid, safe='@')}%3E"
 
 
+def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Pointer]:
+    """Rank inbound messages that likely need the user's response. Drops already-replied
+    messages; keeps those directly addressed to the user (my_addrs ∩ to_addrs). If
+    my_addrs is empty (extraction failed) it degrades to FLAGGED-ONLY rather than
+    flooding the inbox. Reasons (stable): flagged > unread-direct > unanswered-direct;
+    recency (smallest secs_ago) breaks ties within a tier. Bounded to MAX_MAILS."""
+    out: list[tuple[int, int, Pointer]] = []
+    for r in records:
+        if r["was_replied_to"]:
+            continue
+        direct = bool(my_addrs & set(r["to_addrs"]))
+        if my_addrs and not direct:
+            continue
+        if not my_addrs and not r["flagged"]:
+            continue  # can't confirm direct → flagged-only, no flood
+        if r["flagged"]:
+            tier, reason = 0, "flagged"
+        elif not r["read"]:
+            tier, reason = 1, "unread-direct"
+        else:
+            tier, reason = 2, "unanswered-direct"
+        p = Pointer(
+            id=r["id"],
+            summary=clean_summary(_summary(r["subject"], r["sender"])),
+            deeplink=_deeplink(r["id"]),
+            reason=reason,
+        )
+        out.append((tier, r["secs_ago"], p))
+    out.sort(key=lambda t: (t[0], t[1]))  # tier asc, then most-recent (secs_ago) first
+    return [p for _, _, p in out[:MAX_MAILS]]
+
+
 def _parse(raw: str) -> list[Pointer]:
     out = []
     for line in raw.splitlines():

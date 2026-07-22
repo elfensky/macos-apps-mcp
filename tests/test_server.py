@@ -536,6 +536,18 @@ def test_emit_includes_folder_when_set():
     }
 
 
+def test_emit_includes_reason_when_set():
+    from macos_apps_mcp.contracts import Pointer
+
+    assert srv._emit(Pointer(id="i", summary="s", deeplink="d", reason="flagged")) == {
+        "id": "i",
+        "summary": "s",
+        "deeplink": "d",
+        "reason": "flagged",
+    }
+    assert "reason" not in srv._emit(Pointer(id="i", summary="s", deeplink="d"))
+
+
 def test_note_bodies_dispatches(monkeypatch):
     class _FakeNotes:
         def get_bodies(self, ids):
