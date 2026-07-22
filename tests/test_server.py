@@ -111,6 +111,42 @@ def test_mail_tool_dispatches(monkeypatch):
     assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
 
 
+def test_mail_needs_response_dispatches(monkeypatch):
+    class _F:
+        def get_needs_response(self):
+            return [
+                Pointer(
+                    id="<m@x>", summary="s", deeplink="message://m", reason="flagged"
+                )
+            ]
+
+    monkeypatch.setattr(srv, "_mail", _F())
+    out = srv.mail_needs_response()
+    assert out == [
+        {"id": "<m@x>", "summary": "s", "deeplink": "message://m", "reason": "flagged"}
+    ]
+
+
+def test_mail_awaiting_reply_dispatches(monkeypatch):
+    seen = {}
+
+    class _F:
+        def get_awaiting_reply(self, days=3):
+            seen["days"] = days
+            return [
+                Pointer(
+                    id="<s@x>",
+                    summary="s",
+                    deeplink="message://s",
+                    reason="awaiting-reply",
+                )
+            ]
+
+    monkeypatch.setattr(srv, "_mail", _F())
+    out = srv.mail_awaiting_reply(7)
+    assert seen["days"] == 7 and out[0]["reason"] == "awaiting-reply"
+
+
 def test_notes_tool_dispatches(monkeypatch):
     fake = _FakeSource()
     monkeypatch.setattr(srv, "_notes", fake)

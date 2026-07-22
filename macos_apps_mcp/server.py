@@ -360,6 +360,24 @@ def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
     return _mail.list_attachments(mailbox, query)
 
 
+@_read_tool
+def mail_needs_response() -> list[dict]:
+    """Inbox messages that likely need your response, ranked with a machine-readable
+    `reason` (flagged / unread-direct / unanswered-direct). Heuristic over headers +
+    message properties — no body is read; keeps direct-addressed, not-yet-replied mail.
+    Read-only; needs Automation access for Mail. Bounded to 25."""
+    return [_emit(p) for p in _mail.get_needs_response()]
+
+
+@_read_tool
+def mail_awaiting_reply(days: int = 3) -> list[dict]:
+    """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
+    oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
+    group send is cleared once any recipient replies. Read-only; needs Automation access
+    for Mail. Bounded to 25."""
+    return [_emit(p) for p in _mail.get_awaiting_reply(days)]
+
+
 @_additive_tool
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on

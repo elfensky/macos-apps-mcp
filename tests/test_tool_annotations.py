@@ -60,6 +60,8 @@ _PERMISSION = {
     "mail": "Automation",
     "mail_body": "Automation",
     "mail_attachments": "Automation",
+    "mail_needs_response": "Automation",
+    "mail_awaiting_reply": "Automation",
     "create_draft": "Automation",
     "mail_reply": "Automation",
     "notes": "Automation",
