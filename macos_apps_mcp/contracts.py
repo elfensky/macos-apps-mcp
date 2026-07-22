@@ -131,6 +131,7 @@ class Pointer:
     summary: str
     deeplink: str
     folder: str | None = None  # notes_all only: "Account / Folder"; None elsewhere
+    reason: str | None = None  # triage reads only: a stable machine-readable why-string
 
 
 @runtime_checkable

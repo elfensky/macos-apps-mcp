@@ -58,6 +58,8 @@ def _emit(p: Pointer) -> dict[str, str]:
     d = {"id": p.id, "summary": p.summary, "deeplink": p.deeplink}
     if p.folder is not None:
         d["folder"] = p.folder
+    if p.reason is not None:
+        d["reason"] = p.reason
     return d
 
 
