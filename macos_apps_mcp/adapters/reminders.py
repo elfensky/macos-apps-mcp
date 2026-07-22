@@ -11,22 +11,24 @@ from datetime import datetime, timedelta
 import EventKit as EK
 
 from ..contracts import Pointer, Recurrence, ReminderData
-from ..runtime import (
+from ..errors import (
     RecurrenceRequired,
     VerificationFailed,
+    refused_write,
+    resolve_container,
+    verify_persisted,
+)
+from ..runtime import (
     container_id,
     due_components,
     persisted_recurrence_signature,
     recurrence_signature,
-    refused_write,
-    resolve_container,
     rrule_text,
     run_native,
     run_native_async,
     store,
     to_nsdate,
     to_recurrence_rule,
-    verify_persisted,
 )
 from ..text import clean_summary, fold_text, norm_text
 

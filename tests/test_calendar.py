@@ -23,7 +23,7 @@ from macos_apps_mcp.adapters.calendar import (
     _verify_event,
 )
 from macos_apps_mcp.contracts import CalendarEventData, Pointer, Recurrence
-from macos_apps_mcp.runtime import AmbiguousTarget, SpanRequired, VerificationFailed
+from macos_apps_mcp.errors import AmbiguousTarget, SpanRequired, VerificationFailed
 from tests._fakes import fake_rule
 
 

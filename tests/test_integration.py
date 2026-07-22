@@ -320,7 +320,8 @@ def test_recurring_update_omitted_span_raises_and_does_not_write(created):
 
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
     from macos_apps_mcp.contracts import CalendarEventData
-    from macos_apps_mcp.runtime import SpanRequired, to_nsdate
+    from macos_apps_mcp.errors import SpanRequired
+    from macos_apps_mcp.runtime import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -971,7 +972,7 @@ def test_recurring_reminder_update_requires_recurrence(created):
 
     from macos_apps_mcp.adapters.reminders import RemindersAdapter
     from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence, ReminderData
-    from macos_apps_mcp.runtime import RecurrenceRequired
+    from macos_apps_mcp.errors import RecurrenceRequired
 
     run_native(request_access)
     a = RemindersAdapter()
@@ -1266,7 +1267,7 @@ def test_mail_reads_return_id_triple_real_inbox():
     import re as _re
 
     from macos_apps_mcp.adapters.mail import MailAdapter
-    from macos_apps_mcp.runtime import NativeTimeout
+    from macos_apps_mcp.errors import NativeTimeout
 
     try:
         ptrs = MailAdapter().get_pointers("invoice")  # targeted, not a catch-all match

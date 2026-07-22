@@ -39,7 +39,7 @@ from .contracts import (
     parse_recurrence_update,
 )
 from .doctor import diagnose
-from .runtime import NativeError
+from .errors import NativeError
 
 mcp = FastMCP("macos-apps-mcp")
 

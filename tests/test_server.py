@@ -22,7 +22,7 @@ from macos_apps_mcp.contracts import (
     Recurrence,
     ReminderData,
 )
-from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
+from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
 
 class _FakeSource:

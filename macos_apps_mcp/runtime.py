@@ -34,6 +34,16 @@ import EventKit as EK
 import Foundation as F
 
 from .contracts import CLEAR_RECURRENCE, Recurrence
+from .errors import (
+    PRIVACY_PANE,
+    AccessDenied,
+    AppNotRunning,
+    AutomationDenied,
+    FullDiskAccessDenied,
+    NativeError,
+    NativeTimeout,
+    SchemaDrift,
+)
 
 T = TypeVar("T")
 
@@ -62,156 +72,10 @@ _FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
 _ACCESS_TIMEOUT = 120.0  # seconds
 
 
-# --- typed error taxonomy (#47) ------------------------------------------------------
-# The winnable axis is trust: the category leader died of *fake success* — stubbed reads
-# returning [] made permission-denied / crashed / genuinely-empty indistinguishable, so
-# the agent hammered a denied tool. Every native failure is one of these loud, typed
-# classes; str(e) IS the agent-directed remediation. The dispatch layer (server.py)
-# turns them into MCP tool *results* carrying that directive — never a silent [], never
-# a masked stack trace. `kind` is the machine code doctor (#48) and tests branch on.
-
-
-class NativeError(RuntimeError):
-    """Base for every typed native failure. ``str(e)`` is the agent-facing directive."""
-
-    kind = "native_error"
-
-
-class AccessDenied(NativeError):
-    """Calendar/Reminders (EventKit) TCC access is not fully granted."""
-
-    kind = "access_denied"
-
-
-class AutomationDenied(NativeError):
-    """osascript blocked from controlling an app — Automation consent not granted."""
-
-    kind = "automation_denied"
-
-
-class AppNotRunning(NativeError):
-    """The target app isn't running / its Apple-events connection is invalid."""
-
-    kind = "app_not_running"
-
-
-class NativeTimeout(NativeError):
-    """A native call didn't return in time (stuck dialog, pathological query)."""
-
-    kind = "native_timeout"
-
-
-class OutputOverflow(NativeError):
-    """A native result exceeded the caller's size cap (raised by callers, e.g. #52)."""
-
-    kind = "output_overflow"
-
-
-class SchemaDrift(NativeError):
-    """Native output didn't match the shape the parser expects (an OS/app change)."""
-
-    kind = "schema_drift"
-
-
-class VerificationFailed(NativeError):
-    """A create/update didn't persist as requested — the returned id is fabricated, or
-    a field was dropped, or iCloud reverted the write (#49)."""
-
-    kind = "verification_failed"
-
-
-class SpanRequired(NativeError):
-    """A recurring event's update/delete needs an explicit span (this-event vs
-    future-events) so one occurrence isn't silently rewritten as the series (#51)."""
-
-    kind = "span_required"
-
-
-class WriteRefused(NativeError):
-    """The store refused a save/remove — a read-only or subscribed calendar/list, or
-    the account rejected the change."""
-
-    kind = "write_refused"
-
-
-class RecurrenceRequired(NativeError):
-    """Updating a repeating reminder needs an explicit recurrence (re-send the rule
-    or 'none') so a rename can't silently destroy the series (mirror of
-    SpanRequired's rationale, #51)."""
-
-    kind = "recurrence_required"
-
-
-class BatchTooLarge(NativeError):
-    """A bulk operation exceeded its small default safety cap without an explicit
-    override — contains blast radius (griches --confirm-destructive, #54)."""
-
-    kind = "batch_too_large"
-
-
-class AmbiguousTarget(NativeError):
-    """A name/title matched more than one container, so a write cannot safely pick one.
-    The disambiguation rule (#55): never auto-pick an ambiguous target for a write —
-    fuzzy/first-match auto-pick sent iMessages to the wrong human (supermemoryai #48),
-    and duplicate calendar names silently mis-targeted writes (mcp-ical #16). ``str(e)``
-    tells the caller how to disambiguate."""
-
-    kind = "ambiguous_target"
-
-
-class FullDiskAccessDenied(NativeError):
-    """A native sqlite store (chat.db, NoteStore.sqlite, …) couldn't be opened because
-    Full Disk Access is not granted. ``str(e)`` is the remediation; doctor (#48) reports
-    the same surface. Part of the dual-backend policy (#58): the adapter falls back to
-    its AppleScript reader if it has one (Notes), else this surfaces loudly — never a
-    silent empty (Messages content)."""
-
-    kind = "full_disk_access_denied"
-
-
-def resolve_container(items, target: str, *, noun: str):
-    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name (#55).
-
-    The disambiguation rule made concrete: a container-addressed write
-    (``create_event(calendar)``, ``create_reminder(list_name)``) accepts EITHER a
-    ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
-    name. An id wins (it is unambiguous by construction); a name matching >1 container
-    raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
-    the write targeting one of them rather than macos-apps-mcp guessing (mcp-ical #16
-    silent mis-target). id-first: a calendar/list identifier is a UUID, so it can't
-    collide with a human-typed name — the precedence is safe.
-
-    ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
-    container object) is returned. 0 name matches → ``ValueError``; >1 →
-    ``AmbiguousTarget``. Pure (no native imports) so it unit-tests with plain tuples.
-    """
-    for cid, _name, value in items:
-        if cid == target:  # id-first: an unambiguous handle is used directly
-            return value
-    matches = [(cid, value) for cid, name, value in items if name == target]
-    if not matches:
-        raise ValueError(f"no {noun} named {target!r}")
-    if len(matches) > 1:
-        ids = ", ".join(cid for cid, _ in matches)
-        raise AmbiguousTarget(
-            f"{len(matches)} {noun}s are named {target!r} — macos-apps-mcp never "
-            "auto-picks an ambiguous write target. Re-issue the write targeting one of "
-            f"these ids instead: {ids} (or rename them so the names are unique)."
-        )
-    return matches[0][1]
-
-
-def refused_write(what: str, noun: str, err: object) -> WriteRefused:
-    """The uniform store-refused-a-save error: ONE wording for every EventKit write
-    (create/update/delete/complete), instead of six hand-typed copies. ``what`` names
-    the operation ("event write", "reminder completion"); ``noun`` the container kind
-    ("calendar", "list"). Returned, not raised, so the call site reads ``raise
-    refused_write(...)``."""
-    return WriteRefused(
-        f"the {what} was refused by the store: {err}. The target {noun} may be "
-        f"read-only (a subscribed {noun}) or the account rejected the change — do "
-        "not retry the same target; tell the user."
-    )
+# NOTE: the typed error taxonomy (#47) and the pure write policies —
+# resolve_container, refused_write, verify_persisted, require_batch_within — live in
+# errors.py: no native imports there, so adapters/tests use them without loading this
+# module's EventKit/Foundation. runtime raises those classes; it does not define them.
 
 
 def container_id(item) -> str | None:
@@ -223,58 +87,17 @@ def container_id(item) -> str | None:
     return cal.calendarIdentifier() if cal is not None else None
 
 
-def verify_persisted(
-    entity: str, expected: dict[str, object], actual: dict[str, object]
-) -> None:
-    """Diff requested field values against what the store actually persisted; raise
-    ``VerificationFailed`` naming every dropped/changed field (#49).
-
-    The anti-fabrication + anti-rollback check behind every create/update: the category
-    leader shipped a fabricated id and dropped due/list (supermemoryai #64), and iCloud
-    can revert a write ~1s later — and our writes feed the vault id-writeback, so a fake
-    or reverted id silently corrupts the cockpit. Callers pass primitives already
-    normalized for comparison (dates → epoch ints / y-m-d tuples, containers → names) so
-    this stays pure and unit-testable with plain fakes.
-    """
-    dropped = {k: (v, actual.get(k)) for k, v in expected.items() if actual.get(k) != v}
-    if dropped:
-        fields = "; ".join(
-            f"{k}: requested {req!r}, persisted {got!r}"
-            for k, (req, got) in dropped.items()
-        )
-        raise VerificationFailed(
-            f"{entity} write did not persist as requested (dropped or reverted; iCloud "
-            f"can roll a write back ~1s later). Mismatches: {fields}. Re-read the item "
-            "before trusting it; do not reuse the returned id."
-        )
-
-
 # NOTE: text hygiene / fold / verify-normalization live in text.py (#52/#49/#64) —
 # pure string work with no coupling to the native worker.
 
 
-def require_batch_within(count: int, cap: int, *, override_param: str) -> None:
-    """Guard a bulk operation's size (#54): raise ``BatchTooLarge`` when ``count``
-    exceeds the small default ``cap``, naming the ``override_param`` the caller can pass
-    to raise the cap deliberately. Small caps + explicit override contain blast radius
-    (griches). The first bulk destructive op wires this in; single-item writes don't
-    need it. ponytail: this is the shared primitive — a bulk op calls it, it does not
-    invent its own limit check."""
-    if count > cap:
-        raise BatchTooLarge(
-            f"this operation would affect {count} items but the safety cap is {cap}. "
-            f"Narrow the batch, or pass {override_param}=<n> to raise the cap on "
-            "purpose. Do not retry the same oversized batch unchanged."
-        )
-
-
-def _decide(status: int) -> None:
-    """Map an EKAuthorizationStatus to a decision: return on full access, else raise."""
+def _require_full_access(status: int) -> None:
+    """Gate an EKAuthorizationStatus: return on full access, else raise AccessDenied."""
     if status == _FULL_ACCESS:
         return
     raise AccessDenied(
         "macos-apps-mcp needs Calendar + Reminders access. Grant it in "
-        "System Settings → Privacy & Security → Calendars and Reminders, then "
+        f"{PRIVACY_PANE} → Calendars and Reminders, then "
         "restart macos-apps-mcp."
     )
 
@@ -327,8 +150,8 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     if _AUTOMATION_DENIED in stderr:
         return AutomationDenied(
             "macOS blocked macos-apps-mcp from controlling the app (Automation consent "
-            "not granted). Tell the user to enable it in System Settings → Privacy & "
-            "Security → Automation, for whichever app launched macos-apps-mcp, then "
+            f"not granted). Tell the user to enable it in {PRIVACY_PANE} → "
+            "Automation, for whichever app launched macos-apps-mcp, then "
             "restart macos-apps-mcp. Do not retry until the next user message. "
             f"[{detail}]"
         )
@@ -442,7 +265,10 @@ def body_file(text: str):
 _ASYNC_TIMEOUT = 30.0  # seconds
 
 
-def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
+def run_native_async(
+    start: Callable[[Callable[[T | None], None]], None],
+    timeout: float = _ASYNC_TIMEOUT,
+) -> T | None:
     """Block on a completion-handler call; bounded so a dropped callback can't hang.
 
     Generalizes the EventKit fetch pattern. ``start(finish)`` kicks off the async op
@@ -454,10 +280,10 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
     deliver on the main run loop (MapKit, NSMetadataQuery) need an NSRunLoop pump here —
     add it with the first such consumer (Maps #17 / Photos #20) to validate it.
     """
-    box: dict = {}
+    box: dict[str, T | None] = {}
     done = threading.Event()
 
-    def finish(result=None):
+    def finish(result: T | None = None) -> None:
         box["result"] = result
         done.set()
 
@@ -481,7 +307,7 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 # Notes) build on with no new plumbing of their own.
 
 
-def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
+def _open_sqlite_ro(path: Path | str, *, immutable: bool = False) -> sqlite3.Connection:
     """Open a system sqlite store STRICTLY read-only.
 
     Preflights with a raw read so a Full-Disk-Access denial surfaces as a typed
@@ -502,7 +328,7 @@ def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
     except PermissionError as e:
         raise FullDiskAccessDenied(
             "macos-apps-mcp could not read a macOS data store — Full Disk Access is "
-            "not granted. Grant it in System Settings → Privacy & Security → Full "
+            f"not granted. Grant it in {PRIVACY_PANE} → Full "
             "Disk Access to the app that launched macos-apps-mcp, then restart "
             "macos-apps-mcp. Do not retry until the next user message."
         ) from e
@@ -525,7 +351,9 @@ def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
         ) from e
 
 
-def verify_sqlite_schema(conn: sqlite3.Connection, fingerprint: dict) -> None:
+def verify_sqlite_schema(
+    conn: sqlite3.Connection, fingerprint: dict[str, set[str]]
+) -> None:
     """Raise ``SchemaDrift`` unless each expected table has every expected column (#58).
 
     ``fingerprint`` maps table name → the columns the parser reads. macOS updates move
@@ -572,8 +400,13 @@ _STORE_UNAVAILABLE = (FullDiskAccessDenied, SchemaDrift)
 
 
 def read_via_sqlite(
-    path, fingerprint: dict, query, *, fallback=None, immutable: bool = False
-):
+    path: Path | str,
+    fingerprint: dict[str, set[str]],
+    query: Callable[[sqlite3.Connection], T],
+    *,
+    fallback: Callable[[], T] | None = None,
+    immutable: bool = False,
+) -> T:
     """Dual-backend read (#58): query a native sqlite store read-only, degrading to the
     adapter's AppleScript reader when the store is unavailable.
 
@@ -589,7 +422,7 @@ def read_via_sqlite(
     ONE helper the sqlite read planes (#59/#60) build on — they add no new plumbing.
     """
 
-    def work():
+    def work() -> T:
         try:
             conn = _open_sqlite_ro(path, immutable=immutable)
             try:
@@ -748,7 +581,7 @@ def _request_one(s: EK.EKEventStore, entity: int) -> None:
                 "Timed out waiting for the Calendar/Reminders permission response."
             )
         status = EK.EKEventStore.authorizationStatusForEntityType_(entity)
-    _decide(status)
+    _require_full_access(status)
 
 
 # EventKit TCC surfaces requested at startup. Adapters with their own permission

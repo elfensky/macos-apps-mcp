@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
-from ..runtime import NativeError, NativeTimeout
+from ..errors import NativeError, NativeTimeout
 from ..text import clean_summary, fold_text, sanitize_line
 
 MAX_SHORTCUTS = 100
