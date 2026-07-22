@@ -1,11 +1,11 @@
 # CLAUDE.md — macos-apps-mcp
 
-One consolidated MCP server for native macOS apps. Python + **FastMCP 2.0**, managed with **`uv`**.
+One consolidated MCP server for native macOS apps. Python + **FastMCP**, managed with **`uv`**.
 Full design and rationale: [DESIGN.md](DESIGN.md).
 
 ## Architecture (don't drift)
 
-- **FastMCP 2.0 standalone.** Tools in `macos_apps_mcp/server.py` are *thin dispatch* to adapters — no
+- **FastMCP standalone.** Tools in `macos_apps_mcp/server.py` are *thin dispatch* to adapters — no
   business logic in the tool layer.
 - **Adapters = typed `Protocol`** (`macos_apps_mcp/contracts.py`): **reads uniform**
   (`get_pointers -> list[Pointer]`), **writes per-adapter typed** (`create_reminder(ReminderData)`,
@@ -15,8 +15,9 @@ Full design and rationale: [DESIGN.md](DESIGN.md).
   serialized worker thread (EKEventStore thread-affinity + TCC). Never call EventKit off arbitrary
   threads, and never widen the executor past `max_workers=1`.
 - **One adapter module per app** under `macos_apps_mcp/adapters/`. Adding an app = add a module + mount its
-  tools in `server.py`; it must not reach into another adapter. This is what lets a module later
-  harden into a `lyfe` native data-plane adapter unchanged.
+  tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
+  `doctor._AUTOMATION_APPS` so `doctor` probes it; it must not reach into another adapter. This is
+  what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
 
 ## Dev
 

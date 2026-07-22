@@ -57,6 +57,21 @@ def test_audit_read_missing_file_is_empty(tmp_path, monkeypatch):
     assert au.audit_read() == []
 
 
+def test_audit_read_unreadable_returns_error_entry(tmp_path, monkeypatch):
+    # never-raise contract: an unreadable log surfaces as one explicit error entry,
+    # never a raw OSError and never an empty list masquerading as "no writes".
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.audit_write({"tool": "create_event"})
+    path = tmp_path / "audit.jsonl"
+    path.chmod(0o000)
+    try:
+        out = au.audit_read()
+    finally:
+        path.chmod(0o600)
+    assert len(out) == 1
+    assert out[0]["error"].startswith("audit log unreadable")
+
+
 def test_audit_read_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
     for i in range(au.AUDIT_LIMIT + 10):

@@ -761,3 +761,29 @@ def test_notes_snapshot_missing_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(notes_mod, "NOTESTORE", db)
     ident = "x-coredata://STORE-UUID/ICNote/p999"
     assert notes_mod.NotesAdapter().snapshot(ident) is None
+
+
+def test_applescript_title_unknown_id_returns_none(monkeypatch):
+    # the AppleScript fallback honors _read_title_by_id's None-if-not-found contract:
+    # _TITLE_BY_ID returns "" for an unknown/stale id → None here (like the sqlite
+    # path), never a raise — so snapshot() stays Pointer|None on the no-FDA path too.
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")
+    assert NotesAdapter()._applescript_title("x-coredata://S/ICNote/p999") is None
+
+
+def test_applescript_title_found(monkeypatch):
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "Hello")
+    assert NotesAdapter()._applescript_title("x-coredata://S/ICNote/p1") == "Hello"
+
+
+def test_update_refuses_folder(monkeypatch):
+    # folder was silently ignored on update — now it's refused loudly, before any
+    # native call fires (a caller must not believe the note moved).
+    def boom(*a, **kw):
+        raise AssertionError("no osascript call may fire when folder is refused")
+
+    monkeypatch.setattr(notes_mod, "run_osascript", boom)
+    with pytest.raises(ValueError, match="cannot move a note"):
+        NotesAdapter().update(
+            "x-coredata://S/ICNote/p1", NoteData(title="T", folder="Work")
+        )

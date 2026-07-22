@@ -17,6 +17,10 @@ import pytest
 
 from macos_apps_mcp.runtime import request_access, run_native, store
 
+# Every test in this module touches real EventKit/TCC — mark them all at module level
+# so a forgotten per-test decorator can never leak a live test into CI.
+pytestmark = pytest.mark.integration
+
 TITLE_PREFIX = "macos-apps-mcp-test:"
 
 
@@ -44,14 +48,12 @@ def created():
     run_native(_cleanup)
 
 
-@pytest.mark.integration
 def test_request_access_grants_full():
     run_native(
         request_access
     )  # raises AccessDenied if not granted — grant when prompted
 
 
-@pytest.mark.integration
 def test_reminders_read_today():
     from macos_apps_mcp.adapters.reminders import RemindersAdapter
 
@@ -62,7 +64,6 @@ def test_reminders_read_today():
         assert p.id and p.summary and p.deeplink.startswith("x-apple-reminderkit://")
 
 
-@pytest.mark.integration
 def test_calendar_read_week():
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
 
@@ -73,7 +74,6 @@ def test_calendar_read_week():
         assert p.id and p.summary and p.deeplink.startswith("calshow:")
 
 
-@pytest.mark.integration
 def test_free_busy_on_device():
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
 
@@ -90,7 +90,6 @@ def test_free_busy_on_device():
             assert b["end"] <= f["start"] or f["end"] <= b["start"]
 
 
-@pytest.mark.integration
 def test_reminder_create_update_complete(created):
     from datetime import datetime, timedelta
 
@@ -117,7 +116,6 @@ def test_reminder_create_update_complete(created):
     assert p3.id == p.id
 
 
-@pytest.mark.integration
 def test_event_create_update_delete(created):
     from datetime import datetime, timedelta
 
@@ -154,7 +152,6 @@ def test_event_create_update_delete(created):
     )  # delete by the post-move id; teardown is a no-op for an already-deleted id
 
 
-@pytest.mark.integration
 def test_all_day_event_round_trips_date(created):
     """#50: an all-day event created from a date-only local date reads back on the SAME
     calendar day — never shifted a day by the UTC offset."""
@@ -180,7 +177,6 @@ def test_all_day_event_round_trips_date(created):
     assert any(q.id.split("|")[0] == p.id.split("|")[0] for q in same_day)
 
 
-@pytest.mark.integration
 def test_named_list_read_excludes_completed(created):
     """Parity row 4: a named-list read returns only incomplete reminders.
 
@@ -210,7 +206,6 @@ def test_named_list_read_excludes_completed(created):
     assert done_item.id not in ids  # completed item is filtered out (the row-4 fix)
 
 
-@pytest.mark.integration
 def test_reminder_lists_enumerate():
     """Parity row 8: enumerate lists; the default list is discoverable by name."""
     from macos_apps_mcp.adapters.reminders import RemindersAdapter
@@ -222,7 +217,6 @@ def test_reminder_lists_enumerate():
     assert default_name in [p.summary for p in ptrs]
 
 
-@pytest.mark.integration
 def test_calendars_enumerate():
     """Parity row 9: enumerate calendars; the default is discoverable by name."""
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
@@ -234,7 +228,6 @@ def test_calendars_enumerate():
     assert default_name in [p.summary for p in ptrs]
 
 
-@pytest.mark.integration
 def test_recurring_event_update_targets_one_occurrence(created):
     """#8: editing by an occurrence's pointer id changes only THAT occurrence.
 
@@ -312,7 +305,6 @@ def test_recurring_event_update_targets_one_occurrence(created):
     assert all("EDITED" not in t for t in titles_on(days[2]))  # day 2 untouched
 
 
-@pytest.mark.integration
 def test_recurring_update_omitted_span_raises_and_does_not_write(created):
     """#51: an update to a recurring occurrence with NO span must raise SpanRequired and
     leave the series untouched (no silent whole-series rewrite)."""
@@ -375,7 +367,6 @@ def test_recurring_update_omitted_span_raises_and_does_not_write(created):
     assert still and all("SHOULD-NOT-STICK" not in t for t in still)
 
 
-@pytest.mark.integration
 def test_recurring_update_future_events_propagates(created):
     """#51: span='future-events' edits this occurrence AND all later ones, leaving
     earlier occurrences untouched."""
@@ -448,7 +439,6 @@ def test_recurring_update_future_events_propagates(created):
     assert any("EDITED" in t for t in titles_on(days[2]))  # later propagated
 
 
-@pytest.mark.integration
 def test_contacts_create_find_delete():
     """#15: osascript Contacts — create, find by name, delete (Automation TCC)."""
     from macos_apps_mcp.adapters.contacts import ContactsAdapter
@@ -478,7 +468,6 @@ def test_contacts_create_find_delete():
         )
 
 
-@pytest.mark.integration
 def test_mail_search_runs():
     """#18: Mail subject search via osascript runs (Automation TCC)."""
     from macos_apps_mcp.adapters.mail import MailAdapter
@@ -489,7 +478,6 @@ def test_mail_search_runs():
     )  # runs without error (likely empty) — validates the path
 
 
-@pytest.mark.integration
 def test_notes_search_finds_created(tmp_path, monkeypatch):
     """#19/#60: Notes title search finds a just-created note via the fresh-state
     AppleScript reader. The sqlite plane reflects the PERSISTED store, and Notes.app
@@ -531,7 +519,6 @@ def test_notes_search_finds_created(tmp_path, monkeypatch):
         )
 
 
-@pytest.mark.integration
 def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypatch):
     """#64 end-to-end: a note titled with an accent + a curly apostrophe is found by a
     plain-ASCII query. Exercised via the folded AppleScript fallback (both backends fold
@@ -579,7 +566,6 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
         )
 
 
-@pytest.mark.integration
 def test_safari_tabs_runs():
     """#22: Safari open-tabs read via osascript runs (Automation TCC)."""
     from macos_apps_mcp.adapters.safari import SafariAdapter
@@ -587,7 +573,6 @@ def test_safari_tabs_runs():
     assert isinstance(SafariAdapter().get_tabs(), list)
 
 
-@pytest.mark.integration
 def test_photos_search_runs():
     """#20: Photos search via osascript runs (Automation TCC)."""
     from macos_apps_mcp.adapters.photos import PhotosAdapter
@@ -597,7 +582,6 @@ def test_photos_search_runs():
     )
 
 
-@pytest.mark.integration
 def test_messages_chats_runs():
     """#21: Messages chat list via osascript runs (Automation TCC)."""
     from macos_apps_mcp.adapters.messages import MessagesAdapter
@@ -605,7 +589,6 @@ def test_messages_chats_runs():
     assert isinstance(MessagesAdapter().get_chats(), list)
 
 
-@pytest.mark.integration
 def test_shortcuts_list_runs():
     """#22: `shortcuts list` CLI enumerates shortcuts (no TCC)."""
     from macos_apps_mcp.adapters.shortcuts import ShortcutsAdapter
@@ -614,7 +597,6 @@ def test_shortcuts_list_runs():
     assert isinstance(ptrs, list) and all(p.id and p.summary for p in ptrs)
 
 
-@pytest.mark.integration
 def test_run_shortcut_missing_raises():
     """run_shortcut on an unknown name surfaces a clear RuntimeError."""
     from macos_apps_mcp.adapters.shortcuts import ShortcutsAdapter
@@ -623,7 +605,6 @@ def test_run_shortcut_missing_raises():
         ShortcutsAdapter().run_shortcut("macos-apps-mcp-no-such-shortcut-zzz")
 
 
-@pytest.mark.integration
 def test_safari_open_creates_tab():
     """open_url adds a tab whose URL we can find, then we close it."""
     from macos_apps_mcp.adapters.safari import SafariAdapter
@@ -650,7 +631,6 @@ def test_safari_open_creates_tab():
         )
 
 
-@pytest.mark.integration
 def test_event_create_all_day(created):
     """all_day=True creates an all-day event (the summary renders it specially)."""
     from datetime import datetime, timedelta
@@ -674,7 +654,6 @@ def test_event_create_all_day(created):
     assert "all day" in p.summary
 
 
-@pytest.mark.integration
 def test_reminder_create_with_priority(created):
     """priority is written through and reads back off the stored EKReminder."""
     from macos_apps_mcp.adapters.reminders import RemindersAdapter
@@ -689,7 +668,6 @@ def test_reminder_create_with_priority(created):
     assert prio == 1
 
 
-@pytest.mark.integration
 def test_event_create_recurring_series(created):
     """create_event with an RRULE makes a real repeating series (span=FutureEvents).
 
@@ -727,7 +705,6 @@ def test_event_create_recurring_series(created):
     assert occ_on(start + timedelta(days=3)) == []  # COUNT=3 stops the series
 
 
-@pytest.mark.integration
 def test_reminder_create_recurring(created):
     """A recurring reminder stores a rule (and requires a due date)."""
     from datetime import datetime, timedelta
@@ -751,7 +728,6 @@ def test_reminder_create_recurring(created):
     assert rules and len(rules) == 1
 
 
-@pytest.mark.integration
 def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     """Create a note whose body contains newlines, find it via get_all, hydrate its
     body (verifying the embedded newlines survive the control-char framing), then
@@ -817,7 +793,6 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
                 notes.delete(p.id)
 
 
-@pytest.mark.integration
 def test_create_note_returns_usable_id():
     """T3 (#66): create writes via osascript and returns the note's stable x-coredata
     id — immediately usable with get_bodies (no lazy-flush delay unlike the sqlite
@@ -836,7 +811,6 @@ def test_create_note_returns_usable_id():
     adapter.delete(p.id)
 
 
-@pytest.mark.integration
 def test_update_note_preserves_id():
     """T4 (#66): update full-replaces a note's body by id, and the id (Z_PK-backed)
     survives the edit — the returned id must equal the one passed in. Needs Automation
@@ -855,7 +829,6 @@ def test_update_note_preserves_id():
     adapter.delete(created.id)
 
 
-@pytest.mark.integration
 def test_event_move_to_other_calendar_reresolves(created):
     """C-IDCHURN (variant c): a cross-calendar move must return the POST-save pointer —
     the store may re-issue the item identifier when an event changes calendars, so the
@@ -915,7 +888,6 @@ def test_event_move_to_other_calendar_reresolves(created):
     assert run_native(_resolved_calendar) == target
 
 
-@pytest.mark.integration
 def test_reminder_move_between_lists_reresolves(created):
     """C-REMIDMOVE: moving a reminder to another list must return the POST-save id —
     a list move may re-issue the identifier, so update_reminder re-keys its refetch
@@ -962,7 +934,6 @@ def test_reminder_move_between_lists_reresolves(created):
     assert run_native(_resolved_list) == target
 
 
-@pytest.mark.integration
 def test_recurring_reminder_update_requires_recurrence(created):
     """User decision 1: updating a repeating reminder with recurrence omitted is
     REFUSED (RecurrenceRequired, rule intact — a rename can't silently kill the
@@ -1021,7 +992,7 @@ def test_recurring_reminder_update_requires_recurrence(created):
 # intermediate below) is killed, the watcher must os._exit us within ~1-2s.
 _ORPHAN_CHILD = """
 import os, sys, time
-from macos_apps_mcp.runtime import install_lifecycle_guards
+from macos_apps_mcp.lifecycle import install_lifecycle_guards
 install_lifecycle_guards()
 # print our pid AFTER the guards are installed — this is the test's readiness signal, so
 # the parent is only killed once we've captured our launching-parent pid. (If the test
@@ -1051,7 +1022,6 @@ def _alive(pid: int) -> bool:
         return True  # exists but not ours to signal — still alive
 
 
-@pytest.mark.integration
 def test_orphaned_server_exits_within_5s():
     inter_src = _ORPHAN_INTERMEDIATE.format(child=_ORPHAN_CHILD)
     inter = subprocess.Popen(
@@ -1076,7 +1046,6 @@ def test_orphaned_server_exits_within_5s():
 # --- Messages content via chat.db (#59) — needs Full Disk Access ---------------------
 
 
-@pytest.mark.integration
 def test_messages_search_reads_real_store():
     """Real chat.db: a broad search returns snippet Pointers obeying the contract. Needs
     Full Disk Access; skips cleanly if the store has no messages. Never mutates."""
@@ -1089,7 +1058,6 @@ def test_messages_search_reads_real_store():
         assert p.id and isinstance(p.summary, str)
 
 
-@pytest.mark.integration
 def test_attributedbody_decoder_matches_foundation():
     """The ONLY real proof the hand-rolled typedstream decoder matches Apple's byte
     layout: decode real attributedBody blobs with our decoder AND with Apple's own
@@ -1155,7 +1123,6 @@ _RECENTLY_DELETED_IDS = """on run argv
 end run"""
 
 
-@pytest.mark.integration
 def test_notes_sqlite_is_subset_of_applescript_real_store():
     """The real schema validation: every note the sqlite plane returns must be one the
     AppleScript reader also knows (same x-coredata id) — proves the NoteStore
@@ -1193,7 +1160,6 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     )
 
 
-@pytest.mark.integration
 def test_note_body_decoder_matches_applescript_real_store():
     """The real validation for the ZDATA gzip+protobuf body decoder. Decodes the real
     ZDATA blob DIRECTLY (not via get_bodies, which would gap-fill to AppleScript and
@@ -1252,7 +1218,6 @@ def test_note_body_decoder_matches_applescript_real_store():
 # --- Mail id-first reads (#61) — needs Automation access -----------------------------
 
 
-@pytest.mark.integration
 def test_mail_reads_return_id_triple_real_inbox():
     """Real inbox: every read returns the stable RFC822 message-id and a well-formed
     message:// deeplink. Needs Automation access for Mail; skips if no match. (Actually
@@ -1280,7 +1245,6 @@ def test_mail_reads_return_id_triple_real_inbox():
         assert _re.fullmatch(r"message://%3C.+%3E", p.deeplink), p.deeplink
 
 
-@pytest.mark.integration
 def test_mail_create_draft_opens_and_never_sends():
     """create_draft opens a real draft and NEVER sends. Uses an unroutable
     example.invalid recipient (RFC 2606) as belt-and-suspenders, verifies the draft
@@ -1316,7 +1280,6 @@ def test_mail_create_draft_opens_and_never_sends():
         )
 
 
-@pytest.mark.integration
 def test_list_attachments_finds_draft_attachment(created):
     """#45: create a draft with an attachment, list it from Drafts, confirm it appears.
     Needs Automation access for Mail."""
@@ -1364,7 +1327,6 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
-@pytest.mark.integration
 def test_mail_reply_opens_threaded_draft_and_never_sends():
     """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
     message) with our body; delete it; confirm nothing sent. Threading headers can
@@ -1402,7 +1364,6 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
         )
 
 
-@pytest.mark.integration
 def test_mail_needs_response_shape():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
@@ -1413,7 +1374,6 @@ def test_mail_needs_response_shape():
         assert p.deeplink.startswith("message://")
 
 
-@pytest.mark.integration
 def test_mail_awaiting_reply_shape():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
@@ -1427,7 +1387,6 @@ def test_mail_awaiting_reply_shape():
         )
 
 
-@pytest.mark.integration
 def test_mail_awaiting_reply_rejects_bad_days():
     import pytest as _pytest
 
@@ -1437,7 +1396,6 @@ def test_mail_awaiting_reply_rejects_bad_days():
         MailAdapter().get_awaiting_reply(days=0)
 
 
-@pytest.mark.integration
 def test_audit_records_update_with_before(tmp_path, monkeypatch):
     """#67: driving a real write through the MCP Client records an audit entry with
     before/after pointers — proves the middleware end-to-end, not just its unit

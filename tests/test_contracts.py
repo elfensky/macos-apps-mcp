@@ -115,6 +115,12 @@ def test_recurrence_rejects_count_and_until_together():
         Recurrence.from_rrule("FREQ=DAILY;COUNT=5;UNTIL=2026-12-31")
 
 
+def test_recurrence_direct_construction_rejects_count_and_until():
+    # the invariant lives on the dataclass, not only in the RRULE parser.
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Recurrence(frequency="daily", count=5, until=datetime(2026, 12, 31))
+
+
 def test_recurrence_rejects_nonpositive_count():
     # COUNT must be validated like INTERVAL — a zero/negative count isn't a valid series
     with pytest.raises(ValueError, match="COUNT must be"):

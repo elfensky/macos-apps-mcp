@@ -5,8 +5,6 @@ from __future__ import annotations
 import pytest
 
 from macos_apps_mcp.adapters.contacts import (
-    _FIELD,
-    _RECORD,
     MAX_CONTACTS,
     ContactsAdapter,
     _deeplink,
@@ -16,6 +14,7 @@ from macos_apps_mcp.adapters.contacts import (
 )
 from macos_apps_mcp.contracts import ContactData, Pointer
 from macos_apps_mcp.errors import VerificationFailed
+from macos_apps_mcp.text import RS, US
 
 
 def test_get_pointers_passes_cap_into_applescript(monkeypatch):
@@ -66,7 +65,7 @@ def test_deeplink_scheme():
 
 
 def _rec(*fields: str) -> str:
-    return _FIELD.join(fields) + _RECORD
+    return US.join(fields) + RS
 
 
 def test_parse_records():
@@ -93,7 +92,7 @@ def test_parse_three_field_record_still_works():
 
 
 def test_parse_skips_blank_records():
-    assert _parse(_RECORD + "   " + _RECORD) == []
+    assert _parse(RS + "   " + RS) == []
 
 
 def test_parse_tolerates_tab_and_newline_in_field():
@@ -113,7 +112,7 @@ def test_parse_tolerates_tab_and_newline_in_field():
 
 
 def _verify_raw(fn: str, ln: str, org: str) -> str:
-    return _FIELD.join((fn, ln, org))
+    return US.join((fn, ln, org))
 
 
 def test_verify_contact_passes_on_match():

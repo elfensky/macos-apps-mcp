@@ -163,24 +163,74 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     return NativeError(f"osascript failed: {detail}")
 
 
-# In-flight osascript children, tracked so exit paths (atexit / SIGTERM / orphan
-# watcher, #56) can terminate them — an orphaned synchronous Apple Event pinned Mail's
-# main thread indefinitely (patrickfreyer #58). The serialized worker means at most one
-# at a time, but a set + lock is robust and cheap. The AppleScript-level `with timeout`
-# in each template is the second line of defense: it self-terminates a hung child even
-# if the Python side died first and never got to call terminate().
+# In-flight children (osascript, the shortcuts CLI), tracked so exit paths (atexit /
+# SIGTERM / orphan watcher, #56) can terminate them — an orphaned synchronous Apple
+# Event pinned Mail's main thread indefinitely (patrickfreyer #58). The serialized
+# worker means at most one at a time, but a set + lock is robust and cheap. The
+# AppleScript-level `with timeout` in each template is the second line of defense: it
+# self-terminates a hung child even if the Python side died first and never got to call
+# terminate().
 _children: set[subprocess.Popen] = set()
 _children_lock = threading.Lock()
 
 
 def terminate_children() -> None:
-    """Terminate any in-flight osascript child. Idempotent; safe from any thread and at
+    """Terminate any in-flight tracked child. Idempotent; safe from any thread and at
     shutdown (an already-dead child raises OSError on terminate, ignored)."""
     with _children_lock:
         children = list(_children)
     for proc in children:
         with contextlib.suppress(OSError):
             proc.terminate()
+
+
+@contextlib.contextmanager
+def track_child(proc: subprocess.Popen):
+    """Register ``proc`` in the #56 child registry for the duration of the block, so
+    every exit path (atexit / SIGTERM / orphan watcher — lifecycle.py) can terminate it.
+    The ONE seam for subprocess lifetime: every child a module spawns (osascript here,
+    the shortcuts CLI via ``tracked_run``) must run inside it."""
+    with _children_lock:
+        _children.add(proc)
+    try:
+        yield proc
+    finally:
+        with _children_lock:
+            _children.discard(proc)
+
+
+def tracked_run(
+    cmd: list[str],
+    *,
+    timeout: float,
+    input: str | None = None,  # shadows the builtin to mirror subprocess.run's keyword
+    errors: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run(capture_output=True, text=True)`` with the child registered in
+    the #56 cleanup registry (``track_child``) while it runs.
+
+    ``subprocess.run`` never exposes its live ``Popen``, so a child spawned through it
+    escapes the exit-path cleanup — an orphaned server could leave e.g. a ``shortcuts
+    run`` in flight forever. Adapters that shell out to a CLI use this instead. Raises
+    ``subprocess.TimeoutExpired`` (the child is killed and reaped first) exactly like
+    ``run(timeout=...)`` so callers translate it to their own typed timeout.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE if input is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors=errors,
+    )
+    with track_child(proc):
+        try:
+            out, err = proc.communicate(input=input, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()  # reap so we don't leak a zombie
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) -> str:
@@ -212,9 +262,7 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
             stderr=subprocess.PIPE,
             text=True,
         )
-        with _children_lock:
-            _children.add(proc)
-        try:
+        with track_child(proc):
             try:
                 out, err = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired as e:
@@ -226,9 +274,6 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
                     "dismiss any stuck prompt, then retry with a narrower query. Do "
                     "not retry immediately."
                 ) from e
-        finally:
-            with _children_lock:
-                _children.discard(proc)
         if proc.returncode != 0:
             raise _classify_osascript_failure(err)
         # debug telemetry (#56): opt-in via logging level, zero cost otherwise.

@@ -289,11 +289,11 @@ class MessagesAdapter:
             raise ValueError("messages_search needs a search term (got an empty query)")
         like = f"%{_escape_like(q)}%"
 
-        def run(conn):
+        def read(conn):
             rows = conn.execute(_SEARCH_SQL, (like, like, _clamp(limit))).fetchall()
             return [_message_pointer(r) for r in rows]
 
-        return read_via_sqlite(CHAT_DB, _FINGERPRINT, run)  # no fallback → FDA raises
+        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read)  # no fallback → FDA raises
 
     def messages_with(
         self, address: str, country: str | None = None, limit: int = MAX_MESSAGES
@@ -312,11 +312,11 @@ class MessagesAdapter:
             raise ValueError("messages_with needs a phone number or email to match")
         sql = _WITH_SQL.format(placeholders=",".join("?" for _ in variants))
 
-        def run(conn):
+        def read(conn):
             rows = conn.execute(sql, (*variants, _clamp(limit))).fetchall()
             return [_message_pointer(r) for r in rows]
 
-        return read_via_sqlite(CHAT_DB, _FINGERPRINT, run)  # no fallback → FDA raises
+        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read)  # no fallback → FDA raises
 
     def message_body(self, guid: str) -> str:
         """Full text of ONE message by id (chat.db, read-only), hygiene-budgeted.
@@ -329,10 +329,10 @@ class MessagesAdapter:
         if not g:
             raise ValueError("message_body needs a message id (guid)")
 
-        def run(conn):
+        def read(conn):
             return conn.execute(_BODY_SQL, (g,)).fetchone()
 
-        row = read_via_sqlite(CHAT_DB, _FINGERPRINT, run)  # no fallback → FDA raises
+        row = read_via_sqlite(CHAT_DB, _FINGERPRINT, read)  # no fallback → FDA raises
         if row is None:
             raise ValueError(f"no message with id {g!r}")
         text, blob = row

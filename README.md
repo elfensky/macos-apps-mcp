@@ -4,7 +4,7 @@ One consolidated [MCP](https://modelcontextprotocol.io) server for native macOS 
 **Calendar & Reminders** read/write, **Messages & Notes** content search over the native
 stores, id-first **Mail** with draft-and-open replies, plus read-only context and a few
 actions across Contacts, Photos, Safari, and Shortcuts. Python +
-[FastMCP 2.0](https://github.com/PrefectHQ/fastmcp), managed with
+[FastMCP](https://github.com/PrefectHQ/fastmcp), managed with
 [uv](https://docs.astral.sh/uv/).
 
 Replaces the pile of Apple MCP servers a life-cockpit otherwise juggles with a single modular
@@ -85,6 +85,8 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 | `mail` | subject-OR-sender substring | inbox matches; id = stable RFC822 message-id, `message://` deeplink |
 | `mail_body` | id | one message's plaintext, bounded + truncation-marked |
 | `mail_attachments` | mailbox (`inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
+| `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
+| `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
 | `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
 
@@ -104,6 +106,8 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 | `notes` | title/snippet substring | matching notes (id + snippet); diacritic- & smart-punctuation-insensitive |
 | `notes_all` | — | every live note (id + "Account / Folder" + snippet), Recently Deleted excluded |
 | `note_bodies` | ids (≤ 50) | opt-in plaintext hydration → `[{id, body}]` |
+| `create_note` | title, body, optional `folder` name | returns the **stable x-coredata id**; an unknown/ambiguous folder is refused, not guessed |
+| `update_note` | id, title, body | full replace of title+body by id; the stable id is preserved and verified after write |
 | `delete_note` | id, `expect_title`, `dry_run` | moves to Recently Deleted; `dry_run` previews |
 
 ### Other read-only context
@@ -114,7 +118,9 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 | `photos` | search string | media (filename); matches the Photos search field |
 | `safari_tabs` | — | every open tab (url + title) |
 | `shortcuts` | name substring (empty = all) | the user's Shortcuts; id = stable UUID, `shortcuts://` deeplink |
-| `ping` / `now` / `doctor` | — | health check / time / permission diagnostics |
+| `ping` / `now` / `doctor` | — (`doctor` takes optional `request=True` to trigger permission prompts) | health check / time / permission diagnostics |
+| `audit` | optional `since` (ISO datetime) | recent write audit entries (newest first) — what macos-apps-mcp changed, with before/after pointers (enough to undo by hand) |
+| `usage` | — | per-tool call counts + the never-used list, for pruning rarely-used tools |
 
 ### Actions (writes)
 
