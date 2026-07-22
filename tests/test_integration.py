@@ -1402,6 +1402,41 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
 
 
 @pytest.mark.integration
+def test_mail_needs_response_shape():
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    ptrs = MailAdapter().get_needs_response()
+    assert isinstance(ptrs, list) and len(ptrs) <= 25
+    for p in ptrs:
+        assert p.id and p.reason in {"flagged", "unread-direct", "unanswered-direct"}
+        assert p.deeplink.startswith("message://")
+
+
+@pytest.mark.integration
+def test_mail_awaiting_reply_shape():
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    ptrs = MailAdapter().get_awaiting_reply(days=3)
+    assert isinstance(ptrs, list) and len(ptrs) <= 25
+    for p in ptrs:
+        assert (
+            p.id
+            and p.reason == "awaiting-reply"
+            and p.deeplink.startswith("message://")
+        )
+
+
+@pytest.mark.integration
+def test_mail_awaiting_reply_rejects_bad_days():
+    import pytest as _pytest
+
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    with _pytest.raises(ValueError):
+        MailAdapter().get_awaiting_reply(days=0)
+
+
+@pytest.mark.integration
 def test_audit_records_update_with_before(tmp_path, monkeypatch):
     """#67: driving a real write through the MCP Client records an audit entry with
     before/after pointers — proves the middleware end-to-end, not just its unit

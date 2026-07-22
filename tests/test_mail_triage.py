@@ -6,6 +6,9 @@ from macos_apps_mcp.adapters.mail import (
     _classify_awaiting_reply,
     _classify_needs_response,
     _norm_mid,
+    _parse_my_addrs,
+    _parse_sent_records,
+    _parse_triage_records,
     _referenced_ids,
 )
 
@@ -128,3 +131,60 @@ def test_awaiting_reply_oldest_first():
     recs = [_sent(id="<a@x>", secs_ago=4 * DAY), _sent(id="<b@x>", secs_ago=9 * DAY)]
     out = _classify_awaiting_reply(recs, set(), days=3)
     assert [p.id for p in out] == ["<b@x>", "<a@x>"]  # most overdue first
+
+
+US = "\x1f"
+RS = "\x1e"
+
+
+def test_parse_triage_records():
+    raw = (
+        US.join(
+            [
+                "<m1@x>",
+                "Hi",
+                "bob@y.com",
+                "me@x.com,also@x.com",
+                "120",
+                "false",
+                "true",
+                "false",
+            ]
+        )
+        + RS
+    )
+    recs = _parse_triage_records(raw)
+    assert recs == [
+        {
+            "id": "<m1@x>",
+            "subject": "Hi",
+            "sender": "bob@y.com",
+            "to_addrs": ["me@x.com", "also@x.com"],
+            "secs_ago": 120,
+            "was_replied_to": False,
+            "read": True,
+            "flagged": False,
+        }
+    ]
+
+
+def test_parse_triage_skips_malformed():
+    assert _parse_triage_records("") == []
+    assert _parse_triage_records("only" + US + "two" + RS) == []  # too few fields
+
+
+def test_parse_sent_records():
+    raw = US.join(["<s1@x>", "Proposal", "bob@y.com,carol@z.com", "432000"]) + RS
+    assert _parse_sent_records(raw) == [
+        {
+            "id": "<s1@x>",
+            "subject": "Proposal",
+            "recipient_addrs": ["bob@y.com", "carol@z.com"],
+            "secs_ago": 432000,
+        }
+    ]
+
+
+def test_parse_my_addrs_lowercases():
+    addrs = _parse_my_addrs("Me@X.com" + US + "you@y.com" + US)
+    assert addrs == {"me@x.com", "you@y.com"}
