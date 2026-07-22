@@ -21,17 +21,7 @@ where they exist; one adapter per app.
 - **0.3.0 — Trust core** — typed errors, `doctor`, verify-after-write, `now`, EKSpan · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/2)
 - **0.4.0 — Safety rails** — output hygiene, dry-run + batch caps, untrusted-data notice, id-only writes, tool annotations · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/3)
 - **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4)
-
-## 0.7.0 — Differentiators ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5))
-
-Things **nobody** in the survey ships — greenfield value, not parity.
-
-| Issue | What |
-|---|---|
-| [#65](https://github.com/elfensky/macos-apps-mcp/issues/65) | `free_busy` availability tool |
-| [#66](https://github.com/elfensky/macos-apps-mcp/issues/66) | Notes create/update with stable ids |
-| [#67](https://github.com/elfensky/macos-apps-mcp/issues/67) | JSONL write audit trail with undo info |
-| [#68](https://github.com/elfensky/macos-apps-mcp/issues/68) | Mail triage reads — awaiting-reply / needs-response as ranked Pointers |
+- **0.7.0 — Differentiators** — `free_busy` availability, Notes create/update with stable ids, JSONL write audit trail + `audit()`, Mail triage (needs-response / awaiting-reply as ranked Pointers) · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5)
 
 ## 0.8.0 — New adapters & expansion ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6))
 
