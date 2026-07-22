@@ -11,7 +11,7 @@ permission to *that* app.
 Read-only and prompt-free by default: EventKit status is *read* (never requested), and
 the Automation probes — which can surface a one-time consent dialog for a never-used
 app — run only when called with ``request=True``. Every probe is classified through the
-shared error taxonomy (runtime.py, #47); a denied surface is *reported*, never raised —
+shared error taxonomy (errors.py, #47); a denied surface is *reported*, never raised —
 diagnosis is the one place a swallowed error is correct, because it re-emerges as an
 explicit report line carrying the same directive.
 """
@@ -25,7 +25,8 @@ from pathlib import Path
 
 import EventKit as EK
 
-from .runtime import NativeError, request_access_each, run_native, run_osascript
+from .errors import PRIVACY_PANE, NativeError
+from .runtime import request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 _AUTOMATION_APPS = ("Mail", "Notes", "Contacts", "Photos", "Safari", "Messages")
@@ -59,8 +60,6 @@ _EK_ENTITIES = (
     ("calendar", EK.EKEntityTypeEvent, "Calendars"),
     ("reminders", EK.EKEntityTypeReminder, "Reminders"),
 )
-
-_PRIVACY = "System Settings → Privacy & Security"
 
 
 def _surface(
@@ -104,7 +103,7 @@ def _eventkit_surfaces(request: bool) -> list[dict]:
             None
             if ok
             else (
-                f"Grant full access in {_PRIVACY} → {pane}, then restart "
+                f"Grant full access in {PRIVACY_PANE} → {pane}, then restart "
                 "macos-apps-mcp."
             )
         )
@@ -162,8 +161,9 @@ def _fda_surface() -> dict:
             "fda",
             False,
             "denied",
-            f"Grant Full Disk Access in {_PRIVACY} → Full Disk Access to the app that "
-            "launched macos-apps-mcp, then restart it (needed for sqlite read planes).",
+            f"Grant Full Disk Access in {PRIVACY_PANE} → Full Disk Access to the "
+            "app that launched macos-apps-mcp, then restart it (needed for sqlite "
+            "read planes).",
         )
     except FileNotFoundError:
         return _surface(

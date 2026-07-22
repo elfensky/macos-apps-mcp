@@ -9,7 +9,7 @@ import EventKit as EK
 import pytest
 
 from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence
-from macos_apps_mcp.runtime import (
+from macos_apps_mcp.errors import (
     AccessDenied,
     AmbiguousTarget,
     AppNotRunning,
@@ -23,15 +23,18 @@ from macos_apps_mcp.runtime import (
     SpanRequired,
     VerificationFailed,
     WriteRefused,
+    require_batch_within,
+    resolve_container,
+    verify_persisted,
+)
+from macos_apps_mcp.runtime import (
     _classify_osascript_failure,
-    _decide,
+    _require_full_access,
     due_components,
     epoch_nsdate,
     from_nsdate,
     persisted_recurrence_signature,
     recurrence_signature,
-    require_batch_within,
-    resolve_container,
     rrule_text,
     run_native,
     run_native_async,
@@ -39,20 +42,19 @@ from macos_apps_mcp.runtime import (
     store,
     to_nsdate,
     to_recurrence_rule,
-    verify_persisted,
 )
 
 
-def test_decide_passes_on_full_access():
-    _decide(3)  # EKAuthorizationStatusFullAccess — returns without raising
+def test_require_full_access_passes_on_full_access():
+    _require_full_access(3)  # EKAuthorizationStatusFullAccess — returns without raising
 
 
 @pytest.mark.parametrize(
     "status", [0, 1, 2, 4]
 )  # notDetermined, restricted, denied, writeOnly
-def test_decide_raises_on_anything_else(status):
+def test_require_full_access_raises_on_anything_else(status):
     with pytest.raises(AccessDenied, match="System Settings"):
-        _decide(status)
+        _require_full_access(status)
 
 
 def test_store_rejects_off_worker_calls():

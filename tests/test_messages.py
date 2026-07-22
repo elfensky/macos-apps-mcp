@@ -25,7 +25,7 @@ from macos_apps_mcp.adapters.messages import (
     _resolve_calling_code,
 )
 from macos_apps_mcp.contracts import Pointer
-from macos_apps_mcp.runtime import FullDiskAccessDenied, SchemaDrift
+from macos_apps_mcp.errors import FullDiskAccessDenied, SchemaDrift
 
 # --- chat list (osascript) — unchanged -----------------------------------------------
 

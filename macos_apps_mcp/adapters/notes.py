@@ -21,15 +21,13 @@ import zlib
 from pathlib import Path
 
 from ..contracts import NoteData, Pointer
-from ..runtime import (
+from ..errors import (
     NativeError,
     OutputOverflow,
     VerificationFailed,
-    body_file,
-    read_via_sqlite,
-    run_osascript,
     verify_persisted,
 )
+from ..runtime import body_file, read_via_sqlite, run_osascript
 from ..text import clean_body, clean_summary, fold_text, norm_text
 
 MAX_NOTES = 25

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from macos_apps_mcp.runtime import NativeError, OutputOverflow
+from macos_apps_mcp.errors import NativeError, OutputOverflow
 from macos_apps_mcp.text import (
     BODY_HARD_MAX,
     BODY_MAX,

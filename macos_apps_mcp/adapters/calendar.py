@@ -12,21 +12,23 @@ from datetime import datetime, timedelta
 import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer, parse_datetime
-from ..runtime import (
+from ..errors import (
     SpanRequired,
     VerificationFailed,
+    refused_write,
+    resolve_container,
+    verify_persisted,
+)
+from ..runtime import (
     container_id,
     epoch_nsdate,
     from_nsdate,
     persisted_recurrence_signature,
     recurrence_signature,
-    refused_write,
-    resolve_container,
     run_native,
     store,
     to_nsdate,
     to_recurrence_rule,
-    verify_persisted,
 )
 from ..text import clean_summary, norm_text
 

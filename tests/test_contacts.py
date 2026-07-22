@@ -15,7 +15,7 @@ from macos_apps_mcp.adapters.contacts import (
     _verify_contact,
 )
 from macos_apps_mcp.contracts import ContactData, Pointer
-from macos_apps_mcp.runtime import VerificationFailed
+from macos_apps_mcp.errors import VerificationFailed
 
 
 def test_get_pointers_passes_cap_into_applescript(monkeypatch):

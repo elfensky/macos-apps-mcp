@@ -274,7 +274,7 @@ def test_get_pointers_nonzero_raises_native_error(monkeypatch):
         "macos_apps_mcp.adapters.shortcuts.subprocess.run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
     )
-    from macos_apps_mcp.runtime import NativeError
+    from macos_apps_mcp.errors import NativeError
 
     with pytest.raises(NativeError, match="shortcuts CLI failed"):
         ShortcutsAdapter().get_pointers()
@@ -285,7 +285,7 @@ def test_get_pointers_timeout_raises_native_timeout(monkeypatch):
         raise subprocess.TimeoutExpired(cmd, 10)
 
     monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", boom)
-    from macos_apps_mcp.runtime import NativeTimeout
+    from macos_apps_mcp.errors import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
         ShortcutsAdapter().get_pointers()
@@ -296,7 +296,7 @@ def test_run_shortcut_timeout_raises_native_timeout(monkeypatch):
         raise subprocess.TimeoutExpired(cmd, 30)
 
     monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.subprocess.run", boom)
-    from macos_apps_mcp.runtime import NativeTimeout
+    from macos_apps_mcp.errors import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
         ShortcutsAdapter().run_shortcut("Slow")

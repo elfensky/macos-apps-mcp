@@ -7,7 +7,9 @@ ONE place with one uniform rule set:
 - **verify normalization** (#49): ``norm_text`` for NFC/LF-insensitive write-verify
   diffs;
 - **read matching** (#64): ``fold_text`` for case/diacritic/smart-punctuation-
-  insensitive name/title search.
+  insensitive name/title search;
+- **wire framing** (#68): the canonical US/RS separators + strip/split contract for
+  AppleScript payloads.
 
 No native imports — everything unit-tests with plain strings (tests/test_text.py).
 """
@@ -17,7 +19,38 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .runtime import OutputOverflow
+from .errors import OutputOverflow
+
+# --- US/RS wire-framing contract (#68) -----------------------------------------------
+# AppleScript templates emit fields joined with US (\x1f) and records joined with RS
+# (\x1e); every free-text field (subject, sender, note body, contact name) passes
+# through the stripFraming handler FIRST so a payload containing those bytes can't
+# desync parsing. This block is the protocol's ONE home — the separators, the one
+# AppleScript handler (prepended to every framed template), and the one Python splitter
+# (split_framed). No adapter may hard-code \x1f/\x1e or re-declare the handler: that
+# per-adapter scatter is exactly what caused the a6ce7fd subject-framing bug (the
+# subject path missed the strip the other fields had).
+US = "\x1f"  # unit separator — joins fields
+RS = "\x1e"  # record separator — joins records
+
+STRIP_FRAMING = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming"""
+
+
+def split_framed(raw: str) -> list[list[str]]:
+    """Split a US/RS-framed payload into records of fields, skipping blank records —
+    the single Python-side counterpart of the framing contract above."""
+    return [record.split(US) for record in raw.split(RS) if record.strip()]
 
 
 def norm_text(v) -> str | None:

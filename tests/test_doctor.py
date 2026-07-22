@@ -9,7 +9,7 @@ import json
 import pytest
 
 import macos_apps_mcp.doctor as doc
-from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
+from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
 
 def _boom_osascript(*args, **kwargs):

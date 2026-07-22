@@ -165,7 +165,7 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
     # the AppleScript guard raises on mismatch (via run_osascript → NativeError), just
     # as the real delete does — the preview must not swallow it into a "would delete".
     from macos_apps_mcp.adapters.notes import _DELETE
-    from macos_apps_mcp.runtime import NativeError
+    from macos_apps_mcp.errors import NativeError
 
     scripts = []
 
@@ -599,7 +599,7 @@ def test_get_bodies_foreign_uuid_id_not_mis_attributed(notestore, monkeypatch):
 
 def test_get_bodies_gap_fill_failure_keeps_sqlite_bodies(notestore, monkeypatch):
     # a gap-fill (AppleScript) failure must NOT discard bodies sqlite already decoded.
-    from macos_apps_mcp.runtime import AutomationDenied
+    from macos_apps_mcp.errors import AutomationDenied
 
     def boom(*a):
         raise AutomationDenied("Automation not granted")
@@ -671,7 +671,7 @@ def test_compose_html_empty_body():
 
 from macos_apps_mcp.adapters.notes import _verify_note  # noqa: E402
 from macos_apps_mcp.contracts import NoteData  # noqa: E402
-from macos_apps_mcp.runtime import VerificationFailed  # noqa: E402
+from macos_apps_mcp.errors import VerificationFailed  # noqa: E402
 
 
 def test_verify_note_passes_on_match():

@@ -20,8 +20,17 @@ import re
 from urllib.parse import quote
 
 from ..contracts import Pointer
-from ..runtime import NativeError, body_file, run_osascript
-from ..text import clean_body, clean_summary, sanitize_line
+from ..errors import NativeError
+from ..runtime import body_file, run_osascript
+from ..text import (
+    RS,
+    STRIP_FRAMING,
+    US,
+    clean_body,
+    clean_summary,
+    sanitize_line,
+    split_framed,
+)
 
 MAX_MAILS = 25
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
@@ -56,36 +65,12 @@ def system_mailbox_names(canonical: str) -> tuple[str, ...]:
     return _SYSTEM_MAILBOXES[key]
 
 
-# --- US/RS framing contract (#68) ------------------------------------------------
-# AppleScript emits fields joined with US (\x1f) and records joined with RS (\x1e);
-# every free-text field (subject, sender, date, attachment name) passes through the
-# stripFraming handler FIRST so a payload containing those bytes can't desync parsing.
-# This block is the protocol's single home: the separators, the one AppleScript
-# handler (prepended to every framed template), and the one Python splitter
-# (_split_framed). Nothing else in this file may hard-code \x1f/\x1e or re-declare
-# the handler — that scatter is exactly what caused the a6ce7fd subject-framing bug.
-US = "\x1f"  # unit separator — joins fields
-RS = "\x1e"  # record separator — joins records
-
-_STRIP_FRAMING = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming"""
-
-
-def _split_framed(raw: str) -> list[list[str]]:
-    """Split a US/RS-framed payload into records of fields, skipping blank records —
-    the single Python-side counterpart of the framing contract above."""
-    return [record.split(US) for record in raw.split(RS) if record.strip()]
-
+# US/RS framing contract (#68): separators, the shared stripFraming AppleScript
+# handler, and the split_framed splitter all live in text.py — the protocol's single
+# home (the a6ce7fd subject-framing bug came from per-file re-declarations). Nothing
+# in this file may hard-code \x1f/\x1e or re-declare the handler; every free-text
+# field (subject, sender, date, attachment name) passes through stripFraming FIRST so
+# a payload containing those bytes can't desync parsing.
 
 # Bounded host-side (#52): stop emitting after maxN matches instead of streaming the
 # whole match set back and slicing in Python. The `whose` filter still scans the inbox
@@ -169,13 +154,13 @@ end run"""
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
-# sender/date are stripped of raw framing bytes (the shared _STRIP_FRAMING handler)
+# sender/date are stripped of raw framing bytes (the shared STRIP_FRAMING handler)
 # before being joined, so a sender display name that happens to contain a literal
 # US/RS char can't desync reply()'s raw.partition(US) parsing. The body `c` is the
 # LAST field and needs no stripping for parse-safety (clean_body strips control
 # chars from it in _build_quote).
 _ORIGINAL = (
-    _STRIP_FRAMING
+    STRIP_FRAMING
     + """
 
 on run argv
@@ -242,12 +227,12 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 # the mailbox (bounded by maxN) rather than none — AppleScript's `contains ""` is
 # false, so that case is branched explicitly. Fields framed per the US/RS contract:
 # per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
-# subject and each attachment name pass through the shared _STRIP_FRAMING handler
+# subject and each attachment name pass through the shared STRIP_FRAMING handler
 # before being joined, so a message that happens to contain those control chars can't
 # desync the parser. Output capped at maxN records. with timeout (#56). All inputs via
 # argv (no interpolation).
 _ATTACHMENTS = (
-    _STRIP_FRAMING
+    STRIP_FRAMING
     + """
 
 on run argv
@@ -307,7 +292,7 @@ def _parse_attachments(raw: str) -> list[dict]:
     subject then (name, size, downloaded) triples. Malformed/partial trailing records
     are skipped."""
     out = []
-    for parts in _split_framed(raw):
+    for parts in split_framed(raw):
         summary = clean_summary(parts[0])
         atts = []
         rest = parts[1:]
@@ -335,7 +320,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
     sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
     Malformed/partial records are skipped; addresses lowercased."""
     out = []
-    for f in _split_framed(raw):
+    for f in split_framed(raw):
         if len(f) < 8:
             continue
         out.append(
@@ -356,7 +341,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
 def _parse_sent_records(raw: str) -> list[dict]:
     """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
     out = []
-    for f in _split_framed(raw):
+    for f in split_framed(raw):
         if len(f) < 4:
             continue
         out.append(
@@ -379,13 +364,13 @@ def _parse_my_addrs(raw: str) -> set[str]:
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
 # like commands; booleans coerce inside `&`). Subject passes through the shared
-# _STRIP_FRAMING handler before being joined, so a subject that happens to contain
+# STRIP_FRAMING handler before being joined, so a subject that happens to contain
 # those control chars can't desync the parser.
 # Addresses bare (extract address from / address of every to recipient, TID-joined)
 # — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
 # Verified on-device.
 _INBOX_TRIAGE = (
-    _STRIP_FRAMING
+    STRIP_FRAMING
     + """
 
 on run argv
@@ -418,10 +403,10 @@ end run"""
 )
 
 # _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
-# newest-first. Subject passes through the shared _STRIP_FRAMING handler before
+# newest-first. Subject passes through the shared STRIP_FRAMING handler before
 # being joined, same rationale as _INBOX_TRIAGE.
 _SENT_TRIAGE = (
-    _STRIP_FRAMING
+    STRIP_FRAMING
     + """
 
 on run argv
