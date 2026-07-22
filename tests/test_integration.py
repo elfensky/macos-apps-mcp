@@ -74,6 +74,23 @@ def test_calendar_read_week():
 
 
 @pytest.mark.integration
+def test_free_busy_on_device():
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+
+    run_native(request_access)
+    # a wide window; asserts structure + invariants, not specific events (device varies)
+    out = CalendarAdapter().get_free_busy("2026-07-20T00:00:00", "2026-07-21T00:00:00")
+    assert set(out) == {"busy", "free"}
+    for block in out["busy"] + out["free"]:
+        assert set(block) == {"start", "end"}
+        assert block["start"] < block["end"]
+    # busy and free never overlap and both stay inside the window
+    for b in out["busy"]:
+        for f in out["free"]:
+            assert b["end"] <= f["start"] or f["end"] <= b["start"]
+
+
+@pytest.mark.integration
 def test_reminder_create_update_complete(created):
     from datetime import datetime, timedelta
 
@@ -800,6 +817,44 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
 
 
 @pytest.mark.integration
+def test_create_note_returns_usable_id():
+    """T3 (#66): create writes via osascript and returns the note's stable x-coredata
+    id — immediately usable with get_bodies (no lazy-flush delay unlike the sqlite
+    read plane). Needs Automation access for Notes."""
+    from macos_apps_mcp.adapters.notes import NotesAdapter
+    from macos_apps_mcp.contracts import NoteData
+
+    adapter = NotesAdapter()
+    p = adapter.create(NoteData(title="mac-mcp itest note", body="line one\nline two"))
+    assert p.id.startswith("x-coredata://") and "/ICNote/p" in p.id
+    # the one platform assumption: id of the new note is the stable pN immediately
+    bodies = adapter.get_bodies([p.id])
+    assert bodies and bodies[0]["id"] == p.id
+    assert "line one" in bodies[0]["body"]
+    # cleanup
+    adapter.delete(p.id)
+
+
+@pytest.mark.integration
+def test_update_note_preserves_id():
+    """T4 (#66): update full-replaces a note's body by id, and the id (Z_PK-backed)
+    survives the edit — the returned id must equal the one passed in. Needs Automation
+    access for Notes."""
+    from macos_apps_mcp.adapters.notes import NotesAdapter
+    from macos_apps_mcp.contracts import NoteData
+
+    adapter = NotesAdapter()
+    created = adapter.create(NoteData(title="mac-mcp itest upd", body="before"))
+    updated = adapter.update(
+        created.id, NoteData(title="mac-mcp itest upd", body="after")
+    )
+    assert updated.id == created.id  # id survives a body edit
+    bodies = adapter.get_bodies([created.id])
+    assert "after" in bodies[0]["body"] and "before" not in bodies[0]["body"]
+    adapter.delete(created.id)
+
+
+@pytest.mark.integration
 def test_event_move_to_other_calendar_reresolves(created):
     """C-IDCHURN (variant c): a cross-calendar move must return the POST-save pointer —
     the store may re-issue the item identifier when an event changes calendars, so the
@@ -1079,6 +1134,26 @@ def test_attributedbody_decoder_matches_foundation():
 # --- Notes dual-backend (#60) — needs Full Disk Access -------------------------------
 
 
+# ids of notes AppleScript currently holds in Recently Deleted (across accounts) — the
+# subset check excuses these, since sqlite lags AppleScript's delete (see the test).
+_RECENTLY_DELETED_IDS = """on run argv
+  set theIds to {}
+  with timeout of 120 seconds
+  tell application "Notes"
+    repeat with acc in accounts
+      repeat with f in folders of acc
+        if name of f is "Recently Deleted" then
+          set theIds to theIds & (id of notes of f)
+        end if
+      end repeat
+    end repeat
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to linefeed
+  return theIds as text
+end run"""
+
+
 @pytest.mark.integration
 def test_notes_sqlite_is_subset_of_applescript_real_store():
     """The real schema validation: every note the sqlite plane returns must be one the
@@ -1086,26 +1161,32 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     schema/query/id-construction against Apple's real store, and that sqlite does NOT
     leak notes AppleScript hides (e.g. Recently Deleted). Needs Full Disk Access.
 
-    SUBSET, not equality: immutable=1 ignores the -wal, so a just-created note not yet
-    checkpointed is legitimately visible to AppleScript (live) but not sqlite — that
-    direction is accepted staleness, not a bug. A sqlite id ABSENT from AppleScript is
-    the real defect (a wrong id, or a leaked deleted note)."""
+    SUBSET, not equality — two accepted (non-bug) lags. A just-CREATED note is live to
+    AppleScript before the sqlite read sees it. A just-DELETED note keeps reading via
+    sqlite in its ORIGINAL folder while AppleScript already hides it: `delete` moves the
+    note to Recently Deleted in Notes.app's live view at once, but the store's Core Data
+    folder move lands lazily (on-device: ZFOLDER stays the old folder,
+    ZMARKEDFORDELETION=0, for a while after). So excuse any phantom AppleScript still
+    holds in Recently Deleted — proven delete-lag. A phantom in NEITHER the live
+    enumeration NOR Recently Deleted is the real defect: a wrong x-coredata id, or a
+    genuinely leaked note."""
     from macos_apps_mcp.adapters import notes as notes_mod
 
     adapter = notes_mod.NotesAdapter()
-    sqlite_ptrs = adapter.get_all()  # sqlite path (FDA granted)
-    applescript_ptrs = notes_mod._parse_all(  # the fallback path, called directly
-        notes_mod.run_osascript(notes_mod._LIST_ALL)
-    )
-    if not applescript_ptrs:
+    sqlite_ids = {p.id for p in adapter.get_all()}  # sqlite path (FDA granted)
+    applescript_ids = {
+        p.id for p in notes_mod._parse_all(notes_mod.run_osascript(notes_mod._LIST_ALL))
+    }
+    if not applescript_ids:
         pytest.skip("no notes in this Mac's library")
-    sqlite_ids = {p.id for p in sqlite_ptrs}
-    applescript_ids = {p.id for p in applescript_ptrs}
     assert sqlite_ids, "sqlite path returned no notes despite a non-empty library"
-    phantom = sqlite_ids - applescript_ids
-    assert (
-        not phantom
-    ), (  # a sqlite id AppleScript doesn't know = wrong id or leaked note
+    # ids AppleScript currently holds in Recently Deleted — a note mid-delete that
+    # sqlite hasn't caught up on lives here, and is NOT a leak.
+    recently_deleted = {
+        i for i in notes_mod.run_osascript(_RECENTLY_DELETED_IDS).splitlines() if i
+    }
+    phantom = sqlite_ids - applescript_ids - recently_deleted
+    assert not phantom, (  # in neither live nor trash = wrong id or genuine leak
         f"sqlite returned ids AppleScript does not: {phantom} — wrong x-coredata id "
         "construction or a leaked (e.g. Recently Deleted) note"
     )
@@ -1318,3 +1399,88 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
             "    end try\n  end tell\nend run",
             marker,
         )
+
+
+@pytest.mark.integration
+def test_mail_needs_response_shape():
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    ptrs = MailAdapter().get_needs_response()
+    assert isinstance(ptrs, list) and len(ptrs) <= 25
+    for p in ptrs:
+        assert p.id and p.reason in {"flagged", "unread-direct", "unanswered-direct"}
+        assert p.deeplink.startswith("message://")
+
+
+@pytest.mark.integration
+def test_mail_awaiting_reply_shape():
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    ptrs = MailAdapter().get_awaiting_reply(days=3)
+    assert isinstance(ptrs, list) and len(ptrs) <= 25
+    for p in ptrs:
+        assert (
+            p.id
+            and p.reason == "awaiting-reply"
+            and p.deeplink.startswith("message://")
+        )
+
+
+@pytest.mark.integration
+def test_mail_awaiting_reply_rejects_bad_days():
+    import pytest as _pytest
+
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    with _pytest.raises(ValueError):
+        MailAdapter().get_awaiting_reply(days=0)
+
+
+@pytest.mark.integration
+def test_audit_records_update_with_before(tmp_path, monkeypatch):
+    """#67: driving a real write through the MCP Client records an audit entry with
+    before/after pointers — proves the middleware end-to-end, not just its unit
+    seams."""
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.runtime as rt
+    import macos_apps_mcp.server as srv
+    from macos_apps_mcp.adapters.calendar import CalendarAdapter
+    from macos_apps_mcp.contracts import CalendarEventData
+
+    monkeypatch.setattr(rt, "state_dir", lambda: tmp_path)  # audit to a temp log
+    run_native(request_access)
+    a = CalendarAdapter()
+    start = datetime.now().replace(microsecond=0) + timedelta(days=1)
+    created = a.create_event(
+        CalendarEventData(
+            title=f"{TITLE_PREFIX} audit", start=start, end=start + timedelta(hours=1)
+        )
+    )
+    try:
+
+        async def _drive():
+            async with Client(srv.mcp) as c:
+                await c.call_tool(
+                    "update_event",
+                    {
+                        "id": created.id,
+                        "title": f"{TITLE_PREFIX} audit (edited)",
+                        "start": (start + timedelta(hours=2)).isoformat(),
+                        "end": (start + timedelta(hours=3)).isoformat(),
+                    },
+                )
+
+        asyncio.run(_drive())
+        entries = rt.audit_read()
+        upd = next(e for e in entries if e["tool"] == "update_event")
+        assert upd["before"] and "audit" in upd["before"]["summary"]
+        assert upd["after"] and "edited" in upd["after"]["summary"]
+        assert upd["target_id"].split("|")[0] == created.id.split("|")[0]
+    finally:
+        # the update moved the event's start, so its occurrence-suffixed id changed;
+        # delete by the stable base id (calendarItemIdentifier survives the edit).
+        a.delete_event(created.id.split("|")[0])

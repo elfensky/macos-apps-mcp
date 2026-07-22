@@ -122,6 +122,88 @@ def _all_day_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]
     return s, e
 
 
+def _busy_epochs(events) -> list[tuple[int, int]]:
+    """Epoch (start, end) for each event that blocks — i.e. NOT explicitly Free.
+
+    An event blocks unless its availability is `EKEventAvailabilityFree`. This one rule
+    also handles all-day events: EventKit marks them Free by default, so they drop out;
+    an all-day event a user set to busy still blocks. `NotSupported` (local calendars)
+    is `!= Free`, so it counts busy — the safe default.
+    """
+    out = []
+    for e in events:
+        if e.availability() == EK.EKEventAvailabilityFree:
+            continue
+        out.append(
+            (
+                int(e.startDate().timeIntervalSince1970()),
+                int(e.endDate().timeIntervalSince1970()),
+            )
+        )
+    return out
+
+
+def _merge_busy(
+    intervals: list[tuple[int, int]], lo: int, hi: int
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Merge overlapping/adjacent busy intervals within [lo, hi]; return (busy, free).
+
+    All epoch seconds — pure int math, so it's fold-proof across DST (no naive-datetime
+    arithmetic crosses a boundary). `free` is the complement of the merged runs within
+    the window. `<=` on the merge test folds adjacency (back-to-back) into overlap.
+    """
+    clipped = []
+    for start, end in intervals:
+        start, end = max(start, lo), min(end, hi)
+        if start < end:  # drop zero-length and out-of-window intervals
+            clipped.append((start, end))
+    clipped.sort()
+    busy: list[tuple[int, int]] = []
+    for start, end in clipped:
+        if busy and start <= busy[-1][1]:
+            busy[-1] = (busy[-1][0], max(busy[-1][1], end))
+        else:
+            busy.append((start, end))
+    free: list[tuple[int, int]] = []
+    cursor = lo
+    for start, end in busy:
+        if start > cursor:
+            free.append((cursor, start))
+        cursor = end
+    if cursor < hi:
+        free.append((cursor, hi))
+    return busy, free
+
+
+def _resolve_calendars(s, ids: list[str] | None):
+    """None → all calendars (pass None to the predicate); a list → the matching
+    EKCalendars, raising loudly on any unknown id (resolve-or-raise)."""
+    if ids is None:
+        return None
+    by_id = {
+        c.calendarIdentifier(): c
+        for c in s.calendarsForEntityType_(EK.EKEntityTypeEvent)
+    }
+    out = []
+    for cid in ids:
+        c = by_id.get(cid)
+        if c is None:
+            raise ValueError(
+                f"no calendar with id {cid!r} — call the `calendars` tool for valid ids"
+            )
+        out.append(c)
+    return out
+
+
+def _iso_interval(pair: tuple[int, int]) -> dict[str, str]:
+    """An epoch (start, end) as naive-local ISO — fold-proof via epoch_nsdate."""
+    lo, hi = pair
+    return {
+        "start": from_nsdate(epoch_nsdate(lo)).isoformat(),
+        "end": from_nsdate(epoch_nsdate(hi)).isoformat(),
+    }
+
+
 def _apply_event(s, e, data: CalendarEventData) -> None:
     e.setTitle_(data.title)
     e.setAllDay_(data.all_day)
@@ -306,6 +388,36 @@ class CalendarAdapter:
 
         return run_native(work)
 
+    def get_free_busy(
+        self, start: str, end: str, calendars: list[str] | None = None
+    ) -> dict:
+        """Merged busy intervals + free gaps in [start, end] (ISO-8601 naive-local).
+
+        calendars: optional Pointer ids to restrict to; None = all. No event details.
+        """
+        start_dt = parse_datetime(start)
+        end_dt = parse_datetime(end)
+        if start_dt >= end_dt:
+            raise ValueError(
+                f"start must be before end — got start={start!r}, end={end!r}"
+            )
+        lo, hi = int(start_dt.timestamp()), int(end_dt.timestamp())
+
+        def work():
+            s = store()
+            cals = _resolve_calendars(s, calendars)
+            pred = s.predicateForEventsWithStartDate_endDate_calendars_(
+                to_nsdate(start_dt), to_nsdate(end_dt), cals
+            )
+            events = s.eventsMatchingPredicate_(pred) or []
+            busy, free = _merge_busy(_busy_epochs(events), lo, hi)
+            return {
+                "busy": [_iso_interval(b) for b in busy],
+                "free": [_iso_interval(f) for f in free],
+            }
+
+        return run_native(work)
+
     def create_event(self, data: CalendarEventData) -> Pointer:
         def work():
             s = store()
@@ -370,6 +482,19 @@ class CalendarAdapter:
             fresh = _refetch_event(s, ident_after)
             _verify_event(fresh, ident_after, data, cal_id)
             return _event_pointer(fresh)
+
+        return run_native(work)
+
+    def snapshot(self, ident: str) -> Pointer | None:
+        """The event's current pointer by id, or None if it no longer resolves — the
+        before-state the audit layer captures just before an update/delete."""
+
+        def work():
+            s = store()
+            try:
+                return _event_pointer(_resolve_event(s, ident))
+            except ValueError:
+                return None
 
         return run_native(work)
 

@@ -16,18 +16,24 @@ from __future__ import annotations
 
 import contextlib
 import gzip
+import html
+import os
+import tempfile
 import zlib
 from pathlib import Path
 
-from ..contracts import Pointer
+from ..contracts import NoteData, Pointer
 from ..runtime import (
     NativeError,
     OutputOverflow,
+    VerificationFailed,
     clean_body,
     clean_summary,
     fold_text,
+    norm_text,
     read_via_sqlite,
     run_osascript,
+    verify_persisted,
 )
 
 MAX_NOTES = 25
@@ -149,6 +155,15 @@ _DELETE = """on run argv
   end timeout
 end run"""
 
+# verify-fallback title read (no FDA path): name of a note by id.
+_TITLE_BY_ID = """on run argv
+  with timeout of 120 seconds
+  tell application "Notes"
+    return name of note id (item 1 of argv)
+  end tell
+  end timeout
+end run"""
+
 # dry_run preview (#54): the real-delete guard EXACTLY — same `note id` lookup and same
 # AppleScript `is not` title comparison as _DELETE (case-insensitive + whitespace-
 # significant) — minus the `delete n`, plus `return name of n`. The expect_title check
@@ -165,6 +180,51 @@ _PREVIEW_DELETE = """on run argv
       end if
     end if
     return name of n
+  end tell
+  end timeout
+end run"""
+
+# create_note: make a note (body from the tempfile as «class utf8» — never interpolated,
+# so markup/newlines/unicode can't inject). folder "" → the default folder; else locate
+# a folder by name across accounts, erroring on 0 (not found) or >1 (ambiguous). Returns
+# the new note's x-coredata id — the canonical id (same one _LIST_ALL returns). No post-
+# make mutation, so nothing to roll back.
+_CREATE_NOTE = """on run argv
+  set folderName to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Notes"
+    if folderName is "" then
+      set newNote to make new note with properties {body:bodyText}
+    else
+      set matches to {}
+      repeat with acc in accounts
+        repeat with f in folders of acc
+          if name of f is folderName then set end of matches to f
+        end repeat
+      end repeat
+      if (count of matches) is 0 then error "no folder named " & folderName
+      if (count of matches) > 1 then ¬
+        error "folder name is ambiguous across accounts: " & folderName
+      set newNote to make new note at (item 1 of matches) ¬
+        with properties {body:bodyText}
+    end if
+    return id of newNote
+  end tell
+  end timeout
+end run"""
+
+# update_note: full-replace a note's content by id (body from the tempfile as «class
+# utf8»). `note id` errors on an unknown id (surfaces as a typed NativeError). Returns
+# the id (Z_PK is stable across a body edit, so it's unchanged — verify asserts it).
+_UPDATE_NOTE = """on run argv
+  set noteId to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Notes"
+    set n to note id noteId
+    set body of n to bodyText
+    return id of n
   end tell
   end timeout
 end run"""
@@ -198,6 +258,18 @@ def _parse_bodies(raw: str) -> list[dict]:
             continue
         out.append({"id": ident.strip(), "body": body})
     return out
+
+
+def _compose_html(title: str, body: str) -> str:
+    """Plaintext title + body → note HTML `body`; injection-safe via escaping.
+
+    Everything is `html.escape`d so user markup renders as literal text (never
+    HTML/script). The title is the first line (how Notes derives ZTITLE1); body
+    newlines become <br>.
+    """
+    title_html = html.escape(title)
+    body_html = "<br>".join(html.escape(line) for line in body.split("\n"))
+    return f"<div>{title_html}</div><div>{body_html}</div>"
 
 
 # --- sqlite read plane (#60) ---------------------------------------------------------
@@ -373,6 +445,50 @@ _BODY_SQL = (
 )
 
 
+# verify read-back: the note's title by id. Its OWN small fingerprint — a drift here
+# degrades only the verify read (falls back to AppleScript), like the body read.
+_TITLE_FINGERPRINT = {
+    "ZICCLOUDSYNCINGOBJECT": {"Z_PK", "ZTITLE1"},
+    "Z_METADATA": {"Z_UUID"},
+}
+_TITLE_SQL = "SELECT ZTITLE1 FROM ZICCLOUDSYNCINGOBJECT WHERE Z_PK = ?"
+
+
+def _title_key(title: str | None) -> str | None:
+    """Compare-key for a note title. Apple Notes derives ZTITLE1 from the HTML-rendered
+    first line, which collapses whitespace (leading/trailing trimmed, internal runs and
+    tabs/newlines → one space). norm_text only does NFC/LF, so collapse whitespace too —
+    otherwise verify false-fails a correct write whose title had e.g. a trailing space.
+    """
+    n = norm_text(title)
+    return " ".join(n.split()) if n is not None else None
+
+
+def _verify_note(
+    persisted_title: str | None,
+    ident: str,
+    data: NoteData,
+    *,
+    expected_id: str | None = None,
+) -> None:
+    """Verify-after-write (#49): the note must be re-readable by the returned id with
+    the requested title; on update the id must survive the edit. Raises
+    VerificationFailed naming the mismatch — the caller must not reuse the id. Body
+    persistence is NOT checked here; it's covered only by the manual integration tests.
+    """
+    if persisted_title is None:
+        raise VerificationFailed(
+            f"note {ident!r} could not be re-read after the write — it did not persist "
+            "(a fabricated id or an iCloud rollback). Do not trust the id."
+        )
+    expected: dict[str, object] = {"title": _title_key(data.title)}
+    actual: dict[str, object] = {"title": _title_key(persisted_title)}
+    if expected_id is not None:  # update: Z_PK is stable, so the id must be unchanged
+        expected["id"] = expected_id
+        actual["id"] = ident
+    verify_persisted("note", expected, actual)
+
+
 class NotesAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
@@ -502,6 +618,46 @@ class NotesAdapter:
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
+    def _read_title_by_id(self, ident: str) -> str | None:
+        """The note's ZTITLE1 by x-coredata id (sqlite primary, AppleScript fallback);
+        None if the id isn't this store's or the note isn't found."""
+
+        def sqlite(conn) -> str | None:
+            prefix = f"x-coredata://{_store_uuid(conn)}/ICNote/p"
+            if not ident.startswith(prefix):
+                return None  # foreign/stale id — a colliding pN must not resolve
+            pk = _pk_from_id(ident)
+            if pk is None:
+                return None
+            row = conn.execute(_TITLE_SQL, (pk,)).fetchone()
+            return row[0] if row else None
+
+        return read_via_sqlite(
+            NOTESTORE,
+            _TITLE_FINGERPRINT,
+            sqlite,
+            fallback=lambda: self._applescript_title(ident),
+            immutable=False,
+        )
+
+    def snapshot(self, ident: str) -> Pointer | None:
+        """The note's current pointer by id (title only), or None if absent — audit
+        before-state. Pointer-level suffices for manual undo; a full-field snapshot is a
+        non-breaking later enhancement."""
+        title = self._read_title_by_id(ident)
+        if title is None:
+            return None
+        return Pointer(
+            id=ident,
+            summary=clean_summary(title) or "(untitled note)",
+            deeplink="",
+        )
+
+    def _applescript_title(self, ident: str) -> str | None:
+        """Fallback title read (no FDA): `name of note id`. Unknown id → the osascript
+        error surfaces as a typed NativeError."""
+        return run_osascript(_TITLE_BY_ID, ident) or None
+
     def _applescript_bodies(self, ids: list[str]) -> list[dict]:
         """The osascript body reader (fallback + gap-fill path). Unknown ids skipped;
         each body ``clean_body``-bounded, a huge one downgraded to a per-item notice."""
@@ -542,3 +698,57 @@ class NotesAdapter:
         else:
             run_osascript(_DELETE, ident)
         return None
+
+    def create(self, data: NoteData) -> Pointer:
+        """Create a note from plaintext title+body; return its stable x-coredata id.
+
+        Body is written to a 0600 tempfile and read by AppleScript as «class utf8»
+        (never interpolated). folder=None → the default folder; a name is resolved
+        across accounts (unknown/ambiguous → a loud error). The returned id is
+        verified by a re-read (#49) before it's trusted.
+        """
+        html_body = _compose_html(data.title, data.body)
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(html_body)
+            ident = run_osascript(_CREATE_NOTE, data.folder or "", path).strip()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        _verify_note(self._read_title_by_id(ident), ident, data)
+        return Pointer(
+            id=ident,
+            summary=clean_summary(data.title) or "(untitled note)",
+            deeplink="",
+            folder=data.folder,
+        )
+
+    def update(self, ident: str, data: NoteData) -> Pointer:
+        """Full-replace a note's title+body by id; the id must survive (verified, #49).
+
+        `data.folder` is IGNORED on update — moving a note between folders is a separate
+        op. Body transport and verify match `create`.
+        """
+        if not ident.strip():
+            raise ValueError("update_note needs a note id")
+        html_body = _compose_html(data.title, data.body)
+        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(html_body)
+            ident_after = run_osascript(_UPDATE_NOTE, ident, path).strip()
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+        _verify_note(
+            self._read_title_by_id(ident_after),
+            ident_after,
+            data,
+            expected_id=ident,
+        )
+        return Pointer(
+            id=ident_after,
+            summary=clean_summary(data.title) or "(untitled note)",
+            deeplink="",
+        )

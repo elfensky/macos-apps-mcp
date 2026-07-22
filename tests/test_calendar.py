@@ -567,3 +567,29 @@ def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
 
     with pytest.raises(SpanRequired):
         cal.CalendarAdapter().delete_event("E-2", dry_run=True)
+
+
+def test_calendar_snapshot_missing_returns_none(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: object())
+
+    def _raise(_s, _i):
+        raise ValueError("no such event")
+
+    monkeypatch.setattr(cal, "_resolve_event", _raise)
+    assert cal.CalendarAdapter().snapshot("E-1|123") is None
+
+
+def test_calendar_snapshot_found(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: object())
+    ev = _fake_event(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: ev)
+    p = cal.CalendarAdapter().snapshot("E-1|123")
+    assert p is not None and "Standup" in p.summary

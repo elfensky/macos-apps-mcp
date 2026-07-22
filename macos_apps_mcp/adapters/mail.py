@@ -16,7 +16,9 @@ bounds a pathological search. User input goes via argv / a tempfile — not inte
 from __future__ import annotations
 
 import contextlib
+import email
 import os
+import re
 import tempfile
 from urllib.parse import quote
 
@@ -30,6 +32,9 @@ from ..runtime import (
 )
 
 MAX_MAILS = 25
+NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
+SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
+REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
 # Localized system-mailbox name tables (#61): Mail names these per-locale, so a
 # a US-hardcoded "Inbox" gives "mailbox not found" on a non-English Mac. Static data
@@ -321,6 +326,193 @@ def _parse_attachments(raw: str) -> list[dict]:
     return out
 
 
+def _parse_triage_records(raw: str) -> list[dict]:
+    """Parse _INBOX_TRIAGE: RS-separated records, US-separated fields (id, subject,
+    sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
+    Malformed/partial records are skipped; addresses lowercased."""
+    out = []
+    for record in raw.split("\x1e"):
+        if not record.strip():
+            continue
+        f = record.split("\x1f")
+        if len(f) < 8:
+            continue
+        out.append(
+            {
+                "id": f[0],
+                "subject": f[1],
+                "sender": f[2].strip().lower(),
+                "to_addrs": [a.strip().lower() for a in f[3].split(",") if a.strip()],
+                "secs_ago": int(f[4]) if f[4].strip().lstrip("-").isdigit() else 0,
+                "was_replied_to": f[5].strip().lower() == "true",
+                "read": f[6].strip().lower() == "true",
+                "flagged": f[7].strip().lower() == "true",
+            }
+        )
+    return out
+
+
+def _parse_sent_records(raw: str) -> list[dict]:
+    """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
+    out = []
+    for record in raw.split("\x1e"):
+        if not record.strip():
+            continue
+        f = record.split("\x1f")
+        if len(f) < 4:
+            continue
+        out.append(
+            {
+                "id": f[0],
+                "subject": f[1],
+                "recipient_addrs": [
+                    a.strip().lower() for a in f[2].split(",") if a.strip()
+                ],
+                "secs_ago": int(f[3]) if f[3].strip().lstrip("-").isdigit() else 0,
+            }
+        )
+    return out
+
+
+def _parse_my_addrs(raw: str) -> set[str]:
+    return {a.strip().lower() for a in raw.split("\x1f") if a.strip()}
+
+
+# _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
+# concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
+# like commands; booleans coerce inside `&`). Subject is stripped of any raw framing
+# bytes (stripFraming, the same handler _ATTACHMENTS uses) before being joined, so a
+# subject that happens to contain those control chars can't desync the parser.
+# Addresses bare (extract address from / address of every to recipient, TID-joined)
+# — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
+# Verified on-device.
+_INBOX_TRIAGE = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
+  set maxN to (item 1 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    set n to (count of messages of inbox)
+    if n > maxN then set n to maxN
+    repeat with i from 1 to n
+      set m to message i of inbox
+      set mid to message id of m
+      if mid is not missing value and mid is not "" then
+        set AppleScript's text item delimiters to ","
+        set toJoined to ((address of every to recipient of m) as text)
+        set AppleScript's text item delimiters to ""
+        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
+          (extract address from (sender of m)) & us & toJoined & us & ¬
+          (((current date) - (date received of m)) as integer) & us & ¬
+          (was replied to of m) & us & (read status of m) & us & ¬
+          (flagged status of m) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+# _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
+# newest-first. Subject is stripped of raw framing bytes (stripFraming) before being
+# joined, same rationale as _INBOX_TRIAGE.
+_SENT_TRIAGE = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
+  set maxN to (item 1 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    set sm to sent mailbox
+    set n to (count of messages of sm)
+    if n > maxN then set n to maxN
+    repeat with i from 1 to n
+      set m to message i of sm
+      set mid to message id of m
+      if mid is not missing value and mid is not "" then
+        set AppleScript's text item delimiters to ","
+        set toJoined to ((address of every to recipient of m) as text)
+        set AppleScript's text item delimiters to ""
+        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
+          toJoined & us & (((current date) - (date sent of m)) as integer) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+# _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
+# iteration raises -1700). Verified on-device.
+_MY_ADDRESSES = """on run argv
+  set us to character id 31
+  set AppleScript's text item delimiters to us
+  set out to ""
+  with timeout of 60 seconds
+  tell application "Mail"
+    repeat with acc in accounts
+      set out to out & ((email addresses of acc) as text) & us
+    end repeat
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to ""
+  return out
+end run"""
+
+# _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation
+# window), emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry
+# In-Reply-To / References) — Python parses referenced ids (stdlib email handles
+# folding). Capped at maxN.
+_INBOX_REFS = """on run argv
+  set cutoffSecs to (item 1 of argv) as integer
+  set maxN to (item 2 of argv) as integer
+  set rs to character id 30
+  set out to ""
+  set c to 0
+  with timeout of 120 seconds
+  tell application "Mail"
+    set cutoff to (current date) - cutoffSecs
+    repeat with m in (messages of inbox whose date received > cutoff)
+      set h to all headers of m
+      if (h contains "In-Reply-To:") or (h contains "References:") then
+        set c to c + 1
+        if c > maxN then exit repeat
+        set out to out & h & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+
 def _summary(subject: str, sender: str) -> str:
     subject, sender = subject.strip(), sender.strip()
     if subject and sender:
@@ -335,6 +527,83 @@ def _deeplink(message_id: str) -> str:
     # the patrickfreyer recipe (#61). Best-effort; verified on-device (integration).
     mid = message_id.strip().lstrip("<").rstrip(">")
     return f"message://%3C{quote(mid, safe='@')}%3E"
+
+
+def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Pointer]:
+    """Rank inbound messages that likely need the user's response. Drops already-replied
+    messages; keeps those directly addressed to the user (my_addrs ∩ to_addrs). If
+    my_addrs is empty (extraction failed) it degrades to FLAGGED-ONLY rather than
+    flooding the inbox. Reasons (stable): flagged > unread-direct > unanswered-direct;
+    recency (smallest secs_ago) breaks ties within a tier. Bounded to MAX_MAILS."""
+    out: list[tuple[int, int, Pointer]] = []
+    for r in records:
+        if r["was_replied_to"]:
+            continue
+        direct = bool(my_addrs & set(r["to_addrs"]))
+        if my_addrs and not direct:
+            continue
+        if not my_addrs and not r["flagged"]:
+            continue  # can't confirm direct → flagged-only, no flood
+        if r["flagged"]:
+            tier, reason = 0, "flagged"
+        elif not r["read"]:
+            tier, reason = 1, "unread-direct"
+        else:
+            tier, reason = 2, "unanswered-direct"
+        p = Pointer(
+            id=r["id"],
+            summary=clean_summary(_summary(r["subject"], r["sender"])),
+            deeplink=_deeplink(r["id"]),
+            reason=reason,
+        )
+        out.append((tier, r["secs_ago"], p))
+    out.sort(key=lambda t: (t[0], t[1]))  # tier asc, then most-recent (secs_ago) first
+    return [p for _, _, p in out[:MAX_MAILS]]
+
+
+def _norm_mid(mid: str) -> str:
+    """Normalize a Message-ID for comparison: strip angle brackets + surrounding space,
+    lowercase."""
+    return mid.strip().lstrip("<").rstrip(">").strip().lower()
+
+
+def _referenced_ids(header_blobs: list[str]) -> set[str]:
+    """Message-ids cited by inbox messages via In-Reply-To / References. Each blob is
+    one message's raw headers; stdlib email parses folded headers robustly."""
+    ids: set[str] = set()
+    for blob in header_blobs:
+        msg = email.message_from_string(blob)
+        refs = f"{msg.get('In-Reply-To', '')} {msg.get('References', '')}"
+        for tok in re.findall(r"<[^>]+>", refs):
+            ids.add(_norm_mid(tok))
+    return ids
+
+
+def _classify_awaiting_reply(
+    sent: list[dict], referenced_ids: set[str], days: int
+) -> list[Pointer]:
+    """Sent messages older than `days` whose Message-ID no inbox message references
+    (real In-Reply-To/References threading — accurate, no fuzzy subject matching).
+    Reason: stable 'awaiting-reply'. Sorted oldest-sent-first (most overdue). Bounded
+    to MAX_MAILS. A group-thread send is cleared if ANY recipient's reply cites it
+    (documented)."""
+    cutoff = days * 86400
+    out: list[tuple[int, Pointer]] = []
+    for r in sent:
+        if r["secs_ago"] < cutoff:
+            continue
+        if _norm_mid(r["id"]) in referenced_ids:
+            continue
+        to = ", ".join(r["recipient_addrs"]) or "(no recipients)"
+        p = Pointer(
+            id=r["id"],
+            summary=clean_summary(f"{r['subject']} — to {to}"),
+            deeplink=_deeplink(r["id"]),
+            reason="awaiting-reply",
+        )
+        out.append((r["secs_ago"], p))
+    out.sort(key=lambda t: t[0], reverse=True)  # most overdue (largest secs_ago) first
+    return [p for _, p in out[:MAX_MAILS]]
 
 
 def _parse(raw: str) -> list[Pointer]:
@@ -477,3 +746,32 @@ class MailAdapter:
         canon = mailbox.strip().lower()
         raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
         return _parse_attachments(raw)[:MAX_MAILS]
+
+    def get_needs_response(self) -> list[Pointer]:
+        """Inbox messages that likely need the user's response, ranked with a reason
+        (flagged / unread-direct / unanswered-direct). Heuristic over headers/
+        properties — no body scan; direct-addressed + not-yet-replied. Bounded."""
+        records = _parse_triage_records(run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN)))
+        my = _parse_my_addrs(run_osascript(_MY_ADDRESSES))
+        return _classify_needs_response(records, my)
+
+    def get_awaiting_reply(self, days: int = 3) -> list[Pointer]:
+        """Sent messages older than `days` with no reply, ranked oldest-first (reason
+        'awaiting-reply'). Real In-Reply-To/References threading. Bounded."""
+        if not 1 <= days <= 365:
+            raise ValueError("days must be between 1 and 365")
+        sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
+        candidates = [r for r in sent if r["secs_ago"] >= days * 86400]
+        if not candidates:
+            return []
+        window = max(  # scan inbox back to the oldest candidate send
+            r["secs_ago"] for r in candidates
+        )
+        blobs = [
+            b
+            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(
+                "\x1e"
+            )
+            if b.strip()
+        ]
+        return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)

@@ -48,6 +48,21 @@ class _FakeSource:
             Pointer(id="N-1", summary="Milk", deeplink="", folder="iCloud / Groceries")
         ]
 
+    def get_free_busy(self, start, end, calendars=None):
+        self.queries.append((start, end, calendars))
+        return {
+            "busy": [{"start": start, "end": end}],
+            "free": [],
+        }
+
+    def create(self, data):
+        self.queries.append(("create", data.title, data.body, data.folder))
+        return Pointer(id="x-coredata://S/ICNote/p9", summary=data.title, deeplink="")
+
+    def update(self, ident, data):
+        self.queries.append(("update", ident, data.title, data.body))
+        return Pointer(id=ident, summary=data.title, deeplink="")
+
 
 def test_server_constructs():
     assert srv.mcp is not None
@@ -69,6 +84,17 @@ def test_events_tool_dispatches(monkeypatch):
     assert out[0]["id"] == "P-1"
 
 
+def test_free_busy_tool_dispatches(monkeypatch):
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    out = srv.free_busy("2026-07-20T08:00:00", "2026-07-20T17:00:00", ["C-1"])
+    assert fake.queries == [("2026-07-20T08:00:00", "2026-07-20T17:00:00", ["C-1"])]
+    assert out == {
+        "busy": [{"start": "2026-07-20T08:00:00", "end": "2026-07-20T17:00:00"}],
+        "free": [],
+    }
+
+
 def test_contacts_tool_dispatches(monkeypatch):
     fake = _FakeSource()
     monkeypatch.setattr(srv, "_contacts", fake)
@@ -83,6 +109,42 @@ def test_mail_tool_dispatches(monkeypatch):
     out = srv.mail("invoice")
     assert fake.queries == ["invoice"]
     assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+
+
+def test_mail_needs_response_dispatches(monkeypatch):
+    class _F:
+        def get_needs_response(self):
+            return [
+                Pointer(
+                    id="<m@x>", summary="s", deeplink="message://m", reason="flagged"
+                )
+            ]
+
+    monkeypatch.setattr(srv, "_mail", _F())
+    out = srv.mail_needs_response()
+    assert out == [
+        {"id": "<m@x>", "summary": "s", "deeplink": "message://m", "reason": "flagged"}
+    ]
+
+
+def test_mail_awaiting_reply_dispatches(monkeypatch):
+    seen = {}
+
+    class _F:
+        def get_awaiting_reply(self, days=3):
+            seen["days"] = days
+            return [
+                Pointer(
+                    id="<s@x>",
+                    summary="s",
+                    deeplink="message://s",
+                    reason="awaiting-reply",
+                )
+            ]
+
+    monkeypatch.setattr(srv, "_mail", _F())
+    out = srv.mail_awaiting_reply(7)
+    assert seen["days"] == 7 and out[0]["reason"] == "awaiting-reply"
 
 
 def test_notes_tool_dispatches(monkeypatch):
@@ -510,6 +572,18 @@ def test_emit_includes_folder_when_set():
     }
 
 
+def test_emit_includes_reason_when_set():
+    from macos_apps_mcp.contracts import Pointer
+
+    assert srv._emit(Pointer(id="i", summary="s", deeplink="d", reason="flagged")) == {
+        "id": "i",
+        "summary": "s",
+        "deeplink": "d",
+        "reason": "flagged",
+    }
+    assert "reason" not in srv._emit(Pointer(id="i", summary="s", deeplink="d"))
+
+
 def test_note_bodies_dispatches(monkeypatch):
     class _FakeNotes:
         def get_bodies(self, ids):
@@ -536,6 +610,22 @@ def test_delete_note_dispatches(monkeypatch):
     out = srv.delete_note("N-1", expect_title="Milk")
     assert fake.calls == [("N-1", "Milk")]
     assert out == {"deleted": "N-1"}
+
+
+def test_create_note_tool_dispatches(monkeypatch):
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_notes", fake)
+    out = srv.create_note("Title", "Body", "Ideas")
+    assert fake.queries == [("create", "Title", "Body", "Ideas")]
+    assert out == {"id": "x-coredata://S/ICNote/p9", "summary": "Title", "deeplink": ""}
+
+
+def test_update_note_tool_dispatches(monkeypatch):
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_notes", fake)
+    out = srv.update_note("x-coredata://S/ICNote/p1", "New", "Body")
+    assert fake.queries == [("update", "x-coredata://S/ICNote/p1", "New", "Body")]
+    assert out == {"id": "x-coredata://S/ICNote/p1", "summary": "New", "deeplink": ""}
 
 
 # --- errors-as-results: the dispatch seam converts typed native failures (#47) --------
@@ -769,3 +859,24 @@ def test_delete_note_dry_run_dispatches_and_formats_preview(monkeypatch):
         "dry_run": True,
         "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
     }
+
+
+def test_audit_tool_reads(monkeypatch):
+    import macos_apps_mcp.server as srv2
+
+    monkeypatch.setattr(
+        srv2, "audit_read", lambda since=None: [{"tool": "create_event"}]
+    )
+    out = srv2.audit()
+    assert out == [{"tool": "create_event"}]
+
+
+def test_audit_tool_passes_since(monkeypatch):
+    import macos_apps_mcp.server as srv2
+
+    seen = {}
+    monkeypatch.setattr(
+        srv2, "audit_read", lambda since=None: seen.setdefault("since", since) or []
+    )
+    srv2.audit("2026-07-21T00:00:00")
+    assert seen["since"] == "2026-07-21T00:00:00"

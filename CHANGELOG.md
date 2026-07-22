@@ -4,6 +4,33 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [0.7.0] - 2026-07-22 — Differentiators
+
+Greenfield tools no surveyed Apple-apps MCP server ships — value, not parity.
+
+### Added
+
+- **`free_busy(start, end, calendars?)`** (#65) — merged busy intervals + free gaps in a
+  window, as compact intervals (not event dumps). Fold-proof epoch merge (overlap +
+  adjacency); availability/all-day aware; bounded output.
+- **`create_note` / `update_note`** (#66) — write a note and get back its **stable
+  `x-coredata://…/ICNote/pN` id** (unique in the ecosystem), immediately usable with
+  `note_bodies`. Plaintext title+body composed to injection-safe HTML via a 0600 tempfile
+  read as `«class utf8»`; update preserves the id; verify-after-write catches
+  rollback/fabrication (title whitespace-normalized to match Notes' `ZTITLE1`).
+- **Write audit trail** (#67) — append-only JSONL at
+  `$XDG_STATE_HOME/macos-apps-mcp/audit.jsonl` (rotating) recording every write with
+  before-state on update/delete/complete, plus an **`audit(since?)`** read tool. A central
+  `AuditMiddleware` captures before-state via `adapter.snapshot(id)`; auditing never fails a
+  user's write (all paths swallow their own errors).
+- **Mail triage reads** (#68) — **`mail_needs_response()`** and
+  **`mail_awaiting_reply(days=3)`** return ranked `Pointer`s with a stable machine-readable
+  `reason` (`flagged` / `unread-direct` / `unanswered-direct` / `awaiting-reply`).
+  needs-response keeps direct-addressed, not-yet-replied mail; awaiting-reply uses **real
+  In-Reply-To/References header threading** (not fuzzy subject matching). Headers/properties
+  only, no body scan; bounded.
+- **`Pointer.reason`** — optional field carrying a triage `reason`; ranking is list order.
+
 ## [0.6.0] - 2026-07-15
 
 ### Changed

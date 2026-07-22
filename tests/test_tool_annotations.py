@@ -21,6 +21,7 @@ _ADDITIVE_TOOLS = frozenset(
         "safari_open",
         "create_draft",
         "mail_reply",
+        "create_note",
     }
 )
 # Writes that modify/overwrite/delete existing state, or run arbitrary automation.
@@ -32,6 +33,7 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "delete_event",
         "delete_note",
         "run_shortcut",
+        "update_note",
     }
 )
 # The full write half of the read/write seam. Everything else is read-only.
@@ -42,8 +44,10 @@ _PERMISSION = {
     "ping": None,
     "now": None,
     "doctor": None,
+    "audit": None,
     "reminders": "EventKit",
     "events": "EventKit",
+    "free_busy": "EventKit",
     "reminder_lists": "EventKit",
     "calendars": "EventKit",
     "create_reminder": "EventKit",
@@ -56,6 +60,8 @@ _PERMISSION = {
     "mail": "Automation",
     "mail_body": "Automation",
     "mail_attachments": "Automation",
+    "mail_needs_response": "Automation",
+    "mail_awaiting_reply": "Automation",
     "create_draft": "Automation",
     "mail_reply": "Automation",
     "notes": "Automation",
@@ -68,6 +74,8 @@ _PERMISSION = {
     "message_body": "Full Disk Access",
     "safari_tabs": "Automation",
     "delete_note": "Automation",
+    "create_note": "Automation",
+    "update_note": "Automation",
     "create_contact": "Automation",
     "safari_open": "Automation",
     "shortcuts": "Shortcuts CLI",
@@ -122,3 +130,20 @@ def test_every_tool_docstring_states_permission_and_is_nontrivial():
             assert keyword.lower() in doc.lower(), (
                 f"{t.name} docstring must name its permission ({keyword!r})"
             )
+
+
+def test_every_write_tool_is_audit_classified():
+    import macos_apps_mcp.server as srv
+
+    # writes with no id-addressed before-state: creates + non-id actions
+    envelope_only = {
+        "create_reminder",
+        "create_event",
+        "create_note",
+        "create_contact",
+        "create_draft",
+        "mail_reply",
+        "safari_open",
+        "run_shortcut",
+    }
+    assert set(srv._AUDIT_SNAPSHOT) | envelope_only == srv._WRITE_TOOLS

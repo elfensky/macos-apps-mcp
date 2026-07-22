@@ -7,6 +7,7 @@ import pytest
 from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
     NotesAdapter,
+    _compose_html,
     _parse_all,
     _parse_bodies,
 )
@@ -641,3 +642,122 @@ def test_body_table_drift_keeps_enumeration_working(tmp_path, monkeypatch):
     )
     out = NotesAdapter().get_bodies(["x-coredata://STORE-UUID/ICNote/p3"])
     assert out == [{"id": "x-coredata://STORE-UUID/ICNote/p3", "body": "fallback body"}]
+
+
+# --- _compose_html pure helper -------------------------------------------------------
+
+
+def test_compose_html_title_and_body():
+    assert _compose_html("Shopping", "Milk") == "<div>Shopping</div><div>Milk</div>"
+
+
+def test_compose_html_multiline_body_uses_br():
+    assert _compose_html("T", "a\nb\nc") == "<div>T</div><div>a<br>b<br>c</div>"
+
+
+def test_compose_html_escapes_markup_injection():
+    # user text with markup must render as literal text, never as HTML/script
+    out = _compose_html("A & B", "<script>alert(1)</script>")
+    assert "&amp;" in out
+    assert "&lt;script&gt;" in out
+    assert "<script>" not in out
+
+
+def test_compose_html_empty_body():
+    assert _compose_html("Just a title", "") == "<div>Just a title</div><div></div>"
+
+
+# --- verify read-back (#66): _verify_note + _read_title_by_id ------------------------
+
+from macos_apps_mcp.adapters.notes import _verify_note  # noqa: E402
+from macos_apps_mcp.contracts import NoteData  # noqa: E402
+from macos_apps_mcp.runtime import VerificationFailed  # noqa: E402
+
+
+def test_verify_note_passes_on_match():
+    _verify_note("Hello", "x-coredata://S/ICNote/p1", NoteData(title="Hello"))
+
+
+def test_verify_note_none_means_not_persisted():
+    with pytest.raises(VerificationFailed, match="did not persist"):
+        _verify_note(None, "x-coredata://S/ICNote/p1", NoteData(title="Hello"))
+
+
+def test_verify_note_title_mismatch():
+    with pytest.raises(VerificationFailed, match="title"):
+        _verify_note("Wrong", "x-coredata://S/ICNote/p1", NoteData(title="Hello"))
+
+
+def test_verify_note_update_id_must_survive():
+    # expected_id != the id we re-read → the write re-homed/replaced the note
+    with pytest.raises(VerificationFailed, match="id"):
+        _verify_note(
+            "Hello",
+            "x-coredata://S/ICNote/p2",
+            NoteData(title="Hello"),
+            expected_id="x-coredata://S/ICNote/p1",
+        )
+
+
+def _make_title_notestore(path, uuid="STORE-UUID", rows=((1, "Hello"),)):
+    """Synthetic NoteStore with just the columns _read_title_by_id reads."""
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER PRIMARY KEY, ZTITLE1 TEXT)"
+    )
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.execute("INSERT INTO Z_METADATA (Z_UUID) VALUES (?)", (uuid,))
+    conn.executemany(
+        "INSERT INTO ZICCLOUDSYNCINGOBJECT (Z_PK, ZTITLE1) VALUES (?, ?)", rows
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_read_title_by_id_sqlite(tmp_path, monkeypatch):
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite")
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    got = NotesAdapter()._read_title_by_id("x-coredata://STORE-UUID/ICNote/p1")
+    assert got == "Hello"
+
+
+def test_read_title_by_id_foreign_store_returns_none(tmp_path, monkeypatch):
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite", uuid="STORE-UUID")
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    # a pN from a DIFFERENT store must not resolve to a local note's title
+    got = NotesAdapter()._read_title_by_id("x-coredata://OTHER-UUID/ICNote/p1")
+    assert got is None
+
+
+def test_read_title_by_id_unknown_pk_returns_none(tmp_path, monkeypatch):
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite")
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    got = NotesAdapter()._read_title_by_id("x-coredata://STORE-UUID/ICNote/p999")
+    assert got is None
+
+
+def test_verify_note_title_whitespace_normalized():
+    # Apple Notes collapses HTML whitespace deriving ZTITLE1; verify must not false-fail
+    # a correct write whose title had trailing/internal/tab whitespace.
+    _verify_note("Report", "x-coredata://S/ICNote/p1", NoteData(title="Report "))
+    _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A    B"))
+    _verify_note("A B", "x-coredata://S/ICNote/p1", NoteData(title="A\tB"))
+
+
+def test_notes_snapshot_found(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.notes as notes_mod
+
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite", rows=((1, "My note"),))
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    p = notes_mod.NotesAdapter().snapshot("x-coredata://STORE-UUID/ICNote/p1")
+    assert p is not None and p.id.endswith("/p1") and p.summary == "My note"
+
+
+def test_notes_snapshot_missing_returns_none(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.notes as notes_mod
+
+    db = _make_title_notestore(tmp_path / "NoteStore.sqlite")
+    monkeypatch.setattr(notes_mod, "NOTESTORE", db)
+    ident = "x-coredata://STORE-UUID/ICNote/p999"
+    assert notes_mod.NotesAdapter().snapshot(ident) is None

@@ -131,6 +131,7 @@ class Pointer:
     summary: str
     deeplink: str
     folder: str | None = None  # notes_all only: "Account / Folder"; None elsewhere
+    reason: str | None = None  # triage reads only: a stable machine-readable why-string
 
 
 @runtime_checkable
@@ -321,3 +322,12 @@ class ContactData:
     given_name: str
     family_name: str | None = None
     organization: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NoteData:
+    """Payload for creating/updating an Apple Note (plaintext title + body)."""
+
+    title: str
+    body: str = ""
+    folder: str | None = None  # None → default folder; else an existing folder name
