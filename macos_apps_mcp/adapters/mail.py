@@ -16,7 +16,9 @@ bounds a pathological search. User input goes via argv / a tempfile — not inte
 from __future__ import annotations
 
 import contextlib
+import email
 import os
+import re
 import tempfile
 from urllib.parse import quote
 
@@ -367,6 +369,51 @@ def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Po
         out.append((tier, r["secs_ago"], p))
     out.sort(key=lambda t: (t[0], t[1]))  # tier asc, then most-recent (secs_ago) first
     return [p for _, _, p in out[:MAX_MAILS]]
+
+
+def _norm_mid(mid: str) -> str:
+    """Normalize a Message-ID for comparison: strip angle brackets + surrounding space,
+    lowercase."""
+    return mid.strip().lstrip("<").rstrip(">").strip().lower()
+
+
+def _referenced_ids(header_blobs: list[str]) -> set[str]:
+    """Message-ids cited by inbox messages via In-Reply-To / References. Each blob is
+    one message's raw headers; stdlib email parses folded headers robustly."""
+    ids: set[str] = set()
+    for blob in header_blobs:
+        msg = email.message_from_string(blob)
+        refs = f"{msg.get('In-Reply-To', '')} {msg.get('References', '')}"
+        for tok in re.findall(r"<[^>]+>", refs):
+            ids.add(_norm_mid(tok))
+    return ids
+
+
+def _classify_awaiting_reply(
+    sent: list[dict], referenced_ids: set[str], days: int
+) -> list[Pointer]:
+    """Sent messages older than `days` whose Message-ID no inbox message references
+    (real In-Reply-To/References threading — accurate, no fuzzy subject matching).
+    Reason: stable 'awaiting-reply'. Sorted oldest-sent-first (most overdue). Bounded
+    to MAX_MAILS. A group-thread send is cleared if ANY recipient's reply cites it
+    (documented)."""
+    cutoff = days * 86400
+    out: list[tuple[int, Pointer]] = []
+    for r in sent:
+        if r["secs_ago"] < cutoff:
+            continue
+        if _norm_mid(r["id"]) in referenced_ids:
+            continue
+        to = ", ".join(r["recipient_addrs"]) or "(no recipients)"
+        p = Pointer(
+            id=r["id"],
+            summary=clean_summary(f"{r['subject']} — to {to}"),
+            deeplink=_deeplink(r["id"]),
+            reason="awaiting-reply",
+        )
+        out.append((r["secs_ago"], p))
+    out.sort(key=lambda t: t[0], reverse=True)  # most overdue (largest secs_ago) first
+    return [p for _, p in out[:MAX_MAILS]]
 
 
 def _parse(raw: str) -> list[Pointer]:

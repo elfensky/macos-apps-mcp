@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from macos_apps_mcp.adapters.mail import _classify_needs_response
+from macos_apps_mcp.adapters.mail import (
+    _classify_awaiting_reply,
+    _classify_needs_response,
+    _norm_mid,
+    _referenced_ids,
+)
 
 ME = {"me@x.com"}
 
@@ -65,3 +70,61 @@ def test_needs_response_empty_my_addrs_degrades_to_flagged_only():
 def test_needs_response_bounded():
     recs = [_rec(id=f"<m{i}@x>", read=False, secs_ago=i) for i in range(40)]
     assert len(_classify_needs_response(recs, ME)) == 25
+
+
+DAY = 86400
+
+
+def _sent(**kw):
+    base = {
+        "id": "<s1@x>",
+        "subject": "Proposal",
+        "recipient_addrs": ["bob@y.com"],
+        "secs_ago": 5 * DAY,
+    }
+    base.update(kw)
+    return base
+
+
+def test_norm_mid():
+    assert _norm_mid("<Abc@X>") == "abc@x"
+    assert _norm_mid(" abc@x ") == "abc@x"
+
+
+def test_referenced_ids_parses_folded_headers():
+    blob = (
+        "From: a@b.com\r\n"
+        "In-Reply-To: <s1@x>\r\n"
+        "References: <root@x>\r\n <s1@x>\r\n"  # folded continuation
+        "Subject: Re: Proposal\r\n\r\n"
+    )
+    assert _referenced_ids([blob]) == {"s1@x", "root@x"}
+
+
+def test_awaiting_reply_suppressed_when_id_referenced():
+    out = _classify_awaiting_reply([_sent(id="<s1@x>")], {"s1@x"}, days=3)
+    assert out == []
+
+
+def test_awaiting_reply_emitted_when_not_referenced():
+    out = _classify_awaiting_reply([_sent(id="<s1@x>")], {"other@x"}, days=3)
+    assert [p.id for p in out] == ["<s1@x>"]
+    assert out[0].reason == "awaiting-reply"
+
+
+def test_awaiting_reply_same_subject_no_ref_does_not_suppress():
+    # threading is by id, not subject: a same-subject reply that doesn't cite s1 → still
+    # awaiting
+    out = _classify_awaiting_reply([_sent(id="<s1@x>")], {"unrelated@x"}, days=3)
+    assert [p.id for p in out] == ["<s1@x>"]
+
+
+def test_awaiting_reply_days_threshold_excludes_recent():
+    out = _classify_awaiting_reply([_sent(secs_ago=1 * DAY)], set(), days=3)
+    assert out == []  # sent 1 day ago, threshold 3 days
+
+
+def test_awaiting_reply_oldest_first():
+    recs = [_sent(id="<a@x>", secs_ago=4 * DAY), _sent(id="<b@x>", secs_ago=9 * DAY)]
+    out = _classify_awaiting_reply(recs, set(), days=3)
+    assert [p.id for p in out] == ["<b@x>", "<a@x>"]  # most overdue first
