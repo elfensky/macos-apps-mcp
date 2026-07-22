@@ -13,11 +13,6 @@ AppleScript is slow on large mailboxes, so reads are capped and the osascript ti
 bounds a pathological search. User input goes via argv / a tempfile — not interpolated.
 """
 
-# ruff: noqa: E501 — _INBOX_TRIAGE / _SENT_TRIAGE inline their `set out to out & ...`
-# concat onto one long AppleScript line each (verified on-device; the inlining is
-# load-bearing — see the templates' comments). Do not wrap those lines to satisfy the
-# line-length rule; every other line in this file still respects it.
-
 from __future__ import annotations
 
 import contextlib
@@ -383,10 +378,11 @@ def _parse_my_addrs(raw: str) -> set[str]:
     return {a.strip().lower() for a in raw.split("\x1f") if a.strip()}
 
 
-# _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the concat
-# (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead like commands;
-# booleans coerce inside `&`). Addresses bare (extract address from / address of every to
-# recipient, TID-joined). Date as seconds-ago. maxN via argv. Verified on-device.
+# _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
+# concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
+# like commands; booleans coerce inside `&`). Addresses bare (extract address from /
+# address of every to recipient, TID-joined). Date as seconds-ago. maxN via argv.
+# Verified on-device.
 _INBOX_TRIAGE = """on run argv
   set maxN to (item 1 of argv) as integer
   set us to character id 31
@@ -403,7 +399,11 @@ _INBOX_TRIAGE = """on run argv
         set AppleScript's text item delimiters to ","
         set toJoined to ((address of every to recipient of m) as text)
         set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (subject of m) & us & (extract address from (sender of m)) & us & toJoined & us & (((current date) - (date received of m)) as integer) & us & (was replied to of m) & us & (read status of m) & us & (flagged status of m) & rs
+        set out to out & mid & us & (subject of m) & us & ¬
+          (extract address from (sender of m)) & us & toJoined & us & ¬
+          (((current date) - (date received of m)) as integer) & us & ¬
+          (was replied to of m) & us & (read status of m) & us & ¬
+          (flagged status of m) & rs
       end if
     end repeat
   end tell
@@ -411,7 +411,8 @@ _INBOX_TRIAGE = """on run argv
   return out
 end run"""
 
-# _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent), newest-first.
+# _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
+# newest-first.
 _SENT_TRIAGE = """on run argv
   set maxN to (item 1 of argv) as integer
   set us to character id 31
@@ -429,7 +430,8 @@ _SENT_TRIAGE = """on run argv
         set AppleScript's text item delimiters to ","
         set toJoined to ((address of every to recipient of m) as text)
         set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (subject of m) & us & toJoined & us & (((current date) - (date sent of m)) as integer) & rs
+        set out to out & mid & us & (subject of m) & us & toJoined & us & ¬
+          (((current date) - (date sent of m)) as integer) & rs
       end if
     end repeat
   end tell
@@ -454,9 +456,10 @@ _MY_ADDRESSES = """on run argv
   return out
 end run"""
 
-# _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation window),
-# emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry In-Reply-To /
-# References) — Python parses referenced ids (stdlib email handles folding). Capped at maxN.
+# _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation
+# window), emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry
+# In-Reply-To / References) — Python parses referenced ids (stdlib email handles
+# folding). Capped at maxN.
 _INBOX_REFS = """on run argv
   set cutoffSecs to (item 1 of argv) as integer
   set maxN to (item 2 of argv) as integer
