@@ -13,6 +13,11 @@ AppleScript is slow on large mailboxes, so reads are capped and the osascript ti
 bounds a pathological search. User input goes via argv / a tempfile — not interpolated.
 """
 
+# ruff: noqa: E501 — _INBOX_TRIAGE / _SENT_TRIAGE inline their `set out to out & ...`
+# concat onto one long AppleScript line each (verified on-device; the inlining is
+# load-bearing — see the templates' comments). Do not wrap those lines to satisfy the
+# line-length rule; every other line in this file still respects it.
+
 from __future__ import annotations
 
 import contextlib
@@ -32,6 +37,9 @@ from ..runtime import (
 )
 
 MAX_MAILS = 25
+NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
+SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
+REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
 # Localized system-mailbox name tables (#61): Mail names these per-locale, so a
 # a US-hardcoded "Inbox" gives "mailbox not found" on a non-English Mac. Static data
@@ -323,6 +331,155 @@ def _parse_attachments(raw: str) -> list[dict]:
     return out
 
 
+def _parse_triage_records(raw: str) -> list[dict]:
+    """Parse _INBOX_TRIAGE: RS-separated records, US-separated fields (id, subject,
+    sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
+    Malformed/partial records are skipped; addresses lowercased."""
+    out = []
+    for record in raw.split("\x1e"):
+        if not record.strip():
+            continue
+        f = record.split("\x1f")
+        if len(f) < 8:
+            continue
+        out.append(
+            {
+                "id": f[0],
+                "subject": f[1],
+                "sender": f[2].strip().lower(),
+                "to_addrs": [a.strip().lower() for a in f[3].split(",") if a.strip()],
+                "secs_ago": int(f[4]) if f[4].strip().lstrip("-").isdigit() else 0,
+                "was_replied_to": f[5].strip().lower() == "true",
+                "read": f[6].strip().lower() == "true",
+                "flagged": f[7].strip().lower() == "true",
+            }
+        )
+    return out
+
+
+def _parse_sent_records(raw: str) -> list[dict]:
+    """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
+    out = []
+    for record in raw.split("\x1e"):
+        if not record.strip():
+            continue
+        f = record.split("\x1f")
+        if len(f) < 4:
+            continue
+        out.append(
+            {
+                "id": f[0],
+                "subject": f[1],
+                "recipient_addrs": [
+                    a.strip().lower() for a in f[2].split(",") if a.strip()
+                ],
+                "secs_ago": int(f[3]) if f[3].strip().lstrip("-").isdigit() else 0,
+            }
+        )
+    return out
+
+
+def _parse_my_addrs(raw: str) -> set[str]:
+    return {a.strip().lower() for a in raw.split("\x1f") if a.strip()}
+
+
+# _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the concat
+# (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead like commands;
+# booleans coerce inside `&`). Addresses bare (extract address from / address of every to
+# recipient, TID-joined). Date as seconds-ago. maxN via argv. Verified on-device.
+_INBOX_TRIAGE = """on run argv
+  set maxN to (item 1 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    set n to (count of messages of inbox)
+    if n > maxN then set n to maxN
+    repeat with i from 1 to n
+      set m to message i of inbox
+      set mid to message id of m
+      if mid is not missing value and mid is not "" then
+        set AppleScript's text item delimiters to ","
+        set toJoined to ((address of every to recipient of m) as text)
+        set AppleScript's text item delimiters to ""
+        set out to out & mid & us & (subject of m) & us & (extract address from (sender of m)) & us & toJoined & us & (((current date) - (date received of m)) as integer) & us & (was replied to of m) & us & (read status of m) & us & (flagged status of m) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+# _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent), newest-first.
+_SENT_TRIAGE = """on run argv
+  set maxN to (item 1 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    set sm to sent mailbox
+    set n to (count of messages of sm)
+    if n > maxN then set n to maxN
+    repeat with i from 1 to n
+      set m to message i of sm
+      set mid to message id of m
+      if mid is not missing value and mid is not "" then
+        set AppleScript's text item delimiters to ","
+        set toJoined to ((address of every to recipient of m) as text)
+        set AppleScript's text item delimiters to ""
+        set out to out & mid & us & (subject of m) & us & toJoined & us & (((current date) - (date sent of m)) as integer) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+# _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
+# iteration raises -1700). Verified on-device.
+_MY_ADDRESSES = """on run argv
+  set us to character id 31
+  set AppleScript's text item delimiters to us
+  set out to ""
+  with timeout of 60 seconds
+  tell application "Mail"
+    repeat with acc in accounts
+      set out to out & ((email addresses of acc) as text) & us
+    end repeat
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to ""
+  return out
+end run"""
+
+# _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation window),
+# emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry In-Reply-To /
+# References) — Python parses referenced ids (stdlib email handles folding). Capped at maxN.
+_INBOX_REFS = """on run argv
+  set cutoffSecs to (item 1 of argv) as integer
+  set maxN to (item 2 of argv) as integer
+  set rs to character id 30
+  set out to ""
+  set c to 0
+  with timeout of 120 seconds
+  tell application "Mail"
+    set cutoff to (current date) - cutoffSecs
+    repeat with m in (messages of inbox whose date received > cutoff)
+      set h to all headers of m
+      if (h contains "In-Reply-To:") or (h contains "References:") then
+        set c to c + 1
+        if c > maxN then exit repeat
+        set out to out & h & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+
+
 def _summary(subject: str, sender: str) -> str:
     subject, sender = subject.strip(), sender.strip()
     if subject and sender:
@@ -556,3 +713,32 @@ class MailAdapter:
         canon = mailbox.strip().lower()
         raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
         return _parse_attachments(raw)[:MAX_MAILS]
+
+    def get_needs_response(self) -> list[Pointer]:
+        """Inbox messages that likely need the user's response, ranked with a reason
+        (flagged / unread-direct / unanswered-direct). Heuristic over headers/
+        properties — no body scan; direct-addressed + not-yet-replied. Bounded."""
+        records = _parse_triage_records(run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN)))
+        my = _parse_my_addrs(run_osascript(_MY_ADDRESSES))
+        return _classify_needs_response(records, my)
+
+    def get_awaiting_reply(self, days: int = 3) -> list[Pointer]:
+        """Sent messages older than `days` with no reply, ranked oldest-first (reason
+        'awaiting-reply'). Real In-Reply-To/References threading. Bounded."""
+        if not 1 <= days <= 365:
+            raise ValueError("days must be between 1 and 365")
+        sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
+        candidates = [r for r in sent if r["secs_ago"] >= days * 86400]
+        if not candidates:
+            return []
+        window = max(  # scan inbox back to the oldest candidate send
+            r["secs_ago"] for r in candidates
+        )
+        blobs = [
+            b
+            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(
+                "\x1e"
+            )
+            if b.strip()
+        ]
+        return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)
