@@ -147,4 +147,4 @@ def test_every_write_tool_is_audit_classified():
         "safari_open",
         "run_shortcut",
     }
-    assert set(srv._AUDIT_SNAPSHOT) | envelope_only == srv._WRITE_TOOLS
+    assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS

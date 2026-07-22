@@ -1446,12 +1446,12 @@ def test_audit_records_update_with_before(tmp_path, monkeypatch):
 
     from fastmcp import Client
 
-    import macos_apps_mcp.runtime as rt
+    import macos_apps_mcp.audit as au
     import macos_apps_mcp.server as srv
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
     from macos_apps_mcp.contracts import CalendarEventData
 
-    monkeypatch.setattr(rt, "state_dir", lambda: tmp_path)  # audit to a temp log
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)  # audit to a temp log
     run_native(request_access)
     a = CalendarAdapter()
     start = datetime.now().replace(microsecond=0) + timedelta(days=1)
@@ -1475,7 +1475,7 @@ def test_audit_records_update_with_before(tmp_path, monkeypatch):
                 )
 
         asyncio.run(_drive())
-        entries = rt.audit_read()
+        entries = au.audit_read()
         upd = next(e for e in entries if e["tool"] == "update_event")
         assert upd["before"] and "audit" in upd["before"]["summary"]
         assert upd["after"] and "edited" in upd["after"]["summary"]

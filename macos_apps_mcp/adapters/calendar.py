@@ -15,13 +15,12 @@ from ..contracts import CalendarEventData, Pointer, parse_datetime
 from ..runtime import (
     SpanRequired,
     VerificationFailed,
-    WriteRefused,
-    clean_summary,
+    container_id,
     epoch_nsdate,
     from_nsdate,
-    norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
+    refused_write,
     resolve_container,
     run_native,
     store,
@@ -29,6 +28,7 @@ from ..runtime import (
     to_recurrence_rule,
     verify_persisted,
 )
+from ..text import clean_summary, norm_text
 
 
 def _range(query: str) -> tuple[datetime, datetime]:
@@ -426,20 +426,10 @@ class CalendarAdapter:
             # saves future-events. No span param — create is never an ambiguous edit.
             span = _resolve_span(e, None, adds_recurrence=data.recurrence is not None)
             _apply_event(s, e, data)
-            # read before save — the commit may re-home the object, and post-save it
-            # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = e.calendar()
-            cal_id = cal.calendarIdentifier() if cal is not None else None
+            cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event write was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event write", "calendar", err)
             # Re-resolve by the occurrence id we'll return — never trust the in-memory
             # event (#49): prove the id resolves and the fields persisted.
             ident = _event_id(e)
@@ -462,20 +452,10 @@ class CalendarAdapter:
                 e, span, adds_recurrence=data.recurrence is not None
             )
             _apply_event(s, e, data)
-            # read before save — the commit may re-home the object, and post-save it
-            # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = e.calendar()
-            cal_id = cal.calendarIdentifier() if cal is not None else None
+            cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event write was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event write", "calendar", err)
             # Re-key from the post-apply event: if start changed, _event_id(e) carries
             # the new occurrence epoch, so we re-resolve (and cite) it as persisted.
             ident_after = _event_id(e)
@@ -515,12 +495,7 @@ class CalendarAdapter:
                 return _event_pointer(e)  # preview only — nothing is removed
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event delete was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event delete", "calendar", err)
             return None
 
         return run_native(work)

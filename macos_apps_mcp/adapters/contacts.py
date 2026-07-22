@@ -12,13 +12,8 @@ the script, so a name or id can't break out of the AppleScript.
 from __future__ import annotations
 
 from ..contracts import ContactData, Pointer
-from ..runtime import (
-    VerificationFailed,
-    clean_summary,
-    norm_text,
-    run_osascript,
-    verify_persisted,
-)
+from ..runtime import VerificationFailed, run_osascript, verify_persisted
+from ..text import clean_summary, norm_text
 
 MAX_CONTACTS = 50  # cap a broad name match
 

@@ -20,13 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..contracts import Pointer
-from ..runtime import (
-    clean_body,
-    clean_summary,
-    mac_region,
-    read_via_sqlite,
-    run_osascript,
-)
+from ..runtime import mac_region, read_via_sqlite, run_osascript
+from ..text import clean_body, clean_summary
 
 MAX_CHATS = 30
 MAX_MESSAGES = 40  # default cap on a content read

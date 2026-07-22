@@ -133,6 +133,16 @@ class Pointer:
     folder: str | None = None  # notes_all only: "Account / Folder"; None elsewhere
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
 
+    def as_dict(self) -> dict[str, str]:
+        """The wire shape: required fields always; optional fields only when set.
+        The ONE serialization of a Pointer — tool results and audit records share it."""
+        d = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
+        if self.folder is not None:
+            d["folder"] = self.folder
+        if self.reason is not None:
+            d["reason"] = self.reason
+        return d
+
 
 @runtime_checkable
 class PointerSource(Protocol):
@@ -143,6 +153,19 @@ class PointerSource(Protocol):
     """
 
     def get_pointers(self, query: str) -> list[Pointer]: ...
+
+
+@runtime_checkable
+class Snapshotter(Protocol):
+    """The by-id read an id-addressed write needs for audit before-state (#67).
+
+    ``snapshot(ident)`` returns the current Pointer for one item, or None if the id
+    no longer resolves. Declared here so AuditMiddleware consumes a contract, not a
+    duck-typed method — an adapter that registers an update/delete tool with
+    before-state capture must satisfy this Protocol.
+    """
+
+    def snapshot(self, ident: str) -> Pointer | None: ...
 
 
 # --- disambiguation rule (#55) -------------------------------------------------------
@@ -269,6 +292,26 @@ class _ClearRecurrence:
 
 
 CLEAR_RECURRENCE = _ClearRecurrence()
+
+
+def parse_recurrence(rrule: str | None) -> Recurrence | None:
+    """Tool-arg parse: optional RFC-5545 RRULE string → Recurrence. Empty/absent/'none'
+    → None. Lives here with the other tool-arg parsers (parse_datetime/parse_all_day)
+    so the recurrence domain rule isn't smeared into the dispatch layer."""
+    if not rrule or rrule.strip().lower() == "none":
+        return None  # 'none' is taught by update_reminder — accept it everywhere
+    return Recurrence.from_rrule(rrule)
+
+
+def parse_recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | None:
+    """update_reminder's tri-state recurrence: absent/empty → None (unspecified —
+    refused downstream when the target repeats); the literal 'none' →
+    CLEAR_RECURRENCE (explicit stop); anything else parses as an RRULE."""
+    if not rrule:
+        return None
+    if rrule.strip().lower() == "none":
+        return CLEAR_RECURRENCE
+    return Recurrence.from_rrule(rrule)
 
 
 @dataclass(frozen=True, slots=True)

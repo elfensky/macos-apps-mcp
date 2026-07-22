@@ -15,18 +15,14 @@ practice.
 
 from __future__ import annotations
 
-import atexit
 import contextlib
-import json
 import logging
 import os
-import re
-import signal
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
-import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -205,6 +201,28 @@ def resolve_container(items, target: str, *, noun: str):
     return matches[0][1]
 
 
+def refused_write(what: str, noun: str, err: object) -> WriteRefused:
+    """The uniform store-refused-a-save error: ONE wording for every EventKit write
+    (create/update/delete/complete), instead of six hand-typed copies. ``what`` names
+    the operation ("event write", "reminder completion"); ``noun`` the container kind
+    ("calendar", "list"). Returned, not raised, so the call site reads ``raise
+    refused_write(...)``."""
+    return WriteRefused(
+        f"the {what} was refused by the store: {err}. The target {noun} may be "
+        f"read-only (a subscribed {noun}) or the account rejected the change — do "
+        "not retry the same target; tell the user."
+    )
+
+
+def container_id(item) -> str | None:
+    """The item's calendar/list IDENTIFIER, read BEFORE the save — the commit may
+    re-home the object, and post-save it would tautologically equal the actual. May be
+    None (no writable account); the save then surfaces WriteRefused. Verify keys on the
+    identifier, not the title (#55 review). Works for EKEvent and EKReminder alike."""
+    cal = item.calendar()
+    return cal.calendarIdentifier() if cal is not None else None
+
+
 def verify_persisted(
     entity: str, expected: dict[str, object], actual: dict[str, object]
 ) -> None:
@@ -231,129 +249,8 @@ def verify_persisted(
         )
 
 
-def norm_text(v) -> str | None:
-    """NFC + LF-normalize a free-text field for verify comparison (#49): Cocoa treats
-    NFC/NFD as equal and stores may fold CRLF, so byte-exact != would false-fail a
-    correct write. "" and None both mean "unset"."""
-    if v is None:
-        return None
-    s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
-    return s or None
-
-
-# Typographic glyphs Apple's stores keep but users type ASCII for (#64). Curly single/
-# double quotes + primes → ASCII ' and ", ellipsis → "...". NOT hyphens/dashes: folding
-# the dash family broke real hyphenated names elsewhere, and the acceptance requires
-# hyphenated titles unaffected — so dashes pass through fold_text untouched.
-_PUNCT_FOLD = {
-    0x2018: "'",  # ‘ left single quote
-    0x2019: "'",  # ’ right single quote (the U+2019 apostrophe — the #26 culprit)
-    0x201A: "'",  # ‚ single low-9 quote
-    0x201B: "'",  # ‛ single high-reversed-9 quote
-    0x2032: "'",  # ′ prime
-    0x201C: '"',  # “ left double quote
-    0x201D: '"',  # ” right double quote
-    0x201E: '"',  # „ double low-9 quote
-    0x201F: '"',  # ‟ double high-reversed-9 quote
-    0x2033: '"',  # ″ double prime
-    0x2026: "...",  # … horizontal ellipsis
-}
-
-
-def fold_text(v: object) -> str:
-    """Case/diacritic/smart-punctuation-insensitive key for READ-side name/title
-    matching (#64). Apply to BOTH sides of a comparison so "café" matches "cafe" and
-    "Andrei's list" (U+2019) matches "Andrei's list" (ASCII) — Apple stores typographic
-    glyphs, models type ASCII, and the mismatch silently returned nothing (epheterson
-    #26). Steps: map curly quotes/apostrophes/ellipsis → ASCII, NFKD-decompose and drop
-    combining marks (strips diacritics), then casefold. Hyphens/dashes are LEFT ALONE
-    (see _PUNCT_FOLD). Pure / native-free; composes with norm_text (#49).
-
-    READS ONLY. Write-target resolution (resolve_container) stays byte-exact by design:
-    folding a write target could collapse two real containers ("Café"/"Cafe") and
-    silently mis-home the write — the exact opposite of the AmbiguousTarget guard's
-    intent. Fold search results, never write targets.
-
-    ponytail: NFKD is *compatibility* decomposition, so it also folds ligatures/width/
-    superscripts (ﬁ→"fi", №→"no", ①→"1"). That only ever WIDENS a read match (a
-    harmless superset), never drops a legitimate one, and can't reach a write — fine
-    for search. Switch to NFD if a caller ever needs canonical-only folding.
-    """
-    s = str(v) if v is not None else ""
-    s = s.translate(_PUNCT_FOLD)
-    s = "".join(
-        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
-    )
-    return s.casefold()
-
-
-# --- output hygiene (#52) ------------------------------------------------------------
-# Raw native text reaches the model two ways: as a one-line Pointer.summary and as an
-# opt-in hydrated body. Both are control-stripped and bounded here — in ONE place, one
-# uniform rule (no per-tool truncation knobs) — so a pathological item can neither
-# corrupt the client (control chars / U+2028-9 blanked Claude Desktop conversations
-# retroactively, carterlasalle #2) nor blow the buffer/context (a 150k-char body failed
-# *silently* at maxBuffer, FradSer #66/#69). ponytail: the three MAX constants are
-# tuning knobs — change the numbers, not the mechanism.
-SUMMARY_MAX = 200  # a one-line citable extract
-BODY_MAX = 4000  # per-item hydrated body — soft cap: truncate + marker past this
-BODY_HARD_MAX = 50_000  # a body past this is a dump, not a note → OutputOverflow
-
-# Fold every kind of line break to one char first: CRLF/CR, VT, FF, NEL (U+0085), and
-# the Unicode LINE/PARAGRAPH SEPARATORS (U+2028/9) that historically blank JS/JSON
-# consumers. \r\n is one alternative so a Windows newline folds to a single char.
-_LINE_BREAKS = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
-# Disallowed chars remaining after breaks are folded: C0 controls (minus TAB \x09 and
-# the fold char \n \x0a, both kept), DEL \x7f, and C1 \x80-\x9f. \x0b-\x0d never survive
-# folding, so the class starts at \x0e.
-_CTRL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f-\x9f]")
-
-
-def _truncate(text: str, limit: int) -> str:
-    """Cap ``text`` at ``limit`` chars, appending an explicit ``[truncated N chars]``
-    marker (N = chars dropped) so the model never mistakes a clip for the whole."""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]} [truncated {len(text) - limit} chars]"
-
-
-def sanitize_line(text: object) -> str:
-    """Collapse ``text`` to one control-char-free line (NO truncation): every line break
-    → space, C0/C1/DEL controls removed, whitespace runs collapsed. For anything that
-    lands in a one-line ``Pointer.summary``. ``None`` → ``""``."""
-    folded = _LINE_BREAKS.sub(" ", str(text) if text is not None else "")
-    return re.sub(r"\s+", " ", _CTRL.sub("", folded)).strip()
-
-
-def sanitize_block(text: object) -> str:
-    """Strip control chars from multi-line ``text``, preserving line structure (NO
-    truncation): every line break → ``\\n``, TAB kept, other C0/C1/DEL removed. For
-    opt-in hydrated bodies (a body legitimately spans lines — do not flatten it)."""
-    folded = _LINE_BREAKS.sub("\n", str(text) if text is not None else "")
-    return _CTRL.sub("", folded)
-
-
-def clean_summary(text: object) -> str:
-    """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
-    return _truncate(sanitize_line(text), SUMMARY_MAX)
-
-
-def clean_body(
-    text: object, limit: int = BODY_MAX, hard: int | None = BODY_HARD_MAX
-) -> str:
-    """Control-free, line-preserving body truncated at ``limit`` with a marker.
-
-    Raises ``OutputOverflow`` when the sanitized body exceeds ``hard``: a single item
-    that large is a pasted dump, not a note, and truncating it to a few KB would just
-    hand back misleading noise — the model should open it in-app instead. Pass
-    ``hard=None`` to always truncate (where one huge item must not fail a batch)."""
-    s = sanitize_block(text)
-    if hard is not None and len(s) > hard:
-        raise OutputOverflow(
-            f"this item is {len(s)} chars — too large to hydrate (cap {hard}). Open it "
-            "in the app instead of fetching its body; do not retry the hydrate."
-        )
-    return _truncate(s, limit)
+# NOTE: text hygiene / fold / verify-normalization live in text.py (#52/#49/#64) —
+# pure string work with no coupling to the native worker.
 
 
 def require_batch_within(count: int, cap: int, *, override_param: str) -> None:
@@ -453,7 +350,7 @@ _children: set[subprocess.Popen] = set()
 _children_lock = threading.Lock()
 
 
-def _terminate_children() -> None:
+def terminate_children() -> None:
     """Terminate any in-flight osascript child. Idempotent; safe from any thread and at
     shutdown (an already-dead child raises OSError on terminate, ignored)."""
     with _children_lock:
@@ -522,6 +419,24 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
         return out[:-1] if out.endswith("\n") else out
 
     return _run() if _on_worker() else run_native(_run)
+
+
+@contextlib.contextmanager
+def body_file(text: str):
+    """A 0600 utf-8 tempfile holding ``text``, for an AppleScript template to read as
+    ``«class utf8»`` — the safe transport for a large/multiline/unicode body (never
+    interpolated into the script; the supermemoryai pattern, #62). Yields the path
+    (pass it as the template's LAST argv item); the file is deleted on exit — the
+    script runs synchronously, so it has already consumed the content. The one home
+    for the mkstemp → write → unlink dance mail and notes each hand-rolled twice."""
+    fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-body-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        yield path
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
 
 
 _ASYNC_TIMEOUT = 30.0  # seconds
@@ -808,99 +723,8 @@ def rrule_text(rule) -> str:
 log = logging.getLogger("macos_apps_mcp")
 
 
-# --- write audit log storage (#67) ----------------------------------------------------
-AUDIT_LIMIT = 50
-_AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate past ~5 MB; one backup
-
-
-def state_dir() -> Path:
-    """The XDG state dir for this server, created on use."""
-    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
-    d = Path(base) / "macos-apps-mcp"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _audit_path() -> Path:
-    return state_dir() / "audit.jsonl"
-
-
-def audit_write(record: dict) -> None:
-    """Append one JSON record to the audit log. NEVER raises — auditing must not fail a
-    user's write, so a logging error (disk full, permission, missing dir) is
-    swallowed."""
-    try:
-        path = _audit_path()
-        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
-            path.replace(path.with_name(path.name + ".1"))  # rotate; one backup
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as e:  # noqa: BLE001 — audit must never break a write
-        log.debug("audit_write failed: %s", e)
-
-
-def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
-    """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
-    drops older entries by lexical ts compare (entries are naive-local, one format).
-    Malformed lines are skipped; a missing log is empty."""
-    path = _audit_path()
-    if not path.exists():
-        return []
-    out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue  # skip a truncated/corrupt line, never fail the read
-        if since and rec.get("ts", "") < since:
-            continue
-        out.append(rec)
-    out.reverse()  # newest first
-    return out[:limit]
-
-
-# --- per-tool usage tally (#67 addendum) ----------------------------------------------
-# ponytail: append-only jsonl, aggregate on read — mirrors the audit log. Timestamps
-# preserved so "how often" is a real rate, not just a total. Rotates like audit.
-def _usage_path() -> Path:
-    return state_dir() / "usage.jsonl"
-
-
-def usage_log(tool: str) -> None:
-    """Append one usage record for a tool call. NEVER raises — usage tracking must not
-    fail a user's call, so any logging error is swallowed."""
-    try:
-        path = _usage_path()
-        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
-            path.replace(path.with_name(path.name + ".1"))  # rotate; one backup
-        rec = {"ts": datetime.now().isoformat(timespec="seconds"), "tool": tool}
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
-    except Exception as e:  # noqa: BLE001 — tracking must never break a call
-        log.debug("usage_log failed: %s", e)
-
-
-def usage_read() -> dict[str, dict]:
-    """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
-    Malformed lines are skipped; a missing log is empty."""
-    path = _usage_path()
-    out: dict[str, dict] = {}
-    if not path.exists():
-        return out
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            rec = json.loads(line)
-            tool, ts = rec["tool"], rec.get("ts", "")
-        except (ValueError, KeyError, TypeError):
-            continue  # skip a truncated/corrupt line, never fail the read
-        entry = out.get(tool)
-        if entry is None:
-            out[tool] = {"count": 1, "first": ts, "last": ts}
-        else:
-            entry["count"] += 1
-            if ts:
-                entry["last"] = ts
-    return out
+# NOTE: the write-audit trail + usage tally (#67) live in audit.py — they are plain
+# file IO with no coupling to the native worker, so they don't belong in this module.
 
 
 def _request_one(s: EK.EKEventStore, entity: int) -> None:
@@ -959,58 +783,5 @@ def bootstrap() -> None:
     run_native(request_access_each)
 
 
-# --- lifecycle hygiene (#56) ---------------------------------------------------------
-# A stdio MCP server orphaned by its parent (Claude exits/crashes) must not linger,
-# re-launching Mail.app forever (patrickfreyer #58, python-sdk #526). We watch our
-# parent pid and hard-exit on reparent; on every exit path we also terminate any
-# in-flight osascript child (the AppleScript `with timeout` in each template is the
-# backstop for when we can't). Installed by the server entry point, NOT bootstrap(), so
-# importing the module or running unit tests never starts a watcher or grabs SIGTERM.
-_PPID_POLL = 1.0  # seconds — well inside the 5s orphan-exit budget
-
-# The launching parent's pid, captured at IMPORT — deliberately NOT at
-# install_lifecycle_guards() time. bootstrap() blocks up to 120s on the TCC permission
-# prompt *before* the guards install; if the parent died during that wait, an
-# install-time os.getppid() would already read 1 (reparented) and the watcher could
-# never fire (1 == 1 forever). Import runs right after the parent spawns us (alive).
-_LAUNCH_PPID = os.getppid()
-
-
-def _parent_died(original_ppid: int) -> bool:
-    """True once our launching parent is gone: its pid was reaped and we were reparented
-    (``getppid`` changes, typically to 1/launchd). A process's parent never changes
-    while that parent is alive, so a changed ppid reliably means the parent died."""
-    return os.getppid() != original_ppid
-
-
-_lifecycle_installed = False
-
-
-def install_lifecycle_guards() -> None:
-    """Start the orphan watcher and register child-cleanup on exit (#56). Idempotent.
-
-    Call once from the server entry point (after bootstrap). The watcher is a daemon
-    thread; SIGTERM and normal exit both terminate any in-flight osascript child so a
-    graceful stop doesn't leave one hung until its AppleScript timeout.
-    """
-    global _lifecycle_installed
-    if _lifecycle_installed:
-        return
-    _lifecycle_installed = True
-
-    atexit.register(_terminate_children)
-    # signal.signal only works on the main thread — skip (suppress ValueError) if not.
-    with contextlib.suppress(ValueError):
-        signal.signal(signal.SIGTERM, lambda *_: (_terminate_children(), os._exit(0)))
-
-    def _watch() -> None:
-        # compare against the import-time launch ppid (see _LAUNCH_PPID) so a parent
-        # that died during bootstrap's permission prompt is still detected as gone.
-        while not _parent_died(_LAUNCH_PPID):
-            time.sleep(_PPID_POLL)
-        # parent gone: kill any in-flight child, then hard-exit (skip Python teardown —
-        # its stdio pipes point at a dead parent and could block).
-        _terminate_children()
-        os._exit(0)
-
-    threading.Thread(target=_watch, name="mac-ppid-watch", daemon=True).start()
+# NOTE: lifecycle hygiene (#56 — orphan watcher, SIGTERM/atexit child cleanup)
+# lives in lifecycle.py; it consumes terminate_children() above.

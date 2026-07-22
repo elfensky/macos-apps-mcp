@@ -15,21 +15,13 @@ bounds a pathological search. User input goes via argv / a tempfile — not inte
 
 from __future__ import annotations
 
-import contextlib
 import email
-import os
 import re
-import tempfile
 from urllib.parse import quote
 
 from ..contracts import Pointer
-from ..runtime import (
-    NativeError,
-    clean_body,
-    clean_summary,
-    run_osascript,
-    sanitize_line,
-)
+from ..runtime import NativeError, body_file, run_osascript
+from ..text import clean_body, clean_summary, sanitize_line
 
 MAX_MAILS = 25
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
@@ -62,6 +54,37 @@ def system_mailbox_names(canonical: str) -> tuple[str, ...]:
             f"{sorted(_SYSTEM_MAILBOXES)}"
         )
     return _SYSTEM_MAILBOXES[key]
+
+
+# --- US/RS framing contract (#68) ------------------------------------------------
+# AppleScript emits fields joined with US (\x1f) and records joined with RS (\x1e);
+# every free-text field (subject, sender, date, attachment name) passes through the
+# stripFraming handler FIRST so a payload containing those bytes can't desync parsing.
+# This block is the protocol's single home: the separators, the one AppleScript
+# handler (prepended to every framed template), and the one Python splitter
+# (_split_framed). Nothing else in this file may hard-code \x1f/\x1e or re-declare
+# the handler — that scatter is exactly what caused the a6ce7fd subject-framing bug.
+US = "\x1f"  # unit separator — joins fields
+RS = "\x1e"  # record separator — joins records
+
+_STRIP_FRAMING = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming"""
+
+
+def _split_framed(raw: str) -> list[list[str]]:
+    """Split a US/RS-framed payload into records of fields, skipping blank records —
+    the single Python-side counterpart of the framing contract above."""
+    return [record.split(US) for record in raw.split(RS) if record.strip()]
 
 
 # Bounded host-side (#52): stop emitting after maxN matches instead of streaming the
@@ -146,23 +169,14 @@ end run"""
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
-# sender/date are stripped of raw framing bytes (stripFraming, the same handler
-# _ATTACHMENTS uses) before being joined, so a sender display name that happens to
-# contain a literal US/RS char can't desync reply()'s raw.partition("\x1f") parsing.
-# The body `c` is the LAST field and needs no stripping for parse-safety (clean_body
-# strips control chars from it in _build_quote).
-_ORIGINAL = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+# sender/date are stripped of raw framing bytes (the shared _STRIP_FRAMING handler)
+# before being joined, so a sender display name that happens to contain a literal
+# US/RS char can't desync reply()'s raw.partition(US) parsing. The body `c` is the
+# LAST field and needs no stripping for parse-safety (clean_body strips control
+# chars from it in _build_quote).
+_ORIGINAL = (
+    _STRIP_FRAMING
+    + """
 
 on run argv
   set mid to item 1 of argv
@@ -180,6 +194,7 @@ on run argv
   end tell
   end timeout
 end run"""
+)
 
 # reply builds a real reply via Mail's NATIVE reply verb (Mail owns In-Reply-To/
 # References threading — the only mechanism that threads; make-new-outgoing can't set
@@ -225,24 +240,15 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 # would. Since these accessors are locale-independent, only the canonical name travels
 # via argv — no localized candidate list needed. An empty query lists ALL messages in
 # the mailbox (bounded by maxN) rather than none — AppleScript's `contains ""` is
-# false, so that case is branched explicitly. Fields framed with US (\x1f)/RS (\x1e):
+# false, so that case is branched explicitly. Fields framed per the US/RS contract:
 # per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
-# subject and each attachment name are stripped of any raw framing bytes (stripFraming)
+# subject and each attachment name pass through the shared _STRIP_FRAMING handler
 # before being joined, so a message that happens to contain those control chars can't
 # desync the parser. Output capped at maxN records. with timeout (#56). All inputs via
 # argv (no interpolation).
-_ATTACHMENTS = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+_ATTACHMENTS = (
+    _STRIP_FRAMING
+    + """
 
 on run argv
   set q to item 1 of argv
@@ -293,6 +299,7 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 
 def _parse_attachments(raw: str) -> list[dict]:
@@ -300,10 +307,7 @@ def _parse_attachments(raw: str) -> list[dict]:
     subject then (name, size, downloaded) triples. Malformed/partial trailing records
     are skipped."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        parts = record.split("\x1f")
+    for parts in _split_framed(raw):
         summary = clean_summary(parts[0])
         atts = []
         rest = parts[1:]
@@ -331,10 +335,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
     sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
     Malformed/partial records are skipped; addresses lowercased."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        f = record.split("\x1f")
+    for f in _split_framed(raw):
         if len(f) < 8:
             continue
         out.append(
@@ -355,10 +356,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
 def _parse_sent_records(raw: str) -> list[dict]:
     """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        f = record.split("\x1f")
+    for f in _split_framed(raw):
         if len(f) < 4:
             continue
         out.append(
@@ -375,29 +373,20 @@ def _parse_sent_records(raw: str) -> list[dict]:
 
 
 def _parse_my_addrs(raw: str) -> set[str]:
-    return {a.strip().lower() for a in raw.split("\x1f") if a.strip()}
+    return {a.strip().lower() for a in raw.split(US) if a.strip()}
 
 
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
-# like commands; booleans coerce inside `&`). Subject is stripped of any raw framing
-# bytes (stripFraming, the same handler _ATTACHMENTS uses) before being joined, so a
-# subject that happens to contain those control chars can't desync the parser.
+# like commands; booleans coerce inside `&`). Subject passes through the shared
+# _STRIP_FRAMING handler before being joined, so a subject that happens to contain
+# those control chars can't desync the parser.
 # Addresses bare (extract address from / address of every to recipient, TID-joined)
 # — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
 # Verified on-device.
-_INBOX_TRIAGE = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+_INBOX_TRIAGE = (
+    _STRIP_FRAMING
+    + """
 
 on run argv
   set maxN to (item 1 of argv) as integer
@@ -426,22 +415,14 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 # _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
-# newest-first. Subject is stripped of raw framing bytes (stripFraming) before being
-# joined, same rationale as _INBOX_TRIAGE.
-_SENT_TRIAGE = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+# newest-first. Subject passes through the shared _STRIP_FRAMING handler before
+# being joined, same rationale as _INBOX_TRIAGE.
+_SENT_TRIAGE = (
+    _STRIP_FRAMING
+    + """
 
 on run argv
   set maxN to (item 1 of argv) as integer
@@ -468,6 +449,7 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 # _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
 # iteration raises -1700). Verified on-device.
@@ -670,14 +652,8 @@ class MailAdapter:
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-draft-", suffix=".txt")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(body or "")
+        with body_file(body or "") as path:
             run_osascript(_CREATE_DRAFT, addr, subject or "", path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         return {
             "created": True,
             "subject": subject or "",
@@ -704,8 +680,8 @@ class MailAdapter:
         if include_quote:
             raw = run_osascript(_ORIGINAL, mid)
             if raw.strip() and raw.strip() != _MISSING_VALUE:
-                sender, _, rest = raw.partition("\x1f")
-                date_str, _, original = rest.partition("\x1f")
+                sender, _, rest = raw.partition(US)
+                date_str, _, original = rest.partition(US)
                 # defense-in-depth (#42/#46 review): the AppleScript already strips raw
                 # framing bytes from sender/date, but sanitize_line ALSO strips any
                 # other control chars a display name/date could carry, keeping the
@@ -714,14 +690,8 @@ class MailAdapter:
                 sender = sanitize_line(sender)
                 date_str = sanitize_line(date_str)
                 body = reply_body + "\n\n" + _build_quote(sender, date_str, original)
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-reply-", suffix=".txt")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(body)
+        with body_file(body) as path:
             run_osascript(_REPLY, mid, path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         return {
             "created": True,
             "subject": "(reply)",
@@ -769,9 +739,7 @@ class MailAdapter:
         )
         blobs = [
             b
-            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(
-                "\x1e"
-            )
+            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(RS)
             if b.strip()
         ]
         return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)

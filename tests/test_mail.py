@@ -180,7 +180,8 @@ def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
 def test_get_body_huge_body_overflows(monkeypatch):
     # a pasted-dump body over the hard cap surfaces OutputOverflow (open it in Mail),
     # not a silently-truncated blob.
-    from macos_apps_mcp.runtime import BODY_HARD_MAX, OutputOverflow
+    from macos_apps_mcp.runtime import OutputOverflow
+    from macos_apps_mcp.text import BODY_HARD_MAX
 
     monkeypatch.setattr(
         "macos_apps_mcp.adapters.mail.run_osascript",
@@ -363,7 +364,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
     # HIGH fix: _build_quote must TRUNCATE a huge original, not crash the whole reply
     # (clean_body's default hard=BODY_HARD_MAX would raise OutputOverflow here).
     import macos_apps_mcp.adapters.mail as mail
-    from macos_apps_mcp.runtime import BODY_HARD_MAX
+    from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 100)
 
@@ -388,6 +389,46 @@ def test_original_strips_framing_from_sender_and_date():
     assert "my stripFraming(snd)" in _ORIGINAL
     assert "my stripFraming(dt)" in _ORIGINAL
     assert "on stripFraming" in _ORIGINAL
+
+
+# --- US/RS framing contract (#68) -----------------------------------------------------
+
+
+def test_framed_templates_compose_the_one_strip_framing_handler():
+    # The a6ce7fd bug was a template emitting a raw field because its pasted handler
+    # copy drifted. Every template that emits US/RS-framed free text must now COMPOSE
+    # the single _STRIP_FRAMING constant — exactly one handler definition per script.
+    import macos_apps_mcp.adapters.mail as mail
+
+    framed = (mail._ORIGINAL, mail._ATTACHMENTS, mail._INBOX_TRIAGE, mail._SENT_TRIAGE)
+    for tpl in framed:
+        assert tpl.startswith(mail._STRIP_FRAMING)
+        assert tpl.count("on stripFraming") == 1
+
+
+def test_split_framed_skips_blank_records_and_splits_fields():
+    import macos_apps_mcp.adapters.mail as mail
+
+    raw = f"a{mail.US}b{mail.RS}{mail.RS}c{mail.RS}  {mail.RS}"
+    assert mail._split_framed(raw) == [["a", "b"], ["c"]]
+
+
+def test_framing_literals_live_only_in_the_contract_block():
+    # Locality guard: no other line in mail.py may hard-code the framing bytes.
+    import inspect
+
+    import macos_apps_mcp.adapters.mail as mail
+
+    src = inspect.getsource(mail)
+    offenders = [
+        line
+        for line in src.splitlines()
+        if (r"\x1f" in line or r"\x1e" in line)
+        and not line.lstrip().startswith("#")
+        and "US =" not in line
+        and "RS =" not in line
+    ]
+    assert offenders == []
 
 
 def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):

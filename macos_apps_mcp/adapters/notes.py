@@ -17,8 +17,6 @@ from __future__ import annotations
 import contextlib
 import gzip
 import html
-import os
-import tempfile
 import zlib
 from pathlib import Path
 
@@ -27,14 +25,12 @@ from ..runtime import (
     NativeError,
     OutputOverflow,
     VerificationFailed,
-    clean_body,
-    clean_summary,
-    fold_text,
-    norm_text,
+    body_file,
     read_via_sqlite,
     run_osascript,
     verify_persisted,
 )
+from ..text import clean_body, clean_summary, fold_text, norm_text
 
 MAX_NOTES = 25
 MAX_BODIES = 50
@@ -708,14 +704,8 @@ class NotesAdapter:
         verified by a re-read (#49) before it's trusted.
         """
         html_body = _compose_html(data.title, data.body)
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(html_body)
+        with body_file(html_body) as path:
             ident = run_osascript(_CREATE_NOTE, data.folder or "", path).strip()
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         _verify_note(self._read_title_by_id(ident), ident, data)
         return Pointer(
             id=ident,
@@ -733,14 +723,8 @@ class NotesAdapter:
         if not ident.strip():
             raise ValueError("update_note needs a note id")
         html_body = _compose_html(data.title, data.body)
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-note-", suffix=".html")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(html_body)
+        with body_file(html_body) as path:
             ident_after = run_osascript(_UPDATE_NOTE, ident, path).strip()
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         _verify_note(
             self._read_title_by_id(ident_after),
             ident_after,

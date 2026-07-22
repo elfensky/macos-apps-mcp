@@ -10,7 +10,6 @@ import functools
 import os
 from datetime import datetime
 
-import anyio
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
@@ -25,21 +24,22 @@ from .adapters.photos import PhotosAdapter
 from .adapters.reminders import RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
+from .audit import AuditMiddleware, audit_read, usage_read
 from .contracts import (
-    CLEAR_RECURRENCE,
     CalendarEventData,
     ContactData,
     NoteData,
     Pointer,
-    Recurrence,
     ReminderData,
-    _ClearRecurrence,
+    Snapshotter,
     now_local,
     parse_all_day,
     parse_datetime,
+    parse_recurrence,
+    parse_recurrence_update,
 )
 from .doctor import diagnose
-from .runtime import NativeError, audit_read, audit_write, usage_log, usage_read
+from .runtime import NativeError
 
 mcp = FastMCP("macos-apps-mcp")
 
@@ -55,12 +55,7 @@ _shortcuts = ShortcutsAdapter()
 
 
 def _emit(p: Pointer) -> dict[str, str]:
-    d = {"id": p.id, "summary": p.summary, "deeplink": p.deeplink}
-    if p.folder is not None:
-        d["folder"] = p.folder
-    if p.reason is not None:
-        d["reason"] = p.reason
-    return d
+    return p.as_dict()  # the wire shape lives on the type (contracts.py)
 
 
 def _read_only() -> bool:
@@ -102,6 +97,11 @@ _DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
 # below, in the non-read-only branch only (writes aren't registered in read-only mode).
 _WRITE_TOOLS: set[str] = set()
 
+# Which adapter answers snapshot(id) for each id-addressed write tool (#67) — DERIVED
+# at registration (`@_write_tool(snapshot=…)`), never hand-maintained, so a new write
+# tool can't silently miss before-state capture. Consumed by AuditMiddleware.
+_SNAPSHOT_SOURCES: dict[str, Snapshotter] = {}
+
 
 def _read_tool(fn):
     """Register a read tool, wrapped so typed native failures surface as directives.
@@ -109,13 +109,21 @@ def _read_tool(fn):
     return mcp.tool(annotations=_READ_ANNOTATIONS)(_guard(fn))
 
 
-def _write_tool(fn):
+def _write_tool(fn=None, *, snapshot: Snapshotter | None = None):
     """Register a write that modifies/overwrites/deletes existing state — skipped in
-    read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57)."""
-    if _read_only():
-        return fn
-    _WRITE_TOOLS.add(fn.__name__)
-    return mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(fn))
+    read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57).
+    ``snapshot``: the adapter answering ``snapshot(id)`` for audit before-state — pass
+    it on every id-addressed update/delete/complete tool (#67)."""
+
+    def deco(f):
+        if _read_only():
+            return f
+        _WRITE_TOOLS.add(f.__name__)
+        if snapshot is not None:
+            _SNAPSHOT_SOURCES[f.__name__] = snapshot
+        return mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(f))
+
+    return deco(fn) if fn is not None else deco
 
 
 def _additive_tool(fn):
@@ -165,90 +173,12 @@ mcp.add_middleware(UntrustedDataNotice())
 
 
 # --- audit trail (#67) ----------------------------------------------------------------
-# The central write-audit seam: one middleware logs an envelope for EVERY write tool,
-# with before-state captured only for the id-addressed update/delete/complete tools
-# (create_* and non-id writes are envelope-only — there's no prior state to diff).
-# Adapters hold no audit logic; this is the only place it lives.
-_AUDIT_SNAPSHOT = {
-    "update_event": _calendar,
-    "delete_event": _calendar,
-    "update_reminder": _reminders,
-    "complete_reminder": _reminders,
-    "update_note": _notes,
-    "delete_note": _notes,
-}
-
-
-def _audit_op(tool: str) -> str:
-    for prefix in ("create", "update", "delete"):
-        if tool.startswith(prefix):
-            return prefix
-    return {
-        "complete_reminder": "complete",
-        "run_shortcut": "action",
-        "safari_open": "open",
-        "mail_reply": "reply",
-    }.get(tool, "write")
-
-
-def _audit_args(args: dict) -> dict:
-    # truncate long string values so a big note body can't bloat the log
-    return {
-        k: (v[:200] + "…" if isinstance(v, str) and len(v) > 200 else v)
-        for k, v in args.items()
-    }
-
-
-def _audit_after(result) -> dict | None:
-    sc = getattr(result, "structured_content", None)
-    if isinstance(sc, dict):
-        inner = sc.get("result", sc)  # FastMCP may wrap a scalar under "result"
-        if isinstance(inner, dict) and "id" in inner:
-            return inner
-    return None
-
-
-def _safe_snapshot(adapter, ident: str) -> dict | None:
-    try:
-        p = adapter.snapshot(ident)
-        return _emit(p) if p is not None else None
-    except Exception:  # noqa: BLE001 — audit must never break a write
-        return None
-
-
-class AuditMiddleware(Middleware):
-    """Append an audit record for every write; capture before-state on update/delete
-    (#67). Central seam — adapters hold no audit logic. All failures are swallowed."""
-
-    async def on_call_tool(self, context, call_next):
-        tool = context.message.name
-        usage_log(tool)  # tally every call (reads included) — swallows its own errors
-        args = dict(context.message.arguments or {})
-        before = None
-        adapter = _AUDIT_SNAPSHOT.get(tool)
-        if adapter is not None and args.get("id"):
-            before = await anyio.to_thread.run_sync(_safe_snapshot, adapter, args["id"])
-        result = await call_next(context)
-        if tool in _WRITE_TOOLS and not result.is_error:
-            try:
-                after = _audit_after(result)
-                audit_write(
-                    {
-                        "ts": datetime.now().isoformat(timespec="seconds"),
-                        "tool": tool,
-                        "op": _audit_op(tool),
-                        "args": _audit_args(args),
-                        "target_id": args.get("id") or (after or {}).get("id"),
-                        "before": before,
-                        "after": after,
-                    }
-                )
-            except Exception:  # noqa: BLE001 — audit must never break a write
-                pass
-        return result
-
-
-mcp.add_middleware(AuditMiddleware())
+# The audit concept lives in audit.py; here it is only WIRED: the middleware reads the
+# live registries the tool decorators populate (sets/dicts mutate in place, so adding
+# the middleware before the tool defs below is safe).
+mcp.add_middleware(
+    AuditMiddleware(write_tools=_WRITE_TOOLS, snapshot_sources=_SNAPSHOT_SOURCES)
+)
 
 
 # no native call → registered without _guard (but still read-only-annotated, #57)
@@ -529,31 +459,6 @@ def _parse_all_day(label: str, s: str) -> datetime:
         raise ValueError(f"{label}: {e}") from e
 
 
-def _priority(n: int) -> int:
-    """EventKit reminder priority: 0 (none) or 1–9 (1 highest). Reject out-of-range."""
-    if not 0 <= n <= 9:
-        raise ValueError(f"priority must be 0–9 (0=none, 1=highest), got {n}")
-    return n
-
-
-def _recurrence(rrule: str | None) -> Recurrence | None:
-    """Optional RFC-5545 RRULE string → Recurrence. Empty/absent/'none' → None."""
-    if not rrule or rrule.strip().lower() == "none":
-        return None  # 'none' is taught by update_reminder — accept it everywhere
-    return Recurrence.from_rrule(rrule)
-
-
-def _recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | None:
-    """update_reminder's tri-state recurrence: absent/empty → None (unspecified —
-    refused downstream when the target repeats); the literal 'none' →
-    CLEAR_RECURRENCE (explicit stop); anything else parses as an RRULE."""
-    if not rrule:
-        return None
-    if rrule.strip().lower() == "none":
-        return CLEAR_RECURRENCE
-    return Recurrence.from_rrule(rrule)
-
-
 @_additive_tool
 def create_reminder(
     title: str,
@@ -574,14 +479,14 @@ def create_reminder(
         due=_parse(due),
         list_name=list_name,
         notes=notes,
-        priority=_priority(priority),
+        priority=priority,
         start=_parse(start),
-        recurrence=_recurrence(recurrence),
+        recurrence=parse_recurrence(recurrence),
     )
     return _emit(_reminders.create_reminder(data))
 
 
-@_write_tool
+@_write_tool(snapshot=_reminders)
 def update_reminder(
     id: str,
     title: str,
@@ -603,14 +508,14 @@ def update_reminder(
         due=_parse(due),
         list_name=list_name,
         notes=notes,
-        priority=_priority(priority),
+        priority=priority,
         start=_parse(start),
-        recurrence=_recurrence_update(recurrence),
+        recurrence=parse_recurrence_update(recurrence),
     )
     return _emit(_reminders.update_reminder(id, data))
 
 
-@_write_tool
+@_write_tool(snapshot=_reminders)
 def complete_reminder(id: str) -> dict:
     """Mark a reminder complete by id.
     Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
@@ -643,12 +548,12 @@ def create_event(
         location=location,
         notes=notes,
         all_day=all_day,
-        recurrence=_recurrence(recurrence),
+        recurrence=parse_recurrence(recurrence),
     )
     return _emit(_calendar.create_event(data))
 
 
-@_write_tool
+@_write_tool(snapshot=_calendar)
 def update_event(
     id: str,
     title: str,
@@ -676,12 +581,12 @@ def update_event(
         location=location,
         notes=notes,
         all_day=all_day,
-        recurrence=_recurrence(recurrence),
+        recurrence=parse_recurrence(recurrence),
     )
     return _emit(_calendar.update_event(id, data, span=span))
 
 
-@_write_tool
+@_write_tool(snapshot=_calendar)
 def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dict:
     """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
     'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
@@ -697,7 +602,7 @@ def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dic
     return {"deleted": id}
 
 
-@_write_tool
+@_write_tool(snapshot=_notes)
 def delete_note(
     id: str, expect_title: str | None = None, dry_run: bool = False
 ) -> dict:
@@ -725,7 +630,7 @@ def create_note(title: str, body: str = "", folder: str | None = None) -> dict:
     return _emit(_notes.create(NoteData(title=title, body=body, folder=folder)))
 
 
-@_write_tool
+@_write_tool(snapshot=_notes)
 def update_note(id: str, title: str, body: str = "", folder: str | None = None) -> dict:
     """Update a note by id (full-replace title+body); the stable id is preserved and
     verified (#49). `title`/`body` plaintext (escaped). `folder` is ignored on update
@@ -766,7 +671,8 @@ def safari_open(url: str) -> dict:
 
 def main() -> None:
     """Console entry point (`macos-apps-mcp`) and `python -m macos_apps_mcp`."""
-    from .runtime import bootstrap, install_lifecycle_guards
+    from .lifecycle import install_lifecycle_guards
+    from .runtime import bootstrap
 
     bootstrap()
     install_lifecycle_guards()  # orphan watcher + child cleanup (#56)

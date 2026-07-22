@@ -8,7 +8,8 @@ via argv (no injection). Pointers, not page content.
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import clean_summary, run_osascript
+from ..runtime import run_osascript
+from ..text import clean_summary
 
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
 _TABS = """with timeout of 120 seconds

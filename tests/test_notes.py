@@ -113,7 +113,7 @@ def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
 def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
     # a single pathological body (a pasted dump) must not fail the whole batch: it
     # downgrades to a per-item notice while the sibling note hydrates normally.
-    from macos_apps_mcp.runtime import BODY_HARD_MAX
+    from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 1)
     raw = f"N-1\x1f{huge}\x1eN-2\x1fok body\x1e"

@@ -17,13 +17,8 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
-from ..runtime import (
-    NativeError,
-    NativeTimeout,
-    clean_summary,
-    fold_text,
-    sanitize_line,
-)
+from ..runtime import NativeError, NativeTimeout
+from ..text import clean_summary, fold_text, sanitize_line
 
 MAX_SHORTCUTS = 100
 MAX_OUTPUT = 280  # pointers-not-payload: cite the run + a bounded snippet of any output
