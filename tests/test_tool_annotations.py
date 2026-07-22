@@ -45,6 +45,7 @@ _PERMISSION = {
     "now": None,
     "doctor": None,
     "audit": None,
+    "usage": None,
     "reminders": "EventKit",
     "events": "EventKit",
     "free_busy": "EventKit",

@@ -39,7 +39,7 @@ from .contracts import (
     parse_datetime,
 )
 from .doctor import diagnose
-from .runtime import NativeError, audit_read, audit_write
+from .runtime import NativeError, audit_read, audit_write, usage_log, usage_read
 
 mcp = FastMCP("macos-apps-mcp")
 
@@ -222,6 +222,7 @@ class AuditMiddleware(Middleware):
 
     async def on_call_tool(self, context, call_next):
         tool = context.message.name
+        usage_log(tool)  # tally every call (reads included) — swallows its own errors
         args = dict(context.message.arguments or {})
         before = None
         adapter = _AUDIT_SNAPSHOT.get(tool)
@@ -285,6 +286,26 @@ def audit(since: str | None = None) -> list[dict]:
     datetime (call now() to ground it) drops older entries; bounded to the last 50.
     Read-only; no permission (reads a local log at ~/.local/state/macos-apps-mcp)."""
     return audit_read(since)
+
+
+@mcp.tool(annotations=_READ_ANNOTATIONS)
+async def usage() -> dict:
+    """Per-tool call frequency, for pruning rarely/never-used tools. Returns `tools`
+    (each `{tool, count, first, last}`, busiest first), `never_used` (registered tools
+    with zero calls — the pruning list), and `total_calls`. Read-only; no permission
+    (reads a local log at ~/.local/state/macos-apps-mcp)."""
+    tally = usage_read()
+    tools = sorted(
+        ({"tool": t, **stats} for t, stats in tally.items()),
+        key=lambda e: e["count"],
+        reverse=True,
+    )
+    registered = {t.name for t in await mcp.list_tools()}
+    return {
+        "tools": tools,
+        "never_used": sorted(registered - tally.keys()),
+        "total_calls": sum(e["count"] for e in tally.values()),
+    }
 
 
 @_read_tool

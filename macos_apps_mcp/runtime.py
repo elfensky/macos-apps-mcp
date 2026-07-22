@@ -859,6 +859,50 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     return out[:limit]
 
 
+# --- per-tool usage tally (#67 addendum) ----------------------------------------------
+# ponytail: append-only jsonl, aggregate on read — mirrors the audit log. Timestamps
+# preserved so "how often" is a real rate, not just a total. Rotates like audit.
+def _usage_path() -> Path:
+    return state_dir() / "usage.jsonl"
+
+
+def usage_log(tool: str) -> None:
+    """Append one usage record for a tool call. NEVER raises — usage tracking must not
+    fail a user's call, so any logging error is swallowed."""
+    try:
+        path = _usage_path()
+        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
+            path.replace(path.with_name(path.name + ".1"))  # rotate; one backup
+        rec = {"ts": datetime.now().isoformat(timespec="seconds"), "tool": tool}
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception as e:  # noqa: BLE001 — tracking must never break a call
+        log.debug("usage_log failed: %s", e)
+
+
+def usage_read() -> dict[str, dict]:
+    """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
+    Malformed lines are skipped; a missing log is empty."""
+    path = _usage_path()
+    out: dict[str, dict] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            rec = json.loads(line)
+            tool, ts = rec["tool"], rec.get("ts", "")
+        except (ValueError, KeyError, TypeError):
+            continue  # skip a truncated/corrupt line, never fail the read
+        entry = out.get(tool)
+        if entry is None:
+            out[tool] = {"count": 1, "first": ts, "last": ts}
+        else:
+            entry["count"] += 1
+            if ts:
+                entry["last"] = ts
+    return out
+
+
 def _request_one(s: EK.EKEventStore, entity: int) -> None:
     """Request access for one entity type if undetermined, blocking on the async
     callback."""
