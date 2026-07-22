@@ -104,11 +104,9 @@ class BatchTooLarge(NativeError):
 
 
 class AmbiguousTarget(NativeError):
-    """A name/title matched more than one container, so a write cannot safely pick one.
-    The disambiguation rule (#55): never auto-pick an ambiguous target for a write —
-    fuzzy/first-match auto-pick sent iMessages to the wrong human (supermemoryai #48),
-    and duplicate calendar names silently mis-targeted writes (mcp-ical #16). ``str(e)``
-    tells the caller how to disambiguate."""
+    """A name/title matched more than one container, so a write cannot safely pick one
+    — disambiguation rule (#55): see contracts.py. ``str(e)`` tells the caller how to
+    disambiguate."""
 
     kind = "ambiguous_target"
 
@@ -124,20 +122,13 @@ class FullDiskAccessDenied(NativeError):
 
 
 def resolve_container(items: list[tuple[str, str, T]], target: str, *, noun: str) -> T:
-    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name (#55).
+    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name.
 
-    The disambiguation rule made concrete: a container-addressed write
-    (``create_event(calendar)``, ``create_reminder(list_name)``) accepts EITHER a
-    ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
-    name. An id wins (it is unambiguous by construction); a name matching >1 container
-    raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
-    the write targeting one of them rather than macos-apps-mcp guessing (mcp-ical #16
-    silent mis-target). id-first: a calendar/list identifier is a UUID, so it can't
-    collide with a human-typed name — the precedence is safe.
-
-    ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
-    container object) is returned. 0 name matches → ``ValueError``; >1 →
-    ``AmbiguousTarget``. Pure (no native imports) so it unit-tests with plain tuples.
+    Disambiguation rule (#55): see contracts.py. ``items`` is ``list[(id, name,
+    value)]``; the matched ``value`` (the native container object) is returned.
+    id-first (a container id is a UUID, so it can't collide with a human-typed name);
+    0 name matches → ``ValueError``; >1 → ``AmbiguousTarget`` listing the candidate
+    ids. Pure (no native imports) so it unit-tests with plain tuples.
     """
     for cid, _name, value in items:
         if cid == target:  # id-first: an unambiguous handle is used directly

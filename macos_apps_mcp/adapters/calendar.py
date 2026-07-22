@@ -8,6 +8,7 @@ reached-into).
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 import EventKit as EK
 
@@ -96,9 +97,8 @@ def _calendar_pointer(cal) -> Pointer:
 
 
 def _resolve_calendar(s, name: str | None):
-    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
-    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
-    # logic — including listing candidate ids — lives in runtime.resolve_container.
+    # Disambiguation rule (#55): see contracts.py; shared logic in
+    # errors.resolve_container.
     if name is None:
         return s.defaultCalendarForNewEvents()
     items = [
@@ -230,6 +230,11 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     # field, and test it then.
 
 
+# The closed span vocabulary (#51). The tool boundary passes caller strings through
+# unchecked, so _resolve_span still validates membership at runtime and refuses with
+# SpanRequired — the Literal documents/types the set, it doesn't replace the check.
+Span = Literal["this-event", "future-events"]
+
 # EKSpanThisEvent == 0 (falsy!), EKSpanFutureEvents == 1 — so map via membership, never
 # a truthy test.
 _SPANS = {
@@ -238,7 +243,7 @@ _SPANS = {
 }
 
 
-def _resolve_span(e, span: str | None, *, adds_recurrence: bool = False) -> int:
+def _resolve_span(e, span: Span | None, *, adds_recurrence: bool = False) -> int:
     """The EKSpan for an update/delete — requiring an explicit choice for a recurring
     target (#51).
 
@@ -442,7 +447,7 @@ class CalendarAdapter:
         return run_native(work)
 
     def update_event(
-        self, ident: str, data: CalendarEventData, span: str | None = None
+        self, ident: str, data: CalendarEventData, span: Span | None = None
     ) -> Pointer:
         def work():
             s = store()
@@ -481,7 +486,7 @@ class CalendarAdapter:
         return run_native(work)
 
     def delete_event(
-        self, ident: str, span: str | None = None, dry_run: bool = False
+        self, ident: str, span: Span | None = None, dry_run: bool = False
     ) -> Pointer | None:
         """Delete an event by id. ``dry_run=True`` resolves the target — and its span,
         so a recurring event still surfaces ``SpanRequired`` exactly as the real delete

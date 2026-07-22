@@ -37,32 +37,24 @@ NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
-# Localized system-mailbox name tables (#61): Mail names these per-locale, so a
-# a US-hardcoded "Inbox" gives "mailbox not found" on a non-English Mac. Static data
-# used by any mailbox-scoped operation (#45 / the reply-draft issues) to try each
-# candidate name. Canonical → localized names; en/nl/ru at least (the acceptance floor).
-# ponytail: extend per locale as needed — the exact Mail.app strings want on-device
-# confirmation, but a miss only means that mailbox isn't found there, never a crash.
-_SYSTEM_MAILBOXES = {
-    "inbox": ("Inbox", "Postvak IN", "Входящие"),
-    "sent": ("Sent", "Verzonden", "Отправленные"),
-    "drafts": ("Drafts", "Concepten", "Черновики"),
-    "trash": ("Trash", "Prullenmand", "Корзина"),
-    "junk": ("Junk", "Ongewenste reclame", "Спам"),
-}
+# Canonical system-mailbox names a mailbox-scoped operation accepts. Mailbox
+# resolution uses Mail's UNIFIED, locale-independent accessors (`inbox`/`sent
+# mailbox`/…, see _ATTACHMENTS), so only the canonical name matters — the
+# per-locale name tables from #61 died with the unified-accessor migration.
+_SYSTEM_MAILBOXES = frozenset({"inbox", "sent", "drafts", "trash", "junk"})
 
 
-def system_mailbox_names(canonical: str) -> tuple[str, ...]:
-    """Localized name candidates for a canonical system mailbox (inbox/sent/drafts/
-    trash/junk) — a mailbox-scoped op tries each until Mail resolves one. Raises on an
-    unknown canonical name so a typo fails loudly rather than silently matching none."""
-    key = canonical.strip().lower()
-    if key not in _SYSTEM_MAILBOXES:
+def _validate_mailbox(mailbox: str) -> str:
+    """Canonical lowercase system-mailbox name (inbox/sent/drafts/trash/junk), for the
+    unified accessors in the scripts. Raises on an unknown name so a typo fails loudly
+    rather than resolving to the wrong mailbox."""
+    canon = mailbox.strip().lower()
+    if canon not in _SYSTEM_MAILBOXES:
         raise ValueError(
-            f"unknown system mailbox {canonical!r}; expected one of "
+            f"unknown system mailbox {mailbox!r}; expected one of "
             f"{sorted(_SYSTEM_MAILBOXES)}"
         )
-    return _SYSTEM_MAILBOXES[key]
+    return canon
 
 
 # US/RS framing contract (#68): separators, the shared stripFraming AppleScript
@@ -573,7 +565,9 @@ def _classify_awaiting_reply(
     return [p for _, p in out[:MAX_MAILS]]
 
 
-def _parse(raw: str) -> list[Pointer]:
+def _parse_search_results(raw: str) -> list[Pointer]:
+    """Parse the _SEARCH payload: newline-separated records, tab-separated as id,
+    subject, sender. Records with no stable message-id are skipped."""
     out = []
     for line in raw.splitlines():
         if not line.strip():
@@ -604,7 +598,9 @@ class MailAdapter:
         if not q:
             raise ValueError("mail read needs a search substring (got an empty query)")
         # maxN is enforced host-side; the slice is a cheap backstop on the result.
-        return _parse(run_osascript(_SEARCH, q, str(MAX_MAILS)))[:MAX_MAILS]
+        return _parse_search_results(run_osascript(_SEARCH, q, str(MAX_MAILS)))[
+            :MAX_MAILS
+        ]
 
     def get_body(self, message_id: str) -> str:
         """Plaintext body of one inbox message by its RFC822 message-id, budgeted (#52):
@@ -694,11 +690,7 @@ class MailAdapter:
         `get_pointers`, which rejects an empty query. Returns up to MAX_MAILS records:
         [{"summary", "attachments": [{"name","size","downloaded"}]}]. A read — never
         mutates."""
-        # system_mailbox_names raises ValueError on an unknown canonical name; kept
-        # purely as validation here since the script no longer needs localized
-        # candidates (the unified accessors are locale-independent).
-        system_mailbox_names(mailbox)
-        canon = mailbox.strip().lower()
+        canon = _validate_mailbox(mailbox)
         raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
         return _parse_attachments(raw)[:MAX_MAILS]
 
@@ -716,12 +708,13 @@ class MailAdapter:
         if not 1 <= days <= 365:
             raise ValueError("days must be between 1 and 365")
         sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
-        candidates = [r for r in sent if r["secs_ago"] >= days * 86400]
-        if not candidates:
+        # The per-record age cutoff is applied in ONE place —
+        # _classify_awaiting_reply. Here only the correlation window is sized:
+        # scan inbox back to the oldest send; if even that is younger than the
+        # cutoff, no send can qualify, so skip the inbox scan entirely.
+        window = max((r["secs_ago"] for r in sent), default=0)
+        if window < days * 86400:
             return []
-        window = max(  # scan inbox back to the oldest candidate send
-            r["secs_ago"] for r in candidates
-        )
         blobs = [
             b
             for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(RS)

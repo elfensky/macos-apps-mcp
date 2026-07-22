@@ -14,18 +14,18 @@ from __future__ import annotations
 from ..contracts import ContactData, Pointer
 from ..errors import VerificationFailed, verify_persisted
 from ..runtime import run_osascript
-from ..text import clean_summary, norm_text
+from ..text import US, clean_summary, norm_text, split_framed
 
 MAX_CONTACTS = 50  # cap a broad name match
 
-# Field/record delimiters for the osascript payload: control chars instead of
-# tab/newline, so a tab or newline *inside* a field can't split or spoof a row. _parse
-# splits on these; the AppleScript emits them via `character id`.
+# Payload framing uses the canonical US/RS wire contract from text.py (#68): fields
+# joined with US, people with RS — control chars instead of tab/newline, so a tab or
+# newline *inside* a field can't split or spoof a row. The AppleScript emits them via
+# `character id 31`/`character id 30`; split_framed is the Python-side counterpart.
 # ponytail: US/RS are effectively absent from your own Contacts (trusted input), so this
 # is treated as an invariant, not sanitized. A field carrying a literal 0x1f/0x1e (e.g.
-# an adversarial vCard import) would still mis-split — strip them if seen in the wild.
-_FIELD = "\x1f"  # ASCII Unit Separator — between fields
-_RECORD = "\x1e"  # ASCII Record Separator — between people
+# an adversarial vCard import) would still mis-split — adopt text.STRIP_FRAMING (as
+# mail.py does) if seen in the wild.
 
 # Each matching person -> "id|name|org|phone|email" (US-delimited, RS-terminated). Unset
 # fields (`missing value` / no phones / no emails) normalize to "". Phone/email are the
@@ -115,7 +115,7 @@ def _verify_contact(raw: str, ident: str, data: ContactData) -> None:
             f"contact {ident!r} could not be re-read after save — the write did not "
             "persist (a fabricated id or an unsaved record). Do not trust the id."
         )
-    parts = raw.split(_FIELD)
+    parts = raw.split(US)
     fn = parts[0] if parts else ""
     ln = parts[1] if len(parts) > 1 else ""
     org = parts[2] if len(parts) > 2 else ""
@@ -150,10 +150,7 @@ def _deeplink(ident: str) -> str:
 
 def _parse(raw: str) -> list[Pointer]:
     out = []
-    for rec in raw.split(_RECORD):
-        if not rec.strip():
-            continue
-        parts = rec.split(_FIELD)
+    for parts in split_framed(raw):
         ident = parts[0]
         name = parts[1] if len(parts) > 1 else ""
         org = parts[2] if len(parts) > 2 else ""

@@ -8,9 +8,9 @@ from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
     _deeplink,
-    _parse,
+    _parse_search_results,
     _summary,
-    system_mailbox_names,
+    _validate_mailbox,
 )
 from macos_apps_mcp.contracts import Pointer
 
@@ -44,7 +44,7 @@ def test_deeplink_percent_encodes_special_chars():
 
 def test_parse_tab_lines():
     raw = "abc@host\tInvoice\tBob\n<def@host>\tHello\t\n"
-    ptrs = _parse(raw)
+    ptrs = _parse_search_results(raw)
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
     assert ptrs[0].id == "abc@host" and ptrs[0].summary == "Invoice — Bob"
@@ -53,7 +53,7 @@ def test_parse_tab_lines():
 
 
 def test_parse_skips_blank():
-    assert _parse("\n  \n") == []
+    assert _parse_search_results("\n  \n") == []
 
 
 def test_parse_skips_missing_message_id():
@@ -62,7 +62,7 @@ def test_parse_skips_missing_message_id():
     raw = (
         "missing value\tNo header\tSpammer\n\tEmpty id\tNobody\ngood@host\tReal\tBob\n"
     )
-    ptrs = _parse(raw)
+    ptrs = _parse_search_results(raw)
     assert [p.id for p in ptrs] == ["good@host"]  # only the message with a real id
 
 
@@ -74,7 +74,7 @@ def test_parse_sanitizes_control_chars_in_summary():
     # newline in a subject splits too) and out of #52's scope; the helper's own
     # U+2028/9 folding is covered in test_runtime.
     raw = "m@host\tInv\x00oice\x1fQ3\x07\tBob\n"
-    ptr = _parse(raw)[0]
+    ptr = _parse_search_results(raw)[0]
     assert ptr.summary == "InvoiceQ3 — Bob"
     assert "\x00" not in ptr.summary and "\x07" not in ptr.summary
 
@@ -91,29 +91,21 @@ def test_get_pointers_bounds_host_side(monkeypatch):
     assert seen["args"] == ("invoice", str(MAX_MAILS))
 
 
-# --- localized system-mailbox tables (#61) -------------------------------------------
+# --- system-mailbox validation ------------------------------------------------------
 
 
-def test_system_mailbox_names_localized():
-    # en/nl/ru at least (the acceptance floor) — a US-hardcoded "Inbox" fails on a
-    # non-English Mac, so mailbox-scoped ops try each localized candidate.
-    inbox = system_mailbox_names("inbox")
-    assert "Inbox" in inbox and "Postvak IN" in inbox and "Входящие" in inbox
+def test_validate_mailbox_returns_canonical_lowercase():
+    assert _validate_mailbox("  SENT ") == "sent"
 
 
-def test_system_mailbox_names_case_insensitive_canonical():
-    assert system_mailbox_names("SENT") == system_mailbox_names("sent")
-
-
-def test_system_mailbox_names_unknown_raises():
+def test_validate_mailbox_unknown_raises():
     with pytest.raises(ValueError, match="unknown system mailbox"):
-        system_mailbox_names("archive")
+        _validate_mailbox("archive")
 
 
-def test_system_mailbox_covers_the_core_five():
+def test_validate_mailbox_covers_the_core_five():
     for canonical in ("inbox", "sent", "drafts", "trash", "junk"):
-        names = system_mailbox_names(canonical)
-        assert len(names) >= 3  # en + nl + ru at minimum
+        assert _validate_mailbox(canonical) == canonical
 
 
 # --- sender search (#61) -------------------------------------------------------------

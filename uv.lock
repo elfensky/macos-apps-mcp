@@ -698,7 +698,10 @@ name = "macos-apps-mcp"
 version = "0.7.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "fastmcp" },
+    { name = "mcp" },
+    { name = "pyobjc-framework-cocoa" },
     { name = "pyobjc-framework-eventkit" },
 ]
 
@@ -711,7 +714,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4" },
     { name = "fastmcp", specifier = ">=2.0" },
+    { name = "mcp", specifier = ">=1.26" },
+    { name = "pyobjc-framework-cocoa", specifier = ">=10.0" },
     { name = "pyobjc-framework-eventkit", specifier = ">=10.0" },
 ]
 

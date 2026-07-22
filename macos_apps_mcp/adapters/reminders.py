@@ -105,9 +105,8 @@ def _incomplete_due_pred(s, end: datetime | None, cals):
 
 
 def _resolve_list(s, name: str | None):
-    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
-    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
-    # logic — including listing candidate ids — lives in runtime.resolve_container.
+    # Disambiguation rule (#55): see contracts.py; shared logic in
+    # errors.resolve_container.
     if name is None:
         return s.defaultCalendarForNewReminders()
     items = [

@@ -37,6 +37,18 @@ def test_usage_log_swallows_errors(tmp_path, monkeypatch):
     au.usage_log("x")  # must not raise
 
 
+def test_usage_read_unreadable_is_empty(tmp_path, monkeypatch):
+    # never-raise contract: an unreadable log reads as an empty tally, no OSError.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.usage_log("some_tool")
+    path = tmp_path / "usage.jsonl"
+    path.chmod(0o000)
+    try:
+        assert au.usage_read() == {}
+    finally:
+        path.chmod(0o600)
+
+
 def test_usage_log_rotates_at_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
     monkeypatch.setattr(au, "_AUDIT_MAX_BYTES", 200)

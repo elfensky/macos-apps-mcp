@@ -28,7 +28,7 @@ from ..errors import (
     verify_persisted,
 )
 from ..runtime import body_file, read_via_sqlite, run_osascript
-from ..text import clean_body, clean_summary, fold_text, norm_text
+from ..text import RS, US, clean_body, clean_summary, fold_text, norm_text
 
 MAX_NOTES = 25
 MAX_BODIES = 50
@@ -149,11 +149,19 @@ _DELETE = """on run argv
   end timeout
 end run"""
 
-# verify-fallback title read (no FDA path): name of a note by id.
+# verify-fallback title read (no FDA path): name of a note by id. An unknown/stale id
+# returns "" (the try narrows to the id lookup, as contacts' _VERIFY does) so the
+# fallback honors _read_title_by_id's None-if-not-found contract instead of raising —
+# the sqlite path returns None for the same miss.
 _TITLE_BY_ID = """on run argv
   with timeout of 120 seconds
   tell application "Notes"
-    return name of note id (item 1 of argv)
+    try
+      set n to note id (item 1 of argv)
+    on error
+      return ""
+    end try
+    return name of n
   end tell
   end timeout
 end run"""
@@ -245,9 +253,11 @@ def _parse_all(raw: str) -> list[Pointer]:
 
 
 def _parse_bodies(raw: str) -> list[dict]:
+    # partition on the FIRST US only (not text.split_framed): the body itself is not
+    # framing-stripped, so it must stay one opaque field even if it carries a US.
     out = []
-    for record in raw.split("\x1e"):
-        ident, sep, body = record.partition("\x1f")
+    for record in raw.split(RS):
+        ident, sep, body = record.partition(US)
         if not sep:  # trailing "" after final RS, or a malformed record — skip
             continue
         out.append({"id": ident.strip(), "body": body})
@@ -502,7 +512,7 @@ class NotesAdapter:
         if not needle:
             raise ValueError("notes read needs a title substring (got an empty query)")
 
-        def sqlite(conn):
+        def read(conn):
             uuid = _store_uuid(conn)
             out = []
             for r in conn.execute(_ALL_SQL):  # r: pk, title, snippet, pinned, locked...
@@ -533,7 +543,7 @@ class NotesAdapter:
         return read_via_sqlite(
             NOTESTORE,
             _FINGERPRINT,
-            sqlite,
+            read,
             fallback=fallback,
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
@@ -543,14 +553,14 @@ class NotesAdapter:
         pointers (sqlite, read-only, newest first). Folder is "Account / Folder". Falls
         back to the AppleScript enumeration on missing FDA / schema drift."""
 
-        def sqlite(conn):
+        def read(conn):
             uuid = _store_uuid(conn)
             return [_note_pointer(r, uuid) for r in conn.execute(_ALL_SQL).fetchall()]
 
         return read_via_sqlite(
             NOTESTORE,
             _FINGERPRINT,
-            sqlite,
+            read,
             fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
@@ -565,6 +575,10 @@ class NotesAdapter:
         the whole batch degrades to AppleScript. Each body is bounded via ``clean_body``
         (#52): an over-hard-cap body downgrades to a per-item notice, not a batch fail.
         Unknown ids are silently skipped; the caller diffs returned vs requested.
+
+        Deliberately BATCHED (list of ids → records), unlike mail/messages' scalar
+        body-by-id: hydrating N notes must cost one sqlite pass + at most one osascript
+        launch, not N app launches.
         """
         if not ids:
             raise ValueError("note_bodies needs at least one note id")
@@ -574,7 +588,7 @@ class NotesAdapter:
                 f"got {len(ids)} — chunk your requests"
             )
 
-        def sqlite(conn) -> list[dict]:
+        def read(conn) -> list[dict]:
             # Only map ids belonging to THIS store: the bare pN is not unique across
             # stores, so a stale/foreign id with a colliding pN must NOT resolve to a
             # local note's body (#60 review). Match the full x-coredata prefix.
@@ -607,7 +621,7 @@ class NotesAdapter:
         return read_via_sqlite(
             NOTESTORE,
             _BODY_FINGERPRINT,
-            sqlite,
+            read,
             fallback=lambda: self._applescript_bodies(ids),
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
@@ -616,7 +630,7 @@ class NotesAdapter:
         """The note's ZTITLE1 by x-coredata id (sqlite primary, AppleScript fallback);
         None if the id isn't this store's or the note isn't found."""
 
-        def sqlite(conn) -> str | None:
+        def read(conn) -> str | None:
             prefix = f"x-coredata://{_store_uuid(conn)}/ICNote/p"
             if not ident.startswith(prefix):
                 return None  # foreign/stale id — a colliding pN must not resolve
@@ -629,7 +643,7 @@ class NotesAdapter:
         return read_via_sqlite(
             NOTESTORE,
             _TITLE_FINGERPRINT,
-            sqlite,
+            read,
             fallback=lambda: self._applescript_title(ident),
             immutable=False,
         )
@@ -648,8 +662,8 @@ class NotesAdapter:
         )
 
     def _applescript_title(self, ident: str) -> str | None:
-        """Fallback title read (no FDA): `name of note id`. Unknown id → the osascript
-        error surfaces as a typed NativeError."""
+        """Fallback title read (no FDA): `name of note id`. Unknown/stale id → None
+        (the script returns "" for it), matching the sqlite path's contract."""
         return run_osascript(_TITLE_BY_ID, ident) or None
 
     def _applescript_bodies(self, ids: list[str]) -> list[dict]:
@@ -679,18 +693,16 @@ class NotesAdapter:
         """
         if not ident.strip():
             raise ValueError("delete_note needs a note id")
+        # one argv shape for both paths — preview and real delete MUST see the same args
+        args = (ident,) if expect_title is None else (ident, expect_title)
         if dry_run:
-            args = (ident,) if expect_title is None else (ident, expect_title)
             title = run_osascript(_PREVIEW_DELETE, *args)
             return Pointer(
                 id=ident,
                 summary=clean_summary(title) or "(untitled note)",
                 deeplink="",
             )
-        if expect_title is not None:
-            run_osascript(_DELETE, ident, expect_title)
-        else:
-            run_osascript(_DELETE, ident)
+        run_osascript(_DELETE, *args)
         return None
 
     def create(self, data: NoteData) -> Pointer:
@@ -715,11 +727,17 @@ class NotesAdapter:
     def update(self, ident: str, data: NoteData) -> Pointer:
         """Full-replace a note's title+body by id; the id must survive (verified, #49).
 
-        `data.folder` is IGNORED on update — moving a note between folders is a separate
-        op. Body transport and verify match `create`.
+        `data.folder` is REFUSED on update — moving a note between folders is not
+        supported (a separate op if ever needed); silently ignoring it would let a
+        caller believe the note moved. Body transport and verify match `create`.
         """
         if not ident.strip():
             raise ValueError("update_note needs a note id")
+        if data.folder is not None:
+            raise ValueError(
+                "update_note cannot move a note between folders — omit `folder` "
+                "(the note stays where it is; only title/body are replaced)"
+            )
         html_body = _compose_html(data.title, data.body)
         with body_file(html_body) as path:
             ident_after = run_osascript(_UPDATE_NOTE, ident, path).strip()

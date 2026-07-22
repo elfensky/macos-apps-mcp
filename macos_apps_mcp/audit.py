@@ -10,8 +10,9 @@ Three parts, one seam:
   hold no audit logic; before-state comes through the ``Snapshotter`` Protocol
   (contracts.py). The middleware ACCEPTS its write-tool set and snapshot sources at
   construction — dependencies accepted, not created — so tests build one with fakes
-  instead of patching server globals. server.py passes live registries that its tool
-  decorators populate as registration proceeds (the middleware reads them per call).
+  instead of patching server globals. server.py wires it after tool registration, with
+  registries its decorators populated (the middleware also reads them per call, so
+  wiring order can never silently drop coverage).
 """
 
 from __future__ import annotations
@@ -64,12 +65,19 @@ def audit_write(record: dict) -> None:
 def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
     """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
     drops older entries by lexical ts compare (entries are naive-local, one format).
-    Malformed lines are skipped; a missing log is empty."""
+    Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
+    log yields a single explicit error entry — never a raw ``OSError``, and never an
+    empty list masquerading as "no writes"."""
     path = _audit_path()
     if not path.exists():
         return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        log.debug("audit_read failed: %s", e)
+        return [{"error": f"audit log unreadable: {e}"}]
     out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
@@ -106,12 +114,18 @@ def usage_log(tool: str) -> None:
 
 def usage_read() -> dict[str, dict]:
     """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
-    Malformed lines are skipped; a missing log is empty."""
+    Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
+    log reads as empty (logged) — a lost tally must not fail the ``usage`` tool."""
     path = _usage_path()
     out: dict[str, dict] = {}
     if not path.exists():
         return out
-    for line in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        log.debug("usage_read failed: %s", e)
+        return out
+    for line in text.splitlines():
         try:
             rec = json.loads(line)
             tool, ts = rec["tool"], rec.get("ts", "")
@@ -174,9 +188,10 @@ class AuditMiddleware(Middleware):
     """Append an audit record for every write; capture before-state on update/delete
     (#67). Central seam — adapters hold no audit logic. All failures are swallowed.
 
-    ``write_tools`` and ``snapshot_sources`` are live registries owned by the caller
-    (server.py's tool decorators fill them during registration); the middleware reads
-    them per call, so construction order doesn't matter.
+    ``write_tools`` and ``snapshot_sources`` are registries owned by the caller
+    (server.py's tool decorators fill them during registration, before it wires this
+    middleware); the middleware reads them per call, so construction order can't
+    break it either way.
     """
 
     def __init__(

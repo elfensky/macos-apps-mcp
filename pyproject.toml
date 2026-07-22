@@ -29,7 +29,10 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=2.0",
+    "anyio>=4",                           # imported directly (audit.py)
+    "mcp>=1.26",                          # imported directly (server.py: mcp.types)
     "pyobjc-framework-EventKit>=10.0",    # Calendar + Reminders (v1)
+    "pyobjc-framework-Cocoa>=10.0",       # Foundation, imported directly (runtime.py)
 ]
 # Contacts (#15) uses osascript/Automation (Contacts.app AppleScript dictionary), not the
 # Contacts framework — a non-bundled server can't get CNContactStore TCC, but Automation works.
