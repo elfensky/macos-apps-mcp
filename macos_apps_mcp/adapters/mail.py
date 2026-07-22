@@ -380,10 +380,26 @@ def _parse_my_addrs(raw: str) -> set[str]:
 
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
-# like commands; booleans coerce inside `&`). Addresses bare (extract address from /
-# address of every to recipient, TID-joined). Date as seconds-ago. maxN via argv.
+# like commands; booleans coerce inside `&`). Subject is stripped of any raw framing
+# bytes (stripFraming, the same handler _ATTACHMENTS uses) before being joined, so a
+# subject that happens to contain those control chars can't desync the parser.
+# Addresses bare (extract address from / address of every to recipient, TID-joined)
+# — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
 # Verified on-device.
-_INBOX_TRIAGE = """on run argv
+_INBOX_TRIAGE = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
   set maxN to (item 1 of argv) as integer
   set us to character id 31
   set rs to character id 30
@@ -399,7 +415,7 @@ _INBOX_TRIAGE = """on run argv
         set AppleScript's text item delimiters to ","
         set toJoined to ((address of every to recipient of m) as text)
         set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (subject of m) & us & ¬
+        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
           (extract address from (sender of m)) & us & toJoined & us & ¬
           (((current date) - (date received of m)) as integer) & us & ¬
           (was replied to of m) & us & (read status of m) & us & ¬
@@ -412,8 +428,22 @@ _INBOX_TRIAGE = """on run argv
 end run"""
 
 # _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
-# newest-first.
-_SENT_TRIAGE = """on run argv
+# newest-first. Subject is stripped of raw framing bytes (stripFraming) before being
+# joined, same rationale as _INBOX_TRIAGE.
+_SENT_TRIAGE = """on stripFraming(t)
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 30)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  set AppleScript's text item delimiters to (character id 31)
+  set t to text items of t
+  set AppleScript's text item delimiters to ""
+  set t to t as text
+  return t
+end stripFraming
+
+on run argv
   set maxN to (item 1 of argv) as integer
   set us to character id 31
   set rs to character id 30
@@ -430,8 +460,8 @@ _SENT_TRIAGE = """on run argv
         set AppleScript's text item delimiters to ","
         set toJoined to ((address of every to recipient of m) as text)
         set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (subject of m) & us & toJoined & us & ¬
-          (((current date) - (date sent of m)) as integer) & rs
+        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
+          toJoined & us & (((current date) - (date sent of m)) as integer) & rs
       end if
     end repeat
   end tell
