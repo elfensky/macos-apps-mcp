@@ -172,6 +172,7 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "probed_automation",
         "summary",
         "surfaces",
+        "deployment",
     }
     assert len(report["surfaces"]) == 10  # 2 EventKit + 6 Automation + shortcuts + FDA
     assert "launched by" in report["responsible_process"]

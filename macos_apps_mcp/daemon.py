@@ -78,6 +78,9 @@ def _uds_client_factory(path: Path):
 def serve() -> None:
     """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
     One MCP session per client connection (fork resolution, spec)."""
+    os.environ["MACOS_APPS_MCP_ROLE"] = (
+        "daemon"  # before server import (doctor reads it)
+    )
     from .server import mcp  # late: importing server pulls the adapter tree
 
     path = socket_path()
