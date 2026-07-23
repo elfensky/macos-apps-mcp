@@ -162,6 +162,37 @@ def test_build_body_index_size_capped(tmp_path):
     assert res["capped"] is True and res["indexed"] >= 1
 
 
+def test_fts_connect_sets_wal_and_busy_timeout(tmp_path):
+    # #71 concurrency fix: mail_index_bodies runs off run_native, so the sidecar
+    # writer needs WAL (readers proceed during a build) + a busy_timeout (writer/writer
+    # contention waits instead of raising a raw sqlite OperationalError). Pin both.
+    conn = mail_index._fts_connect(tmp_path / "x.sqlite")
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    finally:
+        conn.close()
+
+
+def test_fts_search_reads_during_open_build_write(tmp_path):
+    # A mail_search(body=) reader must return the committed snapshot without raising
+    # "database is locked" while a build holds the sidecar open with a write (WAL).
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "invoice quarterly")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    writer = mail_index._fts_connect(fts)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("INSERT INTO bodies (message_id, body) VALUES ('<b@x>', 'later')")
+    try:
+        assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+    finally:
+        writer.rollback()
+        writer.close()
+
+
 def test_build_body_index_skips_vanished_file(tmp_path, monkeypatch):
     # Mail.app can expunge/rename a .emlx between rglob() enumerating it and us
     # reading it. That must skip the one vanished file, not abort the whole run.
