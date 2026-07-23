@@ -749,6 +749,11 @@ class MailAdapter:
         from ..runtime import log, read_via_sqlite
         from . import mail_index
 
+        # Clamp: an unbounded caller-supplied limit with body= would otherwise build an
+        # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
+        # the promised MAX_MAILS backstop (#70 review M1).
+        limit = min(limit, MAX_MAILS)
+
         path = mail_index.envelope_index_path()
         if path is None:
             raise NativeError(
@@ -758,6 +763,9 @@ class MailAdapter:
 
         message_ids = None
         if body:
+            # ponytail: body= caps at `limit` FTS rows BEFORE header filters apply, so
+            # a narrow header filter over many body hits can under-return; acceptable
+            # for the best-effort body layer — widen limit or add ORDER BY if it bites.
             message_ids = mail_index.fts_search(
                 mail_index.fts_path(), body, limit=limit
             )

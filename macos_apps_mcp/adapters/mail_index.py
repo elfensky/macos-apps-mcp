@@ -314,14 +314,33 @@ def build_body_index(
     }
 
 
+def _fts_query(raw: str) -> str:
+    """Sanitize a raw user query into an always-valid FTS5 MATCH expression.
+
+    FTS5 parses the MATCH value as query syntax, not literal text — bound params only
+    stop injection, they don't stop e.g. `jane@acme.com` ("syntax error near @") or
+    `invoice AND` from raising sqlite3.OperationalError. So every whitespace-split
+    token is quoted as a literal phrase (embedded `"` doubled per SQL-string-escaping
+    convention) and the quoted tokens are joined with a space — FTS5's implicit AND —
+    which is valid for ANY input, including punctuation, bare operators, or an
+    unbalanced `"`. Returns "" when there are no tokens (query was all whitespace);
+    the caller must not call MATCH with that (#70 review I1)."""
+    tokens = raw.split()
+    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
 def fts_search(fts_db: Path, query: str, limit: int = 200) -> list[str]:
     """Message-IDs whose body matches the FTS query, or [] if the sidecar is absent."""
     if not fts_db.exists():
         return []
+    fts_query = _fts_query(query)
+    if not fts_query:
+        return []
     conn = sqlite3.connect(f"file:{fts_db}?mode=ro", uri=True)
     try:
         rows = conn.execute(
-            "SELECT message_id FROM bodies WHERE bodies MATCH ? LIMIT ?", (query, limit)
+            "SELECT message_id FROM bodies WHERE bodies MATCH ? LIMIT ?",
+            (fts_query, limit),
         ).fetchall()
         return [r[0] for r in rows]
     finally:

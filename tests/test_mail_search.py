@@ -6,7 +6,7 @@ from fastmcp import Client
 
 import macos_apps_mcp.server as srv
 from macos_apps_mcp.adapters import mail_index
-from macos_apps_mcp.adapters.mail import MailAdapter
+from macos_apps_mcp.adapters.mail import MAX_MAILS, MailAdapter
 from macos_apps_mcp.errors import NativeError
 
 
@@ -125,6 +125,35 @@ def test_index_bodies_builds_coverage(tmp_path, monkeypatch):
     assert out["total_emlx"] == 4
     assert out["capped"] is False
     assert out["coverage"] == "3/4 downloaded .emlx indexed"
+
+
+def test_search_clamps_limit_to_max_mails(tmp_path, monkeypatch):
+    # A huge limit with body= would otherwise build an oversized `message_ids IN
+    # (...)` clause and ignore the promised MAX_MAILS backstop (#70 review M1).
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    captured = {}
+    real_build_header_query = mail_index.build_header_query
+
+    def spy(**kwargs):
+        captured["limit"] = kwargs.get("limit")
+        return real_build_header_query(**kwargs)
+
+    monkeypatch.setattr(mail_index, "build_header_query", spy)
+    MailAdapter().search(subject="Invoice", limit=10_000)
+    assert captured["limit"] == MAX_MAILS
+
+
+def test_mail_search_since_zero_not_rejected(monkeypatch):
+    # since=0 (epoch 0) is a valid timestamp, not an absent filter — the `not any([...
+    # since ...])` guard wrongly treated it as falsy (#70 review M3).
+    class _F:
+        def search(self, **kwargs):
+            return []
+
+    monkeypatch.setattr(srv, "_mail", _F())
+    assert srv.mail_search(since=0) == []
 
 
 def test_mail_search_tool_registered_read_only():

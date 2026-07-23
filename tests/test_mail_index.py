@@ -192,6 +192,33 @@ def test_build_body_index_skips_vanished_file(tmp_path, monkeypatch):
     assert mail_index.fts_search(fts, "surviving") == ["<a@x>"]
 
 
+def test_fts_query_escapes_operators():
+    # Ordinary body-search inputs must become an always-valid FTS5 expression: each
+    # whitespace token quoted as a literal phrase (embedded `"` doubled), joined with
+    # a space (FTS5 implicit AND) — never handed raw to MATCH (#70 review I1).
+    assert mail_index._fts_query("jane@acme.com") == '"jane@acme.com"'
+    assert mail_index._fts_query("C++") == '"C++"'
+    assert mail_index._fts_query("invoice AND") == '"invoice" "AND"'
+    assert mail_index._fts_query('foo"bar') == '"foo""bar"'
+    assert mail_index._fts_query("   ") == ""
+
+
+def test_fts_search_handles_operator_chars(tmp_path):
+    # A body containing FTS5-special characters must be indexable AND searchable by a
+    # query containing those same characters, without fts_search raising
+    # sqlite3.OperationalError (#70 review I1: raw MATCH on '@'/'AND' syntax crashed).
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "contact jane@acme.com about C++")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+
+    assert mail_index.fts_search(fts, "jane@acme.com") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "C++") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "nomatch AND") == []
+
+
 def test_parse_emlx_deeply_nested_multipart_returns_none():
     # A .emlx whose RFC822 nests multipart parts deeply enough overflows stdlib
     # email.message_from_bytes's own recursive descent (RecursionError), which must
