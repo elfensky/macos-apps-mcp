@@ -80,8 +80,17 @@ def grant_identities(services: list[str] | None = None) -> dict | None:
 
 
 def _run_bundle_role(app: Path, role: str) -> None:
+    # -E -s -P: ignore PYTHON* env vars, skip user site-packages, no unsafe
+    # sys.path[0] prepend. Runtime must honor the same env-free guarantee that
+    # scripts/build_app.sh smoke-tests with `env -i` — the bundled interpreter
+    # must not let a caller's PYTHONPATH/PYTHONHOME/user-site shadow the
+    # bundled macos_apps_mcp package or break getpath.
     exe = app / "Contents/MacOS/macos-apps-mcp"
-    subprocess.run([str(exe), "-m", "macos_apps_mcp", role], check=True, timeout=60)
+    subprocess.run(
+        [str(exe), "-E", "-s", "-P", "-m", "macos_apps_mcp", role],
+        check=True,
+        timeout=60,
+    )
 
 
 def _wait_for_socket(timeout: float = 30) -> None:
@@ -141,7 +150,10 @@ def install_agent(argv: list[str]) -> None:
     _wait_for_socket()
     _request_grants_via_daemon()
     exe = app / "Contents/MacOS/macos-apps-mcp"
-    snippet = {"command": str(exe), "args": ["-m", "macos_apps_mcp", "shim"]}
+    snippet = {
+        "command": str(exe),
+        "args": ["-E", "-s", "-P", "-m", "macos_apps_mcp", "shim"],
+    }
     print(
         "Full Disk Access must be granted by hand — opening the pane:\n"
         "  open 'x-apple.systempreferences:com.apple.preference.security"
