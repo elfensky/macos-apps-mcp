@@ -739,11 +739,14 @@ class MailAdapter:
     ) -> list[Pointer]:
         """Indexed search over ALL mailboxes via Mail's Envelope Index (read-at-rest).
         All filters optional, ANDed. Falls back to the AppleScript inbox search on
-        missing FDA / schema drift. `body` is handled in a later task (best-effort FTS);
-        header-only here."""
+        missing FDA / schema drift. `body` matches against the best-effort FTS body
+        sidecar (built by `index_bodies`); the FTS hits are intersected with the header
+        query via message-ids. If the sidecar has no matches (absent, empty, or no hit
+        for this query) this returns [] rather than raising — a body search is opt-in
+        and its absence isn't an error condition."""
         # imported lazily: mail_index imports _deeplink from this module at load time,
         # so a module-level import here would be a cycle.
-        from ..runtime import read_via_sqlite
+        from ..runtime import log, read_via_sqlite
         from . import mail_index
 
         path = mail_index.envelope_index_path()
@@ -752,6 +755,19 @@ class MailAdapter:
                 "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
                 "Open Mail once to create it. Do not retry."
             )
+
+        message_ids = None
+        if body:
+            message_ids = mail_index.fts_search(
+                mail_index.fts_path(), body, limit=limit
+            )
+            if not message_ids:
+                log.info(
+                    "mail_search body=%r: no FTS matches (run mail_index_bodies to "
+                    "build/refresh the body index)",
+                    body,
+                )
+                return []
 
         sql, params = mail_index.build_header_query(
             subject=subject,
@@ -762,6 +778,7 @@ class MailAdapter:
             until=until,
             unread=unread,
             flagged=flagged,
+            message_ids=message_ids,
             limit=limit,
         )
 
@@ -778,10 +795,34 @@ class MailAdapter:
         # most specific text filter provided (subject/from/mailbox), else empty
         # (raises).
         needle = subject or from_ or to or mailbox or ""
-        return read_via_sqlite(
+        result = read_via_sqlite(
             path,
             mail_index.HEADER_FINGERPRINT,
             read,
             fallback=(lambda: self.get_pointers(needle)) if needle else None,
             immutable=False,
         )
+        if body:
+            log.info(
+                "mail_search body=%r: searched %d indexed messages",
+                body,
+                len(message_ids),
+            )
+        return result
+
+    def index_bodies(self, rebuild: bool = False) -> dict:
+        """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx
+        (read-at-rest; skips not-yet-downloaded *.partial.emlx). Resumable, size-capped.
+        Returns counts + coverage. Never launches Mail, never writes in Mail's data."""
+        from . import mail_index
+
+        root = mail_index.mail_root()
+        if root is None:
+            raise NativeError("no Mail data found; open Mail once. Do not retry.")
+        res = mail_index.build_body_index(
+            mail_root=root, fts_db=mail_index.fts_path(), rebuild=rebuild
+        )
+        res["coverage"] = (
+            f"{res['indexed']}/{res['total_emlx']} downloaded .emlx indexed"
+        )
+        return res

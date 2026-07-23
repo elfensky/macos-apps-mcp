@@ -49,6 +49,12 @@ def envelope_index_path() -> Path | None:
     return roots[-1] if roots else None
 
 
+def mail_root() -> Path | None:
+    """~/Library/Mail (the parent of the V* dirs), or None if it doesn't exist."""
+    root = Path.home() / "Library" / "Mail"
+    return root if root.exists() else None
+
+
 def row_to_pointer(row) -> Pointer | None:
     """Map one joined Envelope Index row → Pointer. None when the message has no RFC822
     Message-ID (no stable citation — same rule the adapter documents for header-less

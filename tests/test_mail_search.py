@@ -57,3 +57,24 @@ def test_search_no_store_raises(monkeypatch):
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
     with pytest.raises(NativeError):
         MailAdapter().search(subject="x")
+
+
+def test_search_body_intersects_fts(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    # FTS returns the one indexed message-id; header join keeps it
+    monkeypatch.setattr(mail_index, "fts_path", lambda: tmp_path / "fts.sqlite")
+    monkeypatch.setattr(
+        mail_index, "fts_search", lambda db_, q, limit=200: ["<abc@ex.com>"]
+    )
+    out = MailAdapter().search(body="invoice")
+    assert [p.id for p in out] == ["<abc@ex.com>"]
+
+
+def test_search_body_empty_index_returns_empty(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(mail_index, "fts_search", lambda db_, q, limit=200: [])
+    assert MailAdapter().search(body="nothing") == []
