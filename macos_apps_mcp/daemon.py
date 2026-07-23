@@ -8,10 +8,14 @@ from __future__ import annotations
 import errno
 import os
 import socket
+import sys
 from pathlib import Path
 
 import httpx
 import uvicorn
+from fastmcp import Client as _Client
+from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
+from fastmcp.server import create_proxy
 
 from .audit import state_dir
 
@@ -84,3 +88,35 @@ def serve() -> None:
     finally:
         s.close()
         path.unlink(missing_ok=True)
+
+
+def shim_check(path: Path) -> None:
+    """Fail FAST when no daemon is serving — a hanging shim looks like a wedged
+    client (spec §C). One actionable stderr line, exit 2."""
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.connect(str(path))
+    except OSError:
+        print(
+            f"macos-apps-mcp: daemon not running (no socket at {path}) — "
+            "run `macos-apps-mcp install-agent`",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from None
+    finally:
+        probe.close()
+
+
+def run_shim() -> None:
+    """Bridge the client's stdio to the daemon over the UDS (FastMCP proxy — the
+    fork-resolved ~15-line shim). No TCC surface: this process only moves bytes."""
+    path = socket_path()
+    shim_check(path)
+    proxy = create_proxy(
+        _Client(
+            _HttpTransport(
+                "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
+            )
+        )
+    )
+    proxy.run()  # stdio transport

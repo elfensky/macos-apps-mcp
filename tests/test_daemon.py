@@ -86,3 +86,26 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
             assert "ok" in r1.content[0].text and "ok" in r2.content[0].text
 
     asyncio.run(go())
+
+
+def test_shim_check_absent_socket_exits_2(sockdir):
+    with pytest.raises(SystemExit) as e:
+        daemon.shim_check(sockdir / "missing.sock")
+    assert e.value.code == 2
+
+
+def test_shim_check_stale_socket_exits_2(sockdir):
+    p = sockdir / "mcp.sock"
+    daemon.bind_socket(p).close()  # stale file, nobody listening
+    with pytest.raises(SystemExit) as e:
+        daemon.shim_check(p)
+    assert e.value.code == 2
+
+
+def test_shim_check_live_socket_passes(sockdir):
+    p = sockdir / "mcp.sock"
+    s = daemon.bind_socket(p)
+    try:
+        daemon.shim_check(p)  # no raise
+    finally:
+        s.close()
