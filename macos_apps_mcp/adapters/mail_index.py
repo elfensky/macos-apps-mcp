@@ -256,12 +256,19 @@ def build_body_index(
             if f.name.endswith(".partial.emlx"):
                 continue
             total += 1
-            st = f.stat()
             key = str(f)
-            if seen.get(key) == (int(st.st_mtime), st.st_size):
+            try:
+                st = f.stat()
+                if seen.get(key) == (int(st.st_mtime), st.st_size):
+                    skipped += 1
+                    continue
+                raw = f.read_bytes()
+            except OSError:
+                # Mail.app can expunge/rename a file between rglob() enumerating it
+                # and us reading it — skip just this file, never abort the run.
                 skipped += 1
                 continue
-            parsed = parse_emlx(f.read_bytes())
+            parsed = parse_emlx(raw)
             if parsed is None:
                 # record so a re-run doesn't reparse an unindexable file
                 conn.execute(
@@ -289,8 +296,10 @@ def build_body_index(
                 capped = True
                 break
     finally:
-        conn.commit()
-        conn.close()
+        try:
+            conn.commit()
+        finally:
+            conn.close()
     return {
         "indexed": indexed,
         "skipped": skipped,

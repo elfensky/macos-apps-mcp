@@ -162,6 +162,36 @@ def test_build_body_index_size_capped(tmp_path):
     assert res["capped"] is True and res["indexed"] >= 1
 
 
+def test_build_body_index_skips_vanished_file(tmp_path, monkeypatch):
+    # Mail.app can expunge/rename a .emlx between rglob() enumerating it and us
+    # reading it. That must skip the one vanished file, not abort the whole run.
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "surviving invoice body")
+    _write_emlx(msgs / "2.emlx", "<b@x>", "vanished invoice body")
+    fts = tmp_path / "mail_fts.sqlite"
+    vanished = msgs / "2.emlx"
+
+    from pathlib import Path
+
+    real_read_bytes = Path.read_bytes
+
+    def flaky_read_bytes(self, *a, **kw):
+        if self == vanished:
+            raise FileNotFoundError(f"vanished: {self}")
+        return real_read_bytes(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_bytes", flaky_read_bytes)
+
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+
+    assert res["total_emlx"] == 2
+    assert res["indexed"] == 1
+    assert res["skipped"] == 1
+    assert mail_index.fts_search(fts, "surviving") == ["<a@x>"]
+
+
 def test_parse_emlx_deeply_nested_multipart_returns_none():
     # A .emlx whose RFC822 nests multipart parts deeply enough overflows stdlib
     # email.message_from_bytes's own recursive descent (RecursionError), which must
