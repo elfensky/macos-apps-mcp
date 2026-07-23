@@ -10,6 +10,9 @@ import os
 import socket
 from pathlib import Path
 
+import httpx
+import uvicorn
+
 from .audit import state_dir
 
 
@@ -53,3 +56,31 @@ def bind_socket(path: Path) -> socket.socket:
     os.chmod(path, 0o600)
     s.listen()
     return s
+
+
+def _uds_client_factory(path: Path):
+    """httpx AsyncClient factory routing all requests over the unix socket. The URL
+    host is a dummy — never resolved."""
+
+    def factory(**kwargs):
+        kwargs.pop("transport", None)
+        return httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(uds=str(path)), **kwargs
+        )
+
+    return factory
+
+
+def serve() -> None:
+    """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
+    One MCP session per client connection (fork resolution, spec)."""
+    from .server import mcp  # late: importing server pulls the adapter tree
+
+    path = socket_path()
+    s = bind_socket(path)
+    try:
+        config = uvicorn.Config(mcp.http_app(), fd=s.fileno(), log_level="warning")
+        uvicorn.Server(config).run()
+    finally:
+        s.close()
+        path.unlink(missing_ok=True)
