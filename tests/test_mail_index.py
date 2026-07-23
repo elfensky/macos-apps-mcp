@@ -104,3 +104,34 @@ def test_parse_emlx_headerless_returns_none():
 
 def test_parse_emlx_malformed_returns_none():
     assert mail_index.parse_emlx(b"not an emlx at all") is None
+
+
+def test_parse_emlx_negative_length_returns_none():
+    # A negative length prefix must not be accepted: int() parses "-5" fine, and a
+    # negative-index slice (raw[nl+1 : nl+1-5]) would silently splice trailing plist
+    # bytes into what's treated as the RFC822 body instead of failing loudly.
+    rfc822 = (
+        b"From: a@x.com\r\nMessage-ID: <neg@x.com>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello invoice body"
+    )
+    plist_tail = b"<?xml version='1.0'?><plist></plist>"
+    raw = b"-5\n" + rfc822 + plist_tail
+    assert mail_index.parse_emlx(raw) is None
+
+
+def test_parse_emlx_deeply_nested_multipart_returns_none():
+    # A .emlx whose RFC822 nests multipart parts deeply enough overflows stdlib
+    # email.message_from_bytes's own recursive descent (RecursionError), which must
+    # not escape parse_emlx: malformed/attacker-influenceable input -> None, never
+    # raise.
+    inner = b"Content-Type: text/plain\r\n\r\nHello\r\n"
+    for i in range(1500):
+        boundary = f"b{i}".encode()
+        inner = (
+            b'Content-Type: multipart/mixed; boundary="' + boundary + b'"\r\n\r\n'
+            b"--" + boundary + b"\r\n" + inner + b"\r\n--" + boundary + b"--\r\n"
+        )
+    rfc822 = b"Message-ID: <deep@x.com>\r\n" + inner
+    raw = _emlx(rfc822)
+    assert mail_index.parse_emlx(raw) is None

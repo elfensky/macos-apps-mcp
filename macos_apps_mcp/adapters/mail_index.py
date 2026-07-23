@@ -176,14 +176,22 @@ def parse_emlx(raw: bytes) -> tuple[str, str] | None:
         length = int(raw[:nl].strip())
     except ValueError:
         return None
+    if length < 0:
+        return None
     rfc822 = raw[nl + 1 : nl + 1 + length]
     if not rfc822:
         return None
-    msg = message_from_bytes(rfc822)
-    mid = msg.get("Message-ID")
-    if not mid or not mid.strip():
+    try:
+        msg = message_from_bytes(rfc822)
+        mid = msg.get("Message-ID")
+        if not mid or not mid.strip():
+            return None
+        body = _body_text(msg).strip()
+    except Exception:
+        # Untrusted-input boundary: .emlx bytes are attacker-influenceable (deeply
+        # nested multipart can overflow stdlib email's own recursive descent before
+        # we ever see a Message object). Never let a parse failure escape — None.
         return None
-    body = _body_text(msg).strip()
     if not body:
         return None
     return mid.strip(), body
