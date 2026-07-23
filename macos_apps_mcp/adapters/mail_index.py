@@ -5,6 +5,8 @@ here; this module never launches Mail (read-at-rest)."""
 
 from __future__ import annotations
 
+from email import message_from_bytes
+from html.parser import HTMLParser
 from pathlib import Path
 
 from ..contracts import Pointer
@@ -122,3 +124,66 @@ def build_header_query(
     sql += " ORDER BY m.date_received DESC LIMIT ?"
     params.append(limit)
     return sql, params
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._chunks: list[str] = []
+
+    def handle_data(self, data):
+        self._chunks.append(data)
+
+    def text(self) -> str:
+        return " ".join(" ".join(self._chunks).split())
+
+
+def _html_to_text(html: str) -> str:
+    p = _TextExtractor()
+    p.feed(html)
+    return p.text()
+
+
+def _body_text(msg) -> str:
+    """Prefer text/plain; else the first text/html rendered to text.
+
+    Empty if neither.
+    """
+    plain, html = None, None
+    for part in msg.walk() if msg.is_multipart() else [msg]:
+        ctype = part.get_content_type()
+        if ctype == "text/plain" and plain is None:
+            plain = part.get_payload(decode=True)
+        elif ctype == "text/html" and html is None:
+            html = part.get_payload(decode=True)
+    if plain:
+        return plain.decode("utf-8", "replace")
+    if html:
+        return _html_to_text(html.decode("utf-8", "replace"))
+    return ""
+
+
+def parse_emlx(raw: bytes) -> tuple[str, str] | None:
+    """(message_id, body_text) from an .emlx byte string.
+
+    Returns None if malformed, header-less, or no extractable text.
+    Strips the length-prefix line and trailing plist.
+    """
+    nl = raw.find(b"\n")
+    if nl == -1:
+        return None
+    try:
+        length = int(raw[:nl].strip())
+    except ValueError:
+        return None
+    rfc822 = raw[nl + 1 : nl + 1 + length]
+    if not rfc822:
+        return None
+    msg = message_from_bytes(rfc822)
+    mid = msg.get("Message-ID")
+    if not mid or not mid.strip():
+        return None
+    body = _body_text(msg).strip()
+    if not body:
+        return None
+    return mid.strip(), body

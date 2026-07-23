@@ -6,6 +6,11 @@ class _Row(dict):
     pass
 
 
+def _emlx(rfc822: bytes) -> bytes:
+    plist_tail = b"<?xml version='1.0'?><plist></plist>"
+    return f"{len(rfc822)}\n".encode() + rfc822 + plist_tail
+
+
 def test_row_to_pointer_maps_all_fields():
     row = _Row(
         message_id_header="<abc@ex.com>",
@@ -68,3 +73,34 @@ def test_build_header_query_message_ids_uses_in_clause():
 def test_build_header_query_no_filters_ok():
     sql, params = mail_index.build_header_query(limit=5)
     assert params == [5]  # only the limit
+
+
+def test_parse_emlx_plaintext():
+    raw = _emlx(
+        b"From: a@x.com\r\nMessage-ID: <m1@x.com>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello invoice body"
+    )
+    mid, body = mail_index.parse_emlx(raw)
+    assert mid == "<m1@x.com>"
+    assert "invoice body" in body
+
+
+def test_parse_emlx_html_stripped():
+    raw = _emlx(
+        b"Message-ID: <m2@x.com>\r\nContent-Type: text/html\r\n\r\n"
+        b"<p>Hello <b>world</b></p>"
+    )
+    mid, body = mail_index.parse_emlx(raw)
+    assert mid == "<m2@x.com>"
+    assert "Hello" in body
+    assert "<b>" not in body
+
+
+def test_parse_emlx_headerless_returns_none():
+    raw = _emlx(b"From: a@x.com\r\n\r\nno message id here")
+    assert mail_index.parse_emlx(raw) is None
+
+
+def test_parse_emlx_malformed_returns_none():
+    assert mail_index.parse_emlx(b"not an emlx at all") is None
