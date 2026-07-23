@@ -34,3 +34,5 @@ def test_build_script_never_deep_signs():
     src = (Path(__file__).resolve().parents[1] / "scripts" / "build_app.sh").read_text()
     assert "--deep" not in src
     assert "--timestamp" in src and "runtime" in src
+    assert "sort -V" in src
+    assert "--notarize requires --sign" in src

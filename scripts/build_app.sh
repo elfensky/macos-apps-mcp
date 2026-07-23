@@ -14,9 +14,11 @@ while [[ $# -gt 0 ]]; do case "$1" in
   *) echo "unknown arg $1" >&2; exit 2;;
 esac; done
 
+[[ -n "$NOTARIZE" && -z "$SIGN" ]] && { echo "--notarize requires --sign" >&2; exit 2; }
+
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
-STD="$(ls -d "$HOME"/.local/share/uv/python/cpython-${PYVER}*-macos-*/ | sort | tail -1)"
+STD="$(ls -d "$HOME"/.local/share/uv/python/cpython-${PYVER}*-macos-*/ | sort -V | tail -1)"
 APP="$OUT/macos-apps-mcp.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
   "$APP/Contents/Library/LaunchAgents" "$APP/Contents/Resources"
