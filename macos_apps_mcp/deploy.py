@@ -130,13 +130,23 @@ def _quarantine_guard(app: Path) -> None:
         ["xattr", "-p", "com.apple.quarantine", str(app)], capture_output=True
     )
     if q.returncode == 0:  # quarantined download — verify, then strip (translocation)
-        subprocess.run(["spctl", "-a", str(app)], check=True)
+        try:
+            subprocess.run(["spctl", "-a", str(app)], check=True)
+        except subprocess.CalledProcessError:
+            raise NativeError(
+                "bundle failed Gatekeeper assessment — sign and notarize it "
+                "(scripts/build_app.sh --sign … --notarize …), or remove the "
+                "quarantine manually. Do not retry."
+            ) from None
         subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(app)], check=True)
 
 
 def install_agent(argv: list[str]) -> None:
     app = Path("/Applications/macos-apps-mcp.app")
     if argv[:1] == ["--app"]:
+        if len(argv) < 2:
+            print("usage: install-agent [--app <path-to.app>]", file=sys.stderr)
+            raise SystemExit(2)
         app = Path(argv[1])
     if not (app / "Contents/MacOS/macos-apps-mcp").exists():
         print(

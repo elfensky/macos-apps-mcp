@@ -200,9 +200,12 @@ build:
   - If `deployment.agent` shows `requires-approval`, open Login Items (above) and approve it.
 
 - **Log locations.**
-  - App state (audit log, usage log, and the daemon's socket dir) lives under
-    `~/.local/state/macos-apps-mcp/` (or `$XDG_STATE_HOME/macos-apps-mcp` if set) — the socket
-    itself is `~/.local/state/macos-apps-mcp/daemon/mcp.sock`.
+  - Audit log and usage log live under `~/.local/state/macos-apps-mcp/` (or
+    `$XDG_STATE_HOME/macos-apps-mcp` if set). The daemon's socket does **not** follow
+    `XDG_STATE_HOME` — it is always `~/.local/state/macos-apps-mcp/daemon/mcp.sock` (unless
+    `MACOS_APPS_MCP_SOCKET` overrides it), so that the launchd daemon, `install-agent`, and
+    client-spawned shims — three processes with different environments — agree on one
+    rendezvous path.
   - The current `ren.lav.macos-apps-mcp.plist` does not redirect the daemon's stdout/stderr to a
     file, so `launchctl print` (above) is the primary source for last-exit info. For anything the
     process itself logged (Python's `logging` module, `macos_apps_mcp` logger), use the unified
@@ -222,6 +225,11 @@ build:
   (`shim_check`), exit code 2 — expected when no daemon is listening at
   `MACOS_APPS_MCP_SOCKET`/the default socket path. Run `macos-apps-mcp install-agent` (or check
   why the daemon isn't up per the steps above) rather than treating this as a hang.
+
+- **Daemon dies mid-session.** Any shim connected at that moment surfaces the failure as a
+  transport error to its client (not a silent hang) — launchd's `KeepAlive` restarts the daemon
+  (`ThrottleInterval` 10s) automatically, and a client reconnects simply by respawning the shim
+  (a fresh `shim` invocation), which re-probes the socket from scratch.
 
 ## Uninstall
 

@@ -17,20 +17,26 @@ from fastmcp import Client as _Client
 from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
 from fastmcp.server import create_proxy
 
-from .audit import state_dir
-
 
 class AlreadyRunning(Exception):
     """A live daemon already owns the socket."""
+
+
+# Home-relative, NOT via audit.state_dir(): three processes must agree on this path —
+# the launchd daemon (no shell env at all), the shell-invoked install-agent, and a
+# client-spawned shim (whatever env the client passes) — and XDG_STATE_HOME is not
+# guaranteed identical across those three. Rooting the default here instead of on
+# state_dir()'s XDG_STATE_HOME lookup keeps the rendezvous point stable regardless of
+# what any one of them has exported.
+_DEFAULT_SOCKET_DIR = Path.home() / ".local" / "state" / "macos-apps-mcp" / "daemon"
 
 
 def socket_path() -> Path:
     override = os.environ.get("MACOS_APPS_MCP_SOCKET")
     if override:
         return Path(override)
-    d = state_dir() / "daemon"
-    d.mkdir(mode=0o700, exist_ok=True)
-    return d / "mcp.sock"
+    _DEFAULT_SOCKET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return _DEFAULT_SOCKET_DIR / "mcp.sock"
 
 
 def bind_socket(path: Path) -> socket.socket:
