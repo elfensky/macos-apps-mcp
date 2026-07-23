@@ -85,8 +85,9 @@ This will:
 4. Print the FDA deep-link and the shim `command:`/`args:` snippet to paste into your MCP
    clients.
 
-**Full Disk Access does not prompt** — step 4 opens
-`x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles` for you; drag
+**Full Disk Access does not prompt** — step 4 prints the command to open the pane
+(`open 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'` — run it
+yourself); drag
 `macos-apps-mcp.app` into the Full Disk Access list and enable it (this is what lets the daemon
 read `chat.db` for Messages, and `TCC.db` itself for the `doctor` identity report).
 
@@ -124,9 +125,9 @@ issue #71's actual promise: **grant once, every client benefits**. Run through i
    /Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp shim
    ```
    (or via any MCP-capable CLI client pointed at that command) — run:
-   - a **calendar read** (e.g. `calendar_list_events`)
-   - a **mail read** (e.g. `mail_list_messages`)
-   - a **chat.db-backed read** (e.g. `messages_search` or `messages_list_recent`)
+   - a **calendar read** (e.g. `events`)
+   - a **mail read** (e.g. `mail` with a subject substring, or `mail_search`)
+   - a **chat.db-backed read** (e.g. `messages_search` or `messages_chats`)
 
    All three must succeed with **no permission prompt**.
 
