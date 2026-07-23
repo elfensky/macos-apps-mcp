@@ -1,6 +1,9 @@
 import sqlite3
 
+import pytest
+
 from macos_apps_mcp import deploy
+from macos_apps_mcp.errors import NativeError
 
 
 def _fake_tcc(path):
@@ -45,3 +48,56 @@ def test_agent_status_maps_ints(monkeypatch):
 
     monkeypatch.setattr(deploy, "_agent_service", lambda: FakeSvc())
     assert deploy.agent_status() == "enabled"
+
+
+def test_register_agent_failure_raises(monkeypatch):
+    class FakeSvc:
+        def registerAndReturnError_(self, _):
+            return (False, "boom")
+
+    monkeypatch.setattr(deploy, "_agent_service", lambda: FakeSvc())
+    with pytest.raises(NativeError, match="boom"):
+        deploy.register_agent()
+
+
+def test_unregister_agent_failure_raises(monkeypatch):
+    class FakeSvc:
+        def unregisterAndReturnError_(self, _):
+            return (False, "boom")
+
+    monkeypatch.setattr(deploy, "_agent_service", lambda: FakeSvc())
+    with pytest.raises(NativeError, match="boom"):
+        deploy.unregister_agent()
+
+
+def test_agent_service_outside_bundle_raises():
+    with pytest.raises(NativeError, match="build_app.sh"):
+        deploy._agent_service()
+
+
+def test_install_agent_missing_app_fails_actionably(tmp_path, capsys):
+    with pytest.raises(SystemExit) as e:
+        deploy.install_agent(["--app", str(tmp_path / "nope.app")])
+    assert e.value.code == 2
+    assert "build_app.sh" in capsys.readouterr().err
+
+
+def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
+    app = tmp_path / "macos-apps-mcp.app"
+    (app / "Contents/MacOS").mkdir(parents=True)
+    exe = app / "Contents/MacOS/macos-apps-mcp"
+    exe.write_text("")
+    exe.chmod(0o755)
+    calls = []
+    monkeypatch.setattr(deploy, "_run_bundle_role", lambda a, role: calls.append(role))
+    monkeypatch.setattr(
+        deploy, "_wait_for_socket", lambda timeout=30: calls.append("socket")
+    )
+    monkeypatch.setattr(
+        deploy, "_request_grants_via_daemon", lambda: calls.append("prompts")
+    )
+    deploy.install_agent(["--app", str(app)])
+    assert calls == ["register", "socket", "prompts"]
+    out = capsys.readouterr().out
+    assert "Privacy_AllFiles" in out  # FDA deep-link printed
+    assert '"shim"' in out  # client config snippet
