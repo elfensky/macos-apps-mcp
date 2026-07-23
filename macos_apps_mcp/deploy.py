@@ -4,7 +4,11 @@ executable; the pip-side install-agent invokes them (never SMAppService directly
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 from .errors import NativeError
@@ -73,3 +77,86 @@ def grant_identities(services: list[str] | None = None) -> dict | None:
     for service, client, auth in rows:
         out.setdefault(service, []).append({"client": client, "granted": auth == 2})
     return out
+
+
+def _run_bundle_role(app: Path, role: str) -> None:
+    exe = app / "Contents/MacOS/macos-apps-mcp"
+    subprocess.run([str(exe), "-m", "macos_apps_mcp", role], check=True, timeout=60)
+
+
+def _wait_for_socket(timeout: float = 30) -> None:
+    from .daemon import socket_path
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if socket_path().exists():
+            return
+        time.sleep(0.25)
+    raise NativeError("daemon socket never appeared — check `launchctl print` / logs")
+
+
+def _request_grants_via_daemon() -> None:
+    """Fire every consent prompt FROM the daemon process (bundle identity — prompts
+    from this terminal would attach to the terminal instead). doctor(request=True)
+    is the existing proactive-prompt pass."""
+    import asyncio
+
+    from fastmcp import Client
+    from fastmcp.client.transports import StreamableHttpTransport
+
+    from .daemon import _uds_client_factory, socket_path
+
+    async def go():
+        transport = StreamableHttpTransport(
+            "http://daemon/mcp", httpx_client_factory=_uds_client_factory(socket_path())
+        )
+        async with Client(transport) as c:
+            await c.call_tool("doctor", {"request": True})
+
+    asyncio.run(go())
+
+
+def _quarantine_guard(app: Path) -> None:
+    q = subprocess.run(
+        ["xattr", "-p", "com.apple.quarantine", str(app)], capture_output=True
+    )
+    if q.returncode == 0:  # quarantined download — verify, then strip (translocation)
+        subprocess.run(["spctl", "-a", str(app)], check=True)
+        subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(app)], check=True)
+
+
+def install_agent(argv: list[str]) -> None:
+    app = Path("/Applications/macos-apps-mcp.app")
+    if argv[:1] == ["--app"]:
+        app = Path(argv[1])
+    if not (app / "Contents/MacOS/macos-apps-mcp").exists():
+        print(
+            f"no bundle at {app} — build one with scripts/build_app.sh "
+            "(then copy to /Applications)",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    _quarantine_guard(app)
+    _run_bundle_role(app, "register")
+    _wait_for_socket()
+    _request_grants_via_daemon()
+    exe = app / "Contents/MacOS/macos-apps-mcp"
+    snippet = {"command": str(exe), "args": ["-m", "macos_apps_mcp", "shim"]}
+    print(
+        "Full Disk Access must be granted by hand — opening the pane:\n"
+        "  open 'x-apple.systempreferences:com.apple.preference.security"
+        "?Privacy_AllFiles'\n"
+        f"Point each MCP client at the shim:\n{json.dumps(snippet, indent=2)}"
+    )
+
+
+def uninstall_agent() -> None:
+    from .daemon import socket_path
+
+    app = Path("/Applications/macos-apps-mcp.app")
+    if (app / "Contents/MacOS/macos-apps-mcp").exists():
+        _run_bundle_role(app, "unregister")
+    socket_path().unlink(missing_ok=True)
+    print(
+        "agent unregistered. To wipe grants: tccutil reset All ren.lav.macos-apps-mcp"
+    )
