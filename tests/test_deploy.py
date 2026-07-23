@@ -101,3 +101,4 @@ def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Privacy_AllFiles" in out  # FDA deep-link printed
     assert '"shim"' in out  # client config snippet
+    assert '"-E"' in out  # isolation flags pinned in printed snippet

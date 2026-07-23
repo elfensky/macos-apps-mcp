@@ -26,7 +26,14 @@ def test_entitlements_minimal():
 def test_launchagent_plist_contract():
     la = plistlib.loads((PKG / "ren.lav.macos-apps-mcp.plist").read_bytes())
     assert la["Label"] == "ren.lav.macos-apps-mcp"
-    assert la["ProgramArguments"][1:] == ["-m", "macos_apps_mcp", "daemon"]
+    assert la["ProgramArguments"][1:] == [
+        "-E",
+        "-s",
+        "-P",
+        "-m",
+        "macos_apps_mcp",
+        "daemon",
+    ]
     assert la["KeepAlive"] is True and la["ThrottleInterval"] >= 5
 
 

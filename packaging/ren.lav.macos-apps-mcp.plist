@@ -4,6 +4,7 @@
   <key>Label</key><string>ren.lav.macos-apps-mcp</string>
   <key>ProgramArguments</key><array>
     <string>__APP__/Contents/MacOS/macos-apps-mcp</string>
+    <string>-E</string><string>-s</string><string>-P</string>
     <string>-m</string><string>macos_apps_mcp</string><string>daemon</string>
   </array>
   <key>RunAtLoad</key><true/>
