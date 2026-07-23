@@ -348,7 +348,17 @@ def mail_search(
     first; partial coverage is normal). At least one filter required. Returns citable
     Pointers, newest first. Falls back to AppleScript inbox search on missing Automation
     access / schema drift. Read-only; needs Automation access for Mail."""
-    if not any([subject, from_, to, mailbox, since, until, unread, flagged, body]):
+    # since/until=0 (epoch 0) is a valid timestamp, not an absent filter — checked via
+    # `is not None` rather than truthiness so it isn't wrongly treated as unset (#70
+    # review M3).
+    text_filters = [subject, from_, to, mailbox, body]
+    if (
+        not any(text_filters)
+        and since is None
+        and until is None
+        and not unread
+        and not flagged
+    ):
         raise ValueError("mail_search needs at least one filter")
     return [
         p.as_dict()
