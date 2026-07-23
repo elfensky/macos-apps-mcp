@@ -194,17 +194,28 @@ On-device (`-m integration`, this Mac — the real gate):
 - [ ] stdio/venv mode still fully working (CI + dev loop untouched).
 - [ ] `install-agent` / uninstall round-trip leaves no residue.
 
-## Risks & open implementation forks
-1. **Python packaging tool** — hand-rolled bundle (spike-proven, full control, we own inside-out
-   sign + notarize scripting) vs **briefcase / py2app** (handles bundling + signing, less control,
-   another dep). Evaluate briefcase first for the sign+notarize ergonomics.
-2. **Transport fork (§C):** streamable-http-over-UDS vs session-per-connection framing. Spike
-   against the FastMCP 2.0 API before the plan locks it — this decides the shim's complexity.
-3. **Automation prompt surfacing from a background agent** — a gui-domain agent can present
+## Fork resolutions (spiked 2026-07-23, in-repo, fastmcp 3.4.2 / uvicorn 0.49)
+- **Transport = (a) streamable-http over UDS — RESOLVED.** `server.http_app()` under
+  `uvicorn.Config(app, uds=…)`; verified end-to-end with **two concurrent MCP sessions** (separate
+  initialize handshakes, gathered tool calls) through one socket via
+  `httpx.AsyncHTTPTransport(uds=…)`. Implementation note: uvicorn creates the socket `0666` —
+  the daemon must `chmod 0600` after bind (dir `0700`).
+- **Shim = FastMCP proxy — RESOLVED.** `create_proxy(Client(StreamableHttpTransport(url,
+  httpx_client_factory=<uds factory>)))` `.run()` on stdio — verified forwarding. ~15 lines on the
+  existing fastmcp dep; **no second binary**: the bundle's one interpreter serves both roles by
+  argv (`daemon` vs `shim`). (`FastMCP.as_proxy` is deprecated; use
+  `fastmcp.server.create_proxy`.)
+- **Packaging = hand-rolled build script — RESOLVED.** With a single dual-role executable, the
+  bundle is exactly the spike-proven shape; briefcase's template (own scaffolding, own Python
+  support build) is a poor fit for the uv/python-build-standalone layout. Briefcase remains the
+  escape hatch if the inside-out sign + notarize scripting turns painful.
+
+## Risks & remaining unknowns
+1. **Automation prompt surfacing from a background agent** — a gui-domain agent can present
    prompts, but the flow is validated on-device during `install-agent` (§F.3 makes it proactive).
-4. **Notarization credentials** — one-time `xcrun notarytool store-credentials` (app-specific
+2. **Notarization credentials** — one-time `xcrun notarytool store-credentials` (app-specific
    password or ASC API key). Gates release builds only, not dev.
-5. **PyObjC under hardened runtime** — libffi trampoline behavior (see §A entitlements); on-device
+3. **PyObjC under hardened runtime** — libffi trampoline behavior (see §A entitlements); on-device
    test decides whether an extra entitlement is needed.
 
 ## Out of scope
