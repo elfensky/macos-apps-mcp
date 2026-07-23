@@ -700,9 +700,11 @@ source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "fastmcp" },
+    { name = "httpx" },
     { name = "mcp" },
     { name = "pyobjc-framework-cocoa" },
     { name = "pyobjc-framework-eventkit" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -716,9 +718,11 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4" },
     { name = "fastmcp", specifier = ">=2.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "mcp", specifier = ">=1.26" },
     { name = "pyobjc-framework-cocoa", specifier = ">=10.0" },
     { name = "pyobjc-framework-eventkit", specifier = ">=10.0" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]
