@@ -793,13 +793,20 @@ class MailAdapter:
 
         # Fallback: the existing AppleScript inbox search needs a substring — use the
         # most specific text filter provided (subject/from/mailbox), else empty
-        # (raises).
+        # (raises). Disabled entirely for a body search: AppleScript cannot do body
+        # FTS, so falling back there would silently swap in unrelated header-substring
+        # matches while the body= caller believes they got FTS-matched results
+        # (dishonest). A body search that can't reach the sqlite plane raises the
+        # typed remediation instead.
         needle = subject or from_ or to or mailbox or ""
+        fallback = (
+            (lambda: self.get_pointers(needle)) if (needle and not body) else None
+        )
         result = read_via_sqlite(
             path,
             mail_index.HEADER_FINGERPRINT,
             read,
-            fallback=(lambda: self.get_pointers(needle)) if needle else None,
+            fallback=fallback,
             immutable=False,
         )
         if body:
