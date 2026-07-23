@@ -327,6 +327,57 @@ def mail_awaiting_reply(days: int = 3) -> list[dict[str, str]]:
     return [p.as_dict() for p in _mail.get_awaiting_reply(days)]
 
 
+@_read_tool
+def mail_search(
+    subject: str = "",
+    from_: str = "",
+    to: str = "",
+    mailbox: str = "",
+    since: int | None = None,
+    until: int | None = None,
+    unread: bool = False,
+    flagged: bool = False,
+    body: str = "",
+    limit: int = 25,
+) -> list[dict]:
+    """Indexed search across ALL mailboxes via Mail's Envelope Index — fast,
+    read-only, no Mail launch. All filters optional and ANDed:
+    subject/from_/to/mailbox substrings, since/until (epoch seconds on received date),
+    unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
+    it only sees messages already downloaded AND indexed by mail_index_bodies (run that
+    first; partial coverage is normal). At least one filter required. Returns citable
+    Pointers, newest first. Falls back to AppleScript inbox search on missing Automation
+    access / schema drift. Read-only; needs Automation access for Mail."""
+    if not any([subject, from_, to, mailbox, since, until, unread, flagged, body]):
+        raise ValueError("mail_search needs at least one filter")
+    return [
+        p.as_dict()
+        for p in _mail.search(
+            subject=subject or None,
+            from_=from_ or None,
+            to=to or None,
+            mailbox=mailbox or None,
+            since=since,
+            until=until,
+            unread=unread,
+            flagged=flagged,
+            body=body or None,
+            limit=limit,
+        )
+    ]
+
+
+@_read_tool
+def mail_index_bodies(rebuild: bool = False) -> dict:
+    """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads
+    downloaded .emlx files at rest (never launches Mail, never writes in Mail's data);
+    skips not-yet-downloaded messages. Resumable and size-capped — safe to re-run; a
+    re-run continues where it left off. rebuild=True re-indexes from scratch. Returns
+    {indexed, skipped, total_emlx, capped, coverage}. Read-only; needs Automation
+    access for Mail."""
+    return _mail.index_bodies(rebuild=rebuild)
+
+
 @_additive_tool
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
