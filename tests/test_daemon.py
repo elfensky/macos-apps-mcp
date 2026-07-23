@@ -31,6 +31,18 @@ def test_socket_path_env_override(sockdir, monkeypatch):
     assert daemon.socket_path() == p
 
 
+def test_socket_path_default_ignores_xdg_state_home(tmp_path, monkeypatch):
+    # launchd agents don't inherit shell exports — the daemon (launchd), install-agent
+    # (shell), and a client-spawned shim must all rendezvous at the SAME default path
+    # regardless of what any one of them has in XDG_STATE_HOME.
+    monkeypatch.delenv("MACOS_APPS_MCP_SOCKET", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))
+    expected = (
+        Path.home() / ".local" / "state" / "macos-apps-mcp" / "daemon" / "mcp.sock"
+    )
+    assert daemon.socket_path() == expected
+
+
 def test_bind_socket_perms(sockdir):
     p = sockdir / "d" / "mcp.sock"
     s = daemon.bind_socket(p)
