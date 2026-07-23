@@ -25,6 +25,7 @@ from pathlib import Path
 
 import EventKit as EK
 
+from . import deploy
 from .errors import PRIVACY_PANE, NativeError
 from .runtime import request_access_each, run_native, run_osascript
 
@@ -227,6 +228,30 @@ def diagnose(request: bool = False) -> dict:
         )
     else:
         summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
+
+    ids = deploy.grant_identities()
+    try:
+        agent = deploy.agent_status()
+    except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
+        agent = f"unavailable: {e}"
+    deployment = {
+        "mode": "daemon"
+        if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
+        else "stdio",
+        "agent": agent,
+        "grant_identities": ids,
+        "note": (
+            "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
+            "for THIS process's responsible identity (grant it, or run via the "
+            "daemon)."
+            if ids is None
+            else "grants listed per identity; the daemon identity is "
+            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) also reports "
+            "granted=False here — if a service looks unexpectedly denied, check "
+            "System Settings before assuming it's actually off."
+        ),
+    }
+
     return {
         "responsible_process": _responsible_process(),
         "note": (
@@ -236,4 +261,5 @@ def diagnose(request: bool = False) -> dict:
         "probed_automation": request,
         "summary": summary,
         "surfaces": surfaces,
+        "deployment": deployment,
     }
