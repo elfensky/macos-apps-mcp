@@ -57,3 +57,68 @@ def row_to_pointer(row) -> Pointer | None:
         deeplink=_deeplink(str(mid)),
         folder=row["mailbox_url"],
     )
+
+
+_BASE_SQL = """
+SELECT gd.message_id_header AS message_id_header,
+       s.subject            AS subject,
+       mb.url               AS mailbox_url,
+       m.date_received      AS date_received
+FROM messages m
+JOIN subjects s ON s.ROWID = m.subject
+LEFT JOIN addresses a ON a.ROWID = m.sender
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0
+"""
+
+
+def build_header_query(
+    *,
+    subject=None,
+    from_=None,
+    to=None,
+    mailbox=None,
+    since=None,
+    until=None,
+    unread=None,
+    flagged=None,
+    message_ids=None,
+    limit=25,
+):
+    """Build (sql, params) for the header plane. All filters optional, ANDed; every
+    value is a bound param (injection-safe). Newest-first, deleted excluded."""
+    sql = _BASE_SQL
+    params: list = []
+    if subject:
+        sql += " AND s.subject LIKE ?"
+        params.append(f"%{subject}%")
+    if from_:
+        sql += " AND (a.address LIKE ? OR a.comment LIKE ?)"
+        params += [f"%{from_}%", f"%{from_}%"]
+    if to:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM recipients r JOIN addresses ra"
+            " ON ra.ROWID = r.address WHERE r.message = m.ROWID AND ra.address LIKE ?)"
+        )
+        params.append(f"%{to}%")
+    if mailbox:
+        sql += " AND mb.url LIKE ?"
+        params.append(f"%{mailbox}%")
+    if since is not None:
+        sql += " AND m.date_received >= ?"
+        params.append(since)
+    if until is not None:
+        sql += " AND m.date_received <= ?"
+        params.append(until)
+    if unread:
+        sql += " AND m.read = 0"
+    if flagged:
+        sql += " AND m.flagged = 1"
+    if message_ids:
+        placeholders = ",".join("?" for _ in message_ids)
+        sql += f" AND gd.message_id_header IN ({placeholders})"
+        params += list(message_ids)
+    sql += " ORDER BY m.date_received DESC LIMIT ?"
+    params.append(limit)
+    return sql, params
