@@ -33,6 +33,7 @@ dependencies = [
     "mcp>=1.26",                          # imported directly (server.py: mcp.types)
     "pyobjc-framework-EventKit>=10.0",    # Calendar + Reminders (v1)
     "pyobjc-framework-Cocoa>=10.0",       # Foundation, imported directly (runtime.py)
+    "pyobjc-framework-ServiceManagement>=10.0",  # SMAppService agent registration (deploy.py)
     "uvicorn>=0.30",                      # imported directly (daemon.py: fd-based UDS serving)
     "httpx>=0.27",                        # imported directly (daemon.py: shim's UDS transport)
 ]
