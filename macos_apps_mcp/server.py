@@ -749,7 +749,9 @@ mcp.add_middleware(
 
 
 def main() -> None:
-    """Console entry point (`macos-apps-mcp`) and `python -m macos_apps_mcp`."""
+    """The stdio role (#71): bare invocation with no argv role, dispatched by
+    `macos_apps_mcp.cli.main`. Bootstrap + lifecycle guards + stdio transport,
+    unchanged from before role dispatch existed."""
     bootstrap()
     install_lifecycle_guards()  # orphan watcher + child cleanup (#56)
     mcp.run()  # stdio transport
