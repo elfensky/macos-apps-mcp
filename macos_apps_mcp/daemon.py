@@ -86,7 +86,11 @@ def serve() -> None:
     path = socket_path()
     s = bind_socket(path)
     try:
-        config = uvicorn.Config(mcp.http_app(), fd=s.fileno(), log_level="warning")
+        # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
+        # autodetection avoids importing the deprecated websockets.legacy stack.
+        config = uvicorn.Config(
+            mcp.http_app(), fd=s.fileno(), log_level="warning", ws="none"
+        )
         uvicorn.Server(config).run()
     finally:
         s.close()
