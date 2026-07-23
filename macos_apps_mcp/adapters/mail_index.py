@@ -227,6 +227,13 @@ def fts_max_bytes() -> int:
 
 def _fts_connect(fts_db: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(fts_db)
+    # Concurrency (#71 panel): mail_index_bodies runs OFF run_native (pure file/sqlite
+    # I/O), so two overlapping builds — or a mail_search(body=) reader racing a build —
+    # would hit the default instant-fail lock and raise a raw sqlite OperationalError.
+    # WAL lets readers proceed during a write; busy_timeout makes writer/writer
+    # contention wait instead of erroring. Safe: this is OUR sidecar, never Mail's data.
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(
         "CREATE VIRTUAL TABLE IF NOT EXISTS bodies"
         " USING fts5(message_id UNINDEXED, body);"
@@ -337,6 +344,7 @@ def fts_search(fts_db: Path, query: str, limit: int = 200) -> list[str]:
     if not fts_query:
         return []
     conn = sqlite3.connect(f"file:{fts_db}?mode=ro", uri=True)
+    conn.execute("PRAGMA busy_timeout=5000")  # wait out a concurrent build, don't error
     try:
         rows = conn.execute(
             "SELECT message_id FROM bodies WHERE bodies MATCH ? LIMIT ?",
