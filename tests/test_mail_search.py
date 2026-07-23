@@ -78,3 +78,47 @@ def test_search_body_empty_index_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(mail_index, "fts_search", lambda db_, q, limit=200: [])
     assert MailAdapter().search(body="nothing") == []
+
+
+def test_search_body_does_not_fall_back_on_drift(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    # missing cols → drift
+    sqlite3.connect(db).executescript("CREATE TABLE messages(ROWID INTEGER);")
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(mail_index, "fts_path", lambda: tmp_path / "fts.sqlite")
+    monkeypatch.setattr(
+        mail_index, "fts_search", lambda db_, q, limit=200: ["<abc@ex.com>"]
+    )
+    adapter = MailAdapter()
+    monkeypatch.setattr(adapter, "get_pointers", lambda q: ["SENTINEL"])
+    # subject= is also set so `needle` is non-empty (as it would be for a realistic
+    # combined body+header search) — this is what makes the AppleScript fallback
+    # eligible to fire under the pre-fix wiring.
+    with pytest.raises(NativeError):
+        adapter.search(body="x", subject="x")
+
+
+def test_index_bodies_no_mail_root_raises(monkeypatch):
+    from macos_apps_mcp.adapters import mail_index
+
+    monkeypatch.setattr(mail_index, "mail_root", lambda: None)
+    with pytest.raises(NativeError):
+        MailAdapter().index_bodies()
+
+
+def test_index_bodies_builds_coverage(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters import mail_index
+
+    monkeypatch.setattr(mail_index, "mail_root", lambda: tmp_path)
+    fixed = {"indexed": 3, "skipped": 1, "total_emlx": 4, "capped": False}
+    monkeypatch.setattr(
+        mail_index,
+        "build_body_index",
+        lambda mail_root, fts_db, rebuild: dict(fixed),
+    )
+    out = MailAdapter().index_bodies()
+    assert out["indexed"] == 3
+    assert out["skipped"] == 1
+    assert out["total_emlx"] == 4
+    assert out["capped"] is False
+    assert out["coverage"] == "3/4 downloaded .emlx indexed"
