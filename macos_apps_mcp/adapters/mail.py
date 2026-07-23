@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import email
 import re
+import sqlite3
 from urllib.parse import quote
 
 from ..contracts import Pointer
@@ -721,3 +722,66 @@ class MailAdapter:
             if b.strip()
         ]
         return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)
+
+    def search(
+        self,
+        *,
+        subject=None,
+        from_=None,
+        to=None,
+        mailbox=None,
+        since=None,
+        until=None,
+        unread=None,
+        flagged=None,
+        body=None,
+        limit=MAX_MAILS,
+    ) -> list[Pointer]:
+        """Indexed search over ALL mailboxes via Mail's Envelope Index (read-at-rest).
+        All filters optional, ANDed. Falls back to the AppleScript inbox search on
+        missing FDA / schema drift. `body` is handled in a later task (best-effort FTS);
+        header-only here."""
+        # imported lazily: mail_index imports _deeplink from this module at load time,
+        # so a module-level import here would be a cycle.
+        from ..runtime import read_via_sqlite
+        from . import mail_index
+
+        path = mail_index.envelope_index_path()
+        if path is None:
+            raise NativeError(
+                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
+                "Open Mail once to create it. Do not retry."
+            )
+
+        sql, params = mail_index.build_header_query(
+            subject=subject,
+            from_=from_,
+            to=to,
+            mailbox=mailbox,
+            since=since,
+            until=until,
+            unread=unread,
+            flagged=flagged,
+            limit=limit,
+        )
+
+        def read(conn):
+            conn.row_factory = sqlite3.Row
+            out = []
+            for row in conn.execute(sql, params):
+                p = mail_index.row_to_pointer(row)
+                if p is not None:
+                    out.append(p)
+            return out
+
+        # Fallback: the existing AppleScript inbox search needs a substring — use the
+        # most specific text filter provided (subject/from/mailbox), else empty
+        # (raises).
+        needle = subject or from_ or to or mailbox or ""
+        return read_via_sqlite(
+            path,
+            mail_index.HEADER_FINGERPRINT,
+            read,
+            fallback=(lambda: self.get_pointers(needle)) if needle else None,
+            immutable=False,
+        )
