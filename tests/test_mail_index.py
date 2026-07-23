@@ -120,6 +120,48 @@ def test_parse_emlx_negative_length_returns_none():
     assert mail_index.parse_emlx(raw) is None
 
 
+def _write_emlx(path, mid, body):
+    rfc = (f"Message-ID: {mid}\r\nContent-Type: text/plain\r\n\r\n{body}").encode()
+    path.write_bytes(f"{len(rfc)}\n".encode() + rfc + b"<plist/>")
+
+
+def test_build_body_index_indexes_full_skips_partial(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/acct/INBOX.mbox/Data/Messages"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "quarterly invoice total")
+    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "should be skipped")
+    fts = tmp_path / "mail_fts.sqlite"
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1 and res["total_emlx"] == 1  # partial not counted
+    assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+
+
+def test_build_body_index_resumes(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "first")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    _write_emlx(msgs / "2.emlx", "<b@x>", "second")
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1 and res["skipped"] == 1  # only the new file indexed
+
+
+def test_build_body_index_size_capped(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    for i in range(5):
+        _write_emlx(msgs / f"{i}.emlx", f"<{i}@x>", "body " * 50)
+    fts = tmp_path / "mail_fts.sqlite"
+    res = mail_index.build_body_index(
+        mail_root=root, fts_db=fts, max_bytes=1
+    )  # tiny cap
+    assert res["capped"] is True and res["indexed"] >= 1
+
+
 def test_parse_emlx_deeply_nested_multipart_returns_none():
     # A .emlx whose RFC822 nests multipart parts deeply enough overflows stdlib
     # email.message_from_bytes's own recursive descent (RecursionError), which must

@@ -5,10 +5,13 @@ here; this module never launches Mail (read-at-rest)."""
 
 from __future__ import annotations
 
+import os
+import sqlite3
 from email import message_from_bytes
 from html.parser import HTMLParser
 from pathlib import Path
 
+from ..audit import state_dir
 from ..contracts import Pointer
 from .mail import _deeplink
 
@@ -195,3 +198,116 @@ def parse_emlx(raw: bytes) -> tuple[str, str] | None:
     if not body:
         return None
     return mid.strip(), body
+
+
+# --- FTS5 body sidecar (#70) ---------------------------------------------------------
+# Best-effort full-text index over .emlx bodies, keyed by RFC822 Message-ID. Lives in
+# our own state dir — NEVER inside Mail's data — so it can be rebuilt or deleted freely
+# without touching anything Mail.app owns.
+
+_FTS_DEFAULT_MAX = 200 * 1024 * 1024  # ~200 MB
+
+
+def fts_path() -> Path:
+    """Where the FTS5 body sidecar lives: our state dir, never Mail's."""
+    return state_dir() / "mail_fts.sqlite"
+
+
+def fts_max_bytes() -> int:
+    """Size cap for the sidecar: env override or the ~200 MB default."""
+    raw = os.environ.get("MACOS_APPS_MCP_FTS_MAX_BYTES")
+    return int(raw) if raw and raw.isdigit() else _FTS_DEFAULT_MAX
+
+
+def _fts_connect(fts_db: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(fts_db)
+    conn.executescript(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS bodies"
+        " USING fts5(message_id UNINDEXED, body);"
+        "CREATE TABLE IF NOT EXISTS indexed_files"
+        "(path TEXT PRIMARY KEY, mtime INTEGER, size INTEGER);"
+    )
+    return conn
+
+
+def build_body_index(
+    *,
+    mail_root: Path,
+    fts_db: Path,
+    rebuild: bool = False,
+    max_bytes: int | None = None,
+) -> dict:
+    """Best-effort FTS body index over full .emlx (skips *.partial.emlx). Resumable
+    (skips unchanged files), size-capped (stops when fts_db exceeds max_bytes). Never
+    touches Mail's data — reads .emlx at rest, writes only fts_db."""
+    if max_bytes is None:
+        max_bytes = fts_max_bytes()
+    if rebuild and fts_db.exists():
+        fts_db.unlink()
+    conn = _fts_connect(fts_db)
+    seen = {
+        r[0]: (r[1], r[2])
+        for r in conn.execute("SELECT path, mtime, size FROM indexed_files")
+    }
+    indexed = skipped = total = 0
+    capped = False
+    try:
+        for f in sorted(mail_root.rglob("*.emlx")):
+            if f.name.endswith(".partial.emlx"):
+                continue
+            total += 1
+            st = f.stat()
+            key = str(f)
+            if seen.get(key) == (int(st.st_mtime), st.st_size):
+                skipped += 1
+                continue
+            parsed = parse_emlx(f.read_bytes())
+            if parsed is None:
+                # record so a re-run doesn't reparse an unindexable file
+                conn.execute(
+                    "INSERT OR REPLACE INTO indexed_files VALUES (?,?,?)",
+                    (key, int(st.st_mtime), st.st_size),
+                )
+                skipped += 1
+            else:
+                mid, body = parsed
+                conn.execute("DELETE FROM bodies WHERE message_id = ?", (mid,))
+                conn.execute(
+                    "INSERT INTO bodies (message_id, body) VALUES (?, ?)", (mid, body)
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO indexed_files VALUES (?,?,?)",
+                    (key, int(st.st_mtime), st.st_size),
+                )
+                conn.commit()
+                indexed += 1
+            # Check the cap only *after* committing progress on this file: a bare
+            # CREATE VIRTUAL TABLE fts5 schema already occupies more than a few bytes,
+            # so checking before the first write would cap the run at zero files
+            # indexed instead of stopping once real progress has been recorded.
+            if fts_db.stat().st_size >= max_bytes:
+                capped = True
+                break
+    finally:
+        conn.commit()
+        conn.close()
+    return {
+        "indexed": indexed,
+        "skipped": skipped,
+        "total_emlx": total,
+        "capped": capped,
+    }
+
+
+def fts_search(fts_db: Path, query: str, limit: int = 200) -> list[str]:
+    """Message-IDs whose body matches the FTS query, or [] if the sidecar is absent."""
+    if not fts_db.exists():
+        return []
+    conn = sqlite3.connect(f"file:{fts_db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT message_id FROM bodies WHERE bodies MATCH ? LIMIT ?", (query, limit)
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
