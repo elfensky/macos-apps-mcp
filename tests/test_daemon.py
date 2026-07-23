@@ -1,10 +1,15 @@
+import asyncio
 import shutil
 import socket
 import stat
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import pytest
+from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 
 from macos_apps_mcp import daemon
 
@@ -57,3 +62,27 @@ def test_bind_socket_stale_file_rebinds(sockdir):
         c.close()
     finally:
         s.close()
+
+
+def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    t = threading.Thread(target=daemon.serve, daemon=True)
+    t.start()
+    for _ in range(100):  # wait for the socket
+        if p.exists():
+            break
+        time.sleep(0.05)
+
+    async def go():
+        def transport():
+            return StreamableHttpTransport(
+                "http://daemon/mcp",
+                httpx_client_factory=daemon._uds_client_factory(p),
+            )
+
+        async with Client(transport()) as c1, Client(transport()) as c2:
+            r1, r2 = await asyncio.gather(c1.call_tool("ping"), c2.call_tool("ping"))
+            assert "ok" in r1.content[0].text and "ok" in r2.content[0].text
+
+    asyncio.run(go())
