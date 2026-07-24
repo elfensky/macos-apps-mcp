@@ -15,6 +15,9 @@ from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
 _TCC_DB = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
+# FDA (kTCCServiceSystemPolicyAllFiles) rows live in the SYSTEM db, not the user one
+# (#123 — found during #71 acceptance: FDA granted + functional, yet invisible here).
+_TCC_SYSTEM_DB = Path("/Library/Application Support/com.apple.TCC/TCC.db")
 _SERVICES = [
     "kTCCServiceCalendar",
     "kTCCServiceReminders",
@@ -55,16 +58,14 @@ def agent_status() -> str:
     return _STATUS.get(int(_agent_service().status()), "unknown")
 
 
-def grant_identities(services: list[str] | None = None) -> dict | None:
-    """Which identity holds each TCC grant — None when TCC.db is unreadable
-    (reading it needs FDA for OUR responsible process: the spec §E chicken-and-egg).
-    Never raises; a wrong claim is worse than no claim."""
-    wanted = services or _SERVICES
+def _tcc_rows(db: Path, wanted: list[str]) -> list | None:
+    """Rows from ONE TCC db, or None if unreadable. Values bound; only `?` marks
+    are interpolated."""
     try:
-        conn = sqlite3.connect(f"file:{_TCC_DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         try:
             marks = ",".join("?" for _ in wanted)
-            rows = conn.execute(
+            return conn.execute(
                 f"SELECT service, client, auth_value FROM access "  # noqa: S608
                 f"WHERE service IN ({marks})",
                 wanted,
@@ -73,9 +74,21 @@ def grant_identities(services: list[str] | None = None) -> dict | None:
             conn.close()
     except sqlite3.Error:
         return None
+
+
+def grant_identities(services: list[str] | None = None) -> dict | None:
+    """Which identity holds each TCC grant — merged from the USER db and the SYSTEM
+    db (FDA rows live only in the latter, #123). None when NEITHER is readable
+    (reading either needs FDA for OUR responsible process: the spec §E
+    chicken-and-egg). Never raises; a wrong claim is worse than no claim."""
+    wanted = services or _SERVICES
+    per_db = [_tcc_rows(db, wanted) for db in (_TCC_DB, _TCC_SYSTEM_DB)]
+    if all(rows is None for rows in per_db):
+        return None
     out: dict[str, list[dict]] = {}
-    for service, client, auth in rows:
-        out.setdefault(service, []).append({"client": client, "granted": auth == 2})
+    for rows in per_db:
+        for service, client, auth in rows or []:
+            out.setdefault(service, []).append({"client": client, "granted": auth == 2})
     return out
 
 
@@ -120,9 +133,20 @@ def _request_grants_via_daemon() -> None:
             "http://daemon/mcp", httpx_client_factory=_uds_client_factory(socket_path())
         )
         async with Client(transport) as c:
-            await c.call_tool("doctor", {"request": True})
+            await c.call_tool("doctor", {"request": True}, timeout=200)
 
-    asyncio.run(go())
+    try:
+        # Hard ceiling (#123): the streamable-http client can hang in TEARDOWN after
+        # the doctor call already completed (seen once during #71 acceptance). The
+        # prompts fired server-side by then, so a timeout here is a note, not a
+        # failure — never leave install-agent wedged on a cosmetic close.
+        asyncio.run(asyncio.wait_for(go(), timeout=240))
+    except TimeoutError:
+        print(
+            "note: prompt pass finished but the connection close timed out "
+            "(harmless); continuing.",
+            file=sys.stderr,
+        )
 
 
 def _quarantine_guard(app: Path) -> None:
