@@ -20,7 +20,12 @@ def test_info_plist_contract():
 
 def test_entitlements_minimal():
     ents = plistlib.loads((PKG / "entitlements.plist").read_bytes())
-    assert ents == {"com.apple.security.automation.apple-events": True}
+    # calendars: macOS 26 silently instant-denies EventKit EVENTS full access for
+    # hardened-runtime apps without it (no prompt, no TCC row) — #71 acceptance find.
+    assert ents == {
+        "com.apple.security.automation.apple-events": True,
+        "com.apple.security.personal-information.calendars": True,
+    }
 
 
 def test_launchagent_plist_contract():
