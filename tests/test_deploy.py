@@ -25,6 +25,9 @@ def test_grant_identities_maps_rows(tmp_path, monkeypatch):
     db = tmp_path / "TCC.db"
     _fake_tcc(db)
     monkeypatch.setattr(deploy, "_TCC_DB", db)
+    # pin the system db away — on a dev Mac with FDA the REAL one is readable and
+    # its rows would leak into the assertions (#123)
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent-sys" / "TCC.db")
     out = deploy.grant_identities(
         ["kTCCServiceCalendar", "kTCCServiceSystemPolicyAllFiles"]
     )
@@ -36,8 +39,49 @@ def test_grant_identities_maps_rows(tmp_path, monkeypatch):
     ]
 
 
+def test_grant_identities_merges_system_db_fda(tmp_path, monkeypatch):
+    # #123: FDA rows live ONLY in the system TCC db — the merge must surface them
+    # even when the user db has no AllFiles row at all.
+    user_db = tmp_path / "user.db"
+    c = sqlite3.connect(user_db)
+    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
+    c.execute(
+        "INSERT INTO access VALUES ('kTCCServiceCalendar','ren.lav.macos-apps-mcp',2)"
+    )
+    c.commit()
+    c.close()
+    sys_db = tmp_path / "system.db"
+    c = sqlite3.connect(sys_db)
+    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
+    c.execute(
+        "INSERT INTO access VALUES "
+        "('kTCCServiceSystemPolicyAllFiles','ren.lav.macos-apps-mcp',2)"
+    )
+    c.commit()
+    c.close()
+    monkeypatch.setattr(deploy, "_TCC_DB", user_db)
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", sys_db)
+    out = deploy.grant_identities()
+    assert out["kTCCServiceSystemPolicyAllFiles"] == [
+        {"client": "ren.lav.macos-apps-mcp", "granted": True}
+    ]
+    assert out["kTCCServiceCalendar"] == [
+        {"client": "ren.lav.macos-apps-mcp", "granted": True}
+    ]
+
+
+def test_grant_identities_partial_when_one_db_unreadable(tmp_path, monkeypatch):
+    db = tmp_path / "TCC.db"
+    _fake_tcc(db)
+    monkeypatch.setattr(deploy, "_TCC_DB", db)
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
+    out = deploy.grant_identities(["kTCCServiceCalendar"])
+    assert out is not None and "kTCCServiceCalendar" in out
+
+
 def test_grant_identities_unreadable_returns_none(tmp_path, monkeypatch):
     monkeypatch.setattr(deploy, "_TCC_DB", tmp_path / "absent" / "TCC.db")
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent2" / "TCC.db")
     assert deploy.grant_identities() is None
 
 
