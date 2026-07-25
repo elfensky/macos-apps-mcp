@@ -31,6 +31,26 @@ surface may still shift between minor versions.
   every attachment from the outgoing message (a real 7-attachment forward arrived with
   0). `forward_mail` now forwards the original and its attachments unchanged and
   accepts no covering note; use `send_mail` for a fresh message with your own text.
+- **`reply_all`'s dry run showed no recipients (#129).** The preview only echoed back
+  what the caller typed — decorative for exactly the tool whose recipient set is
+  surprising (long cc lists). The dry run now resolves the original message's actual
+  to/cc recipients by message-id and reports those; this is a documented exception to
+  the "dry run makes no native call" rule (a *read* of a stored message strands
+  nothing, unlike constructing an outgoing one) — `send`/`forward` still make none.
+- **The outbound gate was unobservable, and unreachable under the daemon (#130).**
+  `doctor()`'s `deployment` now reports `outbound` (adapters currently send-enabled,
+  `[]` if none) + `outbound_note`, derived from the same registration logic
+  `MACOS_APPS_ALLOW_SEND` feeds, never a re-read of the raw env var. Documented
+  (README.md, docs/DAEMON.md) that under the daemon deployment an MCP client's `env`
+  block reaches the shim, not the daemon process that actually reads the variable —
+  setting it in a client config is a silent no-op there; use `launchctl setenv` /
+  the plist's `EnvironmentVariables` on the daemon itself, then `launchctl kickstart -k`.
+- **The gate-ON dispatch path was untested (#131).** `MACOS_APPS_ALLOW_SEND` is read
+  at import time, so a normal test run never registered `send_mail`/`reply_all`/
+  `forward_mail` — their tool→adapter forwarding (`send_mail` alone hand-forwards 8
+  parameters) was never exercised. A subprocess-based test now imports the server
+  with the gate on, replaces the adapter's send methods with recording stubs, and
+  asserts every argument forwards correctly — nothing is ever actually sent.
 
 ### Notes
 

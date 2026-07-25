@@ -160,7 +160,21 @@ Sending is **off by default** — the server creates drafts and never sends. Set
 Send tools take `dry_run`, which **defaults to `True`** — deliberately inverted from the
 id-addressed deletes. A delete targets an item a read already returned; a send *constructs* its
 recipient, and a wrong recipient is the failure that matters. The dry run makes no call into Mail
-at all and reports the resolved envelope; pass `dry_run=False` to actually send.
+at all and reports the resolved envelope; pass `dry_run=False` to actually send. `reply_all` is
+the one exception: its dry run reads (never sends) the original message's actual to/cc
+recipients, because that's exactly the recipient set a caller can't predict.
+
+Run the `doctor` tool to check whether sending is actually enabled — `deployment.outbound` lists
+every adapter currently send-enabled (`[]` if none), derived from the same registration logic
+above rather than a re-read of the raw env var, so it can never disagree with what got registered;
+`deployment.outbound_note` explains the state in prose.
+
+**Under the daemon deployment**, setting `MACOS_APPS_ALLOW_SEND` in an MCP client's config is a
+silent no-op: the client's `env` block reaches the shim, not the long-lived daemon process that
+actually reads the variable at import time, and the shipped LaunchAgent plist ships no
+`EnvironmentVariables` key. See [docs/DAEMON.md](docs/DAEMON.md) ("Outbound (send) mode under the
+daemon") for the `launchctl setenv` / plist `EnvironmentVariables` steps and the
+`launchctl kickstart -k` restart needed for it to take effect.
 
 ## Develop
 

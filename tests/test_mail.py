@@ -411,7 +411,13 @@ def test_framed_templates_compose_the_one_strip_framing_handler():
     # the single STRIP_FRAMING constant — exactly one handler definition per script.
     import macos_apps_mcp.adapters.mail as mail
 
-    framed = (mail._ORIGINAL, mail._ATTACHMENTS, mail._INBOX_TRIAGE, mail._SENT_TRIAGE)
+    framed = (
+        mail._ORIGINAL,
+        mail._ATTACHMENTS,
+        mail._INBOX_TRIAGE,
+        mail._SENT_TRIAGE,
+        mail._REPLY_ALL_RECIPIENTS,
+    )
     for tpl in framed:
         assert tpl.startswith(mail.STRIP_FRAMING)
         assert tpl.count("on stripFraming") == 1
@@ -777,7 +783,9 @@ def test_send_dry_run_touches_nothing(monkeypatch):
     # A dry run must make NO native call: constructing an outgoing message can strand an
     # autosaved copy in Drafts even when the script deletes it (device-verified). This
     # is the load-bearing safety invariant for `send` — the most dangerous of the three
-    # outbound paths — mirroring the equivalent guard on reply_all/forward below.
+    # outbound paths — mirroring the equivalent guard on forward below. reply_all is a
+    # documented exception (#129): its dry run DOES make one native call, a read of the
+    # original message's recipients — see test_reply_all_dry_run_reads_recipients_only.
     def boom(*a, **k):
         raise AssertionError("dry run must not call osascript")
 
@@ -851,21 +859,35 @@ def test_send_rejects_empty_subject_and_body():
         mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
 
 
-def test_reply_all_dry_run_touches_nothing(monkeypatch):
-    def boom(*a, **k):
-        raise AssertionError("dry run must not call osascript")
+def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
+    # #129: reply_all's dry run is a documented exception to the "no native call" rule
+    # — it reads the original message's recipients (a read strands nothing) but must
+    # NEVER reach the send script (_REPLY_ALL) itself.
+    seen = []
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    def fake(script, *argv):
+        seen.append(script)
+        if script is mail._REPLY_ALL_RECIPIENTS:
+            return (
+                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
+                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+            )
+        raise AssertionError(f"dry run must not call {script!r} (the send script)")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good")
     assert out == {
         "dry_run": True,
         "would_send": {
+            "to": ["alice@corp.com", "bob@corp.com"],
+            "cc": ["carol@corp.com"],
             "reply_to": "<orig@x>",
             "reply_all": True,
             "body_chars": 11,
             "include_quote": True,
         },
     }
+    assert seen == [mail._REPLY_ALL_RECIPIENTS]  # exactly one call — the read, only
 
 
 def test_reply_all_sends_with_quote(monkeypatch):

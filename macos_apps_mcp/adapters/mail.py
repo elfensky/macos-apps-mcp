@@ -362,6 +362,45 @@ _FORWARD = """on run argv
   end timeout
 end run"""
 
+# reply_all dry-run preview (#129): resolve an inbox message's to/cc recipients — the
+# set reply-all would ACTUALLY reach — plus its sender, by message-id. Reply-all is
+# exactly the tool whose recipient set is surprising (a long cc list), and the whole
+# justification for dry_run defaulting to True is that a wrong recipient becomes
+# visible before anything leaves; a preview that echoes back only what the caller typed
+# is decorative. Device-verified 2026-07-26: `to recipients`, `cc recipients`, and
+# `sender` are all readable on a stored inbox message. Scoped to inbox (the same source
+# _BODY/_ORIGINAL read from); errors when the id has no match, matching that pair. One
+# RS-framed record per recipient — (kind, address), kind in to/cc — plus a final
+# (sender, address) record: the _DRAFTS/_ATTACHMENTS idiom, so a variable-length to/cc
+# list parses with split_framed instead of a fixed-arity US-partition. Every free-text
+# field (address, sender) passes through the shared stripFraming handler first.
+_REPLY_ALL_RECIPIENTS = (
+    STRIP_FRAMING
+    + """
+
+on run argv
+  set mid to item 1 of argv
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of inbox whose message id is mid)
+    if (count of matches) is 0 then error "no inbox message with that message id"
+    set m to item 1 of matches
+    repeat with r in (to recipients of m)
+      set out to out & "to" & us & (my stripFraming(address of r)) & rs
+    end repeat
+    repeat with r in (cc recipients of m)
+      set out to out & "cc" & us & (my stripFraming(address of r)) & rs
+    end repeat
+    set out to out & "sender" & us & (my stripFraming(sender of m)) & rs
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
@@ -838,6 +877,26 @@ def _parse_draft_records(raw: str) -> list[Pointer]:
     return out
 
 
+def _parse_reply_all_recipients(raw: str) -> dict:
+    """Parse the _REPLY_ALL_RECIPIENTS payload: RS-framed (kind, address) records,
+    kind in "to"/"cc"/"sender". Malformed/partial trailing records are skipped —
+    same defensive rule as every other parser here."""
+    to: list[str] = []
+    cc: list[str] = []
+    sender = ""
+    for fields in split_framed(raw):
+        if len(fields) < 2:
+            continue
+        kind, value = fields[0], fields[1]
+        if kind == "to":
+            to.append(value)
+        elif kind == "cc":
+            cc.append(value)
+        elif kind == "sender":
+            sender = value
+    return {"to": to, "cc": cc, "sender": sender}
+
+
 def _split_addrs(value) -> list[str]:
     """Normalize a recipient argument to a list of addresses. Accepts a comma-separated
     string (what a model usually produces) or a list; blanks are dropped. None → [].
@@ -1017,18 +1076,33 @@ class MailAdapter:
     ) -> dict:
         """Reply-all to an inbox message and SEND it. Mail's native reply verb sets the
         threading headers; ``include_quote`` appends the `On <date>, <sender> wrote:`
-        block, built in Python exactly as ``reply`` builds it. ``dry_run=True``
-        (default) makes no call into Mail. The sending account is inherited from the
-        original message — the correct identity for a thread."""
+        block, built in Python exactly as ``reply`` builds it. The sending account is
+        inherited from the original message — the correct identity for a thread.
+
+        ``dry_run=True`` (default) is a deliberate, DOCUMENTED exception to this
+        file's "a dry run makes no native call" rule (``send``/``forward`` still make
+        none at all): reply-all's recipient set is exactly the surprising one (a long
+        cc list), so the preview reads the original message's ACTUAL to/cc recipients
+        by message-id and reports them — not merely what the caller typed — before
+        anything leaves. That read is safe where a send/forward dry run isn't, because
+        the no-native-call rule exists to stop CONSTRUCTING an outgoing message (which
+        can strand an autosaved draft in Drafts); reading an already-stored inbox
+        message strands nothing.
+        """
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("reply_all needs the original message's id")
         if not body.strip():
             raise ValueError("reply_all needs a non-empty body")
         if dry_run:
+            recipients = _parse_reply_all_recipients(
+                run_osascript(_REPLY_ALL_RECIPIENTS, mid)
+            )
             return {
                 "dry_run": True,
                 "would_send": {
+                    "to": recipients["to"],
+                    "cc": recipients["cc"],
                     "reply_to": message_id.strip(),
                     "reply_all": True,
                     "body_chars": len(body),
