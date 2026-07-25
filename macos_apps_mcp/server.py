@@ -19,6 +19,7 @@ from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
 from .adapters.messages import MessagesAdapter
+from .adapters.music import MusicAdapter
 from .adapters.notes import NotesAdapter
 from .adapters.photos import PhotosAdapter
 from .adapters.reminders import RemindersAdapter
@@ -53,6 +54,7 @@ _safari = SafariAdapter()
 _photos = PhotosAdapter()
 _messages = MessagesAdapter()
 _shortcuts = ShortcutsAdapter()
+_music = MusicAdapter()
 
 
 def _read_only() -> bool:
@@ -443,6 +445,21 @@ def safari_tabs() -> list[dict[str, str]]:
 
 
 @_read_tool
+def music_search(query: str = "") -> list[dict[str, str]]:
+    """Search the Music library + playlists as pointers. `query` optional
+    name/artist/album substring (empty lists all, bounded). Read-only; needs Automation
+    access for Music. Pointers only (id = persistent ID); no audio plays."""
+    return [p.as_dict() for p in _music.get_pointers(query)]
+
+
+@_read_tool
+def now_playing() -> dict:
+    """Current Music player state + track (name/artist/album/id/position/duration), or
+    {"state": "stopped"}. Read-only; needs Automation access for Music."""
+    return _music.now_playing()
+
+
+@_read_tool
 def photos(query: str) -> list[dict[str, str]]:
     """Search Photos (filename, place, date). Returns pointers (id + filename).
     Read-only; needs Automation access for Photos."""
@@ -737,6 +754,37 @@ def safari_open(url: str) -> dict[str, str]:
     """Open a URL in a new Safari tab; adds https:// if no scheme (http/https only).
     Side effect (opens a tab); needs Automation access for Safari. See safari_tabs."""
     return _safari.open_url(url).as_dict()
+
+
+@_additive_tool
+def music_control(action: str) -> dict:
+    """Control Music playback: action in play|pause|playpause|next|previous. Additive,
+    reversible player-state change; needs Automation access for Music. Returns the
+    resulting now-playing state."""
+    return _music.control(action)
+
+
+@_additive_tool
+def play_playlist(id: str) -> dict:
+    """Play a Music playlist by its persistent id (from music_search). Additive,
+    reversible; needs Automation access for Music. Returns the resulting now-playing
+    state."""
+    return _music.play_playlist(id)
+
+
+@_additive_tool
+def set_volume(level: int) -> dict:
+    """Set the Music app sound volume (0–100). Additive, reversible; needs Automation
+    access for Music. Returns the resulting now-playing state."""
+    return _music.set_volume(level)
+
+
+@_additive_tool
+def set_mode(mode: str, on: bool) -> dict:
+    """Set Music shuffle or repeat: mode in shuffle|repeat, on=true/false (repeat
+    on→all, off→off). Additive, reversible; needs Automation access for Music. Returns
+    the resulting now-playing state."""
+    return _music.set_mode(mode, on)
 
 
 # --- audit trail (#67) ----------------------------------------------------------------

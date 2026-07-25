@@ -32,7 +32,15 @@ from .runtime import request_access_each, run_native, run_osascript
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
 # Automation-backed adapter must add its app name here so doctor probes it.
-_AUTOMATION_APPS = ("Mail", "Notes", "Contacts", "Photos", "Safari", "Messages")
+_AUTOMATION_APPS = (
+    "Mail",
+    "Notes",
+    "Contacts",
+    "Photos",
+    "Safari",
+    "Messages",
+    "Music",
+)
 
 # The app name is passed via argv (never interpolated), matching the injection-safe
 # osascript convention even though these targets are constants. name/id/version/
