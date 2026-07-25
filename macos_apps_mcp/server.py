@@ -172,11 +172,12 @@ def _additive_tool(fn):
     return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
 
 
-# Every adapter name a `@_send_tool(...)` call below names (#130) — hand-maintained,
-# the `_AUTOMATION_APPS` pattern in doctor.py: adding outbound support to a new adapter
-# means adding its name here too, so `doctor()`'s outbound report can enumerate every
-# adapter capable of sending, not just the one currently gated on.
-_SEND_ADAPTERS = ("mail",)
+# Every adapter name a `@_send_tool(...)` call below names (#130) — DERIVED at
+# registration, never hand-maintained (the `_SNAPSHOT_SOURCES` rule): a new outbound
+# adapter can't silently miss `doctor()`'s report by forgetting a second edit. Recorded
+# BEFORE the gate check, so it lists every adapter CAPABLE of sending, not just the ones
+# currently enabled — which is what makes doctor able to say "mail: off".
+_SEND_ADAPTERS: set[str] = set()
 
 
 def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
@@ -187,6 +188,7 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     before-state capture."""
 
     def deco(f):
+        _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
         if not _allow_send(adapter):
             return f
         _WRITE_TOOLS.add(f.__name__)
