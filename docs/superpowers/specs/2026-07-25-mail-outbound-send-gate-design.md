@@ -2,7 +2,8 @@
 
 **Milestone:** 0.9.0 — Mail depth & outbound. The first slice; everything outbound depends on it.
 **Status:** approved (brainstorming, 2026-07-25).
-**Covers:** #104 (granular capability gating), #82 (drafts lifecycle), #83 (opt-in direct send).
+**Covers:** #104 (granular capability gating), #82 (drafts lifecycle — list/delete only, see Risks),
+#83 (opt-in direct send).
 **Out of scope:** #86 Messages send (same gate, separate spec), #84 scheduled send, #85 statistics,
 and the read/organize issues #75–#81.
 
@@ -86,7 +87,9 @@ special case.
 | `send_mail` | send | `ALLOW_SEND` | `send_mail(to, subject, body, cc=None, bcc=None, html=False, dry_run=True)` → `dict` |
 | `reply_all` | send | `ALLOW_SEND` | `reply_all(message_id, body, include_quote=True, dry_run=True)` → `dict` |
 | `forward_mail` | send | `ALLOW_SEND` | `forward_mail(message_id, to, body="", dry_run=True)` → `dict` |
-| `send_draft` | send | `ALLOW_SEND` | `send_draft(id: str, dry_run: bool = True)` → `dict` — **spike-gated, see Risks** |
+
+`send_draft` is **out of scope** — the on-device spike disproved it (see Risks). #82 closes as
+list/delete; `send_mail` covers the compose-and-dispatch use case.
 
 **#82's list/delete half is ungated by `ALLOW_SEND`.** Listing and deleting your own drafts are an
 ordinary read and an ordinary local write; only *dispatch* crosses the gate. So `drafts` and
@@ -118,8 +121,8 @@ can simply re-call with `dry_run=False`. Its value is that a wrong recipient bec
 transcript before anything leaves. Consent is carried by the env gate, the `destructiveHint` +
 `openWorldHint` annotations, and the audit log.
 
-`send_draft(id)` is id-addressed like the deletes, but keeps `dry_run=True` because it still
-dispatches outbound; its preview reports the draft's resolved recipients and subject.
+All three surviving send tools take `dry_run=True`; none is id-addressed, so none inherits the
+deletes' `dry_run=False` default.
 
 ## Adapter methods (`adapters/mail.py`)
 
@@ -138,12 +141,13 @@ dispatches outbound; its preview reports the draft's resolved recipients and sub
   Reuses `_build_quote` + `sanitize_line` from the existing `reply`.
 - `forward(message_id, to, body="", dry_run=True) -> dict` — Mail's `forward` verb, then set
   recipients and send.
-- `send_draft(ident, dry_run=True) -> dict` — spike-gated.
 - `snapshot(ident) -> Pointer | None` — **new**: `MailAdapter` does not yet satisfy the
-  `Snapshotter` Protocol (only calendar, notes, reminders do). `delete_draft` and `send_draft` are
-  id-addressed writes, so #67 requires before-state capture: resolve the draft by id, return its
-  Pointer, `None` if the id no longer resolves. Wired as `@_write_tool(snapshot=_mail)` and
-  `@_send_tool("mail", snapshot=_mail)`.
+  `Snapshotter` Protocol (only calendar, notes, reminders do). `delete_draft` is an id-addressed
+  write, so #67 requires before-state capture: resolve the draft by id, return its Pointer, `None`
+  if the id no longer resolves. Wired as `@_write_tool(snapshot=_mail)`.
+
+`_send_tool` keeps its optional `snapshot=` parameter even though no surviving send tool is
+id-addressed — it costs two lines and keeps #67's invariant intact for #86 and #84.
 
 Atomicity follows `create_draft`'s #44 pattern: if any step after creating the outgoing message
 fails, the script deletes the partial message before erroring, so a retry cannot strand a duplicate.
@@ -155,17 +159,28 @@ adapter boundary → `ToolError` via `_guard`, carrying an agent-directed remedi
 failure (invalid address, no account configured, Automation denied) → `NativeError` → `ToolError`.
 Never an empty dict masquerading as success.
 
-## Risks
+## Risks — resolved
 
-**`send_draft` is not confirmed implementable.** Mail's `send` verb is typed for `outgoing message`;
-whether it accepts a stored `message` from the Drafts mailbox is unverified — `sdef` requires Xcode,
-which is absent on this machine, so the dictionary could not be read. GUI keystroke scripting
-(⌘⇧D) is **not** an acceptable fallback (keystroke-free, #46).
+**`send_draft` is NOT implementable. Spike run 2026-07-25 (Mail, macOS 25.5); result: dead end.**
+A throwaway draft addressed to the operator's own address was created, saved to Drafts (arriving as
+class `message`, id 40371), and `send` was attempted on it:
 
-**Resolution: an on-device spike runs before the implementation plan is written.** Create a draft
-addressed to the operator's own address, save it, and attempt `send` on the stored message. If it
-fails, `send_draft` drops from scope, #82 closes as list/delete only, and `send_mail` covers the
-use case. This is settled before task-writing, not discovered mid-implementation.
+```
+SEND FAILED -1708: Mail got an error: message id 40371 of mailbox "Drafts"
+of account id "AE0…" doesn't understand the "send" message.
+```
+
+`-1708` is `errAEEventNotHandled`: Mail's `send` verb applies to `outgoing message` only, never to a
+message stored in a mailbox. The spike draft was deleted afterwards; no mail was sent.
+
+**Rejected fallbacks.** GUI keystroke scripting (⌘⇧D) — keystroke-free is a standing constraint
+(#46). Read-and-recompose (pull the draft's recipients/subject/content into a fresh
+`outgoing message`, send that, delete the original) — it silently drops attachments, inline images,
+and any hand-tuned formatting, so what gets sent is *not* the draft the human reviewed. A send tool
+that quietly alters its payload is worse than no send tool.
+
+**Consequence.** `send_draft` is out of scope. #82 ships as `drafts` + `delete_draft` and closes
+with a note recording this dictionary limitation. `send_mail` covers compose-and-dispatch.
 
 ## Testing
 
@@ -180,8 +195,8 @@ use case. This is settled before task-writing, not discovered mid-implementation
 - `tests/test_tool_annotations.py` gains a `send` tier in `_PERMISSION` so the map keeps
   self-enforcing; a new send tool that skips `_send_tool` fails the suite.
 - `MailAdapter.snapshot` satisfies `Snapshotter` (extend `tests/test_contracts.py`), and
-  `delete_draft`/`send_draft` register a `_SNAPSHOT_SOURCES` entry — so audit before-state cannot
-  be silently missed.
+  `delete_draft` registers a `_SNAPSHOT_SOURCES` entry — so audit before-state cannot be silently
+  missed.
 
 **Integration** (`uv run pytest -m integration`, on-device only, **never CI**): every send test
 targets the operator's own address. No test ever sends to a third party.
