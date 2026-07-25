@@ -32,9 +32,9 @@ def test_music_search_parses_track_and_playlist(monkeypatch):
 
 def test_music_search_folds_smart_punctuation(monkeypatch):
     # library stores a curly apostrophe (U+2019); an ASCII query must still match (#26)
-    raw = _rec("T", "Don't Stop", "Band", "Alb", "TID1") + RS
+    raw = _rec("T", "Don’t Stop", "Band", "Alb", "TID1") + RS
     monkeypatch.setattr(music, "run_osascript", lambda *a, **k: raw)
-    assert MusicAdapter().get_pointers("don't stop")  # ASCII ' matches U+2019
+    assert MusicAdapter().get_pointers("don't stop")  # ASCII apostrophe matches U+2019
 
 
 def test_music_search_filters_by_query(monkeypatch):
@@ -53,6 +53,16 @@ def test_music_search_bounds_results(monkeypatch):
     raw = RS.join(_rec("T", f"t{i}", "a", "b", f"ID{i}") for i in range(120)) + RS
     monkeypatch.setattr(music, "run_osascript", lambda *a, **k: raw)
     assert len(MusicAdapter().get_pointers("")) == music.MAX_MUSIC_RESULTS
+
+
+def test_music_search_playlist_survives_track_cap(monkeypatch):
+    recs = [_rec("P", "Chill", "12", "PID1")]
+    recs += [_rec("T", f"t{i}", "a", "b", f"ID{i}") for i in range(120)]
+    raw = RS.join(recs) + RS
+    monkeypatch.setattr(music, "run_osascript", lambda *a, **k: raw)
+    ptrs = MusicAdapter().get_pointers("")
+    assert len(ptrs) == music.MAX_MUSIC_RESULTS
+    assert any(p.id == "PID1" for p in ptrs)  # playlist not starved by the track cap
 
 
 def test_now_playing_stopped(monkeypatch):
