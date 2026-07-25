@@ -84,7 +84,7 @@ special case.
 |---|---|---|---|
 | `drafts` | read | — | `drafts()` → `list[Pointer]` |
 | `delete_draft` | write (destructive) | `READ_ONLY` | `delete_draft(id: str, dry_run: bool = False)` → `dict` |
-| `send_mail` | send | `ALLOW_SEND` | `send_mail(to, subject, body, cc=None, bcc=None, html=False, dry_run=True)` → `dict` |
+| `send_mail` | send | `ALLOW_SEND` | `send_mail(to, subject, body, cc=None, bcc=None, html=False, from_address=None, dry_run=True)` → `dict` |
 | `reply_all` | send | `ALLOW_SEND` | `reply_all(message_id, body, include_quote=True, dry_run=True)` → `dict` |
 | `forward_mail` | send | `ALLOW_SEND` | `forward_mail(message_id, to, body="", dry_run=True)` → `dict` |
 
@@ -110,11 +110,23 @@ The preview surfaces exactly that:
 ```json
 {"dry_run": true,
  "would_send": {"to": ["a@b.com"], "cc": [], "bcc": [],
-                "from": "andrei@lav.ren", "subject": "Hi",
+                "from": "andrei@drunik.be", "subject": "Hi",
                 "body_chars": 412, "html": false}}
 ```
 
-`from` requires resolving Mail's sending account — one extra osascript read on the dry-run path.
+**The dry-run path makes NO native call.** It is pure Python over the validated arguments. This is
+forced by a device finding (see AppleScript findings): constructing an `outgoing message` can strand
+an autosaved copy in Drafts even when the script deletes it, and a *dry* run must not leave
+artifacts in the user's mailbox.
+
+`from` therefore reports the caller's `from_address` verbatim, or the literal string
+`"(Mail default account)"` when omitted — never a guess. Mail's default sender is **not**
+predictable from account order (device check: 4 enabled accounts, first is `andrei@lavrenov.io`,
+Mail chose `andrei@lav.ren`), so reporting a computed guess would be a lie. `from_address` exists so
+the caller can *choose* rather than predict — `set sender of msg` is verified working.
+
+`from_address` is on `send_mail` only. `reply_all` and `forward_mail` inherit the account of the
+original message, which is the correct identity for a thread; overriding it is a separate concern.
 
 **Honest limits.** `dry_run` is a *visibility* mechanism, not a *consent* mechanism: an agentic loop
 can simply re-call with `dry_run=False`. Its value is that a wrong recipient becomes visible in the
@@ -133,9 +145,10 @@ deletes' `dry_run=False` default.
   window, not of a draft saved to the mailbox. Update that docstring in the same change.
 - `delete_draft(ident, dry_run=False) -> dict` — `dry_run=True` returns the Pointer that *would* be
   deleted, no mutation, matching `delete_event`'s shape.
-- `send(to, subject, body, cc=None, bcc=None, html=False, dry_run=True) -> dict` —
-  `make new outgoing message` + recipients + `send`. `html=True` sets `html content` instead of
-  `content`; one branch in the script.
+- `send(to, subject, body, cc=None, bcc=None, html=False, from_address=None, dry_run=True) -> dict`
+  — `make new outgoing message {visible:false}` + recipients + `send`. `html=True` sets
+  `html content` instead of `content`; `from_address` sets `sender of msg`. `dry_run=True` returns
+  the preview **without touching Mail at all**.
 - `reply_all(message_id, body, include_quote=True, dry_run=True) -> dict` — Mail's native
   `reply … reply to all true`, so `In-Reply-To`/`References` are set by Mail (real threading).
   Reuses `_build_quote` + `sanitize_line` from the existing `reply`.
@@ -158,6 +171,32 @@ Missing/empty recipient, empty subject **and** body, or an unknown draft id → 
 adapter boundary → `ToolError` via `_guard`, carrying an agent-directed remediation. A Mail-side
 failure (invalid address, no account configured, Automation denied) → `NativeError` → `ToolError`.
 Never an empty dict masquerading as success.
+
+## AppleScript findings (device-verified 2026-07-25, Mail on macOS 25.5)
+
+Every verb below was exercised on device before this plan was written. **Verified working:**
+`make new outgoing message {visible:false}` with `to`/`cc`/`bcc` recipients and `html content`;
+`set sender of msg to "<address>"`; `reply m opening window no reply to all yes` (returns an
+`outgoing message`, subject auto-prefixed `Re:`); `forward m opening window no` (returns an
+`outgoing message`, subject auto-prefixed `Fwd:`); `send msg` on a **headless** (`visible:false`)
+outgoing message — the classic "send needs a visible window" fear is unfounded here.
+
+Three traps the implementation must avoid:
+
+1. **Autosave stranding.** `delete msg` on an `outgoing message` does not reliably remove Mail's
+   autosaved copy from Drafts — reproduced twice, and cleanup needed a reverse-index loop. This is
+   why the dry-run path constructs nothing. The real send path is unaffected (`send` consumes the
+   message; a device check found no Drafts residue after sending).
+2. **`whose` is unreliable on the Drafts mailbox.** `messages of drafts mailbox whose subject is X`
+   raised `-1728` ("Can't get item 1 of …") on a draft that demonstrably existed, while
+   `whose subject contains X` worked. Address drafts by iterating and comparing `message id`, not
+   by a `whose` equality filter.
+3. **Deleting while iterating invalidates the collection** (`-1728`). Iterate by index in reverse
+   (`repeat with i from n to 1 by -1`), or collect ids first and re-resolve.
+
+**Pre-existing issue, out of scope:** `_CREATE_DRAFT`'s #44 atomicity (`delete msg` on a
+post-creation error) is subject to trap 1 — an error path may strand an autosaved draft despite the
+rollback. File a separate issue; do not fix it in this branch.
 
 ## Risks — resolved
 
@@ -189,8 +228,10 @@ with a note recording this dictionary limitation. `send_mail` covers compose-and
 - `_allow_send` parse table: unset, `""`, `1`, `true`, `yes`, `all`, `mail`, `mail,messages`,
   `MAIL` (case), stray/empty commas (`mail,,`), unrelated adapter name.
 - `READ_ONLY` precedence: `READ_ONLY=1` + `ALLOW_SEND=all` → `_allow_send("mail")` is `False`.
-- `dry_run=True` returns a preview and performs **no** native call; `dry_run=False` dispatches —
-  asserted against `Protocol` fakes.
+- `dry_run=True` returns a preview and performs **no** native call — assert `run_osascript` is never
+  invoked (monkeypatch it to raise). `dry_run=False` dispatches.
+- `from_address` is echoed verbatim in the preview; omitted → `"(Mail default account)"`, never a
+  computed guess.
 - Recipients and bodies reach `run_osascript` via argv/tempfile, never interpolated into the script.
 - `tests/test_tool_annotations.py` gains a `send` tier in `_PERMISSION` so the map keeps
   self-enforcing; a new send tool that skips `_send_tool` fails the suite.
