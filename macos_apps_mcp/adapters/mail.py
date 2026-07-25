@@ -143,6 +143,47 @@ _CREATE_DRAFT = """on run argv
   end timeout
 end run"""
 
+# drafts (#82): list the Drafts mailbox as US/RS-framed (message id, subject, first
+# recipient) records. Iterates BY INDEX rather than with a `whose` filter — on device,
+# `messages of drafts mailbox whose subject is X` raised -1728 for a draft that
+# demonstrably existed, while index access is reliable (spike 2026-07-25). Output is
+# capped host-side at maxN, the _SEARCH idiom (#52). The first recipient is enough for a
+# pointer summary; a draft's own sender is the user, so it carries no signal.
+_DRAFTS = (
+    STRIP_FRAMING
+    + """
+
+on run argv
+  set maxN to (item 1 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  set c to 0
+  with timeout of 120 seconds
+  tell application "Mail"
+    set dm to drafts mailbox
+    set n to count of (messages of dm)
+    repeat with i from 1 to n
+      set m to message i of dm
+      set mid to message id of m
+      if mid is not missing value and mid is not "" then
+        set c to c + 1
+        if c > maxN then exit repeat
+        set subj to subject of m
+        if subj is missing value then set subj to ""
+        set rcpt to ""
+        try
+          set rcpt to (address of item 1 of (to recipients of m)) as text
+        end try
+        set out to out & (my stripFraming(mid)) & us & (my stripFraming(subj)) & ¬
+          us & (my stripFraming(rcpt)) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
 
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
@@ -592,6 +633,28 @@ def _parse_search_results(raw: str) -> list[Pointer]:
     return out
 
 
+def _parse_draft_records(raw: str) -> list[Pointer]:
+    """Parse the _DRAFTS payload: US-framed (message id, subject, first recipient)
+    records. Records with no stable message-id are skipped — same rule as the inbox
+    reads (#61): never emit a non-resolvable id."""
+    out = []
+    for fields in split_framed(raw):
+        mid = fields[0].strip()
+        if mid in ("", "missing value"):
+            continue
+        subject = fields[1] if len(fields) > 1 else ""
+        rcpt = fields[2].strip() if len(fields) > 2 else ""
+        who = f"to {rcpt}" if rcpt else ""
+        out.append(
+            Pointer(
+                id=mid,
+                summary=clean_summary(_summary(subject, who)),
+                deeplink=_deeplink(mid),
+            )
+        )
+    return out
+
+
 class MailAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """query: a substring to match against the inbox subject OR sender (#61)."""
@@ -643,6 +706,23 @@ class MailAdapter:
             "note": "opened in a Mail compose window for your review; save it to keep "
             "it in Drafts. Unsent drafts have no stable id.",
         }
+
+    def list_drafts(self) -> list[Pointer]:
+        """List the Drafts mailbox as pointers (id + "subject — to recipient"). A read
+        — never mutates. Bounded to MAX_MAILS. Unlike the inbox reads this is NOT
+        scoped to one account: `drafts mailbox` is Mail's unified, locale-independent
+        accessor."""
+        return _parse_draft_records(run_osascript(_DRAFTS, str(MAX_MAILS)))
+
+    def snapshot(self, ident: str) -> Pointer | None:
+        """Current Pointer for one draft, or None if the id no longer resolves — the
+        before-state an id-addressed write needs for the audit trail (#67). Satisfies
+        the Snapshotter Protocol."""
+        mid = ident.strip()
+        for p in self.list_drafts():
+            if p.id == mid:
+                return p
+        return None
 
     def reply(
         self, message_id: str, reply_body: str, include_quote: bool = True

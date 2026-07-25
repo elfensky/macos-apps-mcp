@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from macos_apps_mcp.adapters import mail
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
@@ -13,6 +14,7 @@ from macos_apps_mcp.adapters.mail import (
     _validate_mailbox,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_summary_subject_and_sender():
@@ -573,3 +575,48 @@ def test_reply_cleanup_on_failure_is_in_script():
     assert re.search(r"on error errMsg\s+delete r\s+error errMsg", _REPLY), (
         "the on-error handler must delete the partial reply, then re-raise"
     )
+
+
+# --- drafts (#82) ---------------------------------------------------------------
+
+
+def test_list_drafts_parses_framed_records(monkeypatch):
+    raw = (
+        f"<a@b.com>{US}Q3 numbers{US}boss@corp.com{RS}"
+        f"<c@d.com>{US}Lunch?{US}pal@example.org{RS}"
+    )
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    out = mail.MailAdapter().list_drafts()
+    assert [p.id for p in out] == ["<a@b.com>", "<c@d.com>"]
+    assert out[0].summary == "Q3 numbers — to boss@corp.com"
+    assert out[0].deeplink.startswith("message://")
+
+
+def test_list_drafts_skips_records_without_message_id(monkeypatch):
+    # a draft with no Message-ID has no stable citation — never emit a garbage id.
+    raw = f"missing value{US}No id{US}x@y.com{RS}<ok@z>{US}Fine{US}a@b.com{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    assert [p.id for p in mail.MailAdapter().list_drafts()] == ["<ok@z>"]
+
+
+def test_list_drafts_empty_mailbox(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    assert mail.MailAdapter().list_drafts() == []
+
+
+def test_list_drafts_summary_without_recipient(monkeypatch):
+    raw = f"<a@b>{US}Just a subject{US}{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    assert mail.MailAdapter().list_drafts()[0].summary == "Just a subject"
+
+
+def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
+    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    p = mail.MailAdapter().snapshot("<a@b>")
+    assert p.summary == "Q3 numbers — to boss@corp.com"
+
+
+def test_snapshot_returns_none_for_unknown_id(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    assert mail.MailAdapter().snapshot("<nope@nowhere>") is None

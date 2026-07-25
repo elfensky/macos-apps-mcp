@@ -89,6 +89,7 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
 | `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 
