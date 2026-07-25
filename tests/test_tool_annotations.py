@@ -71,6 +71,7 @@ _PERMISSION = {
     "mail_index_bodies": "Automation",
     "create_draft": "Automation",
     "mail_reply": "Automation",
+    "drafts": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
     "note_bodies": "Automation",

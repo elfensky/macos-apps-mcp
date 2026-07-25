@@ -459,6 +459,14 @@ def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> 
 
 
 @_read_tool
+def drafts() -> list[dict[str, str]]:
+    """List Mail drafts as pointers (id + "subject — to recipient"), newest mailbox
+    order, bounded. The id is the RFC822 message-id — pass it to delete_draft.
+    Read-only; needs Automation access for Mail."""
+    return [p.as_dict() for p in _mail.list_drafts()]
+
+
+@_read_tool
 def notes(title: str) -> list[dict[str, str]]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
     path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to
