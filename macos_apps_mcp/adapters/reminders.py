@@ -11,25 +11,26 @@ from datetime import datetime, timedelta
 import EventKit as EK
 
 from ..contracts import Pointer, Recurrence, ReminderData
-from ..runtime import (
+from ..errors import (
     RecurrenceRequired,
     VerificationFailed,
-    WriteRefused,
-    clean_summary,
+    refused_write,
+    resolve_container,
+    verify_persisted,
+)
+from ..runtime import (
+    container_id,
     due_components,
-    fold_text,
-    norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
-    resolve_container,
     rrule_text,
     run_native,
     run_native_async,
     store,
     to_nsdate,
     to_recurrence_rule,
-    verify_persisted,
 )
+from ..text import clean_summary, fold_text, norm_text
 
 # A fetch has no user interaction, so the GCD callback should arrive quickly. Bound the
 # wait so a callback that never fires can't hang the single worker — and every later
@@ -104,9 +105,8 @@ def _incomplete_due_pred(s, end: datetime | None, cals):
 
 
 def _resolve_list(s, name: str | None):
-    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
-    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
-    # logic — including listing candidate ids — lives in runtime.resolve_container.
+    # Disambiguation rule (#55): see contracts.py; shared logic in
+    # errors.resolve_container.
     if name is None:
         return s.defaultCalendarForNewReminders()
     items = [
@@ -114,6 +114,17 @@ def _resolve_list(s, name: str | None):
         for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
     ]
     return resolve_container(items, name, noun="reminder list")
+
+
+def _fresh_item(s, ident):
+    """Refetch by id for verify-after-write: same-store fetches can serve the
+    registered in-memory object, so refresh() pulls current DB state — the diff must
+    run against what actually persisted. None if the item vanished between save and
+    verify (iCloud rollback)."""
+    fresh = s.calendarItemWithIdentifier_(ident)
+    if fresh is not None and not fresh.refresh():
+        return None  # gone from the DB between save and verify
+    return fresh
 
 
 def _apply_reminder(s, r, data: ReminderData) -> None:
@@ -252,27 +263,14 @@ class RemindersAdapter:
             s = store()
             r = EK.EKReminder.reminderWithEventStore_(s)
             _apply_reminder(s, r, data)
-            # Read the EXPECTED list before the save — the commit may re-home the
-            # object, and post-save it would tautologically equal the actual. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = r.calendar()
-            list_id = cal.calendarIdentifier() if cal is not None else None
+            list_id = container_id(r)  # read EXPECTED list before save (#55)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the reminder write was refused by the store: {err}. The target "
-                    "list may be read-only (a subscribed list) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("reminder write", "list", err)
             # Re-fetch by the id we'll return — never trust the in-memory object (#49):
             # prove the id resolves and the fields persisted.
             ident = r.calendarItemIdentifier()
-            fresh = s.calendarItemWithIdentifier_(ident)
-            # Same-store fetches can serve the registered in-memory object; refresh()
-            # pulls current DB state so the diff is against what actually persisted.
-            if fresh is not None and not fresh.refresh():
-                fresh = None  # gone from the DB between save and verify
+            fresh = _fresh_item(s, ident)
             _verify_reminder(fresh, ident, data, list_id)
             return _reminder_pointer(fresh)
 
@@ -295,27 +293,14 @@ class RemindersAdapter:
                     "No change was made."
                 )
             _apply_reminder(s, r, data)
-            # Read the EXPECTED list before the save — the commit may re-home the
-            # object, and post-save it would tautologically equal the actual. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = r.calendar()
-            list_id = cal.calendarIdentifier() if cal is not None else None
+            list_id = container_id(r)  # read EXPECTED list before save (#55)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the reminder write was refused by the store: {err}. The target "
-                    "list may be read-only (a subscribed list) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("reminder write", "list", err)
             # A list move may re-issue the identifier; the held object's post-save id
             # is authoritative (same pattern as create and calendar.update).
             ident_after = r.calendarItemIdentifier()
-            fresh = s.calendarItemWithIdentifier_(ident_after)
-            # Same-store fetches can serve the registered in-memory object; refresh()
-            # pulls current DB state so the diff is against what actually persisted.
-            if fresh is not None and not fresh.refresh():
-                fresh = None  # gone from the DB between save and verify
+            fresh = _fresh_item(s, ident_after)
             _verify_reminder(fresh, ident_after, data, list_id)
             return _reminder_pointer(fresh)
 
@@ -340,17 +325,8 @@ class RemindersAdapter:
             r.setCompleted_(True)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the reminder completion was refused by the store: {err}. The "
-                    "target list may be read-only (a subscribed list) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
-            fresh = s.calendarItemWithIdentifier_(ident)
-            # Same-store fetches can serve the registered in-memory object; refresh()
-            # pulls current DB state so the diff is against what actually persisted.
-            if fresh is not None and not fresh.refresh():
-                fresh = None  # gone from the DB between save and verify
+                raise refused_write("reminder completion", "list", err)
+            fresh = _fresh_item(s, ident)
             _verify_completed(fresh, ident)
             return _reminder_pointer(fresh)
 

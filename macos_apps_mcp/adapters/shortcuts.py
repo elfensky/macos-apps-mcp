@@ -17,13 +17,9 @@ import subprocess
 import tempfile
 
 from ..contracts import Pointer
-from ..runtime import (
-    NativeError,
-    NativeTimeout,
-    clean_summary,
-    fold_text,
-    sanitize_line,
-)
+from ..errors import NativeError, NativeTimeout
+from ..runtime import tracked_run
+from ..text import clean_summary, fold_text, sanitize_line
 
 MAX_SHORTCUTS = 100
 MAX_OUTPUT = 280  # pointers-not-payload: cite the run + a bounded snippet of any output
@@ -41,6 +37,27 @@ _UUID_RE = re.compile(_UUID)  # a bare handle that IS a UUID (the id-first run p
 def _deeplink(uuid: str) -> str:
     # shortcuts://run-shortcut?id=<UUID> opens/runs the shortcut. A UUID is URL-safe.
     return f"shortcuts://run-shortcut?id={uuid}"
+
+
+def _list_entries() -> list[tuple[str, str | None]]:
+    """The one home for the ``shortcuts list --show-identifiers`` invocation (both
+    get_pointers and the run-citation name resolver read the same listing). Returns
+    parsed ``(name, uuid|None)`` entries; raises ``NativeTimeout`` on a hang and
+    ``NativeError`` on a non-zero exit. Spawned via ``tracked_run`` so the child sits
+    in runtime's #56 registry and exit-path cleanup can terminate it."""
+    try:
+        proc = tracked_run(
+            ["shortcuts", "list", "--show-identifiers"], timeout=_TIMEOUT
+        )
+    except subprocess.TimeoutExpired as e:
+        raise NativeTimeout(
+            f"shortcuts list didn't finish within {_TIMEOUT}s and was stopped — "
+            "the Shortcuts CLI may be hung. Tell the user; do not retry "
+            "immediately."
+        ) from e
+    if proc.returncode != 0:
+        raise NativeError(f"shortcuts CLI failed: {proc.stderr.strip()}")
+    return _parse_list(proc.stdout)
 
 
 def _parse_list(stdout: str) -> list[tuple[str, str | None]]:
@@ -108,22 +125,7 @@ def _filter_entries(
 class ShortcutsAdapter:
     def get_pointers(self, query: str = "") -> list[Pointer]:
         """query: optional name substring (empty lists all shortcuts)."""
-        try:
-            proc = subprocess.run(
-                ["shortcuts", "list", "--show-identifiers"],
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise NativeTimeout(
-                f"shortcuts list didn't finish within {_TIMEOUT}s and was stopped — "
-                "the Shortcuts CLI may be hung. Tell the user; do not retry "
-                "immediately."
-            ) from e
-        if proc.returncode != 0:
-            raise NativeError(f"shortcuts CLI failed: {proc.stderr.strip()}")
-        entries = _filter_entries(_parse_list(proc.stdout), query)
+        entries = _filter_entries(_list_entries(), query)
         return [_list_pointer(name, uuid) for name, uuid in entries]
 
     def run_shortcut(self, name: str, input_text: str | None = None) -> Pointer:
@@ -154,11 +156,12 @@ class ShortcutsAdapter:
                 cmd += ["--input-path", "-"]
             cmd += ["--", name]
             try:
-                proc = subprocess.run(
+                # tracked_run (not subprocess.run): the child sits in runtime's #56
+                # registry, so an exit path (atexit / SIGTERM / orphan watcher) can
+                # terminate an in-flight `shortcuts run` instead of orphaning it.
+                proc = tracked_run(
                     cmd,
                     input=input_text,
-                    capture_output=True,
-                    text=True,
                     errors="replace",
                     timeout=_RUN_TIMEOUT,
                 )
@@ -190,16 +193,9 @@ class ShortcutsAdapter:
         if not _UUID_RE.fullmatch(handle.strip()):
             return handle
         try:
-            proc = subprocess.run(
-                ["shortcuts", "list", "--show-identifiers"],
-                capture_output=True,
-                text=True,
-                timeout=_TIMEOUT,
-            )
-            if proc.returncode == 0:
-                for name, uuid in _parse_list(proc.stdout):
-                    if uuid and uuid.lower() == handle.strip().lower():
-                        return name
-        except (subprocess.TimeoutExpired, OSError):
+            for name, uuid in _list_entries():
+                if uuid and uuid.lower() == handle.strip().lower():
+                    return name
+        except (NativeError, OSError):  # NativeTimeout is a NativeError
             pass
         return handle

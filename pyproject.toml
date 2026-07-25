@@ -1,6 +1,6 @@
 [project]
 name = "macos-apps-mcp"
-version = "0.7.0"
+version = "0.8.0"
 description = "One consolidated MCP server for native macOS apps (Calendar, Reminders, Mail, ...)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,7 +29,13 @@ classifiers = [
 ]
 dependencies = [
     "fastmcp>=2.0",
+    "anyio>=4",                           # imported directly (audit.py)
+    "mcp>=1.26",                          # imported directly (server.py: mcp.types)
     "pyobjc-framework-EventKit>=10.0",    # Calendar + Reminders (v1)
+    "pyobjc-framework-Cocoa>=10.0",       # Foundation, imported directly (runtime.py)
+    "pyobjc-framework-ServiceManagement>=10.0",  # SMAppService agent registration (deploy.py)
+    "uvicorn>=0.30",                      # imported directly (daemon.py: fd-based UDS serving)
+    "httpx>=0.27",                        # imported directly (daemon.py: shim's UDS transport)
 ]
 # Contacts (#15) uses osascript/Automation (Contacts.app AppleScript dictionary), not the
 # Contacts framework — a non-bundled server can't get CNContactStore TCC, but Automation works.

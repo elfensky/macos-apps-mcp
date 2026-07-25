@@ -19,7 +19,7 @@ from macos_apps_mcp.adapters.reminders import (
     _verify_reminder,
 )
 from macos_apps_mcp.contracts import Pointer, Recurrence, ReminderData
-from macos_apps_mcp.runtime import AmbiguousTarget, VerificationFailed
+from macos_apps_mcp.errors import AmbiguousTarget, VerificationFailed
 from tests._fakes import fake_rule
 
 

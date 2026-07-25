@@ -8,9 +8,9 @@ from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
     _deeplink,
-    _parse,
+    _parse_search_results,
     _summary,
-    system_mailbox_names,
+    _validate_mailbox,
 )
 from macos_apps_mcp.contracts import Pointer
 
@@ -44,7 +44,7 @@ def test_deeplink_percent_encodes_special_chars():
 
 def test_parse_tab_lines():
     raw = "abc@host\tInvoice\tBob\n<def@host>\tHello\t\n"
-    ptrs = _parse(raw)
+    ptrs = _parse_search_results(raw)
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
     assert ptrs[0].id == "abc@host" and ptrs[0].summary == "Invoice — Bob"
@@ -53,7 +53,7 @@ def test_parse_tab_lines():
 
 
 def test_parse_skips_blank():
-    assert _parse("\n  \n") == []
+    assert _parse_search_results("\n  \n") == []
 
 
 def test_parse_skips_missing_message_id():
@@ -62,7 +62,7 @@ def test_parse_skips_missing_message_id():
     raw = (
         "missing value\tNo header\tSpammer\n\tEmpty id\tNobody\ngood@host\tReal\tBob\n"
     )
-    ptrs = _parse(raw)
+    ptrs = _parse_search_results(raw)
     assert [p.id for p in ptrs] == ["good@host"]  # only the message with a real id
 
 
@@ -74,7 +74,7 @@ def test_parse_sanitizes_control_chars_in_summary():
     # newline in a subject splits too) and out of #52's scope; the helper's own
     # U+2028/9 folding is covered in test_runtime.
     raw = "m@host\tInv\x00oice\x1fQ3\x07\tBob\n"
-    ptr = _parse(raw)[0]
+    ptr = _parse_search_results(raw)[0]
     assert ptr.summary == "InvoiceQ3 — Bob"
     assert "\x00" not in ptr.summary and "\x07" not in ptr.summary
 
@@ -91,29 +91,21 @@ def test_get_pointers_bounds_host_side(monkeypatch):
     assert seen["args"] == ("invoice", str(MAX_MAILS))
 
 
-# --- localized system-mailbox tables (#61) -------------------------------------------
+# --- system-mailbox validation ------------------------------------------------------
 
 
-def test_system_mailbox_names_localized():
-    # en/nl/ru at least (the acceptance floor) — a US-hardcoded "Inbox" fails on a
-    # non-English Mac, so mailbox-scoped ops try each localized candidate.
-    inbox = system_mailbox_names("inbox")
-    assert "Inbox" in inbox and "Postvak IN" in inbox and "Входящие" in inbox
+def test_validate_mailbox_returns_canonical_lowercase():
+    assert _validate_mailbox("  SENT ") == "sent"
 
 
-def test_system_mailbox_names_case_insensitive_canonical():
-    assert system_mailbox_names("SENT") == system_mailbox_names("sent")
-
-
-def test_system_mailbox_names_unknown_raises():
+def test_validate_mailbox_unknown_raises():
     with pytest.raises(ValueError, match="unknown system mailbox"):
-        system_mailbox_names("archive")
+        _validate_mailbox("archive")
 
 
-def test_system_mailbox_covers_the_core_five():
+def test_validate_mailbox_covers_the_core_five():
     for canonical in ("inbox", "sent", "drafts", "trash", "junk"):
-        names = system_mailbox_names(canonical)
-        assert len(names) >= 3  # en + nl + ru at minimum
+        assert _validate_mailbox(canonical) == canonical
 
 
 # --- sender search (#61) -------------------------------------------------------------
@@ -168,7 +160,7 @@ def test_get_body_empty_id_raises():
 def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
     # #62 review: an HTML-only / not-yet-downloaded message yields AppleScript `missing
     # value`, coerced to the literal string — it must NOT be handed back as the body.
-    from macos_apps_mcp.runtime import NativeError
+    from macos_apps_mcp.errors import NativeError
 
     monkeypatch.setattr(
         "macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
@@ -180,7 +172,8 @@ def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
 def test_get_body_huge_body_overflows(monkeypatch):
     # a pasted-dump body over the hard cap surfaces OutputOverflow (open it in Mail),
     # not a silently-truncated blob.
-    from macos_apps_mcp.runtime import BODY_HARD_MAX, OutputOverflow
+    from macos_apps_mcp.errors import OutputOverflow
+    from macos_apps_mcp.text import BODY_HARD_MAX
 
     monkeypatch.setattr(
         "macos_apps_mcp.adapters.mail.run_osascript",
@@ -363,7 +356,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
     # HIGH fix: _build_quote must TRUNCATE a huge original, not crash the whole reply
     # (clean_body's default hard=BODY_HARD_MAX would raise OutputOverflow here).
     import macos_apps_mcp.adapters.mail as mail
-    from macos_apps_mcp.runtime import BODY_HARD_MAX
+    from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 100)
 
@@ -388,6 +381,46 @@ def test_original_strips_framing_from_sender_and_date():
     assert "my stripFraming(snd)" in _ORIGINAL
     assert "my stripFraming(dt)" in _ORIGINAL
     assert "on stripFraming" in _ORIGINAL
+
+
+# --- US/RS framing contract (#68) -----------------------------------------------------
+
+
+def test_framed_templates_compose_the_one_strip_framing_handler():
+    # The a6ce7fd bug was a template emitting a raw field because its pasted handler
+    # copy drifted. Every template that emits US/RS-framed free text must now COMPOSE
+    # the single STRIP_FRAMING constant — exactly one handler definition per script.
+    import macos_apps_mcp.adapters.mail as mail
+
+    framed = (mail._ORIGINAL, mail._ATTACHMENTS, mail._INBOX_TRIAGE, mail._SENT_TRIAGE)
+    for tpl in framed:
+        assert tpl.startswith(mail.STRIP_FRAMING)
+        assert tpl.count("on stripFraming") == 1
+
+
+def testsplit_framed_skips_blank_records_and_splits_fields():
+    import macos_apps_mcp.adapters.mail as mail
+
+    raw = f"a{mail.US}b{mail.RS}{mail.RS}c{mail.RS}  {mail.RS}"
+    assert mail.split_framed(raw) == [["a", "b"], ["c"]]
+
+
+def test_framing_literals_live_only_in_the_contract_block():
+    # Locality guard: no other line in mail.py may hard-code the framing bytes.
+    import inspect
+
+    import macos_apps_mcp.adapters.mail as mail
+
+    src = inspect.getsource(mail)
+    offenders = [
+        line
+        for line in src.splitlines()
+        if (r"\x1f" in line or r"\x1e" in line)
+        and not line.lstrip().startswith("#")
+        and "US =" not in line
+        and "RS =" not in line
+    ]
+    assert offenders == []
 
 
 def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):

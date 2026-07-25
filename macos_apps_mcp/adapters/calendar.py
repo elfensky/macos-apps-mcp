@@ -8,27 +8,30 @@ reached-into).
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Literal
 
 import EventKit as EK
 
 from ..contracts import CalendarEventData, Pointer, parse_datetime
-from ..runtime import (
+from ..errors import (
     SpanRequired,
     VerificationFailed,
-    WriteRefused,
-    clean_summary,
+    refused_write,
+    resolve_container,
+    verify_persisted,
+)
+from ..runtime import (
+    container_id,
     epoch_nsdate,
     from_nsdate,
-    norm_text,
     persisted_recurrence_signature,
     recurrence_signature,
-    resolve_container,
     run_native,
     store,
     to_nsdate,
     to_recurrence_rule,
-    verify_persisted,
 )
+from ..text import clean_summary, norm_text
 
 
 def _range(query: str) -> tuple[datetime, datetime]:
@@ -94,9 +97,8 @@ def _calendar_pointer(cal) -> Pointer:
 
 
 def _resolve_calendar(s, name: str | None):
-    # Disambiguation rule (#55): accept a Pointer.id OR an exact name; an id is used
-    # directly, an ambiguous name is refused loudly (never auto-picked). The shared
-    # logic — including listing candidate ids — lives in runtime.resolve_container.
+    # Disambiguation rule (#55): see contracts.py; shared logic in
+    # errors.resolve_container.
     if name is None:
         return s.defaultCalendarForNewEvents()
     items = [
@@ -228,6 +230,11 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     # field, and test it then.
 
 
+# The closed span vocabulary (#51). The tool boundary passes caller strings through
+# unchecked, so _resolve_span still validates membership at runtime and refuses with
+# SpanRequired — the Literal documents/types the set, it doesn't replace the check.
+Span = Literal["this-event", "future-events"]
+
 # EKSpanThisEvent == 0 (falsy!), EKSpanFutureEvents == 1 — so map via membership, never
 # a truthy test.
 _SPANS = {
@@ -236,7 +243,7 @@ _SPANS = {
 }
 
 
-def _resolve_span(e, span: str | None, *, adds_recurrence: bool = False) -> int:
+def _resolve_span(e, span: Span | None, *, adds_recurrence: bool = False) -> int:
     """The EKSpan for an update/delete — requiring an explicit choice for a recurring
     target (#51).
 
@@ -426,20 +433,10 @@ class CalendarAdapter:
             # saves future-events. No span param — create is never an ambiguous edit.
             span = _resolve_span(e, None, adds_recurrence=data.recurrence is not None)
             _apply_event(s, e, data)
-            # read before save — the commit may re-home the object, and post-save it
-            # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = e.calendar()
-            cal_id = cal.calendarIdentifier() if cal is not None else None
+            cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event write was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event write", "calendar", err)
             # Re-resolve by the occurrence id we'll return — never trust the in-memory
             # event (#49): prove the id resolves and the fields persisted.
             ident = _event_id(e)
@@ -450,7 +447,7 @@ class CalendarAdapter:
         return run_native(work)
 
     def update_event(
-        self, ident: str, data: CalendarEventData, span: str | None = None
+        self, ident: str, data: CalendarEventData, span: Span | None = None
     ) -> Pointer:
         def work():
             s = store()
@@ -462,20 +459,10 @@ class CalendarAdapter:
                 e, span, adds_recurrence=data.recurrence is not None
             )
             _apply_event(s, e, data)
-            # read before save — the commit may re-home the object, and post-save it
-            # would tautologically equal the actual. cal may be nil (no writable
-            # calendar account); let the save below surface the WriteRefused. Capture
-            # the IDENTIFIER (not title) — that's what verify keys on (#55 review).
-            cal = e.calendar()
-            cal_id = cal.calendarIdentifier() if cal is not None else None
+            cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event write was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event write", "calendar", err)
             # Re-key from the post-apply event: if start changed, _event_id(e) carries
             # the new occurrence epoch, so we re-resolve (and cite) it as persisted.
             ident_after = _event_id(e)
@@ -499,7 +486,7 @@ class CalendarAdapter:
         return run_native(work)
 
     def delete_event(
-        self, ident: str, span: str | None = None, dry_run: bool = False
+        self, ident: str, span: Span | None = None, dry_run: bool = False
     ) -> Pointer | None:
         """Delete an event by id. ``dry_run=True`` resolves the target — and its span,
         so a recurring event still surfaces ``SpanRequired`` exactly as the real delete
@@ -515,12 +502,7 @@ class CalendarAdapter:
                 return _event_pointer(e)  # preview only — nothing is removed
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
-                raise WriteRefused(
-                    f"the event delete was refused by the store: {err}. The target "
-                    "calendar may be read-only (a subscribed calendar) or the account "
-                    "rejected the change — do not retry the same target; tell the "
-                    "user."
-                )
+                raise refused_write("event delete", "calendar", err)
             return None
 
         return run_native(work)

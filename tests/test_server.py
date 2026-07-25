@@ -22,7 +22,7 @@ from macos_apps_mcp.contracts import (
     Recurrence,
     ReminderData,
 )
-from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
+from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
 
 class _FakeSource:
@@ -373,7 +373,7 @@ def test_create_reminder_passes_priority_and_start(monkeypatch):
 
 def test_create_reminder_rejects_out_of_range_priority(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
-    with pytest.raises(ValueError, match="priority must be"):
+    with pytest.raises(ToolError, match="priority must be"):
         srv.create_reminder("x", priority=11)
 
 
@@ -401,7 +401,7 @@ def test_create_event_all_day_rejects_utc_offset(monkeypatch):
     # an all-day instant with a UTC offset can land on the wrong calendar day —
     # rejected with the date-only hint, prefixed by the failing param's label.
     monkeypatch.setattr(srv, "_calendar", _FakeWriter())
-    with pytest.raises(ValueError, match=r"start: .*date-only"):
+    with pytest.raises(ToolError, match=r"start: .*date-only"):
         srv.create_event(
             "Holiday",
             start="2026-07-01T00:00:00Z",
@@ -412,7 +412,7 @@ def test_create_event_all_day_rejects_utc_offset(monkeypatch):
 
 def test_update_event_all_day_rejects_utc_offset(monkeypatch):
     monkeypatch.setattr(srv, "_calendar", _FakeWriter())
-    with pytest.raises(ValueError, match="date-only"):
+    with pytest.raises(ToolError, match="date-only"):
         srv.update_event(
             "E-1",
             "Holiday",
@@ -448,7 +448,7 @@ def test_create_reminder_parses_recurrence(monkeypatch):
 
 def test_create_reminder_recurrence_without_due_rejected(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
-    with pytest.raises(ValueError, match="needs a due date"):
+    with pytest.raises(ToolError, match="needs a due date"):
         srv.create_reminder("Water plants", recurrence="FREQ=DAILY")
 
 
@@ -485,7 +485,7 @@ def test_update_reminder_recurrence_rrule_parses(monkeypatch):
 
 def test_create_event_rejects_bad_rrule(monkeypatch):
     monkeypatch.setattr(srv, "_calendar", _FakeWriter())
-    with pytest.raises(ValueError, match="unsupported RRULE"):
+    with pytest.raises(ToolError, match="unsupported RRULE"):
         srv.create_event(
             "x",
             start="2026-06-24T09:00:00",
@@ -534,7 +534,7 @@ def test_create_event_rejects_empty_start():
     # Required event dates fail clearly at the tool boundary, not as an obscure
     # worker-thread crash: the label prefixes contracts.parse_datetime's message
     # verbatim (which rightly still offers the date-only form for timed events).
-    with pytest.raises(ValueError, match=r"start: expected an ISO-8601 .* or date"):
+    with pytest.raises(ToolError, match=r"start: expected an ISO-8601 .* or date"):
         srv.create_event("Standup", start="", end="2026-06-24T09:15:00")
 
 
@@ -555,15 +555,18 @@ def test_read_only_unset_is_false(monkeypatch):
     assert srv._read_only() is False
 
 
-def test_emit_omits_folder_when_none():
-    out = srv._emit(Pointer(id="P-1", summary="s", deeplink="d"))
+# Tools emit Pointer.as_dict() directly — the wire shape lives on the type.
+
+
+def test_pointer_wire_shape_omits_folder_when_none():
+    out = Pointer(id="P-1", summary="s", deeplink="d").as_dict()
     assert out == {"id": "P-1", "summary": "s", "deeplink": "d"}
 
 
-def test_emit_includes_folder_when_set():
-    out = srv._emit(
-        Pointer(id="P-1", summary="s", deeplink="d", folder="iCloud / Notes")
-    )
+def test_pointer_wire_shape_includes_folder_when_set():
+    out = Pointer(
+        id="P-1", summary="s", deeplink="d", folder="iCloud / Notes"
+    ).as_dict()
     assert out == {
         "id": "P-1",
         "summary": "s",
@@ -572,16 +575,14 @@ def test_emit_includes_folder_when_set():
     }
 
 
-def test_emit_includes_reason_when_set():
-    from macos_apps_mcp.contracts import Pointer
-
-    assert srv._emit(Pointer(id="i", summary="s", deeplink="d", reason="flagged")) == {
+def test_pointer_wire_shape_includes_reason_when_set():
+    assert Pointer(id="i", summary="s", deeplink="d", reason="flagged").as_dict() == {
         "id": "i",
         "summary": "s",
         "deeplink": "d",
         "reason": "flagged",
     }
-    assert "reason" not in srv._emit(Pointer(id="i", summary="s", deeplink="d"))
+    assert "reason" not in Pointer(id="i", summary="s", deeplink="d").as_dict()
 
 
 def test_note_bodies_dispatches(monkeypatch):
@@ -705,19 +706,36 @@ def test_doctor_tool_dispatches(monkeypatch):
     assert out == {"summary": "ok", "surfaces": []}
 
 
-def test_guard_does_not_swallow_value_errors(monkeypatch):
-    # Only NativeError becomes a directive; a validation error stays a ValueError so a
-    # caller bug reads as a caller bug, not a bogus "grant access" directive.
+def test_guard_converts_value_error_to_agent_directive(monkeypatch):
+    # Boundary validation (unknown id, bad query) rides the SAME errors-as-results
+    # channel as NativeError (#47): the ValueError message reaches the model verbatim
+    # as a ToolError, never a raw exception through the protocol.
     class _BadInput:
         def get_pointers(self, query: str) -> list[Pointer]:
-            raise ValueError("bad query")
+            raise ValueError("no reminder with id 'R-404'")
 
     monkeypatch.setattr(srv, "_contacts", _BadInput())
-    with pytest.raises(ValueError, match="bad query"):
+    with pytest.raises(ToolError, match="no reminder with id 'R-404'"):
         srv.contacts("jane")
 
 
+def test_optional_datetime_parse_error_names_the_field(monkeypatch):
+    # An optional datetime param that fails to parse is labeled with the failing
+    # field, exactly like the required ones.
+    monkeypatch.setattr(srv, "_reminders", _FakeWriter())
+    with pytest.raises(ToolError, match=r"due: expected an ISO-8601"):
+        srv.create_reminder("Call dentist", due="not-a-date")
+    with pytest.raises(ToolError, match=r"start: expected an ISO-8601"):
+        srv.create_reminder("Call dentist", start="not-a-date")
+
+
 # --- untrusted-data notice (#53) -----------------------------------------------------
+
+
+def test_no_notice_exempts_exactly_the_meta_tools():
+    # usage carries only tool-call counts — no user-store content — so it is exempt.
+    # audit is deliberately NOT exempt: entries embed (truncated) user-store args.
+    assert {"ping", "now", "doctor", "usage"} == srv._NO_NOTICE
 
 
 def test_untrusted_notice_covers_every_registered_tool_except_meta():

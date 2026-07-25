@@ -1,0 +1,267 @@
+from macos_apps_mcp.adapters import mail_index
+
+
+class _Row(dict):
+    # sqlite3.Row supports __getitem__ by column name; a dict stands in for tests.
+    pass
+
+
+def _emlx(rfc822: bytes) -> bytes:
+    plist_tail = b"<?xml version='1.0'?><plist></plist>"
+    return f"{len(rfc822)}\n".encode() + rfc822 + plist_tail
+
+
+def test_row_to_pointer_maps_all_fields():
+    row = _Row(
+        message_id_header="<abc@ex.com>",
+        subject="Invoice 42",
+        mailbox_url="imap://acct/INBOX",
+    )
+    p = mail_index.row_to_pointer(row)
+    assert p.id == "<abc@ex.com>"
+    assert p.summary == "Invoice 42"
+    assert p.deeplink == "message://%3Cabc@ex.com%3E"
+    assert p.folder == "imap://acct/INBOX"
+
+
+def test_row_to_pointer_skips_headerless():
+    assert (
+        mail_index.row_to_pointer(
+            _Row(message_id_header=None, subject="x", mailbox_url="m")
+        )
+        is None
+    )
+    assert (
+        mail_index.row_to_pointer(
+            _Row(message_id_header="  ", subject="x", mailbox_url="m")
+        )
+        is None
+    )
+
+
+def test_build_header_query_binds_all_filters():
+    sql, params = mail_index.build_header_query(
+        subject="inv",
+        from_="jane",
+        mailbox="INBOX",
+        since=1000,
+        until=2000,
+        unread=True,
+        flagged=True,
+        limit=10,
+    )
+    low = sql.lower()
+    assert "from messages" in low and "join subjects" in low
+    assert "message_global_data" in low
+    assert "m.deleted = 0" in low
+    assert "order by m.date_received desc" in low
+    assert "limit ?" in low
+    # every filter value is a bound param, none interpolated
+    assert "inv" not in sql and "jane" not in sql
+    assert "%inv%" in params and "%jane%" in params
+    assert 1000 in params and 2000 in params and 10 in params
+
+
+def test_build_header_query_message_ids_uses_in_clause():
+    sql, params = mail_index.build_header_query(
+        message_ids=["<a@x>", "<b@x>"], limit=25
+    )
+    assert "message_id_header in (?" in sql.lower()
+    assert "<a@x>" in params and "<b@x>" in params
+
+
+def test_build_header_query_no_filters_ok():
+    sql, params = mail_index.build_header_query(limit=5)
+    assert params == [5]  # only the limit
+
+
+def test_parse_emlx_plaintext():
+    raw = _emlx(
+        b"From: a@x.com\r\nMessage-ID: <m1@x.com>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello invoice body"
+    )
+    mid, body = mail_index.parse_emlx(raw)
+    assert mid == "<m1@x.com>"
+    assert "invoice body" in body
+
+
+def test_parse_emlx_html_stripped():
+    raw = _emlx(
+        b"Message-ID: <m2@x.com>\r\nContent-Type: text/html\r\n\r\n"
+        b"<p>Hello <b>world</b></p>"
+    )
+    mid, body = mail_index.parse_emlx(raw)
+    assert mid == "<m2@x.com>"
+    assert "Hello" in body
+    assert "<b>" not in body
+
+
+def test_parse_emlx_headerless_returns_none():
+    raw = _emlx(b"From: a@x.com\r\n\r\nno message id here")
+    assert mail_index.parse_emlx(raw) is None
+
+
+def test_parse_emlx_malformed_returns_none():
+    assert mail_index.parse_emlx(b"not an emlx at all") is None
+
+
+def test_parse_emlx_negative_length_returns_none():
+    # A negative length prefix must not be accepted: int() parses "-5" fine, and a
+    # negative-index slice (raw[nl+1 : nl+1-5]) would silently splice trailing plist
+    # bytes into what's treated as the RFC822 body instead of failing loudly.
+    rfc822 = (
+        b"From: a@x.com\r\nMessage-ID: <neg@x.com>\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        b"Hello invoice body"
+    )
+    plist_tail = b"<?xml version='1.0'?><plist></plist>"
+    raw = b"-5\n" + rfc822 + plist_tail
+    assert mail_index.parse_emlx(raw) is None
+
+
+def _write_emlx(path, mid, body):
+    rfc = (f"Message-ID: {mid}\r\nContent-Type: text/plain\r\n\r\n{body}").encode()
+    path.write_bytes(f"{len(rfc)}\n".encode() + rfc + b"<plist/>")
+
+
+def test_build_body_index_indexes_full_skips_partial(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/acct/INBOX.mbox/Data/Messages"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "quarterly invoice total")
+    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "should be skipped")
+    fts = tmp_path / "mail_fts.sqlite"
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1 and res["total_emlx"] == 1  # partial not counted
+    assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+
+
+def test_build_body_index_resumes(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "first")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    _write_emlx(msgs / "2.emlx", "<b@x>", "second")
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1 and res["skipped"] == 1  # only the new file indexed
+
+
+def test_build_body_index_size_capped(tmp_path):
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    for i in range(5):
+        _write_emlx(msgs / f"{i}.emlx", f"<{i}@x>", "body " * 50)
+    fts = tmp_path / "mail_fts.sqlite"
+    res = mail_index.build_body_index(
+        mail_root=root, fts_db=fts, max_bytes=1
+    )  # tiny cap
+    assert res["capped"] is True and res["indexed"] >= 1
+
+
+def test_fts_connect_sets_wal_and_busy_timeout(tmp_path):
+    # #71 concurrency fix: mail_index_bodies runs off run_native, so the sidecar
+    # writer needs WAL (readers proceed during a build) + a busy_timeout (writer/writer
+    # contention waits instead of raising a raw sqlite OperationalError). Pin both.
+    conn = mail_index._fts_connect(tmp_path / "x.sqlite")
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    finally:
+        conn.close()
+
+
+def test_fts_search_reads_during_open_build_write(tmp_path):
+    # A mail_search(body=) reader must return the committed snapshot without raising
+    # "database is locked" while a build holds the sidecar open with a write (WAL).
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "invoice quarterly")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    writer = mail_index._fts_connect(fts)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("INSERT INTO bodies (message_id, body) VALUES ('<b@x>', 'later')")
+    try:
+        assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+    finally:
+        writer.rollback()
+        writer.close()
+
+
+def test_build_body_index_skips_vanished_file(tmp_path, monkeypatch):
+    # Mail.app can expunge/rename a .emlx between rglob() enumerating it and us
+    # reading it. That must skip the one vanished file, not abort the whole run.
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "surviving invoice body")
+    _write_emlx(msgs / "2.emlx", "<b@x>", "vanished invoice body")
+    fts = tmp_path / "mail_fts.sqlite"
+    vanished = msgs / "2.emlx"
+
+    from pathlib import Path
+
+    real_read_bytes = Path.read_bytes
+
+    def flaky_read_bytes(self, *a, **kw):
+        if self == vanished:
+            raise FileNotFoundError(f"vanished: {self}")
+        return real_read_bytes(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_bytes", flaky_read_bytes)
+
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+
+    assert res["total_emlx"] == 2
+    assert res["indexed"] == 1
+    assert res["skipped"] == 1
+    assert mail_index.fts_search(fts, "surviving") == ["<a@x>"]
+
+
+def test_fts_query_escapes_operators():
+    # Ordinary body-search inputs must become an always-valid FTS5 expression: each
+    # whitespace token quoted as a literal phrase (embedded `"` doubled), joined with
+    # a space (FTS5 implicit AND) — never handed raw to MATCH (#70 review I1).
+    assert mail_index._fts_query("jane@acme.com") == '"jane@acme.com"'
+    assert mail_index._fts_query("C++") == '"C++"'
+    assert mail_index._fts_query("invoice AND") == '"invoice" "AND"'
+    assert mail_index._fts_query('foo"bar') == '"foo""bar"'
+    assert mail_index._fts_query("   ") == ""
+
+
+def test_fts_search_handles_operator_chars(tmp_path):
+    # A body containing FTS5-special characters must be indexable AND searchable by a
+    # query containing those same characters, without fts_search raising
+    # sqlite3.OperationalError (#70 review I1: raw MATCH on '@'/'AND' syntax crashed).
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "1.emlx", "<a@x>", "contact jane@acme.com about C++")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+
+    assert mail_index.fts_search(fts, "jane@acme.com") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "C++") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "nomatch AND") == []
+
+
+def test_parse_emlx_deeply_nested_multipart_returns_none():
+    # A .emlx whose RFC822 nests multipart parts deeply enough overflows stdlib
+    # email.message_from_bytes's own recursive descent (RecursionError), which must
+    # not escape parse_emlx: malformed/attacker-influenceable input -> None, never
+    # raise.
+    inner = b"Content-Type: text/plain\r\n\r\nHello\r\n"
+    for i in range(1500):
+        boundary = f"b{i}".encode()
+        inner = (
+            b'Content-Type: multipart/mixed; boundary="' + boundary + b'"\r\n\r\n'
+            b"--" + boundary + b"\r\n" + inner + b"\r\n--" + boundary + b"--\r\n"
+        )
+    rfc822 = b"Message-ID: <deep@x.com>\r\n" + inner
+    raw = _emlx(rfc822)
+    assert mail_index.parse_emlx(raw) is None

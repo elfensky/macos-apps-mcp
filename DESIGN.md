@@ -1,6 +1,6 @@
 # macos-apps-mcp — design
 
-One consolidated MCP server (Python, FastMCP 2.0) exposing native macOS apps to LLM agents (Claude
+One consolidated MCP server (Python, FastMCP) exposing native macOS apps to LLM agents (Claude
 Code / Desktop), replacing the two servers a life-cockpit otherwise consumes — `apple-events`
 (Calendar/Reminders) and a forked Apple Mail MCP. It is the first move of the cockpit → `lyfe`
 **"N consumed → 1 produced"** MCP inversion: each app is an adapter that later hardens into a `lyfe`
@@ -18,8 +18,9 @@ native data-plane adapter, so clean module boundaries are load-bearing.
 
 ## Stack decisions (settled by an adversarial four-way debate)
 
-- **FastMCP 2.0 (standalone)** — not the official SDK's vendored `mcp.server.fastmcp` (1.x, lags the
-  spec), not the low-level `Server` (boilerplate). Thin tool layer → low lock-in.
+- **FastMCP (standalone)** — not the official SDK's vendored `mcp.server.fastmcp` (1.x, lags the
+  spec), not the low-level `Server` (boilerplate). Thin tool layer → low lock-in. The unbounded
+  `fastmcp>=2.0` pin currently resolves to FastMCP 3.x (see `uv.lock`).
 - **`uv`** for dev (`uv sync` / `uv lock` / `uv run`); the MCP launches deterministically **off the
   venv python**: `command: <repo>/.venv/bin/python`, `args: ["-m","macos_apps_mcp"]` (or `uv run --frozen
   --project <repo> macos-apps-mcp`). Not `uvx` (ephemeral), not a system console_script (no lockfile / may
@@ -45,6 +46,12 @@ macos_apps_mcp/
   server.py        # FastMCP app: @mcp.tool() registrations = thin dispatch to adapters
   contracts.py     # Pointer + PointerSource Protocol (reads); typed write dataclasses
   runtime.py       # the single serialized EventKit worker thread + native-call dispatch
+  errors.py        # pure NativeError taxonomy + write-policy helpers (no native imports)
+  text.py          # pure text hygiene: control-strip, bounded truncation, match/verify norm
+  audit.py         # write-audit JSONL trail + per-tool usage tally (storage, schema, middleware)
+  doctor.py        # read-only permission + health self-diagnosis with exact remediation
+  lifecycle.py     # orphan watcher + exit-path osascript child cleanup
+  __main__.py      # `python -m macos_apps_mcp` — the deterministic launch path
   adapters/
     calendar.py    # EventKit / PyObjC
     reminders.py   # EventKit / PyObjC

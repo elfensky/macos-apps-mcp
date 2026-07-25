@@ -22,6 +22,10 @@ _ADDITIVE_TOOLS = frozenset(
         "create_draft",
         "mail_reply",
         "create_note",
+        "music_control",
+        "play_playlist",
+        "set_volume",
+        "set_mode",
     }
 )
 # Writes that modify/overwrite/delete existing state, or run arbitrary automation.
@@ -45,6 +49,7 @@ _PERMISSION = {
     "now": None,
     "doctor": None,
     "audit": None,
+    "usage": None,
     "reminders": "EventKit",
     "events": "EventKit",
     "free_busy": "EventKit",
@@ -62,6 +67,8 @@ _PERMISSION = {
     "mail_attachments": "Automation",
     "mail_needs_response": "Automation",
     "mail_awaiting_reply": "Automation",
+    "mail_search": "Automation",
+    "mail_index_bodies": "Automation",
     "create_draft": "Automation",
     "mail_reply": "Automation",
     "notes": "Automation",
@@ -80,6 +87,12 @@ _PERMISSION = {
     "safari_open": "Automation",
     "shortcuts": "Shortcuts CLI",
     "run_shortcut": "Shortcuts CLI",
+    "music_search": "Automation",
+    "now_playing": "Automation",
+    "music_control": "Automation",
+    "play_playlist": "Automation",
+    "set_volume": "Automation",
+    "set_mode": "Automation",
 }
 
 
@@ -145,5 +158,9 @@ def test_every_write_tool_is_audit_classified():
         "mail_reply",
         "safari_open",
         "run_shortcut",
+        "music_control",
+        "play_playlist",
+        "set_volume",
+        "set_mode",
     }
-    assert set(srv._AUDIT_SNAPSHOT) | envelope_only == srv._WRITE_TOOLS
+    assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS

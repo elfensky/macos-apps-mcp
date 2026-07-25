@@ -3,9 +3,10 @@
 Settled by design (adversarial debate): **reads are uniform, writes are per-adapter
 typed.**
 
-- Every adapter is a ``PointerSource``: ``get_pointers(query) -> list[Pointer]``. That
-  is the only shape the cockpit needs on the read side (surface *what exists*, as
-  citable handles).
+- Query-shaped searches implement ``PointerSource``: ``get_pointers(query) ->
+  list[Pointer]`` — the one shape the cockpit needs to surface *what exists* as citable
+  handles. Enumeration reads (``safari_tabs``, ``messages_chats``) are per-adapter
+  typed, like writes.
 - Writes are **typed per-adapter methods** (``create_reminder(ReminderData)``,
   ``create_event(CalendarEventData)``) — never a stringly-typed ``create_item(dict)``,
   which rots into ``list`` vs ``list_id`` vs ``listId`` and is invisible to the type
@@ -20,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, get_args, runtime_checkable
 
 
 def _to_naive_local(dt: datetime) -> datetime:
@@ -130,19 +131,46 @@ class Pointer:
     id: str
     summary: str
     deeplink: str
-    folder: str | None = None  # notes_all only: "Account / Folder"; None elsewhere
+    # notes reads (notes_all, search): "Account / Folder"; create_note: the requested
+    # bare folder name; None elsewhere
+    folder: str | None = None
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
+
+    def as_dict(self) -> dict[str, str]:
+        """The wire shape: required fields always; optional fields only when set.
+        The ONE serialization of a Pointer — tool results and audit records share it."""
+        d = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
+        if self.folder is not None:
+            d["folder"] = self.folder
+        if self.reason is not None:
+            d["reason"] = self.reason
+        return d
 
 
 @runtime_checkable
 class PointerSource(Protocol):
-    """The uniform READ side: every adapter answers queries with Pointers.
+    """The uniform query-search READ side: a query answered with Pointers.
+    Implemented by adapters whose reads are query-shaped; enumeration reads
+    (``safari_tabs``, ``messages_chats``) are per-adapter typed instead.
 
     Structural (``Protocol``), not an ABC — fakes satisfy it without inheritance, which
     is what keeps the tool layer unit-testable by mocking at this boundary.
     """
 
     def get_pointers(self, query: str) -> list[Pointer]: ...
+
+
+@runtime_checkable
+class Snapshotter(Protocol):
+    """The by-id read an id-addressed write needs for audit before-state (#67).
+
+    ``snapshot(ident)`` returns the current Pointer for one item, or None if the id
+    no longer resolves. Declared here so AuditMiddleware consumes a contract, not a
+    duck-typed method — an adapter that registers an update/delete tool with
+    before-state capture must satisfy this Protocol.
+    """
+
+    def snapshot(self, ident: str) -> Pointer | None: ...
 
 
 # --- disambiguation rule (#55) -------------------------------------------------------
@@ -155,9 +183,9 @@ class PointerSource(Protocol):
 #      time. New destructive tools MUST do the same.
 #   2. The remaining name-addressed writes are CONTAINER selection only —
 #      create/update_reminder(list_name) and create/update_event(calendar). Each accepts
-#      EITHER a Pointer.id OR an exact name (runtime.resolve_container): an id is used
+#      EITHER a Pointer.id OR an exact name (errors.resolve_container): an id is used
 #      directly (unambiguous by construction), and a name matching >1 container raises
-#      runtime.AmbiguousTarget LISTING the candidate ids — so the caller re-issues the
+#      errors.AmbiguousTarget LISTING the candidate ids — so the caller re-issues the
 #      write with one of them, instead of macos-apps-mcp writing to the wrong container.
 # The rule is STATELESS by design: there is no server-side "recent matches" store to
 # resolve a later write against (carterlasalle's module-global version breaks concurrent
@@ -172,7 +200,8 @@ class PointerSource(Protocol):
 
 # --- per-adapter typed WRITE payloads (reads uniform, writes typed) ------------------
 
-_FREQUENCIES = ("daily", "weekly", "monthly", "yearly")
+Frequency = Literal["daily", "weekly", "monthly", "yearly"]
+_FREQUENCIES: tuple[str, ...] = get_args(Frequency)
 _RRULE_SUPPORTED = ("FREQ", "INTERVAL", "COUNT", "UNTIL")
 
 
@@ -215,10 +244,16 @@ class Recurrence:
     ``runtime.to_recurrence_rule``, so this module stays free of native imports.
     """
 
-    frequency: str  # daily | weekly | monthly | yearly
+    frequency: Frequency
     interval: int = 1  # every N periods
     count: int | None = None  # end after N occurrences …
     until: datetime | None = None  # … or end on a date (mutually exclusive with count)
+
+    def __post_init__(self) -> None:
+        # Enforce the documented invariant on the contract itself, so it holds however
+        # a Recurrence is built (direct construction included), not only via from_rrule.
+        if self.count is not None and self.until is not None:
+            raise ValueError("recurrence count and until are mutually exclusive")
 
     @classmethod
     def from_rrule(cls, rrule: str) -> Recurrence:
@@ -269,6 +304,26 @@ class _ClearRecurrence:
 
 
 CLEAR_RECURRENCE = _ClearRecurrence()
+
+
+def parse_recurrence(rrule: str | None) -> Recurrence | None:
+    """Tool-arg parse: optional RFC-5545 RRULE string → Recurrence. Empty/absent/'none'
+    → None. Lives here with the other tool-arg parsers (parse_datetime/parse_all_day)
+    so the recurrence domain rule isn't smeared into the dispatch layer."""
+    if not rrule or rrule.strip().lower() == "none":
+        return None  # 'none' is taught by update_reminder — accept it everywhere
+    return Recurrence.from_rrule(rrule)
+
+
+def parse_recurrence_update(rrule: str | None) -> Recurrence | _ClearRecurrence | None:
+    """update_reminder's tri-state recurrence: absent/empty → None (unspecified —
+    refused downstream when the target repeats); the literal 'none' →
+    CLEAR_RECURRENCE (explicit stop); anything else parses as an RRULE."""
+    if not rrule:
+        return None
+    if rrule.strip().lower() == "none":
+        return CLEAR_RECURRENCE
+    return Recurrence.from_rrule(rrule)
 
 
 @dataclass(frozen=True, slots=True)

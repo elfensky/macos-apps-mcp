@@ -11,7 +11,7 @@ permission to *that* app.
 Read-only and prompt-free by default: EventKit status is *read* (never requested), and
 the Automation probes — which can surface a one-time consent dialog for a never-used
 app — run only when called with ``request=True``. Every probe is classified through the
-shared error taxonomy (runtime.py, #47); a denied surface is *reported*, never raised —
+shared error taxonomy (errors.py, #47); a denied surface is *reported*, never raised —
 diagnosis is the one place a swallowed error is correct, because it re-emerges as an
 explicit report line carrying the same directive.
 """
@@ -25,10 +25,22 @@ from pathlib import Path
 
 import EventKit as EK
 
-from .runtime import NativeError, request_access_each, run_native, run_osascript
+from . import deploy
+from .errors import PRIVACY_PANE, NativeError
+from .runtime import request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
-_AUTOMATION_APPS = ("Mail", "Notes", "Contacts", "Photos", "Safari", "Messages")
+# Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
+# Automation-backed adapter must add its app name here so doctor probes it.
+_AUTOMATION_APPS = (
+    "Mail",
+    "Notes",
+    "Contacts",
+    "Photos",
+    "Safari",
+    "Messages",
+    "Music",
+)
 
 # The app name is passed via argv (never interpolated), matching the injection-safe
 # osascript convention even though these targets are constants. name/id/version/
@@ -59,8 +71,6 @@ _EK_ENTITIES = (
     ("calendar", EK.EKEntityTypeEvent, "Calendars"),
     ("reminders", EK.EKEntityTypeReminder, "Reminders"),
 )
-
-_PRIVACY = "System Settings → Privacy & Security"
 
 
 def _surface(
@@ -104,7 +114,7 @@ def _eventkit_surfaces(request: bool) -> list[dict]:
             None
             if ok
             else (
-                f"Grant full access in {_PRIVACY} → {pane}, then restart "
+                f"Grant full access in {PRIVACY_PANE} → {pane}, then restart "
                 "macos-apps-mcp."
             )
         )
@@ -162,8 +172,9 @@ def _fda_surface() -> dict:
             "fda",
             False,
             "denied",
-            f"Grant Full Disk Access in {_PRIVACY} → Full Disk Access to the app that "
-            "launched macos-apps-mcp, then restart it (needed for sqlite read planes).",
+            f"Grant Full Disk Access in {PRIVACY_PANE} → Full Disk Access to the "
+            "app that launched macos-apps-mcp, then restart it (needed for sqlite "
+            "read planes).",
         )
     except FileNotFoundError:
         return _surface(
@@ -225,6 +236,30 @@ def diagnose(request: bool = False) -> dict:
         )
     else:
         summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
+
+    ids = deploy.grant_identities()
+    try:
+        agent = deploy.agent_status()
+    except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
+        agent = f"unavailable: {e}"
+    deployment = {
+        "mode": "daemon"
+        if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
+        else "stdio",
+        "agent": agent,
+        "grant_identities": ids,
+        "note": (
+            "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
+            "for THIS process's responsible identity (grant it, or run via the "
+            "daemon)."
+            if ids is None
+            else "grants listed per identity; the daemon identity is "
+            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) also reports "
+            "granted=False here — if a service looks unexpectedly denied, check "
+            "System Settings before assuming it's actually off."
+        ),
+    }
+
     return {
         "responsible_process": _responsible_process(),
         "note": (
@@ -234,4 +269,5 @@ def diagnose(request: bool = False) -> dict:
         "probed_automation": request,
         "summary": summary,
         "surfaces": surfaces,
+        "deployment": deployment,
     }

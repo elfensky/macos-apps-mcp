@@ -15,20 +15,22 @@ bounds a pathological search. User input goes via argv / a tempfile — not inte
 
 from __future__ import annotations
 
-import contextlib
 import email
-import os
 import re
-import tempfile
+import sqlite3
 from urllib.parse import quote
 
 from ..contracts import Pointer
-from ..runtime import (
-    NativeError,
+from ..errors import NativeError
+from ..runtime import body_file, run_osascript
+from ..text import (
+    RS,
+    STRIP_FRAMING,
+    US,
     clean_body,
     clean_summary,
-    run_osascript,
     sanitize_line,
+    split_framed,
 )
 
 MAX_MAILS = 25
@@ -36,33 +38,32 @@ NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
-# Localized system-mailbox name tables (#61): Mail names these per-locale, so a
-# a US-hardcoded "Inbox" gives "mailbox not found" on a non-English Mac. Static data
-# used by any mailbox-scoped operation (#45 / the reply-draft issues) to try each
-# candidate name. Canonical → localized names; en/nl/ru at least (the acceptance floor).
-# ponytail: extend per locale as needed — the exact Mail.app strings want on-device
-# confirmation, but a miss only means that mailbox isn't found there, never a crash.
-_SYSTEM_MAILBOXES = {
-    "inbox": ("Inbox", "Postvak IN", "Входящие"),
-    "sent": ("Sent", "Verzonden", "Отправленные"),
-    "drafts": ("Drafts", "Concepten", "Черновики"),
-    "trash": ("Trash", "Prullenmand", "Корзина"),
-    "junk": ("Junk", "Ongewenste reclame", "Спам"),
-}
+# Canonical system-mailbox names a mailbox-scoped operation accepts. Mailbox
+# resolution uses Mail's UNIFIED, locale-independent accessors (`inbox`/`sent
+# mailbox`/…, see _ATTACHMENTS), so only the canonical name matters — the
+# per-locale name tables from #61 died with the unified-accessor migration.
+_SYSTEM_MAILBOXES = frozenset({"inbox", "sent", "drafts", "trash", "junk"})
 
 
-def system_mailbox_names(canonical: str) -> tuple[str, ...]:
-    """Localized name candidates for a canonical system mailbox (inbox/sent/drafts/
-    trash/junk) — a mailbox-scoped op tries each until Mail resolves one. Raises on an
-    unknown canonical name so a typo fails loudly rather than silently matching none."""
-    key = canonical.strip().lower()
-    if key not in _SYSTEM_MAILBOXES:
+def _validate_mailbox(mailbox: str) -> str:
+    """Canonical lowercase system-mailbox name (inbox/sent/drafts/trash/junk), for the
+    unified accessors in the scripts. Raises on an unknown name so a typo fails loudly
+    rather than resolving to the wrong mailbox."""
+    canon = mailbox.strip().lower()
+    if canon not in _SYSTEM_MAILBOXES:
         raise ValueError(
-            f"unknown system mailbox {canonical!r}; expected one of "
+            f"unknown system mailbox {mailbox!r}; expected one of "
             f"{sorted(_SYSTEM_MAILBOXES)}"
         )
-    return _SYSTEM_MAILBOXES[key]
+    return canon
 
+
+# US/RS framing contract (#68): separators, the shared stripFraming AppleScript
+# handler, and the split_framed splitter all live in text.py — the protocol's single
+# home (the a6ce7fd subject-framing bug came from per-file re-declarations). Nothing
+# in this file may hard-code \x1f/\x1e or re-declare the handler; every free-text
+# field (subject, sender, date, attachment name) passes through stripFraming FIRST so
+# a payload containing those bytes can't desync parsing.
 
 # Bounded host-side (#52): stop emitting after maxN matches instead of streaming the
 # whole match set back and slicing in Python. The `whose` filter still scans the inbox
@@ -146,23 +147,14 @@ end run"""
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
-# sender/date are stripped of raw framing bytes (stripFraming, the same handler
-# _ATTACHMENTS uses) before being joined, so a sender display name that happens to
-# contain a literal US/RS char can't desync reply()'s raw.partition("\x1f") parsing.
-# The body `c` is the LAST field and needs no stripping for parse-safety (clean_body
-# strips control chars from it in _build_quote).
-_ORIGINAL = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+# sender/date are stripped of raw framing bytes (the shared STRIP_FRAMING handler)
+# before being joined, so a sender display name that happens to contain a literal
+# US/RS char can't desync reply()'s raw.partition(US) parsing. The body `c` is the
+# LAST field and needs no stripping for parse-safety (clean_body strips control
+# chars from it in _build_quote).
+_ORIGINAL = (
+    STRIP_FRAMING
+    + """
 
 on run argv
   set mid to item 1 of argv
@@ -180,6 +172,7 @@ on run argv
   end tell
   end timeout
 end run"""
+)
 
 # reply builds a real reply via Mail's NATIVE reply verb (Mail owns In-Reply-To/
 # References threading — the only mechanism that threads; make-new-outgoing can't set
@@ -225,24 +218,15 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 # would. Since these accessors are locale-independent, only the canonical name travels
 # via argv — no localized candidate list needed. An empty query lists ALL messages in
 # the mailbox (bounded by maxN) rather than none — AppleScript's `contains ""` is
-# false, so that case is branched explicitly. Fields framed with US (\x1f)/RS (\x1e):
+# false, so that case is branched explicitly. Fields framed per the US/RS contract:
 # per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
-# subject and each attachment name are stripped of any raw framing bytes (stripFraming)
+# subject and each attachment name pass through the shared STRIP_FRAMING handler
 # before being joined, so a message that happens to contain those control chars can't
 # desync the parser. Output capped at maxN records. with timeout (#56). All inputs via
 # argv (no interpolation).
-_ATTACHMENTS = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+_ATTACHMENTS = (
+    STRIP_FRAMING
+    + """
 
 on run argv
   set q to item 1 of argv
@@ -293,6 +277,7 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 
 def _parse_attachments(raw: str) -> list[dict]:
@@ -300,10 +285,7 @@ def _parse_attachments(raw: str) -> list[dict]:
     subject then (name, size, downloaded) triples. Malformed/partial trailing records
     are skipped."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        parts = record.split("\x1f")
+    for parts in split_framed(raw):
         summary = clean_summary(parts[0])
         atts = []
         rest = parts[1:]
@@ -331,10 +313,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
     sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
     Malformed/partial records are skipped; addresses lowercased."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        f = record.split("\x1f")
+    for f in split_framed(raw):
         if len(f) < 8:
             continue
         out.append(
@@ -355,10 +334,7 @@ def _parse_triage_records(raw: str) -> list[dict]:
 def _parse_sent_records(raw: str) -> list[dict]:
     """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
     out = []
-    for record in raw.split("\x1e"):
-        if not record.strip():
-            continue
-        f = record.split("\x1f")
+    for f in split_framed(raw):
         if len(f) < 4:
             continue
         out.append(
@@ -375,29 +351,20 @@ def _parse_sent_records(raw: str) -> list[dict]:
 
 
 def _parse_my_addrs(raw: str) -> set[str]:
-    return {a.strip().lower() for a in raw.split("\x1f") if a.strip()}
+    return {a.strip().lower() for a in raw.split(US) if a.strip()}
 
 
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
-# like commands; booleans coerce inside `&`). Subject is stripped of any raw framing
-# bytes (stripFraming, the same handler _ATTACHMENTS uses) before being joined, so a
-# subject that happens to contain those control chars can't desync the parser.
+# like commands; booleans coerce inside `&`). Subject passes through the shared
+# STRIP_FRAMING handler before being joined, so a subject that happens to contain
+# those control chars can't desync the parser.
 # Addresses bare (extract address from / address of every to recipient, TID-joined)
 # — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
 # Verified on-device.
-_INBOX_TRIAGE = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+_INBOX_TRIAGE = (
+    STRIP_FRAMING
+    + """
 
 on run argv
   set maxN to (item 1 of argv) as integer
@@ -426,22 +393,14 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 # _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
-# newest-first. Subject is stripped of raw framing bytes (stripFraming) before being
-# joined, same rationale as _INBOX_TRIAGE.
-_SENT_TRIAGE = """on stripFraming(t)
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 30)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  set AppleScript's text item delimiters to (character id 31)
-  set t to text items of t
-  set AppleScript's text item delimiters to ""
-  set t to t as text
-  return t
-end stripFraming
+# newest-first. Subject passes through the shared STRIP_FRAMING handler before
+# being joined, same rationale as _INBOX_TRIAGE.
+_SENT_TRIAGE = (
+    STRIP_FRAMING
+    + """
 
 on run argv
   set maxN to (item 1 of argv) as integer
@@ -468,6 +427,7 @@ on run argv
   end timeout
   return out
 end run"""
+)
 
 # _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
 # iteration raises -1700). Verified on-device.
@@ -606,7 +566,9 @@ def _classify_awaiting_reply(
     return [p for _, p in out[:MAX_MAILS]]
 
 
-def _parse(raw: str) -> list[Pointer]:
+def _parse_search_results(raw: str) -> list[Pointer]:
+    """Parse the _SEARCH payload: newline-separated records, tab-separated as id,
+    subject, sender. Records with no stable message-id are skipped."""
     out = []
     for line in raw.splitlines():
         if not line.strip():
@@ -637,7 +599,9 @@ class MailAdapter:
         if not q:
             raise ValueError("mail read needs a search substring (got an empty query)")
         # maxN is enforced host-side; the slice is a cheap backstop on the result.
-        return _parse(run_osascript(_SEARCH, q, str(MAX_MAILS)))[:MAX_MAILS]
+        return _parse_search_results(run_osascript(_SEARCH, q, str(MAX_MAILS)))[
+            :MAX_MAILS
+        ]
 
     def get_body(self, message_id: str) -> str:
         """Plaintext body of one inbox message by its RFC822 message-id, budgeted (#52):
@@ -670,14 +634,8 @@ class MailAdapter:
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-draft-", suffix=".txt")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(body or "")
+        with body_file(body or "") as path:
             run_osascript(_CREATE_DRAFT, addr, subject or "", path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         return {
             "created": True,
             "subject": subject or "",
@@ -704,8 +662,8 @@ class MailAdapter:
         if include_quote:
             raw = run_osascript(_ORIGINAL, mid)
             if raw.strip() and raw.strip() != _MISSING_VALUE:
-                sender, _, rest = raw.partition("\x1f")
-                date_str, _, original = rest.partition("\x1f")
+                sender, _, rest = raw.partition(US)
+                date_str, _, original = rest.partition(US)
                 # defense-in-depth (#42/#46 review): the AppleScript already strips raw
                 # framing bytes from sender/date, but sanitize_line ALSO strips any
                 # other control chars a display name/date could carry, keeping the
@@ -714,14 +672,8 @@ class MailAdapter:
                 sender = sanitize_line(sender)
                 date_str = sanitize_line(date_str)
                 body = reply_body + "\n\n" + _build_quote(sender, date_str, original)
-        fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-reply-", suffix=".txt")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(body)
+        with body_file(body) as path:
             run_osascript(_REPLY, mid, path)
-        finally:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
         return {
             "created": True,
             "subject": "(reply)",
@@ -739,11 +691,7 @@ class MailAdapter:
         `get_pointers`, which rejects an empty query. Returns up to MAX_MAILS records:
         [{"summary", "attachments": [{"name","size","downloaded"}]}]. A read — never
         mutates."""
-        # system_mailbox_names raises ValueError on an unknown canonical name; kept
-        # purely as validation here since the script no longer needs localized
-        # candidates (the unified accessors are locale-independent).
-        system_mailbox_names(mailbox)
-        canon = mailbox.strip().lower()
+        canon = _validate_mailbox(mailbox)
         raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
         return _parse_attachments(raw)[:MAX_MAILS]
 
@@ -761,17 +709,135 @@ class MailAdapter:
         if not 1 <= days <= 365:
             raise ValueError("days must be between 1 and 365")
         sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
-        candidates = [r for r in sent if r["secs_ago"] >= days * 86400]
-        if not candidates:
+        # The per-record age cutoff is applied in ONE place —
+        # _classify_awaiting_reply. Here only the correlation window is sized:
+        # scan inbox back to the oldest send; if even that is younger than the
+        # cutoff, no send can qualify, so skip the inbox scan entirely.
+        window = max((r["secs_ago"] for r in sent), default=0)
+        if window < days * 86400:
             return []
-        window = max(  # scan inbox back to the oldest candidate send
-            r["secs_ago"] for r in candidates
-        )
         blobs = [
             b
-            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(
-                "\x1e"
-            )
+            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(RS)
             if b.strip()
         ]
         return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)
+
+    def search(
+        self,
+        *,
+        subject=None,
+        from_=None,
+        to=None,
+        mailbox=None,
+        since=None,
+        until=None,
+        unread=None,
+        flagged=None,
+        body=None,
+        limit=MAX_MAILS,
+    ) -> list[Pointer]:
+        """Indexed search over ALL mailboxes via Mail's Envelope Index (read-at-rest).
+        All filters optional, ANDed. Falls back to the AppleScript inbox search on
+        missing FDA / schema drift. `body` matches against the best-effort FTS body
+        sidecar (built by `index_bodies`); the FTS hits are intersected with the header
+        query via message-ids. If the sidecar has no matches (absent, empty, or no hit
+        for this query) this returns [] rather than raising — a body search is opt-in
+        and its absence isn't an error condition."""
+        # imported lazily: mail_index imports _deeplink from this module at load time,
+        # so a module-level import here would be a cycle.
+        from ..runtime import log, read_via_sqlite
+        from . import mail_index
+
+        # Clamp: an unbounded caller-supplied limit with body= would otherwise build an
+        # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
+        # the promised MAX_MAILS backstop (#70 review M1).
+        limit = min(limit, MAX_MAILS)
+
+        path = mail_index.envelope_index_path()
+        if path is None:
+            raise NativeError(
+                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
+                "Open Mail once to create it. Do not retry."
+            )
+
+        message_ids = None
+        if body:
+            # ponytail: body= caps at `limit` FTS rows BEFORE header filters apply, so
+            # a narrow header filter over many body hits can under-return; acceptable
+            # for the best-effort body layer — widen limit or add ORDER BY if it bites.
+            message_ids = mail_index.fts_search(
+                mail_index.fts_path(), body, limit=limit
+            )
+            if not message_ids:
+                log.info(
+                    "mail_search body=%r: no FTS matches (run mail_index_bodies to "
+                    "build/refresh the body index)",
+                    body,
+                )
+                return []
+
+        sql, params = mail_index.build_header_query(
+            subject=subject,
+            from_=from_,
+            to=to,
+            mailbox=mailbox,
+            since=since,
+            until=until,
+            unread=unread,
+            flagged=flagged,
+            message_ids=message_ids,
+            limit=limit,
+        )
+
+        def read(conn):
+            conn.row_factory = sqlite3.Row
+            out = []
+            for row in conn.execute(sql, params):
+                p = mail_index.row_to_pointer(row)
+                if p is not None:
+                    out.append(p)
+            return out
+
+        # Fallback: the existing AppleScript inbox search needs a substring — use the
+        # most specific text filter provided (subject/from/mailbox), else empty
+        # (raises). Disabled entirely for a body search: AppleScript cannot do body
+        # FTS, so falling back there would silently swap in unrelated header-substring
+        # matches while the body= caller believes they got FTS-matched results
+        # (dishonest). A body search that can't reach the sqlite plane raises the
+        # typed remediation instead.
+        needle = subject or from_ or to or mailbox or ""
+        fallback = (
+            (lambda: self.get_pointers(needle)) if (needle and not body) else None
+        )
+        result = read_via_sqlite(
+            path,
+            mail_index.HEADER_FINGERPRINT,
+            read,
+            fallback=fallback,
+            immutable=False,
+        )
+        if body:
+            log.info(
+                "mail_search body=%r: searched %d indexed messages",
+                body,
+                len(message_ids),
+            )
+        return result
+
+    def index_bodies(self, rebuild: bool = False) -> dict:
+        """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx
+        (read-at-rest; skips not-yet-downloaded *.partial.emlx). Resumable, size-capped.
+        Returns counts + coverage. Never launches Mail, never writes in Mail's data."""
+        from . import mail_index
+
+        root = mail_index.mail_root()
+        if root is None:
+            raise NativeError("no Mail data found; open Mail once. Do not retry.")
+        res = mail_index.build_body_index(
+            mail_root=root, fts_db=mail_index.fts_path(), rebuild=rebuild
+        )
+        res["coverage"] = (
+            f"{res['indexed']}/{res['total_emlx']} downloaded .emlx indexed"
+        )
+        return res

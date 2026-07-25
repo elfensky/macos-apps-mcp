@@ -9,7 +9,7 @@ import json
 import pytest
 
 import macos_apps_mcp.doctor as doc
-from macos_apps_mcp.runtime import AppNotRunning, AutomationDenied
+from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
 
 def _boom_osascript(*args, **kwargs):
@@ -77,6 +77,7 @@ def test_automation_unprobed_when_request_false(monkeypatch):
         "photos",
         "safari",
         "messages",
+        "music",
     ]
     assert all(s["ok"] is None and s["status"] == "unprobed" for s in surfaces)
     assert all("request=True" in s["remediation"] for s in surfaces)
@@ -172,11 +173,12 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "probed_automation",
         "summary",
         "surfaces",
+        "deployment",
     }
-    assert len(report["surfaces"]) == 10  # 2 EventKit + 6 Automation + shortcuts + FDA
+    assert len(report["surfaces"]) == 11  # 2 EventKit + 7 Automation + shortcuts + FDA
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 10 surfaces OK"
+    assert report["summary"] == "all 11 surfaces OK"
 
 
 def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
@@ -184,7 +186,7 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 10 surfaces need attention")
+    assert report["summary"].startswith("2 of 11 surfaces need attention")
 
 
 def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
@@ -202,7 +204,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 10 surfaces OK" not in report["summary"]
+    assert "all 11 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -245,7 +247,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
 @pytest.mark.integration
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
-    assert len(report["surfaces"]) == 10
+    assert len(report["surfaces"]) == 11
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:

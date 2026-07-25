@@ -15,18 +15,14 @@ practice.
 
 from __future__ import annotations
 
-import atexit
 import contextlib
-import json
 import logging
 import os
-import re
-import signal
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
-import unicodedata
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -38,6 +34,16 @@ import EventKit as EK
 import Foundation as F
 
 from .contracts import CLEAR_RECURRENCE, Recurrence
+from .errors import (
+    PRIVACY_PANE,
+    AccessDenied,
+    AppNotRunning,
+    AutomationDenied,
+    FullDiskAccessDenied,
+    NativeError,
+    NativeTimeout,
+    SchemaDrift,
+)
 
 T = TypeVar("T")
 
@@ -66,318 +72,32 @@ _FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
 _ACCESS_TIMEOUT = 120.0  # seconds
 
 
-# --- typed error taxonomy (#47) ------------------------------------------------------
-# The winnable axis is trust: the category leader died of *fake success* — stubbed reads
-# returning [] made permission-denied / crashed / genuinely-empty indistinguishable, so
-# the agent hammered a denied tool. Every native failure is one of these loud, typed
-# classes; str(e) IS the agent-directed remediation. The dispatch layer (server.py)
-# turns them into MCP tool *results* carrying that directive — never a silent [], never
-# a masked stack trace. `kind` is the machine code doctor (#48) and tests branch on.
+# NOTE: the typed error taxonomy (#47) and the pure write policies —
+# resolve_container, refused_write, verify_persisted, require_batch_within — live in
+# errors.py: no native imports there, so adapters/tests use them without loading this
+# module's EventKit/Foundation. runtime raises those classes; it does not define them.
 
 
-class NativeError(RuntimeError):
-    """Base for every typed native failure. ``str(e)`` is the agent-facing directive."""
+def container_id(item) -> str | None:
+    """The item's calendar/list IDENTIFIER, read BEFORE the save — the commit may
+    re-home the object, and post-save it would tautologically equal the actual. May be
+    None (no writable account); the save then surfaces WriteRefused. Verify keys on the
+    identifier, not the title (#55 review). Works for EKEvent and EKReminder alike."""
+    cal = item.calendar()
+    return cal.calendarIdentifier() if cal is not None else None
 
-    kind = "native_error"
 
+# NOTE: text hygiene / fold / verify-normalization live in text.py (#52/#49/#64) —
+# pure string work with no coupling to the native worker.
 
-class AccessDenied(NativeError):
-    """Calendar/Reminders (EventKit) TCC access is not fully granted."""
 
-    kind = "access_denied"
-
-
-class AutomationDenied(NativeError):
-    """osascript blocked from controlling an app — Automation consent not granted."""
-
-    kind = "automation_denied"
-
-
-class AppNotRunning(NativeError):
-    """The target app isn't running / its Apple-events connection is invalid."""
-
-    kind = "app_not_running"
-
-
-class NativeTimeout(NativeError):
-    """A native call didn't return in time (stuck dialog, pathological query)."""
-
-    kind = "native_timeout"
-
-
-class OutputOverflow(NativeError):
-    """A native result exceeded the caller's size cap (raised by callers, e.g. #52)."""
-
-    kind = "output_overflow"
-
-
-class SchemaDrift(NativeError):
-    """Native output didn't match the shape the parser expects (an OS/app change)."""
-
-    kind = "schema_drift"
-
-
-class VerificationFailed(NativeError):
-    """A create/update didn't persist as requested — the returned id is fabricated, or
-    a field was dropped, or iCloud reverted the write (#49)."""
-
-    kind = "verification_failed"
-
-
-class SpanRequired(NativeError):
-    """A recurring event's update/delete needs an explicit span (this-event vs
-    future-events) so one occurrence isn't silently rewritten as the series (#51)."""
-
-    kind = "span_required"
-
-
-class WriteRefused(NativeError):
-    """The store refused a save/remove — a read-only or subscribed calendar/list, or
-    the account rejected the change."""
-
-    kind = "write_refused"
-
-
-class RecurrenceRequired(NativeError):
-    """Updating a repeating reminder needs an explicit recurrence (re-send the rule
-    or 'none') so a rename can't silently destroy the series (mirror of
-    SpanRequired's rationale, #51)."""
-
-    kind = "recurrence_required"
-
-
-class BatchTooLarge(NativeError):
-    """A bulk operation exceeded its small default safety cap without an explicit
-    override — contains blast radius (griches --confirm-destructive, #54)."""
-
-    kind = "batch_too_large"
-
-
-class AmbiguousTarget(NativeError):
-    """A name/title matched more than one container, so a write cannot safely pick one.
-    The disambiguation rule (#55): never auto-pick an ambiguous target for a write —
-    fuzzy/first-match auto-pick sent iMessages to the wrong human (supermemoryai #48),
-    and duplicate calendar names silently mis-targeted writes (mcp-ical #16). ``str(e)``
-    tells the caller how to disambiguate."""
-
-    kind = "ambiguous_target"
-
-
-class FullDiskAccessDenied(NativeError):
-    """A native sqlite store (chat.db, NoteStore.sqlite, …) couldn't be opened because
-    Full Disk Access is not granted. ``str(e)`` is the remediation; doctor (#48) reports
-    the same surface. Part of the dual-backend policy (#58): the adapter falls back to
-    its AppleScript reader if it has one (Notes), else this surfaces loudly — never a
-    silent empty (Messages content)."""
-
-    kind = "full_disk_access_denied"
-
-
-def resolve_container(items, target: str, *, noun: str):
-    """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name (#55).
-
-    The disambiguation rule made concrete: a container-addressed write
-    (``create_event(calendar)``, ``create_reminder(list_name)``) accepts EITHER a
-    ``Pointer.id`` — the stable, unambiguous handle from the read side — OR an exact
-    name. An id wins (it is unambiguous by construction); a name matching >1 container
-    raises ``AmbiguousTarget`` **listing the candidate ids**, so the caller re-issues
-    the write targeting one of them rather than macos-apps-mcp guessing (mcp-ical #16
-    silent mis-target). id-first: a calendar/list identifier is a UUID, so it can't
-    collide with a human-typed name — the precedence is safe.
-
-    ``items`` is ``list[(id, name, value)]``; the matched ``value`` (the native
-    container object) is returned. 0 name matches → ``ValueError``; >1 →
-    ``AmbiguousTarget``. Pure (no native imports) so it unit-tests with plain tuples.
-    """
-    for cid, _name, value in items:
-        if cid == target:  # id-first: an unambiguous handle is used directly
-            return value
-    matches = [(cid, value) for cid, name, value in items if name == target]
-    if not matches:
-        raise ValueError(f"no {noun} named {target!r}")
-    if len(matches) > 1:
-        ids = ", ".join(cid for cid, _ in matches)
-        raise AmbiguousTarget(
-            f"{len(matches)} {noun}s are named {target!r} — macos-apps-mcp never "
-            "auto-picks an ambiguous write target. Re-issue the write targeting one of "
-            f"these ids instead: {ids} (or rename them so the names are unique)."
-        )
-    return matches[0][1]
-
-
-def verify_persisted(
-    entity: str, expected: dict[str, object], actual: dict[str, object]
-) -> None:
-    """Diff requested field values against what the store actually persisted; raise
-    ``VerificationFailed`` naming every dropped/changed field (#49).
-
-    The anti-fabrication + anti-rollback check behind every create/update: the category
-    leader shipped a fabricated id and dropped due/list (supermemoryai #64), and iCloud
-    can revert a write ~1s later — and our writes feed the vault id-writeback, so a fake
-    or reverted id silently corrupts the cockpit. Callers pass primitives already
-    normalized for comparison (dates → epoch ints / y-m-d tuples, containers → names) so
-    this stays pure and unit-testable with plain fakes.
-    """
-    dropped = {k: (v, actual.get(k)) for k, v in expected.items() if actual.get(k) != v}
-    if dropped:
-        fields = "; ".join(
-            f"{k}: requested {req!r}, persisted {got!r}"
-            for k, (req, got) in dropped.items()
-        )
-        raise VerificationFailed(
-            f"{entity} write did not persist as requested (dropped or reverted; iCloud "
-            f"can roll a write back ~1s later). Mismatches: {fields}. Re-read the item "
-            "before trusting it; do not reuse the returned id."
-        )
-
-
-def norm_text(v) -> str | None:
-    """NFC + LF-normalize a free-text field for verify comparison (#49): Cocoa treats
-    NFC/NFD as equal and stores may fold CRLF, so byte-exact != would false-fail a
-    correct write. "" and None both mean "unset"."""
-    if v is None:
-        return None
-    s = unicodedata.normalize("NFC", str(v)).replace("\r\n", "\n").replace("\r", "\n")
-    return s or None
-
-
-# Typographic glyphs Apple's stores keep but users type ASCII for (#64). Curly single/
-# double quotes + primes → ASCII ' and ", ellipsis → "...". NOT hyphens/dashes: folding
-# the dash family broke real hyphenated names elsewhere, and the acceptance requires
-# hyphenated titles unaffected — so dashes pass through fold_text untouched.
-_PUNCT_FOLD = {
-    0x2018: "'",  # ‘ left single quote
-    0x2019: "'",  # ’ right single quote (the U+2019 apostrophe — the #26 culprit)
-    0x201A: "'",  # ‚ single low-9 quote
-    0x201B: "'",  # ‛ single high-reversed-9 quote
-    0x2032: "'",  # ′ prime
-    0x201C: '"',  # “ left double quote
-    0x201D: '"',  # ” right double quote
-    0x201E: '"',  # „ double low-9 quote
-    0x201F: '"',  # ‟ double high-reversed-9 quote
-    0x2033: '"',  # ″ double prime
-    0x2026: "...",  # … horizontal ellipsis
-}
-
-
-def fold_text(v: object) -> str:
-    """Case/diacritic/smart-punctuation-insensitive key for READ-side name/title
-    matching (#64). Apply to BOTH sides of a comparison so "café" matches "cafe" and
-    "Andrei's list" (U+2019) matches "Andrei's list" (ASCII) — Apple stores typographic
-    glyphs, models type ASCII, and the mismatch silently returned nothing (epheterson
-    #26). Steps: map curly quotes/apostrophes/ellipsis → ASCII, NFKD-decompose and drop
-    combining marks (strips diacritics), then casefold. Hyphens/dashes are LEFT ALONE
-    (see _PUNCT_FOLD). Pure / native-free; composes with norm_text (#49).
-
-    READS ONLY. Write-target resolution (resolve_container) stays byte-exact by design:
-    folding a write target could collapse two real containers ("Café"/"Cafe") and
-    silently mis-home the write — the exact opposite of the AmbiguousTarget guard's
-    intent. Fold search results, never write targets.
-
-    ponytail: NFKD is *compatibility* decomposition, so it also folds ligatures/width/
-    superscripts (ﬁ→"fi", №→"no", ①→"1"). That only ever WIDENS a read match (a
-    harmless superset), never drops a legitimate one, and can't reach a write — fine
-    for search. Switch to NFD if a caller ever needs canonical-only folding.
-    """
-    s = str(v) if v is not None else ""
-    s = s.translate(_PUNCT_FOLD)
-    s = "".join(
-        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
-    )
-    return s.casefold()
-
-
-# --- output hygiene (#52) ------------------------------------------------------------
-# Raw native text reaches the model two ways: as a one-line Pointer.summary and as an
-# opt-in hydrated body. Both are control-stripped and bounded here — in ONE place, one
-# uniform rule (no per-tool truncation knobs) — so a pathological item can neither
-# corrupt the client (control chars / U+2028-9 blanked Claude Desktop conversations
-# retroactively, carterlasalle #2) nor blow the buffer/context (a 150k-char body failed
-# *silently* at maxBuffer, FradSer #66/#69). ponytail: the three MAX constants are
-# tuning knobs — change the numbers, not the mechanism.
-SUMMARY_MAX = 200  # a one-line citable extract
-BODY_MAX = 4000  # per-item hydrated body — soft cap: truncate + marker past this
-BODY_HARD_MAX = 50_000  # a body past this is a dump, not a note → OutputOverflow
-
-# Fold every kind of line break to one char first: CRLF/CR, VT, FF, NEL (U+0085), and
-# the Unicode LINE/PARAGRAPH SEPARATORS (U+2028/9) that historically blank JS/JSON
-# consumers. \r\n is one alternative so a Windows newline folds to a single char.
-_LINE_BREAKS = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
-# Disallowed chars remaining after breaks are folded: C0 controls (minus TAB \x09 and
-# the fold char \n \x0a, both kept), DEL \x7f, and C1 \x80-\x9f. \x0b-\x0d never survive
-# folding, so the class starts at \x0e.
-_CTRL = re.compile(r"[\x00-\x08\x0e-\x1f\x7f-\x9f]")
-
-
-def _truncate(text: str, limit: int) -> str:
-    """Cap ``text`` at ``limit`` chars, appending an explicit ``[truncated N chars]``
-    marker (N = chars dropped) so the model never mistakes a clip for the whole."""
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]} [truncated {len(text) - limit} chars]"
-
-
-def sanitize_line(text: object) -> str:
-    """Collapse ``text`` to one control-char-free line (NO truncation): every line break
-    → space, C0/C1/DEL controls removed, whitespace runs collapsed. For anything that
-    lands in a one-line ``Pointer.summary``. ``None`` → ``""``."""
-    folded = _LINE_BREAKS.sub(" ", str(text) if text is not None else "")
-    return re.sub(r"\s+", " ", _CTRL.sub("", folded)).strip()
-
-
-def sanitize_block(text: object) -> str:
-    """Strip control chars from multi-line ``text``, preserving line structure (NO
-    truncation): every line break → ``\\n``, TAB kept, other C0/C1/DEL removed. For
-    opt-in hydrated bodies (a body legitimately spans lines — do not flatten it)."""
-    folded = _LINE_BREAKS.sub("\n", str(text) if text is not None else "")
-    return _CTRL.sub("", folded)
-
-
-def clean_summary(text: object) -> str:
-    """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
-    return _truncate(sanitize_line(text), SUMMARY_MAX)
-
-
-def clean_body(
-    text: object, limit: int = BODY_MAX, hard: int | None = BODY_HARD_MAX
-) -> str:
-    """Control-free, line-preserving body truncated at ``limit`` with a marker.
-
-    Raises ``OutputOverflow`` when the sanitized body exceeds ``hard``: a single item
-    that large is a pasted dump, not a note, and truncating it to a few KB would just
-    hand back misleading noise — the model should open it in-app instead. Pass
-    ``hard=None`` to always truncate (where one huge item must not fail a batch)."""
-    s = sanitize_block(text)
-    if hard is not None and len(s) > hard:
-        raise OutputOverflow(
-            f"this item is {len(s)} chars — too large to hydrate (cap {hard}). Open it "
-            "in the app instead of fetching its body; do not retry the hydrate."
-        )
-    return _truncate(s, limit)
-
-
-def require_batch_within(count: int, cap: int, *, override_param: str) -> None:
-    """Guard a bulk operation's size (#54): raise ``BatchTooLarge`` when ``count``
-    exceeds the small default ``cap``, naming the ``override_param`` the caller can pass
-    to raise the cap deliberately. Small caps + explicit override contain blast radius
-    (griches). The first bulk destructive op wires this in; single-item writes don't
-    need it. ponytail: this is the shared primitive — a bulk op calls it, it does not
-    invent its own limit check."""
-    if count > cap:
-        raise BatchTooLarge(
-            f"this operation would affect {count} items but the safety cap is {cap}. "
-            f"Narrow the batch, or pass {override_param}=<n> to raise the cap on "
-            "purpose. Do not retry the same oversized batch unchanged."
-        )
-
-
-def _decide(status: int) -> None:
-    """Map an EKAuthorizationStatus to a decision: return on full access, else raise."""
+def _require_full_access(status: int) -> None:
+    """Gate an EKAuthorizationStatus: return on full access, else raise AccessDenied."""
     if status == _FULL_ACCESS:
         return
     raise AccessDenied(
         "macos-apps-mcp needs Calendar + Reminders access. Grant it in "
-        "System Settings → Privacy & Security → Calendars and Reminders, then "
+        f"{PRIVACY_PANE} → Calendars and Reminders, then "
         "restart macos-apps-mcp."
     )
 
@@ -430,8 +150,8 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     if _AUTOMATION_DENIED in stderr:
         return AutomationDenied(
             "macOS blocked macos-apps-mcp from controlling the app (Automation consent "
-            "not granted). Tell the user to enable it in System Settings → Privacy & "
-            "Security → Automation, for whichever app launched macos-apps-mcp, then "
+            f"not granted). Tell the user to enable it in {PRIVACY_PANE} → "
+            "Automation, for whichever app launched macos-apps-mcp, then "
             "restart macos-apps-mcp. Do not retry until the next user message. "
             f"[{detail}]"
         )
@@ -443,24 +163,74 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
     return NativeError(f"osascript failed: {detail}")
 
 
-# In-flight osascript children, tracked so exit paths (atexit / SIGTERM / orphan
-# watcher, #56) can terminate them — an orphaned synchronous Apple Event pinned Mail's
-# main thread indefinitely (patrickfreyer #58). The serialized worker means at most one
-# at a time, but a set + lock is robust and cheap. The AppleScript-level `with timeout`
-# in each template is the second line of defense: it self-terminates a hung child even
-# if the Python side died first and never got to call terminate().
+# In-flight children (osascript, the shortcuts CLI), tracked so exit paths (atexit /
+# SIGTERM / orphan watcher, #56) can terminate them — an orphaned synchronous Apple
+# Event pinned Mail's main thread indefinitely (patrickfreyer #58). The serialized
+# worker means at most one at a time, but a set + lock is robust and cheap. The
+# AppleScript-level `with timeout` in each template is the second line of defense: it
+# self-terminates a hung child even if the Python side died first and never got to call
+# terminate().
 _children: set[subprocess.Popen] = set()
 _children_lock = threading.Lock()
 
 
-def _terminate_children() -> None:
-    """Terminate any in-flight osascript child. Idempotent; safe from any thread and at
+def terminate_children() -> None:
+    """Terminate any in-flight tracked child. Idempotent; safe from any thread and at
     shutdown (an already-dead child raises OSError on terminate, ignored)."""
     with _children_lock:
         children = list(_children)
     for proc in children:
         with contextlib.suppress(OSError):
             proc.terminate()
+
+
+@contextlib.contextmanager
+def track_child(proc: subprocess.Popen):
+    """Register ``proc`` in the #56 child registry for the duration of the block, so
+    every exit path (atexit / SIGTERM / orphan watcher — lifecycle.py) can terminate it.
+    The ONE seam for subprocess lifetime: every child a module spawns (osascript here,
+    the shortcuts CLI via ``tracked_run``) must run inside it."""
+    with _children_lock:
+        _children.add(proc)
+    try:
+        yield proc
+    finally:
+        with _children_lock:
+            _children.discard(proc)
+
+
+def tracked_run(
+    cmd: list[str],
+    *,
+    timeout: float,
+    input: str | None = None,  # shadows the builtin to mirror subprocess.run's keyword
+    errors: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """``subprocess.run(capture_output=True, text=True)`` with the child registered in
+    the #56 cleanup registry (``track_child``) while it runs.
+
+    ``subprocess.run`` never exposes its live ``Popen``, so a child spawned through it
+    escapes the exit-path cleanup — an orphaned server could leave e.g. a ``shortcuts
+    run`` in flight forever. Adapters that shell out to a CLI use this instead. Raises
+    ``subprocess.TimeoutExpired`` (the child is killed and reaped first) exactly like
+    ``run(timeout=...)`` so callers translate it to their own typed timeout.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE if input is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors=errors,
+    )
+    with track_child(proc):
+        try:
+            out, err = proc.communicate(input=input, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()  # reap so we don't leak a zombie
+            raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 
 def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) -> str:
@@ -492,9 +262,7 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
             stderr=subprocess.PIPE,
             text=True,
         )
-        with _children_lock:
-            _children.add(proc)
-        try:
+        with track_child(proc):
             try:
                 out, err = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired as e:
@@ -506,9 +274,6 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
                     "dismiss any stuck prompt, then retry with a narrower query. Do "
                     "not retry immediately."
                 ) from e
-        finally:
-            with _children_lock:
-                _children.discard(proc)
         if proc.returncode != 0:
             raise _classify_osascript_failure(err)
         # debug telemetry (#56): opt-in via logging level, zero cost otherwise.
@@ -524,10 +289,31 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
     return _run() if _on_worker() else run_native(_run)
 
 
+@contextlib.contextmanager
+def body_file(text: str):
+    """A 0600 utf-8 tempfile holding ``text``, for an AppleScript template to read as
+    ``«class utf8»`` — the safe transport for a large/multiline/unicode body (never
+    interpolated into the script; the supermemoryai pattern, #62). Yields the path
+    (pass it as the template's LAST argv item); the file is deleted on exit — the
+    script runs synchronously, so it has already consumed the content. The one home
+    for the mkstemp → write → unlink dance mail and notes each hand-rolled twice."""
+    fd, path = tempfile.mkstemp(prefix="macos-apps-mcp-body-", suffix=".txt")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        yield path
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+
+
 _ASYNC_TIMEOUT = 30.0  # seconds
 
 
-def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
+def run_native_async(
+    start: Callable[[Callable[[T | None], None]], None],
+    timeout: float = _ASYNC_TIMEOUT,
+) -> T | None:
     """Block on a completion-handler call; bounded so a dropped callback can't hang.
 
     Generalizes the EventKit fetch pattern. ``start(finish)`` kicks off the async op
@@ -539,10 +325,10 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
     deliver on the main run loop (MapKit, NSMetadataQuery) need an NSRunLoop pump here —
     add it with the first such consumer (Maps #17 / Photos #20) to validate it.
     """
-    box: dict = {}
+    box: dict[str, T | None] = {}
     done = threading.Event()
 
-    def finish(result=None):
+    def finish(result: T | None = None) -> None:
         box["result"] = result
         done.set()
 
@@ -566,7 +352,7 @@ def run_native_async(start, timeout: float = _ASYNC_TIMEOUT):
 # Notes) build on with no new plumbing of their own.
 
 
-def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
+def _open_sqlite_ro(path: Path | str, *, immutable: bool = False) -> sqlite3.Connection:
     """Open a system sqlite store STRICTLY read-only.
 
     Preflights with a raw read so a Full-Disk-Access denial surfaces as a typed
@@ -587,7 +373,7 @@ def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
     except PermissionError as e:
         raise FullDiskAccessDenied(
             "macos-apps-mcp could not read a macOS data store — Full Disk Access is "
-            "not granted. Grant it in System Settings → Privacy & Security → Full "
+            f"not granted. Grant it in {PRIVACY_PANE} → Full "
             "Disk Access to the app that launched macos-apps-mcp, then restart "
             "macos-apps-mcp. Do not retry until the next user message."
         ) from e
@@ -610,7 +396,9 @@ def _open_sqlite_ro(path, *, immutable: bool = False) -> sqlite3.Connection:
         ) from e
 
 
-def verify_sqlite_schema(conn: sqlite3.Connection, fingerprint: dict) -> None:
+def verify_sqlite_schema(
+    conn: sqlite3.Connection, fingerprint: dict[str, set[str]]
+) -> None:
     """Raise ``SchemaDrift`` unless each expected table has every expected column (#58).
 
     ``fingerprint`` maps table name → the columns the parser reads. macOS updates move
@@ -657,8 +445,13 @@ _STORE_UNAVAILABLE = (FullDiskAccessDenied, SchemaDrift)
 
 
 def read_via_sqlite(
-    path, fingerprint: dict, query, *, fallback=None, immutable: bool = False
-):
+    path: Path | str,
+    fingerprint: dict[str, set[str]],
+    query: Callable[[sqlite3.Connection], T],
+    *,
+    fallback: Callable[[], T] | None = None,
+    immutable: bool = False,
+) -> T:
     """Dual-backend read (#58): query a native sqlite store read-only, degrading to the
     adapter's AppleScript reader when the store is unavailable.
 
@@ -674,7 +467,7 @@ def read_via_sqlite(
     ONE helper the sqlite read planes (#59/#60) build on — they add no new plumbing.
     """
 
-    def work():
+    def work() -> T:
         try:
             conn = _open_sqlite_ro(path, immutable=immutable)
             try:
@@ -808,55 +601,8 @@ def rrule_text(rule) -> str:
 log = logging.getLogger("macos_apps_mcp")
 
 
-# --- write audit log storage (#67) ----------------------------------------------------
-AUDIT_LIMIT = 50
-_AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate past ~5 MB; one backup
-
-
-def state_dir() -> Path:
-    """The XDG state dir for this server, created on use."""
-    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
-    d = Path(base) / "macos-apps-mcp"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _audit_path() -> Path:
-    return state_dir() / "audit.jsonl"
-
-
-def audit_write(record: dict) -> None:
-    """Append one JSON record to the audit log. NEVER raises — auditing must not fail a
-    user's write, so a logging error (disk full, permission, missing dir) is
-    swallowed."""
-    try:
-        path = _audit_path()
-        if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
-            path.replace(path.with_name(path.name + ".1"))  # rotate; one backup
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception as e:  # noqa: BLE001 — audit must never break a write
-        log.debug("audit_write failed: %s", e)
-
-
-def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
-    """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
-    drops older entries by lexical ts compare (entries are naive-local, one format).
-    Malformed lines are skipped; a missing log is empty."""
-    path = _audit_path()
-    if not path.exists():
-        return []
-    out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue  # skip a truncated/corrupt line, never fail the read
-        if since and rec.get("ts", "") < since:
-            continue
-        out.append(rec)
-    out.reverse()  # newest first
-    return out[:limit]
+# NOTE: the write-audit trail + usage tally (#67) live in audit.py — they are plain
+# file IO with no coupling to the native worker, so they don't belong in this module.
 
 
 def _request_one(s: EK.EKEventStore, entity: int) -> None:
@@ -880,7 +626,7 @@ def _request_one(s: EK.EKEventStore, entity: int) -> None:
                 "Timed out waiting for the Calendar/Reminders permission response."
             )
         status = EK.EKEventStore.authorizationStatusForEntityType_(entity)
-    _decide(status)
+    _require_full_access(status)
 
 
 # EventKit TCC surfaces requested at startup. Adapters with their own permission
@@ -915,58 +661,5 @@ def bootstrap() -> None:
     run_native(request_access_each)
 
 
-# --- lifecycle hygiene (#56) ---------------------------------------------------------
-# A stdio MCP server orphaned by its parent (Claude exits/crashes) must not linger,
-# re-launching Mail.app forever (patrickfreyer #58, python-sdk #526). We watch our
-# parent pid and hard-exit on reparent; on every exit path we also terminate any
-# in-flight osascript child (the AppleScript `with timeout` in each template is the
-# backstop for when we can't). Installed by the server entry point, NOT bootstrap(), so
-# importing the module or running unit tests never starts a watcher or grabs SIGTERM.
-_PPID_POLL = 1.0  # seconds — well inside the 5s orphan-exit budget
-
-# The launching parent's pid, captured at IMPORT — deliberately NOT at
-# install_lifecycle_guards() time. bootstrap() blocks up to 120s on the TCC permission
-# prompt *before* the guards install; if the parent died during that wait, an
-# install-time os.getppid() would already read 1 (reparented) and the watcher could
-# never fire (1 == 1 forever). Import runs right after the parent spawns us (alive).
-_LAUNCH_PPID = os.getppid()
-
-
-def _parent_died(original_ppid: int) -> bool:
-    """True once our launching parent is gone: its pid was reaped and we were reparented
-    (``getppid`` changes, typically to 1/launchd). A process's parent never changes
-    while that parent is alive, so a changed ppid reliably means the parent died."""
-    return os.getppid() != original_ppid
-
-
-_lifecycle_installed = False
-
-
-def install_lifecycle_guards() -> None:
-    """Start the orphan watcher and register child-cleanup on exit (#56). Idempotent.
-
-    Call once from the server entry point (after bootstrap). The watcher is a daemon
-    thread; SIGTERM and normal exit both terminate any in-flight osascript child so a
-    graceful stop doesn't leave one hung until its AppleScript timeout.
-    """
-    global _lifecycle_installed
-    if _lifecycle_installed:
-        return
-    _lifecycle_installed = True
-
-    atexit.register(_terminate_children)
-    # signal.signal only works on the main thread — skip (suppress ValueError) if not.
-    with contextlib.suppress(ValueError):
-        signal.signal(signal.SIGTERM, lambda *_: (_terminate_children(), os._exit(0)))
-
-    def _watch() -> None:
-        # compare against the import-time launch ppid (see _LAUNCH_PPID) so a parent
-        # that died during bootstrap's permission prompt is still detected as gone.
-        while not _parent_died(_LAUNCH_PPID):
-            time.sleep(_PPID_POLL)
-        # parent gone: kill any in-flight child, then hard-exit (skip Python teardown —
-        # its stdio pipes point at a dead parent and could block).
-        _terminate_children()
-        os._exit(0)
-
-    threading.Thread(target=_watch, name="mac-ppid-watch", daemon=True).start()
+# NOTE: lifecycle hygiene (#56 — orphan watcher, SIGTERM/atexit child cleanup)
+# lives in lifecycle.py; it consumes terminate_children() above.

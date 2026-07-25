@@ -10,7 +10,8 @@ is slow — a cold search takes ~20s); user input via argv (no injection).
 from __future__ import annotations
 
 from ..contracts import Pointer
-from ..runtime import clean_summary, run_osascript
+from ..runtime import run_osascript
+from ..text import clean_summary
 
 MAX_PHOTOS = 25
 
