@@ -40,6 +40,8 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "update_note",
         "delete_draft",
         "send_mail",
+        "reply_all",
+        "forward_mail",
     }
 )
 # The full write half of the read/write seam. Everything else is read-only.
@@ -76,6 +78,8 @@ _PERMISSION = {
     "drafts": "Automation",
     "delete_draft": "Automation",
     "send_mail": "Automation",
+    "reply_all": "Automation",
+    "forward_mail": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
     "note_bodies": "Automation",

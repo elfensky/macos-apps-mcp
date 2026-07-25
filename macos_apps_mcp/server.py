@@ -505,6 +505,38 @@ def send_mail(
     )
 
 
+@_send_tool("mail")
+def reply_all(
+    message_id: str,
+    body: str,
+    include_quote: bool = True,
+    dry_run: bool = True,
+) -> dict:
+    """Reply-all to an inbox message and SEND it — this leaves your machine.
+
+    `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
+    message_id is the RFC822 id from a mail read; Mail sets the threading headers
+    natively and the sending account is inherited from the original. Registered ONLY
+    when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for
+    Mail.
+    """
+    return _mail.reply_all(message_id, body, include_quote, dry_run=dry_run)
+
+
+@_send_tool("mail")
+def forward_mail(
+    message_id: str, to: str, body: str = "", dry_run: bool = True
+) -> dict:
+    """Forward an inbox message and SEND it — this leaves your machine.
+
+    `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
+    `body` is prepended as your note; the forwarded original is preserved. `to` is
+    comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
+    adapter. Needs Automation access for Mail.
+    """
+    return _mail.forward(message_id, to, body, dry_run=dry_run)
+
+
 @_read_tool
 def notes(title: str) -> list[dict[str, str]]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
