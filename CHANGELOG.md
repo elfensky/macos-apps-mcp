@@ -4,6 +4,23 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## 0.9.0 (unreleased)
+
+### Added
+
+- **Outbound, gated (#104, #83).** `MACOS_APPS_ALLOW_SEND` opts in per adapter
+  (`mail`, `mail,messages`, or `1`/`all`); unset — the default — registers no send tools at
+  all. `MACOS_APPS_READ_ONLY` always wins. New: `send_mail`, `reply_all`, `forward_mail`,
+  each annotated destructive + open-world and defaulting to `dry_run=True`.
+- **Drafts lifecycle (#82).** `drafts` lists Mail drafts as pointers; `delete_draft`
+  removes one by message-id with `dry_run` preview and audit before-state. Both are
+  ungated by `ALLOW_SEND` — listing and deleting your own drafts is not outbound.
+
+### Notes
+
+- `send_draft` was investigated and dropped: Mail's `send` verb applies only to an
+  `outgoing message`, never to a message stored in Drafts (`-1708`, device-verified).
+
 ## [0.8.0] - 2026-07-25 — New adapters & expansion
 
 New surface (a Music adapter), an indexed Mail read plane, and the distribution
