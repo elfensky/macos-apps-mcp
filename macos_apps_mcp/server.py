@@ -172,6 +172,13 @@ def _additive_tool(fn):
     return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
 
 
+# Every adapter name a `@_send_tool(...)` call below names (#130) — hand-maintained,
+# the `_AUTOMATION_APPS` pattern in doctor.py: adding outbound support to a new adapter
+# means adding its name here too, so `doctor()`'s outbound report can enumerate every
+# adapter capable of sending, not just the one currently gated on.
+_SEND_ADAPTERS = ("mail",)
+
+
 def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
     (#104). Annotated destructive + open-world (#57). ``snapshot``: as on

@@ -208,6 +208,19 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
+def _outbound_state() -> list[str]:
+    """Adapters with OUTBOUND send currently enabled (#130) — read straight from
+    ``server._allow_send``/``server._SEND_ADAPTERS`` rather than re-reading
+    ``MACOS_APPS_ALLOW_SEND`` here, so this report can never disagree with what
+    actually got registered at import time. Imported LOCALLY: ``server.py`` does
+    ``from .doctor import diagnose`` at module level, so a module-level `import
+    server` here would be circular — this is the one place doctor.py reaches into
+    server.py, and it does so lazily."""
+    from . import server
+
+    return [a for a in server._SEND_ADAPTERS if server._allow_send(a)]
+
+
 def diagnose(request: bool = False) -> dict:
     """Per-surface macOS permission + health report with exact remediation (#48).
 
@@ -242,12 +255,25 @@ def diagnose(request: bool = False) -> dict:
         agent = deploy.agent_status()
     except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
         agent = f"unavailable: {e}"
+    outbound = _outbound_state()
     deployment = {
         "mode": "daemon"
         if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
         else "stdio",
         "agent": agent,
         "grant_identities": ids,
+        "outbound": outbound,
+        "outbound_note": (
+            "sending is ON for: " + ", ".join(outbound)
+            if outbound
+            else "sending is OFF for every adapter (MACOS_APPS_ALLOW_SEND is unset, "
+            "or set to a value matching no adapter). Set MACOS_APPS_ALLOW_SEND "
+            "(e.g. 'mail') on the process THIS server runs as, then restart it, to "
+            "enable send_mail/reply_all/forward_mail. Under the launchd daemon "
+            "deployment a client's env block does not reach the daemon process — "
+            "see README.md 'Outbound (send) mode' / docs/DAEMON.md for the "
+            "daemon-specific launchctl steps."
+        ),
         "note": (
             "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
             "for THIS process's responsible identity (grant it, or run via the "
