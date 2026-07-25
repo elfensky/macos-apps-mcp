@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 
 from macos_apps_mcp.adapters import mail
@@ -737,3 +739,78 @@ def test_send_rejects_missing_recipient():
 def test_send_rejects_empty_subject_and_body():
     with pytest.raises(ValueError, match="subject or a body"):
         mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
+
+
+def test_reply_all_dry_run_touches_nothing(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good")
+    assert out == {
+        "dry_run": True,
+        "would_send": {
+            "reply_to": "<orig@x>",
+            "reply_all": True,
+            "body_chars": 11,
+            "include_quote": True,
+        },
+    }
+
+
+def test_reply_all_sends_with_quote(monkeypatch):
+    seen = {}
+    bodies = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail._ORIGINAL:
+            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        return "sent"
+
+    def fake_body_file(text):
+        bodies["text"] = text
+        return nullcontext("/tmp/fake-body")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail, "body_file", fake_body_file)
+    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good", dry_run=False)
+    assert out == {"sent": True, "reply_to": "<orig@x>", "reply_all": True}
+    assert bodies["text"].startswith("Sounds good")
+    assert "> Original text" in bodies["text"]
+    assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body")
+
+
+def test_reply_all_rejects_empty_body():
+    with pytest.raises(ValueError, match="non-empty"):
+        mail.MailAdapter().reply_all("<orig@x>", "   ", dry_run=False)
+
+
+def test_forward_dry_run_reports_recipients(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com, c@d.com", "FYI")
+    assert out["dry_run"] is True
+    assert out["would_send"]["to"] == ["a@b.com", "c@d.com"]
+    assert out["would_send"]["forwarding"] == "<orig@x>"
+
+
+def test_forward_sends_via_argv(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail, "body_file", lambda t: nullcontext("/tmp/fwd-body"))
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com", "FYI", dry_run=False)
+    assert out == {"sent": True, "to": ["a@b.com"], "forwarding": "<orig@x>"}
+    assert seen[mail._FORWARD] == ("orig@x", "/tmp/fwd-body", "a@b.com")
+
+
+def test_forward_rejects_missing_recipient():
+    with pytest.raises(ValueError, match="recipient"):
+        mail.MailAdapter().forward("<orig@x>", "", "FYI", dry_run=False)

@@ -267,6 +267,72 @@ _SEND = """on run argv
   end timeout
 end run"""
 
+# reply_all (#83): Mail's NATIVE reply verb with `reply to all yes`, so In-Reply-To /
+# References are set by Mail (the only mechanism that threads — make-new-outgoing
+# cannot set headers). `opening window no` keeps it headless; device-verified
+# 2026-07-25, returns an outgoing message with the Re: subject already applied. The
+# body (reply text + our quote, built in Python exactly as `reply` does) is set, then
+# sent. Atomic (#44).
+_REPLY_ALL = """on run argv
+  set mid to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of inbox whose message id is mid)
+    if (count of matches) is 0 then error "no inbox message with that message id"
+    set r to reply (item 1 of matches) opening window no reply to all yes
+    try
+      set content of r to bodyText
+      send r
+      return "sent"
+    on error errMsg
+      try
+        delete r
+      end try
+      error errMsg
+    end try
+  end tell
+  end timeout
+end run"""
+
+# forward (#83): Mail's native forward verb (device-verified: returns an outgoing
+# message with the Fwd: subject and the original content already in place). Our note
+# is PREPENDED — setting `content` outright would discard the forwarded original,
+# which is the whole point of a forward. Recipients arrive US-joined in one argv item.
+_FORWARD = """on run argv
+  set mid to item 1 of argv
+  set noteText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  set toList to item 3 of argv
+  set us to character id 31
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of inbox whose message id is mid)
+    if (count of matches) is 0 then error "no inbox message with that message id"
+    set f to forward (item 1 of matches) opening window no
+    try
+      if noteText is not "" then
+        set content of f to noteText & linefeed & linefeed & (content of f)
+      end if
+      set AppleScript's text item delimiters to us
+      repeat with a in (text items of toList)
+        if (a as text) is not "" then
+          tell f to make new to recipient with properties {address:(a as text)}
+        end if
+      end repeat
+      set AppleScript's text item delimiters to ""
+      send f
+      return "sent"
+    on error errMsg
+      set AppleScript's text item delimiters to ""
+      try
+        delete f
+      end try
+      error errMsg
+    end try
+  end tell
+  end timeout
+end run"""
+
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
@@ -891,6 +957,75 @@ class MailAdapter:
                 US.join(bcc_list),
             )
         return {"sent": True, **envelope}
+
+    def reply_all(
+        self,
+        message_id: str,
+        body: str,
+        include_quote: bool = True,
+        dry_run: bool = True,
+    ) -> dict:
+        """Reply-all to an inbox message and SEND it. Mail's native reply verb sets the
+        threading headers; ``include_quote`` appends the `On <date>, <sender> wrote:`
+        block, built in Python exactly as ``reply`` builds it. ``dry_run=True``
+        (default) makes no call into Mail. The sending account is inherited from the
+        original message — the correct identity for a thread."""
+        mid = message_id.strip().lstrip("<").rstrip(">")
+        if not mid:
+            raise ValueError("reply_all needs the original message's id")
+        if not body.strip():
+            raise ValueError("reply_all needs a non-empty body")
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_send": {
+                    "reply_to": message_id.strip(),
+                    "reply_all": True,
+                    "body_chars": len(body),
+                    "include_quote": include_quote,
+                },
+            }
+        full = body
+        if include_quote:
+            raw = run_osascript(_ORIGINAL, mid)
+            if raw.strip() and raw.strip() != _MISSING_VALUE:
+                sender, _, rest = raw.partition(US)
+                date_str, _, original = rest.partition(US)
+                full = (
+                    body
+                    + "\n\n"
+                    + _build_quote(
+                        sanitize_line(sender), sanitize_line(date_str), original
+                    )
+                )
+        with body_file(full) as path:
+            run_osascript(_REPLY_ALL, mid, path)
+        return {"sent": True, "reply_to": message_id.strip(), "reply_all": True}
+
+    def forward(
+        self, message_id: str, to, body: str = "", dry_run: bool = True
+    ) -> dict:
+        """Forward an inbox message and SEND it. The forwarded original is preserved —
+        ``body`` is prepended as a note, never substituted for it. ``dry_run=True``
+        (default) makes no call into Mail."""
+        mid = message_id.strip().lstrip("<").rstrip(">")
+        if not mid:
+            raise ValueError("forward needs the original message's id")
+        to_list = _split_addrs(to)
+        if not to_list:
+            raise ValueError("forward needs at least one recipient address (to)")
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_send": {
+                    "to": to_list,
+                    "forwarding": message_id.strip(),
+                    "note_chars": len(body or ""),
+                },
+            }
+        with body_file(body or "") as path:
+            run_osascript(_FORWARD, mid, path, US.join(to_list))
+        return {"sent": True, "to": to_list, "forwarding": message_id.strip()}
 
     def reply(
         self, message_id: str, reply_body: str, include_quote: bool = True
