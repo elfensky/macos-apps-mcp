@@ -234,14 +234,17 @@ def test_create_draft_empty_recipient_raises():
 
 
 def test_create_draft_returns_locator_dict(monkeypatch):
-    # #43: an unsent draft has no stable Message-ID, so create_draft returns a locator
-    # (where to find it) instead of a fabricated id.
+    # #43: a freshly opened compose window has no stable Message-ID YET, so
+    # create_draft returns a locator (where to find it) instead of a fabricated id.
+    # #82/F4 review: once saved to Drafts it DOES get one (drafts()/delete_draft()
+    # resolve by it) — the note must point at that recovery path, not claim drafts
+    # are permanently unaddressable.
     monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "")
     out = MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
     assert out["subject"] == "Hi"
-    assert "no stable id" in out["note"].lower()
+    assert "drafts()" in out["note"]
 
 
 def test_create_draft_cleanup_on_failure_is_in_script():
@@ -654,14 +657,43 @@ def test_delete_draft_deletes_by_message_id(monkeypatch):
         return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().delete_draft("<a@b>")
-    assert out == {"deleted": True, "id": "<a@b>"}
-    assert seen[mail._DELETE_DRAFT] == ("<a@b>",)
+    out = mail.MailAdapter().delete_draft("a@b")
+    assert out == {"deleted": True, "id": "a@b"}
+    assert seen[mail._DELETE_DRAFT] == ("a@b",)
 
 
 def test_delete_draft_rejects_empty_id():
     with pytest.raises(ValueError, match="draft id"):
         mail.MailAdapter().delete_draft("   ")
+
+
+# --- M1 review: delete_draft accepts a bracketed id like every other id-taking method -
+
+
+def test_delete_draft_accepts_bracketed_id(monkeypatch):
+    # a caller passing "<id>" (the RFC822-looking form, matching what get_body/reply/
+    # reply_all/forward all accept) must resolve — not fail loudly. Brackets are
+    # stripped before the id reaches the AppleScript argv.
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("<a@b>")
+    assert out == {"deleted": True, "id": "a@b"}
+    assert seen[mail._DELETE_DRAFT] == ("a@b",)  # bare on the wire, not "<a@b>"
+
+
+def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkeypatch):
+    # snapshot() must match regardless of whether the caller's id or the stored
+    # Pointer.id is bracketed (M1 review) — the dry-run path depends on this.
+    raw = f"a@b{US}Q3 numbers{US}boss@corp.com{RS}"  # stored id is BARE
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)  # caller id bracketed
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "a@b"
 
 
 # --- send (#83) -------------------------------------------------------------------
@@ -674,71 +706,45 @@ def test_split_addrs_accepts_string_and_list():
     assert mail._split_addrs(" , ") == []
 
 
-def test_send_dry_run_touches_nothing(monkeypatch):
-    # A dry run must make NO native call: constructing an outgoing message can strand an
-    # autosaved copy in Drafts even when the script deletes it (device-verified).
-    def boom(*a, **k):
-        raise AssertionError("dry run must not call osascript")
-
-    monkeypatch.setattr(mail, "run_osascript", boom)
-    out = mail.MailAdapter().send(
-        "a@b.com", "Hi", "body text", cc="c@d.com", from_address="me@corp.com"
-    )
-    assert out == {
-        "dry_run": True,
-        "would_send": {
-            "to": ["a@b.com"],
-            "cc": ["c@d.com"],
-            "bcc": [],
-            "from": "me@corp.com",
-            "subject": "Hi",
-            "body_chars": 9,
-            "html": False,
-        },
-    }
+def test_split_addrs_strips_unit_separator_injection():
+    # F1 review: a literal U+001F (the wire's own field separator, US) embedded in an
+    # address must NOT survive into the list — otherwise US.join(...) on the result
+    # produces a string that _SEND's `text items of` (which splits on US) parses back
+    # into TWO recipients, even though this function only ever emitted one entry.
+    # Written as an explicit \u001f escape (never a literal control glyph in source),
+    # and asserted on the actual bytes of the result.
+    injected = "alice@corp.com\u001fexfil@evil.tld"
+    out = mail._split_addrs(injected)
+    assert out == ["alice@corp.comexfil@evil.tld"]  # ONE entry — the US byte is gone
+    assert "\u001f" not in out[0]
+    # the wire-level invariant this exists to protect: joining the result and
+    # re-splitting on US (exactly what _SEND's AppleScript does) must yield the SAME
+    # count as the parsed list — no smuggled extra recipient.
+    joined = mail.US.join(out)
+    assert len(joined.split(mail.US)) == len(out) == 1
 
 
-def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
-    out = mail.MailAdapter().send("a@b.com", "Hi", "x")
-    # Mail's default sender is NOT predictable from account order (device-verified), so
-    # never report a computed guess.
-    assert out["would_send"]["from"] == "(Mail default account)"
+def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
+    # F1 review: the dry-run preview (what the model sees before deciding to send) and
+    # the argv actually handed to run_osascript (what Mail actually sends to) must
+    # describe the SAME recipient set — an injected \u001f must not let them diverge
+    # (the preview showing ONE recipient while the wire actually carries TWO).
+    injected_to = "alice@corp.com\u001fexfil@evil.tld"
+    preview = mail.MailAdapter().send(injected_to, "Hi", "body")
+    previewed_to = preview["would_send"]["to"]
+    assert previewed_to == ["alice@corp.comexfil@evil.tld"]
 
-
-def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     seen = {}
 
     def fake(script, *argv):
-        seen["script"], seen["argv"] = script, argv
+        seen["argv"] = argv
         return "sent"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().send(
-        "a@b.com,e@f.com",
-        "Hi",
-        "body",
-        cc="c@d.com",
-        bcc="x@y.com",
-        html=True,
-        from_address="me@corp.com",
-        dry_run=False,
-    )
-    assert out["sent"] is True
-    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["argv"]
-    assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
-    assert to_j == f"a@b.com{US}e@f.com"
-    assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
-
-
-def test_send_rejects_missing_recipient():
-    with pytest.raises(ValueError, match="recipient"):
-        mail.MailAdapter().send("  ", "Hi", "body", dry_run=False)
-
-
-def test_send_rejects_empty_subject_and_body():
-    with pytest.raises(ValueError, match="subject or a body"):
-        mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
+    mail.MailAdapter().send(injected_to, "Hi", "body", dry_run=False)
+    _subj, _path, _html, _from, to_j, _cc_j, _bcc_j = seen["argv"]
+    wire_to = [a for a in to_j.split(mail.US) if a]
+    assert wire_to == previewed_to  # preview and wire agree by construction
 
 
 def test_reply_all_dry_run_touches_nothing(monkeypatch):

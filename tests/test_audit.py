@@ -77,3 +77,17 @@ def test_audit_read_bounded(tmp_path, monkeypatch):
     for i in range(au.AUDIT_LIMIT + 10):
         au.audit_write({"ts": f"2026-07-21T00:00:{i:02d}", "tool": str(i)})
     assert len(au.audit_read()) == au.AUDIT_LIMIT
+
+
+def test_audit_op_labels_send_tools_distinctly_from_write():
+    # M3 review: the three outbound tools must be filterable in the audit log for
+    # "what actually left this machine" — not lumped into the generic "write" bucket
+    # a create/update/delete fallback would otherwise assign them.
+    assert au._audit_op("send_mail") == "send"
+    assert au._audit_op("reply_all") == "send"
+    assert au._audit_op("forward_mail") == "send"
+    # unrelated tools are unaffected by the new mapping.
+    assert au._audit_op("mail_reply") == "reply"
+    assert au._audit_op("create_event") == "create"
+    assert au._audit_op("delete_note") == "delete"
+    assert au._audit_op("ping") == "write"

@@ -352,7 +352,8 @@ def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
     "junk" (resolved via Mail's unified, cross-account accessors). query: optional
     subject substring — an empty/omitted query lists ALL messages in the mailbox
     (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
-    confirm an attachment landed on a DRAFT (drafts have no stable id). Returns
+    confirm an attachment landed on a DRAFT before it's saved (a freshly opened compose
+    window has no stable id yet — once saved to Drafts it does, see drafts()). Returns
     [{summary, attachments: [{name, size, downloaded}]}], bounded.
     """
     return _mail.list_attachments(mailbox, query)
@@ -441,9 +442,10 @@ def mail_index_bodies(rebuild: bool = False) -> dict:
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
     its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
-    "mailbox", "note"}) — an unsent draft has no stable id, so this says where to find
-    it (Drafts) instead of fabricating one. Additive (creates a draft; does not
-    send/modify/delete); needs Automation access for Mail."""
+    "mailbox", "note"}) — a freshly opened compose window has no stable id yet, so
+    this says where to find it (Drafts) instead of fabricating one; save it and
+    `drafts()` resolves it by its stable message-id. Additive (creates a draft; does
+    not send/modify/delete); needs Automation access for Mail."""
     return _mail.create_draft(to, subject, body)
 
 
@@ -453,7 +455,7 @@ def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> 
 
     NEVER sends. message_id: the RFC822 id from a mail read. Mail sets the threading
     headers natively; include_quote appends the quoted original. Returns a locator
-    dict (unsent drafts have no stable id).
+    dict — save the draft to Drafts and `drafts()` resolves it by a stable message-id.
     """
     return _mail.reply(message_id, reply_body, include_quote)
 
@@ -530,9 +532,10 @@ def forward_mail(
     """Forward an inbox message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
-    `body` is prepended as your note; the forwarded original is preserved. `to` is
-    comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
-    adapter. Needs Automation access for Mail.
+    `body` is prepended as your note; the forwarded original is preserved — except for
+    an HTML original, where prepending a note flattens the whole body to plaintext.
+    `to` is comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the
+    mail adapter. Needs Automation access for Mail.
     """
     return _mail.forward(message_id, to, body, dry_run=dry_run)
 
