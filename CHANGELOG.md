@@ -18,6 +18,15 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **`send`/`reply_all`/`forward` reported delivery that hadn't happened (#134).**
+  Device-verified: a perfectly-formed message (correct subject, recipient, sender)
+  was accepted by AppleScript's `send` verb, this adapter returned `sent: True`, and
+  the message then sat in Mail's Outbox undelivered for minutes — a stranded
+  recipient-less message can also jam the outbox so later, valid sends queue behind
+  it and never leave. A successful return now means Mail **accepted** the message,
+  not that it was delivered; every result also reports `outbox_pending` (Mail's
+  current outbox count) and, when it's non-zero, a `note` telling the caller
+  delivery is unconfirmed and to check Mail ▸ Outbox.
 - **Empty-body AppleScript crash (`-39`).** A body-carrying Mail script reading an
   empty tempfile via `read … as «class utf8»` raised "End of file error" — this broke
   `forward`'s default empty note, a subject-only `send_mail`, and (shipped in 0.8.0)

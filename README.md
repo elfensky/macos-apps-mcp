@@ -164,6 +164,14 @@ at all and reports the resolved envelope; pass `dry_run=False` to actually send.
 the one exception: its dry run reads (never sends) the original message's actual to/cc
 recipients, because that's exactly the recipient set a caller can't predict.
 
+A successful `send_mail` / `reply_all` / `forward_mail` result (`sent: True`) means Mail
+**accepted** the message — not that it was delivered. Device-verified: a perfectly-formed message
+can sit in Mail's Outbox undelivered for minutes after `send` returns, and a stranded
+recipient-less message can jam the outbox so later, valid sends queue behind it and never leave.
+Every result also reports `outbox_pending`, Mail's current outbox count; when it's greater than
+zero the result carries a `note` explaining that delivery is not confirmed and to check Mail ▸
+Outbox.
+
 Run the `doctor` tool to check whether sending is actually enabled — `deployment.outbound` lists
 every adapter currently send-enabled (`[]` if none), derived from the same registration logic
 above rather than a re-read of the raw env var, so it can never disagree with what got registered;
