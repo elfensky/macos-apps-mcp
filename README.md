@@ -135,6 +135,25 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
 
+### Outbound (send) mode
+
+Sending is **off by default** — the server creates drafts and never sends. Set
+`MACOS_APPS_ALLOW_SEND` to opt in, per adapter:
+
+| Value | Effect |
+|---|---|
+| unset (default) | no send tools are registered at all |
+| `mail` | Mail outbound only (`send_mail`, `reply_all`, `forward_mail`) |
+| `mail,messages` | named adapters (comma list) |
+| `1` / `true` / `yes` / `all` | every adapter's outbound |
+
+`MACOS_APPS_READ_ONLY` always wins: with both set, no send tools are registered.
+
+Send tools take `dry_run`, which **defaults to `True`** — deliberately inverted from the
+id-addressed deletes. A delete targets an item a read already returned; a send *constructs* its
+recipient, and a wrong recipient is the failure that matters. The dry run makes no call into Mail
+at all and reports the resolved envelope; pass `dry_run=False` to actually send.
+
 ## Develop
 
 ```sh

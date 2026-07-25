@@ -68,6 +68,25 @@ def _read_only() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _allow_send(adapter: str) -> bool:
+    """True when OUTBOUND is enabled for ``adapter`` (#104).
+
+    ``MACOS_APPS_ALLOW_SEND`` is unset by default — "never sends" stays the default,
+    but absence is a GATE, not a ceiling. ``1``/``true``/``yes``/``all`` enable every
+    adapter; a comma list (``mail,messages``) enables named ones, so a user can accept
+    Mail send (reviewable, leaves a Sent record) while refusing iMessage send (instant,
+    social, no undo). ``MACOS_APPS_READ_ONLY`` wins unconditionally — it is the
+    safe-deploy guard. Read at registration time, like ``_read_only()``: set it before
+    launching the server.
+    """
+    if _read_only():
+        return False
+    val = os.environ.get("MACOS_APPS_ALLOW_SEND", "").strip().lower()
+    if val in ("1", "true", "yes", "all"):
+        return True
+    return adapter in {p.strip() for p in val.split(",") if p.strip()}
+
+
 def _guard(fn):
     """Convert a typed native failure into a loud, agent-directed tool result (#47).
 
@@ -100,6 +119,16 @@ def _guard(fn):
 _READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
 _ADDITIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": False}
 _DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
+
+# Outbound leaves this machine — a sent mail cannot be recalled by any tool here.
+# MCP's openWorldHint is exactly that signal ("interacts with external entities"), so a
+# host can gate send_mail differently from delete_event, which is destructive but purely
+# local.
+_SEND_ANNOTATIONS = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "openWorldHint": True,
+}
 
 # Names of every registered write tool (#67) — populated by _write_tool/_additive_tool
 # below, in the non-read-only branch only (writes aren't registered in read-only mode).
@@ -141,6 +170,24 @@ def _additive_tool(fn):
         return fn
     _WRITE_TOOLS.add(fn.__name__)
     return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
+
+
+def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
+    """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
+    (#104). Annotated destructive + open-world (#57). ``snapshot``: as on
+    ``_write_tool``, the adapter answering ``snapshot(id)`` for audit before-state on an
+    id-addressed send (#67) — unused today, kept so #86/#84 cannot silently skip
+    before-state capture."""
+
+    def deco(f):
+        if not _allow_send(adapter):
+            return f
+        _WRITE_TOOLS.add(f.__name__)
+        if snapshot is not None:
+            _SNAPSHOT_SOURCES[f.__name__] = snapshot
+        return mcp.tool(annotations=_SEND_ANNOTATIONS)(_guard(f))
+
+    return deco
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
