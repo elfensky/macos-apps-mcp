@@ -25,6 +25,9 @@ from ..text import (
 
 MAX_MUSIC_RESULTS = 50  # pointers-not-payload: cap tracks + playlists combined
 
+_ACTIONS = ("play", "pause", "playpause", "next", "previous")
+_MODES = ("shuffle", "repeat")
+
 # One Apple Event pulls parallel lists of ALL track fields (scales — no per-track round
 # trips), then each free-text field passes through the shared stripFraming handler so a
 # name containing US/RS bytes can't desync the parser. Records: a leading type tag
@@ -81,6 +84,66 @@ end tell
 end timeout
 return out"""
 )
+
+_CONTROL = """on run argv
+  set act to item 1 of argv
+  with timeout of 120 seconds
+  tell application "Music"
+    if act is "play" then
+      play
+    else if act is "pause" then
+      pause
+    else if act is "playpause" then
+      playpause
+    else if act is "next" then
+      next track
+    else if act is "previous" then
+      previous track
+    end if
+  end tell
+  end timeout
+end run"""
+
+_PLAY_PLAYLIST = """on run argv
+  set pid to item 1 of argv
+  with timeout of 120 seconds
+  tell application "Music"
+    try
+      set p to (first playlist whose persistent ID is pid)
+    on error
+      error "no playlist with id " & pid & "; call music_search for valid ids"
+    end try
+    play p
+  end tell
+  end timeout
+end run"""
+
+_SET_VOLUME = """on run argv
+  set lvl to (item 1 of argv) as integer
+  with timeout of 120 seconds
+  tell application "Music"
+    set sound volume to lvl
+  end tell
+  end timeout
+end run"""
+
+_SET_MODE = """on run argv
+  set md to item 1 of argv
+  set onFlag to (item 2 of argv) is "1"
+  with timeout of 120 seconds
+  tell application "Music"
+    if md is "shuffle" then
+      set shuffle enabled to onFlag
+    else if md is "repeat" then
+      if onFlag then
+        set song repeat to all
+      else
+        set song repeat to off
+      end if
+    end if
+  end tell
+  end timeout
+end run"""
 
 
 def _parse_now_playing(raw: str) -> dict:
@@ -152,3 +215,44 @@ class MusicAdapter:
     def now_playing(self) -> dict:
         """Current player state + track, or {"state": "stopped"}."""
         return _parse_now_playing(run_osascript(_NOW_PLAYING))
+
+    # ponytail: each action does one extra osascript round-trip (now_playing) to return
+    # a useful resulting state. Fine — actions are interactive, not a hot loop. Return a
+    # cheaper confirmation dict if that ever shows up as latency.
+    def control(self, action: str) -> dict:
+        """Playback control: action in play|pause|playpause|next|previous."""
+        action = action.strip().lower()
+        if action not in _ACTIONS:
+            raise ValueError(
+                f"unknown music action {action!r}; expected one of "
+                f"{', '.join(_ACTIONS)}"
+            )
+        run_osascript(_CONTROL, action)
+        return self.now_playing()
+
+    def play_playlist(self, ident: str) -> dict:
+        """Play a playlist by its persistent id (from music_search)."""
+        ident = ident.strip()
+        if not ident:
+            raise ValueError(
+                "play_playlist needs a playlist id (got empty); call music_search"
+            )
+        run_osascript(_PLAY_PLAYLIST, ident)
+        return self.now_playing()
+
+    def set_volume(self, level: int) -> dict:
+        """Set the Music app sound volume (0–100)."""
+        if not 0 <= level <= 100:
+            raise ValueError(f"volume must be 0–100; got {level}")
+        run_osascript(_SET_VOLUME, str(level))
+        return self.now_playing()
+
+    def set_mode(self, mode: str, on: bool) -> dict:
+        """Set shuffle (boolean) or repeat (on→all, off→off)."""
+        mode = mode.strip().lower()
+        if mode not in _MODES:
+            raise ValueError(
+                f"unknown mode {mode!r}; expected one of {', '.join(_MODES)}"
+            )
+        run_osascript(_SET_MODE, mode, "1" if on else "0")
+        return self.now_playing()

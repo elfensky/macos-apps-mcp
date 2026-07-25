@@ -71,3 +71,74 @@ def test_now_playing_playing(monkeypatch):
     assert r["id"] == "TID"
     assert r["position"] == "5.0"
     assert r["duration"] == "200.0"
+
+
+def _recorder():
+    """A fake run_osascript that records (script, args) and returns 'stopped' so the
+    trailing now_playing() call parses to {"state": "stopped"}."""
+    calls: list = []
+
+    def fake(script, *args, **kwargs):
+        calls.append((script, args))
+        return "stopped"
+
+    return calls, fake
+
+
+def test_control_rejects_unknown_verb():
+    import pytest
+
+    with pytest.raises(ValueError):
+        MusicAdapter().control("destroy")
+
+
+def test_control_dispatches_action(monkeypatch):
+    calls, fake = _recorder()
+    monkeypatch.setattr(music, "run_osascript", fake)
+    assert MusicAdapter().control("next") == {"state": "stopped"}
+    assert calls[0][0] is music._CONTROL
+    assert calls[0][1] == ("next",)  # action via argv, never interpolated
+
+
+def test_set_volume_rejects_out_of_range():
+    import pytest
+
+    with pytest.raises(ValueError):
+        MusicAdapter().set_volume(150)
+
+
+def test_set_volume_passes_level(monkeypatch):
+    calls, fake = _recorder()
+    monkeypatch.setattr(music, "run_osascript", fake)
+    MusicAdapter().set_volume(30)
+    assert calls[0][0] is music._SET_VOLUME
+    assert calls[0][1] == ("30",)
+
+
+def test_set_mode_rejects_unknown_mode():
+    import pytest
+
+    with pytest.raises(ValueError):
+        MusicAdapter().set_mode("crossfade", True)
+
+
+def test_set_mode_maps_repeat_bool(monkeypatch):
+    calls, fake = _recorder()
+    monkeypatch.setattr(music, "run_osascript", fake)
+    MusicAdapter().set_mode("repeat", True)
+    assert calls[0][1] == ("repeat", "1")
+
+
+def test_play_playlist_requires_id():
+    import pytest
+
+    with pytest.raises(ValueError):
+        MusicAdapter().play_playlist("  ")
+
+
+def test_play_playlist_passes_id(monkeypatch):
+    calls, fake = _recorder()
+    monkeypatch.setattr(music, "run_osascript", fake)
+    MusicAdapter().play_playlist("PID1")
+    assert calls[0][0] is music._PLAY_PLAYLIST
+    assert calls[0][1] == ("PID1",)
