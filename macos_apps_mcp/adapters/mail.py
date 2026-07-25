@@ -12,6 +12,10 @@ DO send — but only when the operator opts in via ``MACOS_APPS_ALLOW_SEND`` (un
 default, so absent unless explicitly enabled) and ``dry_run`` still defaults to True
 even then (the surveyed-consensus safe shape: a wrong-recipient/address-leak send is
 the ecosystem's most dangerous mail tool, so it's gated + previewed, not eliminated).
+``sent: True`` from any of them means Mail ACCEPTED the message, NOT that it was
+delivered — device-verified: an accepted send can sit in Mail's Outbox undelivered for
+minutes, so every send/reply_all/forward result also reports ``outbox_pending`` (Mail's
+outbox count) and a ``note`` when it's non-zero.
 Mail's AppleScript is slow on large mailboxes, so reads are capped and the osascript
 timeout bounds a pathological search. User input goes via argv / a tempfile — not
 interpolated.
@@ -361,6 +365,51 @@ _FORWARD = """on run argv
   end tell
   end timeout
 end run"""
+
+# outbox_pending (#134): a successful `send`/`reply`/`forward` verb means Mail ACCEPTED
+# the message — NOT that it left this machine. Device-verified 2026-07-25: a
+# perfectly-formed message (correct subject, recipient, sender) was accepted by `send`,
+# this code returned `sent: True`, and the message then sat in Mail's Outbox undelivered
+# for minutes. A recipient-less message stranded by an error path can also JAM the
+# outbox, so later, valid sends queue behind it and never leave. Called after every send
+# script runs (send/reply_all/forward), never before — this reports Mail's WHOLE outbox
+# count, not specifically the message this call just sent: once the native verb consumes
+# our outgoing message there is no stable id left to re-identify it by, so we cannot
+# scope the count to just ours. A non-zero count therefore only means "something is
+# queued", not "our message is queued" — but that's still the actionable signal: it
+# tells the caller delivery is NOT confirmed and Mail's Outbox needs a look. Do not
+# invent subject-matching or other heuristics to attribute the count to one message.
+_OUTBOX_COUNT = """on run argv
+  with timeout of 120 seconds
+  tell application "Mail"
+    return (count of outgoing messages) as text
+  end tell
+  end timeout
+end run"""
+
+
+def _outbox_pending() -> int:
+    """Run _OUTBOX_COUNT and parse the result. The script always returns a plain
+    integer coerced `as text`, so a parse failure means something is structurally
+    wrong — let it raise rather than silently reporting 0 (which would itself be the
+    dishonest-success failure this whole feature exists to prevent)."""
+    return int(run_osascript(_OUTBOX_COUNT).strip())
+
+
+def _with_outbox_pending(result: dict) -> dict:
+    """Merge the outbox truth into a send/reply_all/forward result dict. When Mail's
+    outbox is non-empty, add a `note` a model can relay to the human verbatim — the
+    caller must not treat `sent: True` alone as delivery confirmation."""
+    pending = _outbox_pending()
+    result["outbox_pending"] = pending
+    if pending > 0:
+        result["note"] = (
+            f"Mail still has {pending} message(s) queued in its Outbox — delivery is "
+            "NOT confirmed. Tell the user to open Mail ▸ Outbox to check before "
+            "assuming this was delivered."
+        )
+    return result
+
 
 # reply_all dry-run preview (#129): resolve an inbox message's to/cc recipients — the
 # set reply-all would ACTUALLY reach — plus its sender, by message-id. Reply-all is
@@ -1030,6 +1079,11 @@ class MailAdapter:
         which is NOT predictable from account order (device-verified), so the preview
         reports "(Mail default account)" rather than a guess. Addresses accept a
         comma-separated string or a list; ``html=True`` sends the body as HTML.
+
+        A successful return (``sent: True``) means Mail ACCEPTED the message — NOT
+        that it was delivered (device-verified: an accepted send can sit undelivered
+        in Mail's Outbox for minutes). Check ``outbox_pending``: non-zero means
+        something is still queued and delivery is not confirmed.
         """
         to_list = _split_addrs(to)
         if not to_list:
@@ -1065,7 +1119,7 @@ class MailAdapter:
                 US.join(cc_list),
                 US.join(bcc_list),
             )
-        return {"sent": True, **envelope}
+        return _with_outbox_pending({"sent": True, **envelope})
 
     def reply_all(
         self,
@@ -1088,6 +1142,11 @@ class MailAdapter:
         the no-native-call rule exists to stop CONSTRUCTING an outgoing message (which
         can strand an autosaved draft in Drafts); reading an already-stored inbox
         message strands nothing.
+
+        A successful return (``sent: True``) means Mail ACCEPTED the reply — NOT
+        that it was delivered (device-verified: an accepted send can sit undelivered
+        in Mail's Outbox for minutes). Check ``outbox_pending``: non-zero means
+        something is still queued and delivery is not confirmed.
         """
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
@@ -1124,7 +1183,9 @@ class MailAdapter:
                 )
         with body_file(full) as path:
             run_osascript(_REPLY_ALL, mid, path)
-        return {"sent": True, "reply_to": message_id.strip(), "reply_all": True}
+        return _with_outbox_pending(
+            {"sent": True, "reply_to": message_id.strip(), "reply_all": True}
+        )
 
     def forward(self, message_id: str, to, dry_run: bool = True) -> dict:
         """Forward an inbox message and SEND it. The original message and its
@@ -1137,7 +1198,12 @@ class MailAdapter:
         forward was delivered with 0 once `content` was touched; untouched, all 7
         arrived intact with the full original body). So this method carries no
         covering-note parameter; use ``send`` for a fresh message with your own text.
-        ``dry_run=True`` (default) makes no call into Mail."""
+        ``dry_run=True`` (default) makes no call into Mail.
+
+        A successful return (``sent: True``) means Mail ACCEPTED the forward — NOT
+        that it was delivered (device-verified: an accepted send can sit undelivered
+        in Mail's Outbox for minutes). Check ``outbox_pending``: non-zero means
+        something is still queued and delivery is not confirmed."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("forward needs the original message's id")
@@ -1150,7 +1216,9 @@ class MailAdapter:
                 "would_send": {"to": to_list, "forwarding": message_id.strip()},
             }
         run_osascript(_FORWARD, mid, US.join(to_list))
-        return {"sent": True, "to": to_list, "forwarding": message_id.strip()}
+        return _with_outbox_pending(
+            {"sent": True, "to": to_list, "forwarding": message_id.strip()}
+        )
 
     def reply(
         self, message_id: str, reply_body: str, include_quote: bool = True

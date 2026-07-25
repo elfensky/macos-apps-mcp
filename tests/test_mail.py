@@ -758,8 +758,13 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
     seen = {}
 
     def fake(script, *argv):
-        seen["argv"] = argv
-        return "sent"
+        # a real send now makes TWO calls: _SEND, then the outbox truth-check
+        # (_OUTBOX_COUNT). Dispatch on script identity so the outbox call (whose
+        # argv is empty) can't clobber the _SEND argv this test cares about.
+        if script is mail._SEND:
+            seen["argv"] = argv
+            return "sent"
+        return "0"
 
     # Patched BEFORE the first send() call below: that call is dry_run=True by
     # default and relies on the early return to never reach run_osascript, but
@@ -819,8 +824,14 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     seen = {}
 
     def fake(script, *argv):
-        seen["script"], seen["argv"] = script, argv
-        return "sent"
+        # a real send now dispatches TWO scripts: _SEND, then _OUTBOX_COUNT (#134's
+        # outbox truth-check) — recorded separately so asserting the _SEND argv can't
+        # be clobbered by the outbox call's (empty) argv.
+        if script is mail._SEND:
+            seen["send_script"], seen["send_argv"] = script, argv
+            return "sent"
+        seen["outbox_script"] = script
+        return "3"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().send(
@@ -834,10 +845,15 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
         dry_run=False,
     )
     assert out["sent"] is True
-    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["argv"]
+    # outbox_pending (#134) reports the real outbox count and, when non-zero, a note
+    # for the model to relay — a "sent" result alone is not delivery confirmation.
+    assert out["outbox_pending"] == 3
+    assert "Outbox" in out["note"]
+    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["send_argv"]
     assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
     assert to_j == f"a@b.com{US}e@f.com"
     assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
+    assert seen["outbox_script"] is mail._OUTBOX_COUNT  # the truth-check ran too
 
 
 def test_send_reads_body_through_shared_handler():
@@ -847,6 +863,40 @@ def test_send_reads_body_through_shared_handler():
     assert "on readBody(p)" in mail._SEND
     assert "my readBody(item 2 of argv)" in mail._SEND
     assert mail._SEND.count("read (POSIX file") == 1  # only inside the handler itself
+
+
+# --- outbox_pending truth-check (#134) -------------------------------------------
+
+
+def test_outbox_count_script_counts_the_outgoing_messages():
+    # the AppleScript that backs outbox_pending must actually count Mail's outbox and
+    # be bounded like every other template in this file.
+    assert "count of outgoing messages" in mail._OUTBOX_COUNT
+    assert "with timeout of 120 seconds" in mail._OUTBOX_COUNT
+
+
+def test_outbox_pending_runs_the_count_script(monkeypatch):
+    seen = []
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: seen.append(a) or "4")
+    assert mail._outbox_pending() == 4
+    assert seen == [(mail._OUTBOX_COUNT,)]  # no argv — the script needs none
+
+
+def test_with_outbox_pending_zero_omits_note(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "0")
+    out = mail._with_outbox_pending({"sent": True})
+    assert out == {"sent": True, "outbox_pending": 0}
+    assert "note" not in out
+
+
+def test_with_outbox_pending_nonzero_adds_actionable_note(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "2")
+    out = mail._with_outbox_pending({"sent": True})
+    assert out["outbox_pending"] == 2
+    # worded so a model relaying it to a human states delivery is NOT confirmed and
+    # points at where to check.
+    assert "not confirmed" in out["note"].lower()
+    assert "Outbox" in out["note"]
 
 
 def test_send_rejects_missing_recipient():
@@ -898,6 +948,10 @@ def test_reply_all_sends_with_quote(monkeypatch):
         seen[script] = argv
         if script is mail._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        # #134: reply_all now also runs the outbox truth-check (_OUTBOX_COUNT)
+        # after _REPLY_ALL — return a real count for it, "sent" for _REPLY_ALL.
+        if script is mail._OUTBOX_COUNT:
+            return "0"
         return "sent"
 
     def fake_body_file(text):
@@ -907,10 +961,17 @@ def test_reply_all_sends_with_quote(monkeypatch):
     monkeypatch.setattr(mail, "run_osascript", fake)
     monkeypatch.setattr(mail, "body_file", fake_body_file)
     out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good", dry_run=False)
-    assert out == {"sent": True, "reply_to": "<orig@x>", "reply_all": True}
+    assert out == {
+        "sent": True,
+        "reply_to": "<orig@x>",
+        "reply_all": True,
+        "outbox_pending": 0,
+    }
+    assert "note" not in out  # zero pending: no caveat needed
     assert bodies["text"].startswith("Sounds good")
     assert "> Original text" in bodies["text"]
     assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body")
+    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def test_reply_all_reads_body_through_shared_handler():
@@ -947,12 +1008,21 @@ def test_forward_sends_via_argv(monkeypatch):
 
     def fake(script, *argv):
         seen[script] = argv
+        # #134: forward now also runs the outbox truth-check (_OUTBOX_COUNT) after
+        # _FORWARD — it must return a real count, not the opaque "sent" _FORWARD uses.
+        if script is mail._OUTBOX_COUNT:
+            return "2"
         return "sent"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().forward("<orig@x>", "a@b.com", dry_run=False)
-    assert out == {"sent": True, "to": ["a@b.com"], "forwarding": "<orig@x>"}
+    assert out["sent"] is True
+    assert out["to"] == ["a@b.com"]
+    assert out["forwarding"] == "<orig@x>"
+    assert out["outbox_pending"] == 2
+    assert "Outbox" in out["note"]  # non-zero pending: caveat included
     assert seen[mail._FORWARD] == ("orig@x", "a@b.com")
+    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def test_forward_rejects_missing_recipient():
