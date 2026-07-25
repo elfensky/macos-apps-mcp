@@ -247,6 +247,18 @@ def test_create_draft_returns_locator_dict(monkeypatch):
     assert "drafts()" in out["note"]
 
 
+def test_create_draft_reads_body_through_shared_handler():
+    # Bug 1 (device-verified): a bare `read (POSIX file …) as «class utf8»` raises -39
+    # ("End of file error") on a ZERO-BYTE file — an empty create_draft body crashed
+    # since 0.8.0. The script must compose the shared readBody handler instead of
+    # reading directly.
+    assert "on readBody(p)" in _CREATE_DRAFT
+    assert "my readBody(item 3 of argv)" in _CREATE_DRAFT
+    # "read (POSIX file" legitimately appears ONCE, inside the readBody handler itself
+    # — the `on run` body must never call it bare (a second, direct occurrence).
+    assert _CREATE_DRAFT.count("read (POSIX file") == 1
+
+
 def test_create_draft_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
     # deleted in the error path. Assert the STRUCTURE (delete msg between `on error` and
@@ -574,6 +586,14 @@ def test_reply_never_sends():
     assert "opening window yes" in _REPLY  # opens for human review
 
 
+def test_reply_reads_body_through_shared_handler():
+    # Bug 1: same -39-on-empty-file hazard as _CREATE_DRAFT — _REPLY must compose the
+    # shared readBody handler rather than reading the tempfile directly.
+    assert "on readBody(p)" in _REPLY
+    assert "my readBody(item 2 of argv)" in _REPLY
+    assert _REPLY.count("read (POSIX file") == 1  # only inside the handler itself
+
+
 def test_reply_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
     # deleted in the error path, structurally (not just present as loose words).
@@ -812,6 +832,15 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
 
 
+def test_send_reads_body_through_shared_handler():
+    # Bug 1 (device-verified): a subject-only send leaves the body tempfile EMPTY,
+    # which crashes a bare `read … as «class utf8»` with -39. _SEND must compose the
+    # shared readBody handler instead.
+    assert "on readBody(p)" in mail._SEND
+    assert "my readBody(item 2 of argv)" in mail._SEND
+    assert mail._SEND.count("read (POSIX file") == 1  # only inside the handler itself
+
+
 def test_send_rejects_missing_recipient():
     with pytest.raises(ValueError, match="recipient"):
         mail.MailAdapter().send("  ", "Hi", "body", dry_run=False)
@@ -862,6 +891,15 @@ def test_reply_all_sends_with_quote(monkeypatch):
     assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body")
 
 
+def test_reply_all_reads_body_through_shared_handler():
+    # Bug 1: same -39-on-empty-file hazard — _REPLY_ALL must compose the shared
+    # readBody handler rather than reading the tempfile directly.
+    assert "on readBody(p)" in mail._REPLY_ALL
+    assert "my readBody(item 2 of argv)" in mail._REPLY_ALL
+    # only inside the handler itself
+    assert mail._REPLY_ALL.count("read (POSIX file") == 1
+
+
 def test_reply_all_rejects_empty_body():
     with pytest.raises(ValueError, match="non-empty"):
         mail.MailAdapter().reply_all("<orig@x>", "   ", dry_run=False)
@@ -872,13 +910,17 @@ def test_forward_dry_run_reports_recipients(monkeypatch):
         raise AssertionError("dry run must not call osascript")
 
     monkeypatch.setattr(mail, "run_osascript", boom)
-    out = mail.MailAdapter().forward("<orig@x>", "a@b.com, c@d.com", "FYI")
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com, c@d.com")
     assert out["dry_run"] is True
-    assert out["would_send"]["to"] == ["a@b.com", "c@d.com"]
-    assert out["would_send"]["forwarding"] == "<orig@x>"
+    assert out["would_send"] == {
+        "to": ["a@b.com", "c@d.com"],
+        "forwarding": "<orig@x>",
+    }
 
 
 def test_forward_sends_via_argv(monkeypatch):
+    # forward carries NO body/note — its argv is just (message id, US-joined
+    # recipients); no tempfile is ever created for it.
     seen = {}
 
     def fake(script, *argv):
@@ -886,12 +928,19 @@ def test_forward_sends_via_argv(monkeypatch):
         return "sent"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail, "body_file", lambda t: nullcontext("/tmp/fwd-body"))
-    out = mail.MailAdapter().forward("<orig@x>", "a@b.com", "FYI", dry_run=False)
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com", dry_run=False)
     assert out == {"sent": True, "to": ["a@b.com"], "forwarding": "<orig@x>"}
-    assert seen[mail._FORWARD] == ("orig@x", "/tmp/fwd-body", "a@b.com")
+    assert seen[mail._FORWARD] == ("orig@x", "a@b.com")
 
 
 def test_forward_rejects_missing_recipient():
     with pytest.raises(ValueError, match="recipient"):
-        mail.MailAdapter().forward("<orig@x>", "", "FYI", dry_run=False)
+        mail.MailAdapter().forward("<orig@x>", "", dry_run=False)
+
+
+def test_forward_script_never_touches_content():
+    # Bug 2 (device-verified): writing `content` of a forward is both a no-op read
+    # (the original is permanently unreadable via AppleScript) and destructive
+    # (writing it at all strips every attachment — a real 7-attachment forward was
+    # delivered with 0 once `content` was touched). _FORWARD must never set it.
+    assert "set content of" not in mail._FORWARD

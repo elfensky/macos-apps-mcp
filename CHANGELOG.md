@@ -16,6 +16,22 @@ surface may still shift between minor versions.
   removes one by message-id with `dry_run` preview and audit before-state. Both are
   ungated by `ALLOW_SEND` — listing and deleting your own drafts is not outbound.
 
+### Fixed
+
+- **Empty-body AppleScript crash (`-39`).** A body-carrying Mail script reading an
+  empty tempfile via `read … as «class utf8»` raised "End of file error" — this broke
+  `forward`'s default empty note, a subject-only `send_mail`, and (shipped in 0.8.0)
+  `create_draft` with an empty body. All body reads now go through a shared
+  `readBody` handler (`macos_apps_mcp/text.py`) that treats a zero-byte file as empty
+  text, not an error.
+- **`forward_mail` dropped its `body`/note parameter.** Device-verified: `content` of
+  a forwarded message is unreadable via AppleScript at any point after `forward` is
+  invoked, so the previous "prepend a note" implementation was silently replacing the
+  whole body with just the note — and writing `content` at all, even once, stripped
+  every attachment from the outgoing message (a real 7-attachment forward arrived with
+  0). `forward_mail` now forwards the original and its attachments unchanged and
+  accepts no covering note; use `send_mail` for a fresh message with your own text.
+
 ### Notes
 
 - `send_draft` was investigated and dropped: Mail's `send` verb applies only to an

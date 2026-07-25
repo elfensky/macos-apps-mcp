@@ -96,7 +96,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
 | `reply_all` | `message_id`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
-| `forward_mail` | `message_id`, `to`, `body`, `dry_run` | **gated**; `body` is prepended, original preserved |
+| `forward_mail` | `message_id`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 
