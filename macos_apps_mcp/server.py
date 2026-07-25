@@ -466,6 +466,14 @@ def drafts() -> list[dict[str, str]]:
     return [p.as_dict() for p in _mail.list_drafts()]
 
 
+@_write_tool(snapshot=_mail)
+def delete_draft(id: str, dry_run: bool = False) -> dict:
+    """Delete one Mail draft by its message-id (from drafts()). `dry_run=True` previews
+    the draft that WOULD be deleted (pointer, no mutation). Destructive but LOCAL — this
+    deletes an unsent draft, it never sends. Needs Automation access for Mail."""
+    return _mail.delete_draft(id, dry_run=dry_run)
+
+
 @_read_tool
 def notes(title: str) -> list[dict[str, str]]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast

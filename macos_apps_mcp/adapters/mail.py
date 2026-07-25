@@ -185,6 +185,29 @@ on run argv
 end run"""
 )
 
+# delete_draft (#82): resolve one draft by RFC822 message-id and delete it. Iterates
+# IN REVERSE BY INDEX: deleting while iterating a forward collection invalidates the
+# reference (-1728, device-verified), and a `whose` equality filter is unreliable on the
+# Drafts mailbox. Returns immediately after the delete, so at most one is removed.
+_DELETE_DRAFT = """on run argv
+  set mid to item 1 of argv
+  with timeout of 120 seconds
+  tell application "Mail"
+    set dm to drafts mailbox
+    set n to count of (messages of dm)
+    repeat with i from n to 1 by -1
+      set m to message i of dm
+      set thisId to message id of m
+      if thisId is not missing value and (thisId as text) is mid then
+        delete m
+        return "deleted"
+      end if
+    end repeat
+    error "no draft with that message id"
+  end tell
+  end timeout
+end run"""
+
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
@@ -723,6 +746,24 @@ class MailAdapter:
             if p.id == mid:
                 return p
         return None
+
+    def delete_draft(self, ident: str, dry_run: bool = False) -> dict:
+        """Delete one draft by its RFC822 message-id (from `list_drafts`).
+        ``dry_run=True`` resolves the target and returns the Pointer that WOULD be
+        deleted, no mutation — the `delete_event` shape. Raises if the id resolves to
+        no draft, so a stale id fails loudly instead of silently deleting nothing."""
+        mid = ident.strip()
+        if not mid:
+            raise ValueError(
+                "delete_draft needs a draft id (the message-id from drafts)"
+            )
+        if dry_run:
+            found = self.snapshot(mid)
+            if found is None:
+                raise ValueError(f"no draft with message id {mid!r}")
+            return {"dry_run": True, "would_delete": found.as_dict()}
+        run_osascript(_DELETE_DRAFT, mid)
+        return {"deleted": True, "id": mid}
 
     def reply(
         self, message_id: str, reply_body: str, include_quote: bool = True
