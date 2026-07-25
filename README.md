@@ -91,6 +91,7 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 | `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
+| `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 

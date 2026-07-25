@@ -474,6 +474,37 @@ def delete_draft(id: str, dry_run: bool = False) -> dict:
     return _mail.delete_draft(id, dry_run=dry_run)
 
 
+@_send_tool("mail")
+def send_mail(
+    to: str,
+    subject: str = "",
+    body: str = "",
+    cc: str | None = None,
+    bcc: str | None = None,
+    html: bool = False,
+    from_address: str | None = None,
+    dry_run: bool = True,
+) -> dict:
+    """SEND a new mail — this leaves your machine and cannot be recalled.
+
+    `dry_run` DEFAULTS TO TRUE: the first call previews the resolved envelope without
+    touching Mail. Pass `dry_run=False` to actually send. Addresses are
+    comma-separated (or a list). `from_address` picks the sending account; omitted,
+    Mail uses its default. `html=True` sends the body as HTML. Registered ONLY when
+    MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for Mail.
+    """
+    return _mail.send(
+        to,
+        subject,
+        body,
+        cc=cc,
+        bcc=bcc,
+        html=html,
+        from_address=from_address,
+        dry_run=dry_run,
+    )
+
+
 @_read_tool
 def notes(title: str) -> list[dict[str, str]]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast

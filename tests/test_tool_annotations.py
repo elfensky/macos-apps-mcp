@@ -39,6 +39,7 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "run_shortcut",
         "update_note",
         "delete_draft",
+        "send_mail",
     }
 )
 # The full write half of the read/write seam. Everything else is read-only.
@@ -74,6 +75,7 @@ _PERMISSION = {
     "mail_reply": "Automation",
     "drafts": "Automation",
     "delete_draft": "Automation",
+    "send_mail": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
     "note_bodies": "Automation",
@@ -166,4 +168,13 @@ def test_every_write_tool_is_audit_classified():
         "set_volume",
         "set_mode",
     }
+    if srv._allow_send("mail"):
+        envelope_only |= {"send_mail", "reply_all", "forward_mail"}
     assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS
+
+
+def test_send_tools_absent_by_default():
+    # "Never sends" is the default: with MACOS_APPS_ALLOW_SEND unset, the outbound tools
+    # are not registered at all — absent, not erroring.
+    live = {t.name for t in _tools()}
+    assert not ({"send_mail", "reply_all", "forward_mail"} & live)

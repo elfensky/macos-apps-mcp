@@ -208,6 +208,65 @@ _DELETE_DRAFT = """on run argv
   end timeout
 end run"""
 
+# send (#83): the FIRST tool here that dispatches outside this machine — gated by
+# MACOS_APPS_ALLOW_SEND at registration, so it does not exist unless the operator opted
+# in. `visible:false` + `send` is device-verified (2026-07-25): the "send needs a
+# visible compose window" folklore does not hold. Recipient lists arrive as ONE argv
+# item per field, US-joined (an email address cannot contain U+001F). Body via
+# tempfile as «class utf8». Atomic (#44): delete the partial message on any
+# post-creation error — note that Mail may still keep an autosaved Drafts copy, a
+# known Mail behaviour we cannot fully suppress, which is exactly why the DRY-RUN
+# path builds nothing at all.
+_SEND = """on run argv
+  set subj to item 1 of argv
+  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  set isHtml to (item 3 of argv) is "1"
+  set fromAddr to item 4 of argv
+  set toList to item 5 of argv
+  set ccList to item 6 of argv
+  set bccList to item 7 of argv
+  set us to character id 31
+  with timeout of 120 seconds
+  tell application "Mail"
+    set msg to make new outgoing message with properties {visible:false}
+    try
+      set subject of msg to subj
+      if isHtml then
+        set html content of msg to bodyText
+      else
+        set content of msg to bodyText
+      end if
+      if fromAddr is not "" then set sender of msg to fromAddr
+      set AppleScript's text item delimiters to us
+      repeat with a in (text items of toList)
+        if (a as text) is not "" then
+          tell msg to make new to recipient with properties {address:(a as text)}
+        end if
+      end repeat
+      repeat with a in (text items of ccList)
+        if (a as text) is not "" then
+          tell msg to make new cc recipient with properties {address:(a as text)}
+        end if
+      end repeat
+      repeat with a in (text items of bccList)
+        if (a as text) is not "" then
+          tell msg to make new bcc recipient with properties {address:(a as text)}
+        end if
+      end repeat
+      set AppleScript's text item delimiters to ""
+      send msg
+      return "sent"
+    on error errMsg
+      set AppleScript's text item delimiters to ""
+      try
+        delete msg
+      end try
+      error errMsg
+    end try
+  end tell
+  end timeout
+end run"""
+
 # reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
 # so Python can build the quoted block deterministically (Mail's auto-quote is NOT
 # visible via the content property — spike 2026-07-11). Scoped to inbox, like _BODY.
@@ -678,6 +737,15 @@ def _parse_draft_records(raw: str) -> list[Pointer]:
     return out
 
 
+def _split_addrs(value) -> list[str]:
+    """Normalize a recipient argument to a list of addresses. Accepts a comma-separated
+    string (what a model usually produces) or a list; blanks are dropped. None → []."""
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else str(value).split(",")
+    return [str(a).strip() for a in items if str(a).strip()]
+
+
 class MailAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """query: a substring to match against the inbox subject OR sender (#61)."""
@@ -764,6 +832,65 @@ class MailAdapter:
             return {"dry_run": True, "would_delete": found.as_dict()}
         run_osascript(_DELETE_DRAFT, mid)
         return {"deleted": True, "id": mid}
+
+    def send(
+        self,
+        to,
+        subject: str = "",
+        body: str = "",
+        cc=None,
+        bcc=None,
+        html: bool = False,
+        from_address: str | None = None,
+        dry_run: bool = True,
+    ) -> dict:
+        """Send a NEW mail — the one path here that leaves this machine.
+
+        ``dry_run=True`` (the default, deliberately inverted from the id-addressed
+        deletes) returns the resolved envelope and makes NO call into Mail: a send
+        CONSTRUCTS its recipient, so a wrong recipient is the failure that matters,
+        and a dry run must not strand an autosaved draft in the user's mailbox.
+
+        ``from_address`` sets the sending account. Omitted, Mail picks its default —
+        which is NOT predictable from account order (device-verified), so the preview
+        reports "(Mail default account)" rather than a guess. Addresses accept a
+        comma-separated string or a list; ``html=True`` sends the body as HTML.
+        """
+        to_list = _split_addrs(to)
+        if not to_list:
+            raise ValueError("send_mail needs at least one recipient address (to)")
+        if not (subject or "").strip() and not (body or "").strip():
+            raise ValueError("send_mail needs a subject or a body (both were empty)")
+        cc_list, bcc_list = _split_addrs(cc), _split_addrs(bcc)
+        sender = (from_address or "").strip()
+        envelope = {
+            "to": to_list,
+            "cc": cc_list,
+            "bcc": bcc_list,
+            "from": sender or "(Mail default account)",
+            "subject": subject or "",
+        }
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_send": {
+                    **envelope,
+                    "body_chars": len(body or ""),
+                    "html": bool(html),
+                },
+            }
+        with body_file(body or "") as path:
+            run_osascript(
+                _SEND,
+                subject or "",
+                path,
+                "1" if html else "0",
+                sender,
+                US.join(to_list),
+                US.join(cc_list),
+                US.join(bcc_list),
+            )
+        return {"sent": True, **envelope}
 
     def reply(
         self, message_id: str, reply_body: str, include_quote: bool = True
