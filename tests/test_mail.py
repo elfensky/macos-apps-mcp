@@ -729,22 +729,97 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
     # the argv actually handed to run_osascript (what Mail actually sends to) must
     # describe the SAME recipient set — an injected \u001f must not let them diverge
     # (the preview showing ONE recipient while the wire actually carries TWO).
-    injected_to = "alice@corp.com\u001fexfil@evil.tld"
-    preview = mail.MailAdapter().send(injected_to, "Hi", "body")
-    previewed_to = preview["would_send"]["to"]
-    assert previewed_to == ["alice@corp.comexfil@evil.tld"]
-
     seen = {}
 
     def fake(script, *argv):
         seen["argv"] = argv
         return "sent"
 
+    # Patched BEFORE the first send() call below: that call is dry_run=True by
+    # default and relies on the early return to never reach run_osascript, but
+    # patching up front means a regression in that early return fails loudly here
+    # instead of firing a real osascript send into Mail.app under a plain
+    # `uv run pytest`.
     monkeypatch.setattr(mail, "run_osascript", fake)
+
+    injected_to = "alice@corp.com\u001fexfil@evil.tld"
+    preview = mail.MailAdapter().send(injected_to, "Hi", "body")
+    previewed_to = preview["would_send"]["to"]
+    assert previewed_to == ["alice@corp.comexfil@evil.tld"]
+
     mail.MailAdapter().send(injected_to, "Hi", "body", dry_run=False)
     _subj, _path, _html, _from, to_j, _cc_j, _bcc_j = seen["argv"]
     wire_to = [a for a in to_j.split(mail.US) if a]
     assert wire_to == previewed_to  # preview and wire agree by construction
+
+
+def test_send_dry_run_touches_nothing(monkeypatch):
+    # A dry run must make NO native call: constructing an outgoing message can strand an
+    # autosaved copy in Drafts even when the script deletes it (device-verified). This
+    # is the load-bearing safety invariant for `send` — the most dangerous of the three
+    # outbound paths — mirroring the equivalent guard on reply_all/forward below.
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().send(
+        "a@b.com", "Hi", "body text", cc="c@d.com", from_address="me@corp.com"
+    )
+    assert out == {
+        "dry_run": True,
+        "would_send": {
+            "to": ["a@b.com"],
+            "cc": ["c@d.com"],
+            "bcc": [],
+            "from": "me@corp.com",
+            "subject": "Hi",
+            "body_chars": 9,
+            "html": False,
+        },
+    }
+
+
+def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    out = mail.MailAdapter().send("a@b.com", "Hi", "x")
+    # Mail's default sender is NOT predictable from account order (device-verified), so
+    # never report a computed guess.
+    assert out["would_send"]["from"] == "(Mail default account)"
+
+
+def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen["script"], seen["argv"] = script, argv
+        return "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().send(
+        "a@b.com,e@f.com",
+        "Hi",
+        "body",
+        cc="c@d.com",
+        bcc="x@y.com",
+        html=True,
+        from_address="me@corp.com",
+        dry_run=False,
+    )
+    assert out["sent"] is True
+    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["argv"]
+    assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
+    assert to_j == f"a@b.com{US}e@f.com"
+    assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
+
+
+def test_send_rejects_missing_recipient():
+    with pytest.raises(ValueError, match="recipient"):
+        mail.MailAdapter().send("  ", "Hi", "body", dry_run=False)
+
+
+def test_send_rejects_empty_subject_and_body():
+    with pytest.raises(ValueError, match="subject or a body"):
+        mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
 
 
 def test_reply_all_dry_run_touches_nothing(monkeypatch):
