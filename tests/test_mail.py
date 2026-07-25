@@ -660,3 +660,80 @@ def test_delete_draft_deletes_by_message_id(monkeypatch):
 def test_delete_draft_rejects_empty_id():
     with pytest.raises(ValueError, match="draft id"):
         mail.MailAdapter().delete_draft("   ")
+
+
+# --- send (#83) -------------------------------------------------------------------
+
+
+def test_split_addrs_accepts_string_and_list():
+    assert mail._split_addrs("a@b.com, c@d.com") == ["a@b.com", "c@d.com"]
+    assert mail._split_addrs(["a@b.com", " c@d.com "]) == ["a@b.com", "c@d.com"]
+    assert mail._split_addrs(None) == []
+    assert mail._split_addrs(" , ") == []
+
+
+def test_send_dry_run_touches_nothing(monkeypatch):
+    # A dry run must make NO native call: constructing an outgoing message can strand an
+    # autosaved copy in Drafts even when the script deletes it (device-verified).
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().send(
+        "a@b.com", "Hi", "body text", cc="c@d.com", from_address="me@corp.com"
+    )
+    assert out == {
+        "dry_run": True,
+        "would_send": {
+            "to": ["a@b.com"],
+            "cc": ["c@d.com"],
+            "bcc": [],
+            "from": "me@corp.com",
+            "subject": "Hi",
+            "body_chars": 9,
+            "html": False,
+        },
+    }
+
+
+def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    out = mail.MailAdapter().send("a@b.com", "Hi", "x")
+    # Mail's default sender is NOT predictable from account order (device-verified), so
+    # never report a computed guess.
+    assert out["would_send"]["from"] == "(Mail default account)"
+
+
+def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen["script"], seen["argv"] = script, argv
+        return "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().send(
+        "a@b.com,e@f.com",
+        "Hi",
+        "body",
+        cc="c@d.com",
+        bcc="x@y.com",
+        html=True,
+        from_address="me@corp.com",
+        dry_run=False,
+    )
+    assert out["sent"] is True
+    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["argv"]
+    assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
+    assert to_j == f"a@b.com{US}e@f.com"
+    assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
+
+
+def test_send_rejects_missing_recipient():
+    with pytest.raises(ValueError, match="recipient"):
+        mail.MailAdapter().send("  ", "Hi", "body", dry_run=False)
+
+
+def test_send_rejects_empty_subject_and_body():
+    with pytest.raises(ValueError, match="subject or a body"):
+        mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
