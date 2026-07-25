@@ -263,16 +263,15 @@ def diagnose(request: bool = False) -> dict:
         "agent": agent,
         "grant_identities": ids,
         "outbound": outbound,
+        # Terse by design: this rides in EVERY doctor report and the whole report has a
+        # hard context budget (test_report_stays_under_token_budget). The daemon's
+        # launchctl steps live in README "Outbound (send) mode", not here.
         "outbound_note": (
-            "sending is ON for: " + ", ".join(outbound)
+            "sending ON for: " + ", ".join(outbound)
             if outbound
-            else "sending is OFF for every adapter (MACOS_APPS_ALLOW_SEND is unset, "
-            "or set to a value matching no adapter). Set MACOS_APPS_ALLOW_SEND "
-            "(e.g. 'mail') on the process THIS server runs as, then restart it, to "
-            "enable send_mail/reply_all/forward_mail. Under the launchd daemon "
-            "deployment a client's env block does not reach the daemon process — "
-            "see README.md 'Outbound (send) mode' / docs/DAEMON.md for the "
-            "daemon-specific launchctl steps."
+            else "sending OFF — set MACOS_APPS_ALLOW_SEND (e.g. 'mail') on the process "
+            "this server runs as, then restart it; under launchd a client env block "
+            "does not reach the daemon (see README 'Outbound (send) mode')."
         ),
         "note": (
             "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
