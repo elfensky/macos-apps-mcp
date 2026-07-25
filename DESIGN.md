@@ -124,7 +124,14 @@ first, depth second, differentiators third. Work breakdown → GitHub issues as 
   reminder titles are attacker-writable). Cheapest prompt-injection mitigation; nobody ships it.
 - **Write gating**: registration-time stripping already ships (`MACOS_APPS_READ_ONLY` skips every
   `_write_tool`, incl. `run_shortcut`/`safari_open`); remaining work is `dry_run` + small batch
-  caps on destructive tools.
+  caps on destructive tools. **Outbound is a third tier above writes** (0.9.0): `MACOS_APPS_ALLOW_SEND`
+  is unset by default and takes a per-adapter list, so a user can accept Mail send while refusing
+  iMessage send; `READ_ONLY` wins unconditionally. Same registration-time seam — a gated-off send
+  tool is *absent*, never registered-and-erroring. Send tools carry `openWorldHint` (they act off
+  this machine, unlike `delete_event`, which is destructive but local) and default `dry_run=True`,
+  deliberately inverted from the id-addressed deletes: a delete targets an item a read already
+  returned, while a send *constructs* its recipient, and a wrong recipient is the failure that
+  matters.
 - **Disambiguation rule** (contracts-level): an ambiguous name search returns candidate
   Pointers; writes accept `Pointer.id` only. Fuzzy auto-pick has sent iMessages to the wrong
   human — ambiguity never resolves silently before a write.
