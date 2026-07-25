@@ -4,6 +4,56 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [0.8.0] - 2026-07-25 — New adapters & expansion
+
+New surface (a Music adapter), an indexed Mail read plane, and the distribution
+infrastructure every later milestone sits on: a signed `.app` under launchd that holds the
+TCC grants once, so every client connects through it without re-prompting.
+
+### Added
+
+- **Music adapter** (#69) — six tools over Music.app (Automation): **`music_search`** (library
+  tracks + user playlists as `Pointer`s, id = persistent ID) and **`now_playing`** (player
+  state + current track) read-only; **`music_control`** (play/pause/playpause/next/previous),
+  **`play_playlist`** (by persistent id), **`set_volume`** (0–100), and **`set_mode`**
+  (shuffle / repeat) are additive, reversible player-state changes. Smart-punctuation-
+  insensitive matching via `fold_text` applied to **both** sides of the query (the failure
+  that returned nothing in the one competitor). One bulk Apple Event reads the whole library,
+  so search scales; `now_playing` position/duration are locale-proof integer seconds.
+- **Indexed Mail search** (#70) — **`mail_search`** queries Mail's **Envelope Index**
+  (`sender`/`subject`/`date`/`flags`/`mailbox`) directly instead of walking messages, and
+  **`mail_index_bodies`** builds an **FTS5 body sidecar** so `body=` search is a real index
+  intersection, not an AppleScript scan. WAL + `busy_timeout` so a concurrent build and read
+  can't collide; bounded, sanitized queries.
+- **launchd daemon + TCC-to-bundle** (#71) — a Developer-ID-signed **`macos-apps-mcp.app`**
+  runs under launchd (SMAppService) and owns the TCC grants; clients connect through a stdio
+  **shim** over a home-pinned **unix socket**, so a grant is attributed to the *bundle* once
+  and no client ever re-prompts. New CLI roles (`daemon` / `shim` / `register` /
+  `install-agent`); `scripts/build_app.sh` builds the bundle inside-out
+  (`--timestamp --options runtime`, never `--deep`) from a python-build-standalone
+  interpreter with no `PYTHONHOME`/`PYTHONPATH` needed. The bare `macos-apps-mcp` invocation
+  stays the stdio server, byte-for-byte, for dev/CI. See `docs/DAEMON.md`.
+- **`doctor` deployment section** (#71) — running mode, launchd agent status, and per-service
+  grant identities (which client holds which grant), plus a Full-Disk-Access note.
+
+### Fixed
+
+- **EventKit events entitlement** (#71 acceptance) — macOS 26 hardened-runtime apps are
+  *silently* instant-denied EventKit **events** full access (no prompt, no error, no TCC row)
+  without `com.apple.security.personal-information.calendars`; added it to the bundle
+  entitlements (Reminders was unaffected — the asymmetry cost a debugging session).
+- **Full-Disk-Access visibility** (#123) — FDA (`kTCCServiceSystemPolicyAllFiles`) rows live
+  in the **system** `TCC.db`, not the user one, so `doctor` reported FDA as denied while it
+  was granted and functional; `doctor` now merges the system db (read-only). Also caps the
+  installer's prompt-pass teardown so it can't hang.
+- **Socket rendezvous** (#71 review) — the daemon/shim socket path is home-relative-pinned,
+  not `XDG_STATE_HOME`-derived, so the launchd daemon (no shell env) and a shell-launched
+  shim can't disagree on where to meet.
+- **CI signal** — `_agent_service` pinned its off-bundle guard to our exact
+  `CFBundleIdentifier`, not merely "some bundle": the GitHub macOS runner's Python is itself a
+  bundle, which made the guard miss and reddened every `develop` push. The bundle-gate tests
+  now inject the id, so they're host-independent.
+
 ## [0.7.0] - 2026-07-22 — Differentiators
 
 Greenfield tools no surveyed Apple-apps MCP server ships — value, not parity.

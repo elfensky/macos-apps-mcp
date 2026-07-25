@@ -22,16 +22,7 @@ where they exist; one adapter per app.
 - **0.4.0 — Safety rails** — output hygiene, dry-run + batch caps, untrusted-data notice, id-only writes, tool annotations · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/3)
 - **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4)
 - **0.7.0 — Differentiators** — `free_busy` availability, Notes create/update with stable ids, JSONL write audit trail + `audit()`, Mail triage (needs-response / awaiting-reply as ranked Pointers) · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5)
-
-## 0.8.0 — New adapters & expansion ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6))
-
-Infrastructure that later milestones sit on, plus the first new adapter.
-
-| Issue | What | Prior art |
-|---|---|---|
-| [#70](https://github.com/elfensky/macos-apps-mcp/issues/70) | Envelope Index read plane — indexed Mail search engine | imdinu, che-apple-mail-mcp, rusty_apple_mail_mcp |
-| [#71](https://github.com/elfensky/macos-apps-mcp/issues/71) | launchd daemon + TCC-to-binary attachment (one grant, every client) | FradSer scoped binary; iMCP app as the ceiling |
-| [#69](https://github.com/elfensky/macos-apps-mcp/issues/69) | Music adapter | apple-mcp-pro |
+- **0.8.0 — New adapters & expansion** — indexed Mail search (Envelope Index + FTS body sidecar, #70), launchd daemon + TCC-to-bundle so one grant serves every client (#71), Full-Disk-Access visibility (#123), and the **Music** adapter — search / now-playing / additive playback (#69) · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6)
 
 ## 0.9.0 — Mail depth & outbound ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/7))
 
