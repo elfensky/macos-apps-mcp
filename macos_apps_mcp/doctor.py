@@ -218,7 +218,7 @@ def _outbound_state() -> list[str]:
     server.py, and it does so lazily."""
     from . import server
 
-    return [a for a in server._SEND_ADAPTERS if server._allow_send(a)]
+    return sorted(a for a in server._SEND_ADAPTERS if server._allow_send(a))
 
 
 def diagnose(request: bool = False) -> dict:
