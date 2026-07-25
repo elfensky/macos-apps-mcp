@@ -18,6 +18,13 @@ Full design and rationale: [DESIGN.md](DESIGN.md).
   tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
   `doctor._AUTOMATION_APPS` so `doctor` probes it; it must not reach into another adapter. This is
   what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
+- **Three capability tiers, all gated at registration** (a gated-off tool is *absent*, never
+  registered-and-erroring): read → write (`@_write_tool`/`@_additive_tool`, skipped by
+  `MACOS_APPS_READ_ONLY`) → **outbound** (`@_send_tool("<adapter>")`, registered only when
+  `MACOS_APPS_ALLOW_SEND` names that adapter; `READ_ONLY` wins unconditionally). Outbound acts off
+  this machine, so it carries `openWorldHint` and defaults `dry_run=True` — and its dry-run path must
+  make **no native call at all** (building a Mail `outgoing message` can strand an autosaved draft).
+  A new send tool goes through `_send_tool` or `tests/test_tool_annotations.py` fails.
 
 ## Dev
 
