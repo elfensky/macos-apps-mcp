@@ -620,3 +620,43 @@ def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
 def test_snapshot_returns_none_for_unknown_id(monkeypatch):
     monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
     assert mail.MailAdapter().snapshot("<nope@nowhere>") is None
+
+
+def test_delete_draft_dry_run_makes_no_native_call(monkeypatch):
+    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
+    calls = []
+
+    def fake(script, *argv):
+        calls.append(script)
+        return raw
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "<a@b>"
+    # exactly one call — the snapshot read. Never the delete script.
+    assert calls == [mail._DRAFTS]
+
+
+def test_delete_draft_dry_run_unknown_id_raises(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    with pytest.raises(ValueError, match="no draft"):
+        mail.MailAdapter().delete_draft("<nope@nowhere>", dry_run=True)
+
+
+def test_delete_draft_deletes_by_message_id(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("<a@b>")
+    assert out == {"deleted": True, "id": "<a@b>"}
+    assert seen[mail._DELETE_DRAFT] == ("<a@b>",)
+
+
+def test_delete_draft_rejects_empty_id():
+    with pytest.raises(ValueError, match="draft id"):
+        mail.MailAdapter().delete_draft("   ")
