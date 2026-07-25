@@ -114,9 +114,35 @@ def test_unregister_agent_failure_raises(monkeypatch):
         deploy.unregister_agent()
 
 
-def test_agent_service_outside_bundle_raises():
+def test_agent_service_outside_bundle_raises(monkeypatch):
+    # off-bundle: main-bundle id is None (a bare venv). Inject it so the test doesn't
+    # depend on what the host's Python reports.
+    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: None)
     with pytest.raises(NativeError, match="build_app.sh"):
         deploy._agent_service()
+
+
+def test_agent_service_foreign_bundle_raises(monkeypatch):
+    # a NON-None but foreign bundle id (e.g. the runner's org.python.python) must still
+    # raise — the `is None` check missed this and reddened CI. Reproduce it.
+    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: "org.python.python")
+    with pytest.raises(NativeError, match="build_app.sh"):
+        deploy._agent_service()
+
+
+def test_agent_service_our_bundle_proceeds(monkeypatch):
+    # our exact bundle id passes the gate: _agent_service goes on to call SMAppService.
+    # Stub the framework seam so the positive path is asserted without a real bundle.
+    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: deploy._BUNDLE_ID)
+    import sys
+    import types
+
+    fake_sm = types.ModuleType("ServiceManagement")
+    fake_sm.SMAppService = types.SimpleNamespace(
+        agentServiceWithPlistName_=lambda name: ("svc", name)
+    )
+    monkeypatch.setitem(sys.modules, "ServiceManagement", fake_sm)
+    assert deploy._agent_service() == ("svc", deploy._PLIST)
 
 
 def test_install_agent_missing_app_fails_actionably(tmp_path, capsys):

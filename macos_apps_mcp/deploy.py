@@ -14,6 +14,7 @@ from pathlib import Path
 from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
+_BUNDLE_ID = _PLIST.removesuffix(".plist")  # our signed .app's CFBundleIdentifier
 _TCC_DB = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
 # FDA (kTCCServiceSystemPolicyAllFiles) rows live in the SYSTEM db, not the user one
 # (#123 — found during #71 acceptance: FDA granted + functional, yet invisible here).
@@ -29,16 +30,29 @@ _SERVICES = [
 _STATUS = {0: "not-registered", 1: "enabled", 2: "requires-approval", 3: "not-found"}
 
 
-def _agent_service():
+def _main_bundle_id():
+    """The running process's main-bundle CFBundleIdentifier (None off-bundle). A one-
+    line seam so the bundle-gate is testable by injection, not by whatever the test
+    host's Python reports."""
     import Foundation
+
+    return Foundation.NSBundle.mainBundle().bundleIdentifier()
+
+
+def _agent_service():
+    # Must be OUR signed bundle, not merely SOME bundle: a venv/CI Python can itself be
+    # a bundle with an identifier (e.g. org.python.python on the GitHub runner), so an
+    # `is None` check let this proceed off-bundle and register the wrong plist. Pin
+    # the exact CFBundleIdentifier. Guard BEFORE importing ServiceManagement so the
+    # off-bundle error path never depends on that framework.
+    if _main_bundle_id() != _BUNDLE_ID:
+        raise NativeError(
+            "not running from the ren.lav.macos-apps-mcp .app bundle — SMAppService "
+            "registers plists from the calling bundle. Build with scripts/build_app.sh "
+            "and invoke the bundle executable. Do not retry from the venv."
+        )
     from ServiceManagement import SMAppService
 
-    if Foundation.NSBundle.mainBundle().bundleIdentifier() is None:
-        raise NativeError(
-            "not running from the .app bundle — SMAppService registers plists from "
-            "the calling bundle. Build with scripts/build_app.sh and invoke the "
-            "bundle executable. Do not retry from the venv."
-        )
     return SMAppService.agentServiceWithPlistName_(_PLIST)
 
 
