@@ -526,18 +526,18 @@ def reply_all(
 
 
 @_send_tool("mail")
-def forward_mail(
-    message_id: str, to: str, body: str = "", dry_run: bool = True
-) -> dict:
+def forward_mail(message_id: str, to: str, dry_run: bool = True) -> dict:
     """Forward an inbox message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
-    `body` is prepended as your note; the forwarded original is preserved — except for
-    an HTML original, where prepending a note flattens the whole body to plaintext.
-    `to` is comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the
-    mail adapter. Needs Automation access for Mail.
+    The original message and its attachments are forwarded intact and unchanged.
+    There is NO covering-note parameter: AppleScript cannot add text to a forward
+    without destroying the original body and its attachments (device-verified) — if
+    you want to add your own commentary, use `send_mail` instead. `to` is
+    comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
+    adapter. Needs Automation access for Mail.
     """
-    return _mail.forward(message_id, to, body, dry_run=dry_run)
+    return _mail.forward(message_id, to, dry_run=dry_run)
 
 
 @_read_tool

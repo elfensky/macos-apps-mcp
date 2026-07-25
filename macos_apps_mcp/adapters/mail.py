@@ -28,6 +28,7 @@ from ..contracts import Pointer
 from ..errors import NativeError
 from ..runtime import body_file, run_osascript
 from ..text import (
+    READ_BODY,
     RS,
     STRIP_FRAMING,
     US,
@@ -122,15 +123,20 @@ _MISSING_VALUE = "missing value"
 # create_draft: draft-and-open, NEVER send. `make new outgoing message … visible:true`
 # opens a compose window for the HUMAN to review/send; there is deliberately no `send`
 # verb here (the two-tier safe gate — joshrutkowski/orchard/patrickfreyer). The body is
-# READ from a tempfile as «class utf8» (never interpolated into the script — the
-# supermemoryai pattern), so a long/multiline/unicode body can't break or inject the
-# script. to/subject/tempfile-path all arrive via argv. Atomic (#44): everything after
-# `make new outgoing message` is wrapped in a try; on any failure the partial outgoing
-# message is deleted before re-raising, so a retry can't strand a duplicate draft.
-_CREATE_DRAFT = """on run argv
+# READ from a tempfile via the shared readBody handler (never interpolated into the
+# script — the supermemoryai pattern), so a long/multiline/unicode/EMPTY body can't
+# break, inject, or crash (-39 on a zero-byte file, #READ_BODY) the script. to/subject/
+# tempfile-path all arrive via argv. Atomic (#44): everything after `make new outgoing
+# message` is wrapped in a try; on any failure the partial outgoing message is deleted
+# before re-raising, so a retry can't strand a duplicate draft.
+_CREATE_DRAFT = (
+    READ_BODY
+    + """
+
+on run argv
   set recipientAddr to item 1 of argv
   set subj to item 2 of argv
-  set bodyText to (read (POSIX file (item 3 of argv)) as «class utf8»)
+  set bodyText to my readBody(item 3 of argv)
   with timeout of 120 seconds
   tell application "Mail"
     set msg to make new outgoing message with properties {visible:true}
@@ -146,6 +152,7 @@ _CREATE_DRAFT = """on run argv
   end tell
   end timeout
 end run"""
+)
 
 # drafts (#82): list the Drafts mailbox as US/RS-framed (message id, subject, first
 # recipient) records. Iterates BY INDEX rather than with a `whose` filter — on device,
@@ -217,13 +224,18 @@ end run"""
 # in. `visible:false` + `send` is device-verified (2026-07-25): the "send needs a
 # visible compose window" folklore does not hold. Recipient lists arrive as ONE argv
 # item per field, US-joined (an email address cannot contain U+001F). Body via
-# tempfile as «class utf8». Atomic (#44): delete the partial message on any
-# post-creation error — note that Mail may still keep an autosaved Drafts copy, a
-# known Mail behaviour we cannot fully suppress, which is exactly why the DRY-RUN
-# path builds nothing at all.
-_SEND = """on run argv
+# tempfile through the shared readBody handler (never a bare `read` — a subject-only
+# send leaves an EMPTY body file, which crashes -39, #READ_BODY). Atomic (#44): delete
+# the partial message on any post-creation error — note that Mail may still keep an
+# autosaved Drafts copy, a known Mail behaviour we cannot fully suppress, which is
+# exactly why the DRY-RUN path builds nothing at all.
+_SEND = (
+    READ_BODY
+    + """
+
+on run argv
   set subj to item 1 of argv
-  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  set bodyText to my readBody(item 2 of argv)
   set isHtml to (item 3 of argv) is "1"
   set fromAddr to item 4 of argv
   set toList to item 5 of argv
@@ -270,16 +282,22 @@ _SEND = """on run argv
   end tell
   end timeout
 end run"""
+)
 
 # reply_all (#83): Mail's NATIVE reply verb with `reply to all yes`, so In-Reply-To /
 # References are set by Mail (the only mechanism that threads — make-new-outgoing
 # cannot set headers). `opening window no` keeps it headless; device-verified
 # 2026-07-25, returns an outgoing message with the Re: subject already applied. The
-# body (reply text + our quote, built in Python exactly as `reply` does) is set, then
-# sent. Atomic (#44).
-_REPLY_ALL = """on run argv
+# body (reply text + our quote, built in Python exactly as `reply` does) is read
+# through the shared readBody handler, never a bare `read` (an empty body — no quote,
+# no reply text — would otherwise crash -39, #READ_BODY). Atomic (#44).
+_REPLY_ALL = (
+    READ_BODY
+    + """
+
+on run argv
   set mid to item 1 of argv
-  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  set bodyText to my readBody(item 2 of argv)
   with timeout of 120 seconds
   tell application "Mail"
     set matches to (messages of inbox whose message id is mid)
@@ -298,15 +316,25 @@ _REPLY_ALL = """on run argv
   end tell
   end timeout
 end run"""
+)
 
-# forward (#83): Mail's native forward verb (device-verified: returns an outgoing
-# message with the Fwd: subject and the original content already in place). Our note
-# is PREPENDED — setting `content` outright would discard the forwarded original,
-# which is the whole point of a forward. Recipients arrive US-joined in one argv item.
+# forward (#83): Mail's NATIVE forward verb (device-verified: returns an outgoing
+# message with the Fwd: subject and the original content + attachments already in
+# place). This script NEVER touches `content` of the forwarded message: `content` of a
+# forward is permanently unreadable (reads empty at 0s/1s/4s — Mail renders the quoted
+# original only in its compose UI and assembles it at send time, never exposing it to
+# scripting), so a note prepended via `set content of f to noteText & ... & (content of
+# f)` was actually just OVERWRITING the body with the note — the "original" half was
+# always empty. Worse, device-verified end to end (real send, real inspection of what
+# arrived): writing `content` at all — even once — destroys the attachments. A forward
+# of a message with 7 attachments, body replaced, delivered with 0 attachments; the same
+# forward with `content` never touched delivered all 7 attachments intact plus the full
+# 1915-char original body. So there is no way to add a covering note to a forward
+# without destroying the very thing being forwarded — this script forwards the
+# original unchanged and carries no note. Recipients arrive US-joined in one argv item.
 _FORWARD = """on run argv
   set mid to item 1 of argv
-  set noteText to (read (POSIX file (item 2 of argv)) as «class utf8»)
-  set toList to item 3 of argv
+  set toList to item 2 of argv
   set us to character id 31
   with timeout of 120 seconds
   tell application "Mail"
@@ -314,9 +342,6 @@ _FORWARD = """on run argv
     if (count of matches) is 0 then error "no inbox message with that message id"
     set f to forward (item 1 of matches) opening window no
     try
-      if noteText is not "" then
-        set content of f to noteText & linefeed & linefeed & (content of f)
-      end if
       set AppleScript's text item delimiters to us
       repeat with a in (text items of toList)
         if (a as text) is not "" then
@@ -372,10 +397,15 @@ end run"""
 # headers, spike 2026-07-11). The body (reply text + our quote) is set on the returned
 # outgoing message — keystroke-free (#46; no .eml). A window opens for the HUMAN to
 # review/send. NEVER sends. Atomic (#44): delete the draft on any post-creation
-# failure. body via tempfile as «class utf8»; message-id via argv.
-_REPLY = """on run argv
+# failure. body via tempfile through the shared readBody handler, never a bare `read`
+# (an empty reply_body would otherwise crash -39, #READ_BODY); message-id via argv.
+_REPLY = (
+    READ_BODY
+    + """
+
+on run argv
   set mid to item 1 of argv
-  set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
+  set bodyText to my readBody(item 2 of argv)
   with timeout of 120 seconds
   tell application "Mail"
     set matches to (messages of inbox whose message id is mid)
@@ -390,6 +420,7 @@ _REPLY = """on run argv
   end tell
   end timeout
 end run"""
+)
 
 
 def _build_quote(sender: str, date_str: str, original_body: str) -> str:
@@ -1021,14 +1052,17 @@ class MailAdapter:
             run_osascript(_REPLY_ALL, mid, path)
         return {"sent": True, "reply_to": message_id.strip(), "reply_all": True}
 
-    def forward(
-        self, message_id: str, to, body: str = "", dry_run: bool = True
-    ) -> dict:
-        """Forward an inbox message and SEND it. The forwarded original is preserved —
-        ``body`` is prepended as a note, never substituted for it. Note: for an HTML
-        original, prepending a plaintext note flattens the whole body to plaintext
-        (`set content of f to noteText & ... & (content of f)` sets the plaintext
-        `content` property) — preservation holds exactly for plaintext mail.
+    def forward(self, message_id: str, to, dry_run: bool = True) -> dict:
+        """Forward an inbox message and SEND it. The original message and its
+        attachments are forwarded UNCHANGED — there is no way to attach a covering
+        note. Device-verified: `content` of a forwarded message is permanently
+        unreadable via AppleScript (Mail assembles the quoted original only at send
+        time, never exposing it to scripting), so writing `content` to prepend a note
+        was actually just replacing the whole body with the note. Worse, writing
+        `content` at all — even once — destroys the attachments (a real 7-attachment
+        forward was delivered with 0 once `content` was touched; untouched, all 7
+        arrived intact with the full original body). So this method carries no
+        covering-note parameter; use ``send`` for a fresh message with your own text.
         ``dry_run=True`` (default) makes no call into Mail."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
@@ -1039,14 +1073,9 @@ class MailAdapter:
         if dry_run:
             return {
                 "dry_run": True,
-                "would_send": {
-                    "to": to_list,
-                    "forwarding": message_id.strip(),
-                    "note_chars": len(body or ""),
-                },
+                "would_send": {"to": to_list, "forwarding": message_id.strip()},
             }
-        with body_file(body or "") as path:
-            run_osascript(_FORWARD, mid, path, US.join(to_list))
+        run_osascript(_FORWARD, mid, US.join(to_list))
         return {"sent": True, "to": to_list, "forwarding": message_id.strip()}
 
     def reply(

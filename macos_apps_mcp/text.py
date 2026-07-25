@@ -47,6 +47,19 @@ STRIP_FRAMING = """on stripFraming(t)
 end stripFraming"""
 
 
+# AppleScript's `read … as «class utf8»` raises -39 ("End of file") on a ZERO-BYTE file,
+# so a body-carrying script must read through this handler, never `read` directly: an
+# EMPTY body is empty text, not an error. (create_draft with an empty body has been
+# broken since 0.8.0 for exactly this reason; device-verified 2026-07-26.)
+READ_BODY = """on readBody(p)
+  try
+    return (read (POSIX file p) as «class utf8»)
+  on error number -39
+    return ""
+  end try
+end readBody"""
+
+
 def split_framed(raw: str) -> list[list[str]]:
     """Split a US/RS-framed payload into records of fields, skipping blank records —
     the single Python-side counterpart of the framing contract above."""
