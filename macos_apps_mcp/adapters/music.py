@@ -65,6 +65,12 @@ return out"""
 # now-playing: player state, plus the current track's fields when not stopped. Reading
 # `current track` ERRORS when stopped (verified on-device), so it is guarded by the
 # state check. STRIP_FRAMING protects the free-text fields; US-joined, no records.
+# position/duration are truncated to integer seconds via `div 1`: a bare `(real as
+# text)` renders with the machine's locale decimal separator (a comma on non-en_US Macs
+# — e.g. "195,022"), which is un-parseable as a number; an AppleScript integer `as text`
+# is locale-proof, and whole seconds are all a "now playing" readout needs. `div 1`
+# (integer division, a math operator) — NOT `round`, which raised errAECoercionFail
+# inside the `tell "Music"` block on-device.
 _NOW_PLAYING = (
     STRIP_FRAMING
     + """
@@ -79,8 +85,8 @@ tell application "Music"
     set t to current track
     set out to out & us & (my stripFraming(name of t)) & us & ¬
       (my stripFraming(artist of t)) & us & (my stripFraming(album of t)) & us & ¬
-      (persistent ID of t) & us & ((player position) as text) & us & ¬
-      ((duration of t) as text)
+      (persistent ID of t) & us & (((player position) div 1) as text) & us & ¬
+      (((duration of t) div 1) as text)
   end if
 end tell
 end timeout
