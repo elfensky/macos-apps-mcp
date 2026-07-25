@@ -42,6 +42,12 @@ set out to ""
 with timeout of 120 seconds
 tell application "Music"
   set lib to library playlist 1
+  -- playlists first: they are typically few, so emitting them before the (often
+  -- much larger) track list means they survive the combined MAX_MUSIC_RESULTS cap
+  repeat with p in (get user playlists)
+    set out to out & "P" & us & (my stripFraming(name of p)) & us & ¬
+      ((count of tracks of p) as text) & us & (persistent ID of p) & rs
+  end repeat
   set ns to (get name of every track of lib)
   set ars to (get artist of every track of lib)
   set als to (get album of every track of lib)
@@ -50,10 +56,6 @@ tell application "Music"
     set out to out & "T" & us & (my stripFraming(item i of ns)) & us & ¬
       (my stripFraming(item i of ars)) & us & ¬
       (my stripFraming(item i of als)) & us & (item i of pids) & rs
-  end repeat
-  repeat with p in (get user playlists)
-    set out to out & "P" & us & (my stripFraming(name of p)) & us & ¬
-      ((count of tracks of p) as text) & us & (persistent ID of p) & rs
   end repeat
 end tell
 end timeout
