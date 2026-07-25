@@ -177,8 +177,16 @@ def test_every_write_tool_is_audit_classified():
     assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS
 
 
-def test_send_tools_absent_by_default():
-    # "Never sends" is the default: with MACOS_APPS_ALLOW_SEND unset, the outbound tools
-    # are not registered at all — absent, not erroring.
+def test_send_tools_registered_only_when_gate_is_on():
+    # "Never sends" is the default: with MACOS_APPS_ALLOW_SEND unset, the outbound
+    # tools are not registered at all — absent, not erroring. Consistent with
+    # test_every_write_tool_is_audit_classified's convention (F6 review): rather than
+    # skipping this test under the gate into uselessness, assert the tools ARE
+    # registered when the operator opted in — this is exactly the scenario
+    # `MACOS_APPS_ALLOW_SEND=mail uv run pytest` must exercise and pass.
     live = {t.name for t in _tools()}
-    assert not ({"send_mail", "reply_all", "forward_mail"} & live)
+    send_tools = {"send_mail", "reply_all", "forward_mail"}
+    if srv._allow_send("mail"):
+        assert send_tools <= live
+    else:
+        assert not (send_tools & live)

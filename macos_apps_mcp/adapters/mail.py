@@ -1,16 +1,20 @@
-"""Mail adapter — Mail.app via osascript (Automation TCC): inbox search, body-by-id, and
-a draft-and-open write.
+"""Mail adapter — Mail.app via osascript (Automation TCC): inbox search, body-by-id, a
+draft-and-open write, and a gated outbound send path.
 
 Mail has a rich AppleScript dictionary. ``Pointer.id`` is the RFC822 ``message id``
 (stable across relaunch — the citation contract), NOT the AppleScript object ``id`` (a
 session-local integer that rots across relaunch, so never a durable citation). Actions
 resolve a message BY that RFC id. ``deeplink`` is a ``message://`` URL built from the
 same RFC id. Search matches subject OR sender over the inbox; ``mail_body`` hydrates one
-message's plaintext by id (hygiene-budgeted). ``create_draft`` opens a draft for HUMAN
-review — there is NO send path anywhere (the surveyed-consensus safe shape: a wrong-
-recipient/address-leak send is the ecosystem's most dangerous mail tool). Mail's
-AppleScript is slow on large mailboxes, so reads are capped and the osascript timeout
-bounds a pathological search. User input goes via argv / a tempfile — not interpolated.
+message's plaintext by id (hygiene-budgeted). ``create_draft``/``mail_reply`` open a
+draft for HUMAN review and never send on their own. ``send``/``reply_all``/``forward``
+DO send — but only when the operator opts in via ``MACOS_APPS_ALLOW_SEND`` (unset by
+default, so absent unless explicitly enabled) and ``dry_run`` still defaults to True
+even then (the surveyed-consensus safe shape: a wrong-recipient/address-leak send is
+the ecosystem's most dangerous mail tool, so it's gated + previewed, not eliminated).
+Mail's AppleScript is slow on large mailboxes, so reads are capped and the osascript
+timeout bounds a pathological search. User input goes via argv / a tempfile — not
+interpolated.
 """
 
 from __future__ import annotations
@@ -805,11 +809,19 @@ def _parse_draft_records(raw: str) -> list[Pointer]:
 
 def _split_addrs(value) -> list[str]:
     """Normalize a recipient argument to a list of addresses. Accepts a comma-separated
-    string (what a model usually produces) or a list; blanks are dropped. None → []."""
+    string (what a model usually produces) or a list; blanks are dropped. None → [].
+
+    Every entry is run through ``sanitize_line`` (F1 review): callers US-join the
+    result and _SEND/_FORWARD re-split on US (`text items of`), so an address string
+    containing a literal U+001F would otherwise yield ONE entry in a dry-run preview
+    but split into TWO recipients on the wire once joined — the preview and the wire
+    must describe the same recipient set by construction. sanitize_line strips
+    C0/C1/DEL controls (which includes U+001F) and collapses whitespace; an entry that
+    sanitizes to empty is dropped."""
     if value is None:
         return []
     items = value if isinstance(value, list) else str(value).split(",")
-    return [str(a).strip() for a in items if str(a).strip()]
+    return [s for a in items if (s := sanitize_line(a))]
 
 
 class MailAdapter:
@@ -846,11 +858,13 @@ class MailAdapter:
         """Create a Mail draft and OPEN it for the human to review/send — NEVER sends.
         Atomic (#44): if any step after creation fails, the script deletes the partial
         draft before erroring, so a retry can't strand a duplicate. Returns a locator
-        (#43): an unsent draft has no stable Message-ID (Mail stamps it only on send),
-        so we return where to find it, not a fabricated id. The body is written to a
-        0600 tempfile and read by the script as «class utf8» (never interpolated);
-        to/subject go via argv. The tempfile is deleted after the (synchronous) script
-        has read its content into the draft."""
+        (#43): a freshly opened compose window has no stable Message-ID YET (Mail
+        stamps one once the draft is saved to the Drafts mailbox), so we return where
+        to find it rather than guessing an id — once saved, `drafts()`/`delete_draft()`
+        address it by that stable id. The body is written to a 0600 tempfile and read
+        by the script as «class utf8» (never interpolated); to/subject go via argv.
+        The tempfile is deleted after the (synchronous) script has read its content
+        into the draft."""
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
@@ -861,7 +875,8 @@ class MailAdapter:
             "subject": subject or "",
             "mailbox": "Drafts",
             "note": "opened in a Mail compose window for your review; save it to keep "
-            "it in Drafts. Unsent drafts have no stable id.",
+            "it in Drafts, where it gets a stable message-id — see drafts()/"
+            "delete_draft().",
         }
 
     def list_drafts(self) -> list[Pointer]:
@@ -874,19 +889,23 @@ class MailAdapter:
     def snapshot(self, ident: str) -> Pointer | None:
         """Current Pointer for one draft, or None if the id no longer resolves — the
         before-state an id-addressed write needs for the audit trail (#67). Satisfies
-        the Snapshotter Protocol."""
-        mid = ident.strip()
+        the Snapshotter Protocol. Compares bracket-normalized (`_norm_mid`, M1 review):
+        accepts a bracketed or bare ``ident`` against a bracketed or bare stored id."""
+        mid = _norm_mid(ident)
         for p in self.list_drafts():
-            if p.id == mid:
+            if _norm_mid(p.id) == mid:
                 return p
         return None
 
     def delete_draft(self, ident: str, dry_run: bool = False) -> dict:
-        """Delete one draft by its RFC822 message-id (from `list_drafts`).
-        ``dry_run=True`` resolves the target and returns the Pointer that WOULD be
-        deleted, no mutation — the `delete_event` shape. Raises if the id resolves to
-        no draft, so a stale id fails loudly instead of silently deleting nothing."""
-        mid = ident.strip()
+        """Delete one draft by its RFC822 message-id (from `list_drafts`). Accepts a
+        bracketed or bare id — brackets are stripped like every other id-taking mail
+        method (`get_body`/`reply`/`reply_all`/`forward`, M1 review), so a caller
+        passing `<id>` resolves instead of failing loudly. ``dry_run=True`` resolves
+        the target and returns the Pointer that WOULD be deleted, no mutation — the
+        `delete_event` shape. Raises if the id resolves to no draft, so a stale id
+        fails loudly instead of silently deleting nothing."""
+        mid = ident.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError(
                 "delete_draft needs a draft id (the message-id from drafts)"
@@ -1006,8 +1025,11 @@ class MailAdapter:
         self, message_id: str, to, body: str = "", dry_run: bool = True
     ) -> dict:
         """Forward an inbox message and SEND it. The forwarded original is preserved —
-        ``body`` is prepended as a note, never substituted for it. ``dry_run=True``
-        (default) makes no call into Mail."""
+        ``body`` is prepended as a note, never substituted for it. Note: for an HTML
+        original, prepending a plaintext note flattens the whole body to plaintext
+        (`set content of f to noteText & ... & (content of f)` sets the plaintext
+        `content` property) — preservation holds exactly for plaintext mail.
+        ``dry_run=True`` (default) makes no call into Mail."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("forward needs the original message's id")
@@ -1035,7 +1057,8 @@ class MailAdapter:
         In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
         include_quote appends `On <date>, <sender> wrote:` + the `> `-quoted original.
         Keystroke-free (#46); atomic (#44). Returns the same locator dict as
-        create_draft (an unsent draft has no stable id)."""
+        create_draft — save it to Drafts and it gets a stable message-id, addressable
+        via drafts()/delete_draft()."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("reply needs the original message's id")
@@ -1061,7 +1084,8 @@ class MailAdapter:
             "created": True,
             "subject": "(reply)",
             "mailbox": "Drafts",
-            "note": "reply draft opened for review; unsent drafts have no stable id",
+            "note": "reply draft opened for review; save it to keep it in Drafts, "
+            "where it gets a stable message-id (see drafts())",
         }
 
     def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:

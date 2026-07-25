@@ -78,7 +78,10 @@ guessing. **Recurrence** is an RFC 5545 `RRULE` (`FREQ`/`INTERVAL`/`COUNT`/`UNTI
 
 ### Mail — id-first read + draft-and-open (Automation)
 
-Nothing here ever **sends** — replies and drafts open a compose window for you to review.
+Sending is **off by default**: reads, `create_draft`, and `mail_reply` never send — they
+open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
+`forward_mail`) exists but only runs when the operator opts in via
+`MACOS_APPS_ALLOW_SEND`, and `dry_run` still defaults to `True` even then.
 
 | Tool | Args | Notes |
 |------|------|-------|
