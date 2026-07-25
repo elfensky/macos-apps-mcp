@@ -28,6 +28,12 @@ def test_now_playing_shape(adapter):
         "fast forwarding",
         "rewinding",
     }
+    # position/duration must be locale-proof integer-second strings — a bare AppleScript
+    # `(real as text)` renders a comma decimal on non-en_US Macs (e.g. "195,022"), which
+    # is un-parseable. Only a live run catches this, so guard it here.
+    if state["state"] != "stopped":
+        assert state["position"].isdigit(), state["position"]
+        assert state["duration"].isdigit(), state["duration"]
 
 
 def test_play_pause_roundtrip(adapter):
