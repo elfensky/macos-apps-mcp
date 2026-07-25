@@ -53,3 +53,21 @@ def test_music_search_bounds_results(monkeypatch):
     raw = RS.join(_rec("T", f"t{i}", "a", "b", f"ID{i}") for i in range(120)) + RS
     monkeypatch.setattr(music, "run_osascript", lambda *a, **k: raw)
     assert len(MusicAdapter().get_pointers("")) == music.MAX_MUSIC_RESULTS
+
+
+def test_now_playing_stopped(monkeypatch):
+    monkeypatch.setattr(music, "run_osascript", lambda *a, **k: "stopped")
+    assert MusicAdapter().now_playing() == {"state": "stopped"}
+
+
+def test_now_playing_playing(monkeypatch):
+    raw = US.join(["playing", "Song", "Artist", "Album", "TID", "5.0", "200.0"])
+    monkeypatch.setattr(music, "run_osascript", lambda *a, **k: raw)
+    r = MusicAdapter().now_playing()
+    assert r["state"] == "playing"
+    assert r["track"] == "Song"
+    assert r["artist"] == "Artist"
+    assert r["album"] == "Album"
+    assert r["id"] == "TID"
+    assert r["position"] == "5.0"
+    assert r["duration"] == "200.0"

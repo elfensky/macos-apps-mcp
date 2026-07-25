@@ -16,8 +16,10 @@ from ..contracts import Pointer
 from ..runtime import run_osascript
 from ..text import (
     STRIP_FRAMING,
+    US,
     clean_summary,
     fold_text,
+    sanitize_line,
     split_framed,
 )
 
@@ -54,6 +56,48 @@ end tell
 end timeout
 return out"""
 )
+
+# now-playing: player state, plus the current track's fields when not stopped. Reading
+# `current track` ERRORS when stopped (verified on-device), so it is guarded by the
+# state check. STRIP_FRAMING protects the free-text fields; US-joined, no records.
+_NOW_PLAYING = (
+    STRIP_FRAMING
+    + """
+
+set us to character id 31
+set out to ""
+with timeout of 120 seconds
+tell application "Music"
+  set pstate to (player state as text)
+  set out to pstate
+  if pstate is not "stopped" then
+    set t to current track
+    set out to out & us & (my stripFraming(name of t)) & us & ¬
+      (my stripFraming(artist of t)) & us & (my stripFraming(album of t)) & us & ¬
+      (persistent ID of t) & us & ((player position) as text) & us & ¬
+      ((duration of t) as text)
+  end if
+end tell
+end timeout
+return out"""
+)
+
+
+def _parse_now_playing(raw: str) -> dict:
+    fields = raw.split(US)
+    state = fields[0].strip() if fields and fields[0].strip() else "stopped"
+    if len(fields) < 7:  # stopped, or a transient state with no track payload
+        return {"state": state}
+    _, name, artist, album, pid, pos, dur = fields[:7]
+    return {
+        "state": state,
+        "track": sanitize_line(name),
+        "artist": sanitize_line(artist),
+        "album": sanitize_line(album),
+        "id": pid,
+        "position": pos,
+        "duration": dur,
+    }
 
 
 def _track_pointer(name: str, artist: str, album: str, pid: str) -> Pointer:
@@ -104,3 +148,7 @@ class MusicAdapter:
         if q:
             parsed = [(p, key) for p, key in parsed if q in key]
         return [p for p, _ in parsed[:MAX_MUSIC_RESULTS]]
+
+    def now_playing(self) -> dict:
+        """Current player state + track, or {"state": "stopped"}."""
+        return _parse_now_playing(run_osascript(_NOW_PLAYING))
