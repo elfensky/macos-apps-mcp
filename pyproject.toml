@@ -1,6 +1,6 @@
 [project]
 name = "macos-apps-mcp"
-version = "0.8.0"
+version = "0.9.0"
 description = "One consolidated MCP server for native macOS apps (Calendar, Reminders, Mail, ...)."
 readme = "README.md"
 requires-python = ">=3.11"

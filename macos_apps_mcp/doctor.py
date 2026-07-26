@@ -269,9 +269,9 @@ def diagnose(request: bool = False) -> dict:
         "outbound_note": (
             "sending ON for: " + ", ".join(outbound)
             if outbound
-            else "sending OFF — set MACOS_APPS_ALLOW_SEND (e.g. 'mail') on the process "
-            "this server runs as, then restart it; under launchd a client env block "
-            "does not reach the daemon (see README 'Outbound (send) mode')."
+            else "sending OFF — the USER (not the model) enables it by running "
+            "`macos-apps-mcp allow-send mail`, which restarts the daemon; a client env "
+            "block cannot reach it (see README 'Outbound (send) mode')."
         ),
         "note": (
             "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "

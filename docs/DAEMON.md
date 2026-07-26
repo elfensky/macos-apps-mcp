@@ -116,36 +116,31 @@ differs, `command`/`args` stay identical. A Terminal-spawned shim uses the same 
 
 ### 5. Outbound (send) mode under the daemon
 
-`MACOS_APPS_ALLOW_SEND` (see README.md "Outbound (send) mode") is read once, at import time, by
-the process that registers the tools — **the daemon**, not the shim. Under this deployment the
-shim is just a thin stdio↔socket relay: an MCP client's `env` block reaches the *shim* process
-only, never the long-lived daemon, and the shipped `packaging/ren.lav.macos-apps-mcp.plist` has
-no `EnvironmentVariables` key. So setting `MACOS_APPS_ALLOW_SEND` in a client config is a silent
-no-op for daemon users — the send tools simply never register, with no error anywhere. To enable
-sending you must set the variable on the **daemon process itself**, then restart it:
-
 ```sh
-# session-wide, for the gui domain this agent runs in (`daemon` role reads it at import)
-launchctl setenv MACOS_APPS_ALLOW_SEND mail
-
-# restart the daemon so it re-imports with the new environment
-launchctl kickstart -k gui/$UID/ren.lav.macos-apps-mcp
+macos-apps-mcp allow-send mail    # or: messages / mail,messages / all / off
+macos-apps-mcp allow-send         # print the current setting
 ```
 
-`launchctl setenv` only affects processes launched *after* it runs, which is why the kickstart is
-required — an already-running daemon keeps whatever environment it started with. Alternatively,
-bake it into the LaunchAgent plist itself (persists across reboots, doesn't need `setenv` re-run
-per login session) by adding an `EnvironmentVariables` dict and re-running `install-agent`:
+This writes `~/.local/state/macos-apps-mcp/allow_send` and runs the kickstart for you.
 
-```xml
-<key>EnvironmentVariables</key>
-<dict>
-  <key>MACOS_APPS_ALLOW_SEND</key><string>mail</string>
-</dict>
-```
+Why a file and not an environment variable: `MACOS_APPS_ALLOW_SEND` is read once, at import time,
+by the process that registers the tools — **the daemon**, not the shim. An MCP client's `env`
+block reaches the *shim* process only, and the shipped
+`packaging/ren.lav.macos-apps-mcp.plist` has no `EnvironmentVariables` key, so setting it in a
+client config is a silent no-op for daemon users — the send tools just never register, with no
+error anywhere. The toggle file is home-pinned for the same reason as the daemon socket: the
+shell that writes it and the launchd process that reads it do not share an environment, so
+`XDG_STATE_HOME` would let them disagree. A *set* `MACOS_APPS_ALLOW_SEND` still wins over the
+file, and the file is consulted **only** in the daemon role — stdio and CI stay env-driven.
 
-The shipped plist deliberately does **not** ship this key — sending stays off by default even
-under the daemon; it's an explicit opt-in you add yourself. Either way, `doctor()`'s
+The kickstart is what makes it take effect: registration happens at import, so a running daemon
+keeps whatever gate it started with. Any client connected at that moment sees its transport drop
+— respawn the shim to reconnect.
+
+`launchctl setenv MACOS_APPS_ALLOW_SEND mail` + the same kickstart also works, but does not
+survive a reboot. Baking an `EnvironmentVariables` dict into the plist persists too; the shipped
+plist deliberately does **not** ship that key — sending stays off by default under the daemon.
+Whichever route, `doctor()`'s
 `deployment.outbound` (list of adapters currently send-enabled) and `deployment.outbound_note`
 report the *effective* state as read by the daemon that's actually serving your client — run
 `doctor` after the kickstart to confirm it took.

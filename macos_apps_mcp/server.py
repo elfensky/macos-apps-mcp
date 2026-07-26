@@ -15,6 +15,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from mcp.types import TextContent
 
+from . import deploy
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -78,10 +79,19 @@ def _allow_send(adapter: str) -> bool:
     social, no undo). ``MACOS_APPS_READ_ONLY`` wins unconditionally — it is the
     safe-deploy guard. Read at registration time, like ``_read_only()``: set it before
     launching the server.
+
+    Under the DAEMON only, an unset env var falls back to the persisted toggle
+    (``macos-apps-mcp allow-send mail``) — no env var can reach a launchd-run daemon
+    from a client config (#130), so on-disk state is the only way to opt in there. In
+    stdio mode the env var is reachable and is the whole story, which also keeps the
+    test suite hermetic: it never reads this machine's toggle file.
     """
     if _read_only():
         return False
-    val = os.environ.get("MACOS_APPS_ALLOW_SEND", "").strip().lower()
+    val = os.environ.get("MACOS_APPS_ALLOW_SEND", "")
+    if not val and os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon":
+        val = deploy.allow_send_file()
+    val = val.strip().lower()
     if val in ("1", "true", "yes", "all"):
         return True
     return adapter in {p.strip() for p in val.split(",") if p.strip()}
