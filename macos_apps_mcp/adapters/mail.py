@@ -124,6 +124,58 @@ end run"""
 # "missing value" body as if it were the email's contents.
 _MISSING_VALUE = "missing value"
 
+# rollback (#135): the ONLY place this adapter deletes a message it just built. A bare
+# `delete` reports success whether or not it removed anything, so this verifies the
+# outcome instead of assuming it: device-verified 2026-07-26, a successfully deleted
+# outgoing message's reference goes DEAD and reading a property off it raises -1728.
+# Only -1728 counts as proof. A live reference means the delete did not take; ANY other
+# error means the outcome is unknown, and unknown is reported as NOT verified — this
+# handler never guesses in the reassuring direction, because a rollback that lies is
+# the exact failure #135 is made of.
+#
+# It carries its OWN `with timeout` (#56): AppleScript's timeout is lexical, so the
+# enclosing script's wrapper does not cover a handler body called from inside it — an
+# un-bounded Apple Event here could pin a hung Mail exactly when we are cleaning up.
+#
+# CRITICAL: only ever call this BEFORE handing the message to `send`. Once Mail has
+# accepted a message, `delete` is a silent NO-OP: device-verified 2026-07-26, both
+# `delete <ref>` and `delete outgoing message i` returned cleanly on a sent message and
+# removed nothing, and the message went on to deliver normally. So a post-send rollback
+# cannot succeed — it can only report a cleanup that did not happen. That is why `send`
+# sits OUTSIDE the rollback `try` in every script here: past that verb the honest move
+# is to report the leftover, never to pretend it was removed.
+#
+# The two leftover warnings live here as AppleScript handlers rather than as Python
+# constants interpolated into the scripts: `_SEND` contains `{visible:false}`, so an
+# f-string would need brace escaping, and the no-interpolation rule is easier to keep
+# when nothing is interpolated at all. Appended to the ORIGINAL error when rollback()
+# could not prove the partial message is gone — the caller gets the real failure plus
+# the leftover fact and its recovery (the in-memory outbox zombie clears when Mail is
+# quit and reopened; device-verified).
+_ROLLBACK = """on rollback(msg)
+  with timeout of 120 seconds
+    try
+      tell application "Mail" to delete msg
+    end try
+    try
+      tell application "Mail" to get subject of msg
+      return false
+    on error number en
+      return (en is -1728)
+    end try
+  end timeout
+end rollback
+
+on outgoingLeftover()
+  return " (WARNING: a partial outgoing message may remain; check Mail's " & ¬
+    "Outbox before retrying, so a retry cannot send twice)"
+end outgoingLeftover
+
+on draftLeftover()
+  return " (WARNING: a partial draft may remain in Mail's Drafts; remove it " & ¬
+    "with delete_draft)"
+end draftLeftover"""
+
 # create_draft: draft-and-open, NEVER send. `make new outgoing message … visible:true`
 # opens a compose window for the HUMAN to review/send; there is deliberately no `send`
 # verb here (the two-tier safe gate — joshrutkowski/orchard/patrickfreyer). The body is
@@ -135,6 +187,8 @@ _MISSING_VALUE = "missing value"
 # before re-raising, so a retry can't strand a duplicate draft.
 _CREATE_DRAFT = (
     READ_BODY
+    + "\n\n"
+    + _ROLLBACK
     + """
 
 on run argv
@@ -150,8 +204,11 @@ on run argv
       tell msg to make new to recipient with properties {address:recipientAddr}
       activate
     on error errMsg
-      delete msg
-      error errMsg
+      if my rollback(msg) then
+        error errMsg
+      else
+        error errMsg & my draftLeftover()
+      end if
     end try
   end tell
   end timeout
@@ -235,6 +292,8 @@ end run"""
 # exactly why the DRY-RUN path builds nothing at all.
 _SEND = (
     READ_BODY
+    + "\n\n"
+    + _ROLLBACK
     + """
 
 on run argv
@@ -274,15 +333,16 @@ on run argv
         end if
       end repeat
       set AppleScript's text item delimiters to ""
-      send msg
-      return "sent"
     on error errMsg
       set AppleScript's text item delimiters to ""
-      try
-        delete msg
-      end try
-      error errMsg
+      if my rollback(msg) then
+        error errMsg
+      else
+        error errMsg & my outgoingLeftover()
+      end if
     end try
+    send msg
+    return "sent"
   end tell
   end timeout
 end run"""
@@ -297,6 +357,8 @@ end run"""
 # no reply text — would otherwise crash -39, #READ_BODY). Atomic (#44).
 _REPLY_ALL = (
     READ_BODY
+    + "\n\n"
+    + _ROLLBACK
     + """
 
 on run argv
@@ -309,14 +371,15 @@ on run argv
     set r to reply (item 1 of matches) opening window no reply to all yes
     try
       set content of r to bodyText
-      send r
-      return "sent"
     on error errMsg
-      try
-        delete r
-      end try
-      error errMsg
+      if my rollback(r) then
+        error errMsg
+      else
+        error errMsg & my outgoingLeftover()
+      end if
     end try
+    send r
+    return "sent"
   end tell
   end timeout
 end run"""
@@ -336,7 +399,11 @@ end run"""
 # 1915-char original body. So there is no way to add a covering note to a forward
 # without destroying the very thing being forwarded — this script forwards the
 # original unchanged and carries no note. Recipients arrive US-joined in one argv item.
-_FORWARD = """on run argv
+_FORWARD = (
+    _ROLLBACK
+    + """
+
+on run argv
   set mid to item 1 of argv
   set toList to item 2 of argv
   set us to character id 31
@@ -353,36 +420,48 @@ _FORWARD = """on run argv
         end if
       end repeat
       set AppleScript's text item delimiters to ""
-      send f
-      return "sent"
     on error errMsg
       set AppleScript's text item delimiters to ""
-      try
-        delete f
-      end try
-      error errMsg
+      if my rollback(f) then
+        error errMsg
+      else
+        error errMsg & my outgoingLeftover()
+      end if
     end try
+    send f
+    return "sent"
   end tell
   end timeout
 end run"""
+)
 
 # outbox_pending (#134): a successful `send`/`reply`/`forward` verb means Mail ACCEPTED
 # the message — NOT that it left this machine. Device-verified 2026-07-25: a
 # perfectly-formed message (correct subject, recipient, sender) was accepted by `send`,
-# this code returned `sent: True`, and the message then sat in Mail's Outbox undelivered
-# for minutes. A recipient-less message stranded by an error path can also JAM the
-# outbox, so later, valid sends queue behind it and never leave. Called after every send
-# script runs (send/reply_all/forward), never before — this reports Mail's WHOLE outbox
-# count, not specifically the message this call just sent: once the native verb consumes
-# our outgoing message there is no stable id left to re-identify it by, so we cannot
-# scope the count to just ours. A non-zero count therefore only means "something is
-# queued", not "our message is queued" — but that's still the actionable signal: it
-# tells the caller delivery is NOT confirmed and Mail's Outbox needs a look. Do not
-# invent subject-matching or other heuristics to attribute the count to one message.
+# this code returned `sent: True`, and the message then sat undelivered for minutes.
+#
+# Counts `messages of outbox` — Mail's REAL send queue. It must NOT count `outgoing
+# messages`, which is what this shipped as in #134 and is a different thing entirely:
+# that is the set of script-created message OBJECTS alive in Mail's current session, and
+# it includes messages already delivered. Device-verified 2026-07-26, sampling both
+# counters across one real send: the object count read 2 before the send and 2 for ten
+# seconds after it, never moving, while `messages of outbox` went 0 -> 1 as the message
+# queued and back to 0 within ~10s as it went out. Counting objects therefore reports a
+# permanent non-zero after the session's first send, firing the "delivery is NOT
+# confirmed" note on every subsequent send forever — a false alarm that trains the
+# caller to ignore the one signal that matters.
+#
+# Called after every send script runs (send/reply_all/forward), never before — this
+# reports the WHOLE queue, not specifically the message this call just sent: once the
+# native verb consumes our outgoing message there is no stable id left to re-identify it
+# by, so we cannot scope the count to just ours. A non-zero count therefore only means
+# "something is queued", not "our message is queued" — but that's still the actionable
+# signal: delivery is NOT confirmed and Mail's Outbox needs a look. Do not invent
+# subject-matching or other heuristics to attribute the count to one message.
 _OUTBOX_COUNT = """on run argv
   with timeout of 120 seconds
   tell application "Mail"
-    return (count of outgoing messages) as text
+    return (count of (messages of outbox)) as text
   end tell
   end timeout
 end run"""
@@ -489,6 +568,8 @@ end run"""
 # (an empty reply_body would otherwise crash -39, #READ_BODY); message-id via argv.
 _REPLY = (
     READ_BODY
+    + "\n\n"
+    + _ROLLBACK
     + """
 
 on run argv
@@ -502,8 +583,11 @@ on run argv
     try
       set content of r to bodyText
     on error errMsg
-      delete r
-      error errMsg
+      if my rollback(r) then
+        error errMsg
+      else
+        error errMsg & my draftLeftover()
+      end if
     end try
   end tell
   end timeout

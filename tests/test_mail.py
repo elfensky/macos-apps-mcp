@@ -190,7 +190,10 @@ def test_get_body_huge_body_overflows(monkeypatch):
 def test_create_draft_never_sends():
     # the SAFETY invariant: the draft script has NO `send` verb anywhere — it can only
     # create-and-open, never send (joshrutkowski's two-tier gate; the #62 acceptance).
-    assert "send" not in _CREATE_DRAFT.lower()
+    # Anchored on the VERB, not the substring: the shared #135 rollback preamble prose
+    # contains the word "sends", and a bare substring check would fail on that while
+    # still not proving anything about the verb.
+    assert not re.search(r"^\s*send \w+\s*$", _CREATE_DRAFT, re.M)
     assert "make new outgoing message" in _CREATE_DRAFT
     assert "visible:true" in _CREATE_DRAFT  # opens for human review
 
@@ -261,12 +264,14 @@ def test_create_draft_reads_body_through_shared_handler():
 
 def test_create_draft_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
-    # deleted in the error path. Assert the STRUCTURE (delete msg between `on error` and
-    # the re-raise), not just the words: a substring check would pass even if the block
-    # were gutted and a stray "delete"/"on error" comment left behind (#43/#44 review).
-    assert re.search(r"on error errMsg\s+delete msg\s+error errMsg", _CREATE_DRAFT), (
-        "the on-error handler must delete the partial draft, then re-raise"
-    )
+    # deleted in the error path. Assert the STRUCTURE (the rollback between `on error`
+    # and the re-raise), not just the words: a substring check would pass even if the
+    # block were gutted and a stray "delete"/"on error" comment left behind (#43/#44
+    # review). Since #135 the delete goes through the VERIFYING rollback handler, so the
+    # structure is `on error` -> rollback -> re-raise either way.
+    assert re.search(
+        r"on error errMsg\s+if my rollback\(msg\) then\s+error errMsg", _CREATE_DRAFT
+    ), "the on-error handler must roll back the partial draft, then re-raise"
 
 
 def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
@@ -583,11 +588,12 @@ def test_reply_empty_body_raises():
 
 
 def test_reply_never_sends():
-    # the SAFETY invariant: neither template contains a `send` verb (as opposed to
-    # `sender`, which legitimately appears in _ORIGINAL) — a reply can only open a
-    # draft window for the human, never send on its own.
-    assert not re.search(r"\bsend\b", _ORIGINAL.lower())
-    assert not re.search(r"\bsend\b", _REPLY.lower())
+    # the SAFETY invariant: neither template contains a `send` VERB (as opposed to
+    # `sender`, which legitimately appears in _ORIGINAL, or the #135 rollback preamble's
+    # prose, which mentions sending) — a reply can only open a draft window for the
+    # human, never send on its own. Anchored on the verb in statement position.
+    assert not re.search(r"^\s*send \w+\s*$", _ORIGINAL, re.M)
+    assert not re.search(r"^\s*send \w+\s*$", _REPLY, re.M)
     assert "reply (" in _REPLY  # uses Mail's native reply verb (real threading)
     assert "opening window yes" in _REPLY  # opens for human review
 
@@ -602,10 +608,11 @@ def test_reply_reads_body_through_shared_handler():
 
 def test_reply_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
-    # deleted in the error path, structurally (not just present as loose words).
-    assert re.search(r"on error errMsg\s+delete r\s+error errMsg", _REPLY), (
-        "the on-error handler must delete the partial reply, then re-raise"
-    )
+    # deleted in the error path, structurally (not just present as loose words). Since
+    # #135 that delete goes through the verifying rollback handler.
+    assert re.search(
+        r"on error errMsg\s+if my rollback\(r\) then\s+error errMsg", _REPLY
+    ), "the on-error handler must roll back the partial reply, then re-raise"
 
 
 # --- drafts (#82) ---------------------------------------------------------------
@@ -869,9 +876,11 @@ def test_send_reads_body_through_shared_handler():
 
 
 def test_outbox_count_script_counts_the_outgoing_messages():
-    # the AppleScript that backs outbox_pending must actually count Mail's outbox and
-    # be bounded like every other template in this file.
-    assert "count of outgoing messages" in mail._OUTBOX_COUNT
+    # the AppleScript that backs outbox_pending must count Mail's REAL send queue (see
+    # test_outbox_count_reads_the_real_queue_not_session_objects for why that is
+    # `messages of outbox` and not `outgoing messages`) and be bounded like every other
+    # template in this file.
+    assert "count of (messages of outbox)" in mail._OUTBOX_COUNT
     assert "with timeout of 120 seconds" in mail._OUTBOX_COUNT
 
 
@@ -1036,3 +1045,82 @@ def test_forward_script_never_touches_content():
     # (writing it at all strips every attachment — a real 7-attachment forward was
     # delivered with 0 once `content` was touched). _FORWARD must never set it.
     assert "set content of" not in mail._FORWARD
+
+
+# --- #135: never delete after send; verify the pre-send rollback ------------------
+
+# the three scripts that hand a message to Mail's `send` verb, vs. the two that roll
+# back but never send. Every one of them must roll back through the verifying handler.
+_SENDING_SCRIPTS = ("_SEND", "_REPLY_ALL", "_FORWARD")
+_ROLLING_BACK_SCRIPTS = _SENDING_SCRIPTS + ("_CREATE_DRAFT", "_REPLY")
+
+
+@pytest.mark.parametrize("name", _SENDING_SCRIPTS)
+def test_send_scripts_never_delete_after_the_send_verb(name):
+    # #135, device-verified 2026-07-26: `delete` on a message Mail has already accepted
+    # via `send` is a SILENT NO-OP — both `delete <ref>` and `delete outgoing message i`
+    # returned cleanly, removed nothing, and the message delivered anyway. A post-send
+    # rollback therefore cannot succeed; it can only report a cleanup that never
+    # happened. So `send` must sit outside the rollback `try` entirely. This is the test
+    # that fails if anyone re-nests it.
+    script = getattr(mail, name)
+    verb = re.search(r"^\s*send \w+\s*$", script, re.M)
+    assert verb, f"{name} has no `send <msg>` verb to anchor on"
+    assert "delete" not in script[verb.start() :], (
+        f"{name} deletes after `send` — that strands a zombie in Mail's outbox (#135)"
+    )
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_rollback_goes_through_the_verifying_handler(name):
+    # a bare `delete` reports success whether or not it removed anything, so every
+    # rollback path composes the handler and calls it instead.
+    script = getattr(mail, name)
+    assert "on rollback(msg)" in script, f"{name} lacks the rollback handler"
+    assert "my rollback(" in script, f"{name} never calls the rollback handler"
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_rollback_is_the_only_delete_in_a_rollback_script(name):
+    # the handler owns the delete; a stray `delete` elsewhere would be an unverified
+    # rollback sneaking back in.
+    assert getattr(mail, name).count("delete ") == 1
+
+
+def test_rollback_handler_trusts_only_1728_as_proof_of_deletion():
+    # device-verified: a successfully deleted outgoing message's reference goes DEAD,
+    # and reading a property off it raises -1728. Any OTHER error (a timeout, say)
+    # leaves the outcome unknown — and unknown must never be reported as a clean
+    # rollback, or we hand the caller the reassuring lie this issue is made of.
+    assert "delete msg" in mail._ROLLBACK
+    assert "-1728" in mail._ROLLBACK
+    assert "return false" in mail._ROLLBACK  # still readable => the delete did not take
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_unverified_rollback_warns_about_the_leftover(name):
+    # when the handler returns false the original error still propagates, but it carries
+    # the fact that a partial message may remain — and where to look for it. Both
+    # warning
+    # texts live in the shared preamble, so assert the CALL SITE: a script that sends
+    # leaves an outbox leftover, one that only drafts leaves a Drafts leftover. Checking
+    # for the words themselves would pass vacuously on every script.
+    script = getattr(mail, name)
+    expected = (
+        "my outgoingLeftover()" if name in _SENDING_SCRIPTS else "my draftLeftover()"
+    )
+    assert expected in script
+    assert "error errMsg" in script  # the ORIGINAL failure still propagates
+
+
+def test_outbox_count_reads_the_real_queue_not_session_objects():
+    # #135, device-verified 2026-07-26 by sampling BOTH counters across one real send:
+    # `count of outgoing messages` counts script-created message OBJECTS alive in Mail's
+    # session — including already-delivered ones — and read 2 before the send and 2 for
+    # ten seconds after, never moving. `messages of outbox` is the real queue: 0 -> 1 on
+    # send, back to 0 within ~10s on delivery. Counting objects (how #134 shipped) means
+    # a permanent non-zero after the session's first send, so the "delivery is NOT
+    # confirmed" note fires on every later send forever and trains the caller to ignore
+    # the one signal that matters.
+    assert "messages of outbox" in mail._OUTBOX_COUNT
+    assert "count of outgoing messages" not in mail._OUTBOX_COUNT
