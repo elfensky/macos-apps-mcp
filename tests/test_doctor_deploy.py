@@ -63,3 +63,15 @@ def test_deployment_section_daemon_mode(monkeypatch):
     d = doctor.diagnose()["deployment"]
     assert d["mode"] == "daemon" and d["agent"] == "enabled"
     assert d["grant_identities"]["kTCCServiceCalendar"][0]["granted"] is True
+
+
+def test_report_carries_the_serving_version(monkeypatch):
+    """Which code is answering — the daemon is a different process from the repo, and
+    nothing else in the report reveals when it has gone stale."""
+    import tomllib
+    from pathlib import Path
+
+    from macos_apps_mcp import doctor as doc
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    assert doc._version() == tomllib.loads(pyproject.read_text())["project"]["version"]

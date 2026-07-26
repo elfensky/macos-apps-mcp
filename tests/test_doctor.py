@@ -168,6 +168,7 @@ def test_diagnose_shape(monkeypatch, tmp_path):
     _all_granted(monkeypatch, tmp_path)
     report = doc.diagnose(request=True)
     assert set(report) == {
+        "version",
         "responsible_process",
         "note",
         "probed_automation",

@@ -208,6 +208,19 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
+def _version() -> str:
+    """The version of the code actually SERVING this call. The daemon is a separate
+    long-lived process from the repo you edit — it sat three releases behind for weeks
+    with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
+    the repo."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("macos-apps-mcp")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def _outbound_state() -> list[str]:
     """Adapters with OUTBOUND send currently enabled (#130) — read straight from
     ``server._allow_send``/``server._SEND_ADAPTERS`` rather than re-reading
@@ -286,6 +299,7 @@ def diagnose(request: bool = False) -> dict:
     }
 
     return {
+        "version": _version(),
         "responsible_process": _responsible_process(),
         "note": (
             "TCC attributes permissions to the process that launched macos-apps-mcp "
