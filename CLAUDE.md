@@ -3,6 +3,14 @@
 One consolidated MCP server for native macOS apps. Python + **FastMCP**, managed with **`uv`**.
 Full design and rationale: [DESIGN.md](DESIGN.md).
 
+**Touching Mail? Read [docs/mail-applescript-facts.md](docs/mail-applescript-facts.md) FIRST.**
+Device-verified traps that code review cannot catch — `delete` after `send` is a silent no-op, a
+compose window is a recipient-less `outgoing message`, writing `content` on a forward destroys the
+attachments, and Mail's Drafts autosave lands ~15s late so a 3-second check reports a clean
+mailbox and lies. Verify every Mail write **by running it and inspecting the resulting message**;
+three reviews and a green suite once passed a forward that delivered empty mail and ate 7
+attachments.
+
 ## Architecture (don't drift)
 
 - **FastMCP standalone.** Tools in `macos_apps_mcp/server.py` are *thin dispatch* to adapters — no
