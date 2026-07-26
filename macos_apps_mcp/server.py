@@ -453,8 +453,11 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
     "mailbox", "note"}) — a freshly opened compose window has no stable id yet, so
     this says where to find it (Drafts) instead of fabricating one; save it and
-    `drafts()` resolves it by its stable message-id. Additive (creates a draft; does
-    not send/modify/delete); needs Automation access for Mail."""
+    `drafts()` resolves it by its stable message-id. If the create FAILS partway, Mail
+    may still leave a stray autosaved draft behind (#133 — its autosave is
+    asynchronous and cannot be suppressed); `drafts()` + `delete_draft()` clear it.
+    Additive (creates a draft; does not send/modify/delete); needs Automation access
+    for Mail."""
     return _mail.create_draft(to, subject, body)
 
 
@@ -503,6 +506,11 @@ def send_mail(
     comma-separated (or a list). `from_address` picks the sending account; omitted,
     Mail uses its default. `html=True` sends the body as HTML. Registered ONLY when
     MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for Mail.
+
+    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
+    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
+    it — so a successful send still litters. Remove it with `drafts()` +
+    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
     """
     return _mail.send(
         to,
@@ -530,6 +538,11 @@ def reply_all(
     natively and the sending account is inherited from the original. Registered ONLY
     when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for
     Mail.
+
+    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
+    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
+    it — so a successful send still litters. Remove it with `drafts()` +
+    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
     """
     return _mail.reply_all(message_id, body, include_quote, dry_run=dry_run)
 
@@ -545,6 +558,11 @@ def forward_mail(message_id: str, to: str, dry_run: bool = True) -> dict:
     you want to add your own commentary, use `send_mail` instead. `to` is
     comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
     adapter. Needs Automation access for Mail.
+
+    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
+    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
+    it — so a successful send still litters. Remove it with `drafts()` +
+    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
     """
     return _mail.forward(message_id, to, dry_run=dry_run)
 

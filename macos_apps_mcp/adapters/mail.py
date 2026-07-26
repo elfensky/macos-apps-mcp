@@ -16,6 +16,11 @@ the ecosystem's most dangerous mail tool, so it's gated + previewed, not elimina
 delivered — device-verified: an accepted send can sit in Mail's Outbox undelivered for
 minutes, so every send/reply_all/forward result also reports ``outbox_pending`` (Mail's
 outbox count) and a ``note`` when it's non-zero.
+Mail also autosaves EVERY outgoing message this module builds into the Drafts mailbox
+~10-15s after creation (#133) — asynchronously, unsuppressably, and whether the message
+was sent, rolled back, or abandoned. So a successful send leaves a stray Drafts copy;
+``drafts()`` + ``delete_draft()`` are the only recovery, and a dry run (which constructs
+nothing) is the only way to leave nothing.
 Mail's AppleScript is slow on large mailboxes, so reads are capped and the osascript
 timeout bounds a pathological search. User input goes via argv / a tempfile — not
 interpolated.
@@ -182,9 +187,16 @@ end draftLeftover"""
 # READ from a tempfile via the shared readBody handler (never interpolated into the
 # script — the supermemoryai pattern), so a long/multiline/unicode/EMPTY body can't
 # break, inject, or crash (-39 on a zero-byte file, #READ_BODY) the script. to/subject/
-# tempfile-path all arrive via argv. Atomic (#44): everything after `make new outgoing
-# message` is wrapped in a try; on any failure the partial outgoing message is deleted
-# before re-raising, so a retry can't strand a duplicate draft.
+# tempfile-path all arrive via argv. Atomic (#44), with a HARD LIMIT (#133): everything
+# after `make new outgoing message` is wrapped in a try and the partial outgoing message
+# is rolled back before re-raising — but that does NOT stop a duplicate appearing in
+# Drafts. Device-verified 2026-07-26: Mail autosaves ANY outgoing message to the Drafts
+# mailbox ~10-15 seconds after creation, asynchronously, and nothing cancels it. The
+# rollback removes the outgoing-message OBJECT (proven, -1728) and the autosave still
+# lands afterwards. Five suppression attempts all failed — one-shot `with properties`,
+# post-creation writes, visible:true, visible:false, and `close … saving no`. So a
+# failed create_draft CAN leave a stray draft; `drafts()` + `delete_draft()` are the
+# recovery, and the #44 comment must not be read as promising otherwise.
 _CREATE_DRAFT = (
     READ_BODY
     + "\n\n"
@@ -286,10 +298,13 @@ end run"""
 # visible compose window" folklore does not hold. Recipient lists arrive as ONE argv
 # item per field, US-joined (an email address cannot contain U+001F). Body via
 # tempfile through the shared readBody handler (never a bare `read` — a subject-only
-# send leaves an EMPTY body file, which crashes -39, #READ_BODY). Atomic (#44): delete
-# the partial message on any post-creation error — note that Mail may still keep an
-# autosaved Drafts copy, a known Mail behaviour we cannot fully suppress, which is
-# exactly why the DRY-RUN path builds nothing at all.
+# send leaves an EMPTY body file, which crashes -39, #READ_BODY). Atomic (#44): roll
+# back the partial message on any pre-send error.
+#
+# #133, device-verified 2026-07-26: Mail autosaves any outgoing message to Drafts
+# ~10-15s after creation and nothing suppresses it, so a SUCCESSFUL send also leaves a
+# stray Drafts copy — not just the error path. This is why the DRY-RUN path builds
+# nothing at all: the only way to not litter is to not construct a message.
 _SEND = (
     READ_BODY
     + "\n\n"
@@ -354,7 +369,8 @@ end run"""
 # 2026-07-25, returns an outgoing message with the Re: subject already applied. The
 # body (reply text + our quote, built in Python exactly as `reply` does) is read
 # through the shared readBody handler, never a bare `read` (an empty body — no quote,
-# no reply text — would otherwise crash -39, #READ_BODY). Atomic (#44).
+# no reply text — would otherwise crash -39, #READ_BODY). Atomic (#44), with #133's
+# limit: a successful reply-all still leaves an autosaved Drafts copy behind.
 _REPLY_ALL = (
     READ_BODY
     + "\n\n"
@@ -563,9 +579,10 @@ end run"""
 # References threading — the only mechanism that threads; make-new-outgoing can't set
 # headers, spike 2026-07-11). The body (reply text + our quote) is set on the returned
 # outgoing message — keystroke-free (#46; no .eml). A window opens for the HUMAN to
-# review/send. NEVER sends. Atomic (#44): delete the draft on any post-creation
-# failure. body via tempfile through the shared readBody handler, never a bare `read`
-# (an empty reply_body would otherwise crash -39, #READ_BODY); message-id via argv.
+# review/send. NEVER sends. Atomic (#44): roll back the draft on any post-creation
+# failure — subject to #133's limit, i.e. Mail's async autosave can still leave a stray
+# Drafts copy. body via tempfile through the shared readBody handler, never a bare
+# `read` (an empty reply_body would otherwise crash -39, #READ_BODY); id via argv.
 _REPLY = (
     READ_BODY
     + "\n\n"
@@ -1079,8 +1096,12 @@ class MailAdapter:
 
     def create_draft(self, to: str, subject: str, body: str) -> dict:
         """Create a Mail draft and OPEN it for the human to review/send — NEVER sends.
-        Atomic (#44): if any step after creation fails, the script deletes the partial
-        draft before erroring, so a retry can't strand a duplicate. Returns a locator
+        Atomic (#44): if any step after creation fails, the script rolls the partial
+        draft back before erroring. That rollback is verified but NOT sufficient (#133):
+        Mail autosaves any outgoing message to Drafts ~10-15s after creation,
+        asynchronously and unsuppressably, so a failed create can still leave a stray
+        draft. List it with `drafts()` and remove it with `delete_draft()`. Returns a
+        locator
         (#43): a freshly opened compose window has no stable Message-ID YET (Mail
         stamps one once the draft is saved to the Drafts mailbox), so we return where
         to find it rather than guessing an id — once saved, `drafts()`/`delete_draft()`

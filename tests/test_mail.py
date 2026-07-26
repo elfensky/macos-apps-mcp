@@ -1124,3 +1124,33 @@ def test_outbox_count_reads_the_real_queue_not_session_objects():
     # the one signal that matters.
     assert "messages of outbox" in mail._OUTBOX_COUNT
     assert "count of outgoing messages" not in mail._OUTBOX_COUNT
+
+
+# --- #133: the autosave limit is documented, not silently claimed away ---------------
+
+
+def test_send_tools_document_the_unsuppressable_autosave():
+    # #133, device-verified 2026-07-26: Mail autosaves ANY outgoing message into Drafts
+    # ~10-15s after creation, asynchronously — verified across a delete, a rollback AND
+    # a fully successful send, and unsuppressed by all five construction/teardown
+    # variants tried (one-shot `with properties`, post-creation writes, visible:true,
+    # visible:false, `close … saving no`). It cannot be swept safely either: an outgoing
+    # message has no readable `message id` (-1700) and the draft's id is only assigned
+    # at autosave, so matching would have to guess by subject and could delete a real
+    # draft. Since the behaviour cannot be fixed, it MUST be documented where the caller
+    # reads it — the tool docstring is the MCP tool description.
+    from macos_apps_mcp import server
+
+    for tool in (server.send_mail, server.reply_all, server.forward_mail):
+        doc = tool.__doc__ or ""
+        assert "#133" in doc, f"{tool.__name__} does not document the autosave"
+        assert "delete_draft" in doc, f"{tool.__name__} omits the recovery path"
+
+
+def test_atomicity_comments_do_not_overclaim():
+    # the #44 comments used to promise "a retry can't strand a duplicate draft". That is
+    # false (see above), and a false safety claim in a comment is worse than none — it
+    # is what let #133 sit misdiagnosed. Assert the claim stays retired.
+    assert "retry can't strand a duplicate" not in mail.__doc__
+    assert "retry can't strand a duplicate" not in mail._CREATE_DRAFT
+    assert "#133" in mail.__doc__  # the real limit is stated instead
