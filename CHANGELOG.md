@@ -4,7 +4,7 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
-## 0.9.0 (unreleased)
+## [0.9.0] - 2026-07-27 — Outbound mail, gated
 
 ### Added
 
@@ -61,10 +61,37 @@ surface may still shift between minor versions.
   with the gate on, replaces the adapter's send methods with recording stubs, and
   asserts every argument forwards correctly — nothing is ever actually sent.
 
+- **A failed send ran a cleanup that deleted nothing, and the outbox counter cried
+  wolf (#135).** Device-verified: `delete` on a message Mail has already accepted via
+  `send` returns cleanly, removes nothing, and the message delivers anyway — yet every
+  send path had `send` *inside* the try whose handler deleted, so a failure at the send
+  step "rolled back" a message that was already on its way and reported success. `send`
+  now sits outside that try in send/reply_all/forward, and the rollback proves the delete
+  (`-1728` against the dead reference) instead of assuming it; anything else reports "not
+  verified" rather than guessing kindly. Separately, `outbox_pending` had measured
+  `outgoing messages` since #134 — script-session message *objects*, including delivered
+  ones — which read 2 before a send and 2 for ten seconds after while `messages of outbox`
+  went 0 → 1 → 0. Every send for the rest of the session falsely warned "delivery is NOT
+  confirmed". It now counts `messages of outbox`.
+- **We promised an atomicity Mail does not offer (#133).** Device-verified: Mail
+  autosaves *any* outgoing message into Drafts ~10–15 s after creation, asynchronously,
+  and nothing cancels it — a fully successful send litters too, and the entry persists
+  (12 h+ verified). Five suppression attempts failed (one-shot `with properties`,
+  post-creation writes, `visible:true`/`false`, `close … saving no`), and automatic
+  cleanup is unsafe: an outgoing message has no readable `message id` (`-1700`) and the
+  draft's id only exists once the autosave lands, so a sweep would guess by subject and
+  could delete a real draft. The #44-era claim that "a retry can't strand a duplicate
+  draft" was simply untrue, and that false assurance is what kept this misdiagnosed —
+  every earlier "cannot reproduce" checked within a few seconds, before the autosave
+  fired. The claim is retired, and the real limit is now documented in the
+  `send_mail`/`create_draft` tool descriptions where the caller reads it.
+
 ### Notes
 
 - `send_draft` was investigated and dropped: Mail's `send` verb applies only to an
   `outgoing message`, never to a message stored in Drafts (`-1708`, device-verified).
+- New: `docs/mail-applescript-facts.md` collects every device-verified Mail AppleScript
+  trap found this milestone, with what was observed and when.
 
 ## [0.8.0] - 2026-07-25 — New adapters & expansion
 

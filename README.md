@@ -145,8 +145,20 @@ tool is skipped, a safe-deploy guard. (Reads may still open apps / read local st
 
 ### Outbound (send) mode
 
-Sending is **off by default** — the server creates drafts and never sends. Set
-`MACOS_APPS_ALLOW_SEND` to opt in, per adapter:
+Sending is **off by default** — the server creates drafts and never sends. Turn it on with:
+
+```sh
+macos-apps-mcp allow-send mail    # or: messages / mail,messages / all / off
+macos-apps-mcp allow-send         # print the current setting
+```
+
+That persists the opt-in and restarts the daemon so it re-registers (registration happens at
+import, so a restart is unavoidable — reconnect your MCP client afterward). It is a **CLI
+command, not a tool**: the gate is your consent, so the model can neither grant itself sending
+nor restart the server out from under your session.
+
+The same choice is available as `MACOS_APPS_ALLOW_SEND` in the environment, which is what a
+stdio server reads (a set variable always wins over the persisted toggle):
 
 | Value | Effect |
 |---|---|
@@ -179,10 +191,11 @@ above rather than a re-read of the raw env var, so it can never disagree with wh
 
 **Under the daemon deployment**, setting `MACOS_APPS_ALLOW_SEND` in an MCP client's config is a
 silent no-op: the client's `env` block reaches the shim, not the long-lived daemon process that
-actually reads the variable at import time, and the shipped LaunchAgent plist ships no
-`EnvironmentVariables` key. See [docs/DAEMON.md](docs/DAEMON.md) ("Outbound (send) mode under the
-daemon") for the `launchctl setenv` / plist `EnvironmentVariables` steps and the
-`launchctl kickstart -k` restart needed for it to take effect.
+reads the variable at import time, and the shipped LaunchAgent plist ships no
+`EnvironmentVariables` key. This is exactly why `allow-send` exists — it writes state the daemon
+can read (`~/.local/state/macos-apps-mcp/allow_send`, home-pinned so the shell that writes it and
+the launchd process that reads it always agree) and survives reboots, unlike `launchctl setenv`.
+See [docs/DAEMON.md](docs/DAEMON.md) ("Outbound (send) mode under the daemon").
 
 ## Develop
 
