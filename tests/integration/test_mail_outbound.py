@@ -75,3 +75,48 @@ def test_send_to_self_and_delete_draft_round_trip():
 
     # a real send must not leave a draft behind either
     assert not [p for p in adapter.list_drafts() if subject in p.summary]
+
+
+# --- #135: the rollback tells the truth, and outbox_pending measures the real queue ---
+
+
+def test_rollback_verifies_a_real_delete():
+    """The rollback handler run against live Mail: it deletes a freshly built outgoing
+    message and PROVES it, returning true. The old code called a bare `delete` and
+    assumed the outcome."""
+    from macos_apps_mcp.runtime import run_osascript
+
+    probe = (
+        mail_module._ROLLBACK
+        + """
+
+on run argv
+  tell application "Mail"
+    set m to make new outgoing message with properties {visible:false}
+  end tell
+  set verdict to my rollback(m)
+  tell application "Mail"
+    return (verdict as text) & " " & ((count of outgoing messages) as text)
+  end tell
+end run"""
+    )
+    verdict, _count = run_osascript(probe).strip().split()
+    assert verdict == "true"  # the delete was verified, not assumed
+
+
+def test_outbox_pending_tracks_the_real_queue_not_session_objects():
+    """A real send to self must move outbox_pending 0 -> non-zero -> 0. The counter this
+    shipped with (`count of outgoing messages`) counts script-session objects including
+    already-delivered ones, so it would read non-zero here forever and never drain."""
+    assert mail_module._outbox_pending() == 0, "start from a clean outbox"
+    out = MailAdapter().send(
+        SELF_ADDRESS, f"{MARKER} outbox drain", "drain probe", dry_run=False
+    )
+    assert out["sent"] is True
+    drained = False
+    for _ in range(20):  # bounded: never leave a loop pointed at Mail
+        if mail_module._outbox_pending() == 0:
+            drained = True
+            break
+        time.sleep(6)
+    assert drained, "the outbox never drained — delivery is genuinely stuck"
