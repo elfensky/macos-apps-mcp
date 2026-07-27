@@ -30,12 +30,17 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
         "read",
         "flagged",
         "deleted",
+        "conversation_id",
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
     "mailboxes": {"ROWID", "url"},
     "message_global_data": {"ROWID", "message_id_header"},
     "recipients": {"message", "address"},
+    # conversation_id: Mail's own threading key (five dedicated indexes on it),
+    # read by build_thread_query. attachments: backs has_attachments — an indexed
+    # EXISTS, never a per-message AppleScript probe.
+    "attachments": {"ROWID", "message", "name"},
 }
 
 
