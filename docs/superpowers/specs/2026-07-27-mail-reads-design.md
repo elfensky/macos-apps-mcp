@@ -26,7 +26,8 @@ Every number below came from querying the live `Envelope Index`, not from docume
   `messages_conversation_id_mailbox_date_received_deleted_index`). Mail already does the
   threading — matching References/In-Reply-To by hand, as #77 sketches, is redundant work.
 - `attachments(ROWID, message, name)` with `attachments_message_name_index` → `has_attachments`
-  is an indexed `EXISTS`, not a per-message AppleScript probe.
+  is an indexed `EXISTS`, not a per-message AppleScript probe. **But the table counts inline
+  signature and newsletter images as attachments** — see below.
 - `mailboxes.url` embeds the account UUID: `imap://<UUID>/<percent-encoded-path>`.
 - AppleScript `id of every account of application "Mail"` returns **exactly those UUIDs**,
   alongside `name` and `email addresses` — verified, sub-second:
@@ -63,6 +64,36 @@ the schema carries a `mailboxes.unread_count_adjusted_for_duplicates` column.
 
 **Therefore: dedupe in the read plane, unconditionally.** Cleanup is filed separately.
 
+### `has_attachments` cannot be a naive EXISTS
+
+Mail records inline images as attachment rows. The most common `attachments.name` values on this
+Mac are email furniture, not attachments anyone means:
+
+```
+Mail Attachment.png  498 · image001.png 426 · image002.png 385 · embed0.png 285
+icon-headerbar-logo.png 131 · megekko_header_bars_full.png 131
+```
+
+| Predicate | Messages matched |
+| --- | --- |
+| any attachment row (naive `EXISTS`) | 4,474 |
+| anything that is not an image | 2,566 |
+| **the shipped rule (below)** | **2,562** |
+
+A naive `has_attachments=True` would return a mailbox-worth of newsletters. **The filter means
+"carries a real document"**: an attachment whose name does not end in a known image extension.
+Names with no extension count as documents (43 rows — could be anything; better a false positive
+than a silently dropped attachment). There are no NULL names in this store, but the predicate
+tolerates them for the same reason.
+
+```python
+_IMAGE_EXTS = ("png", "jpg", "jpeg", "gif", "webp", "heic",
+               "bmp", "tiff", "tif", "svg", "ico")
+```
+
+Cost, stated plainly: a photo someone genuinely emailed you is missed. `mail_attachments` still
+lists every attachment of a message, images included, so nothing becomes unreachable.
+
 ### Stored counts are stale
 
 `mailboxes.unread_count` is a trigger-maintained column, and on this Mac it **lies**: the Gmail
@@ -96,6 +127,10 @@ for a field already in hand.
 Only the two filters Andrei selected are added to `mail_search`. `flag_color` and sort-order
 control were considered and dropped (YAGNI — `flag_color` is only useful to someone who
 colour-flags mail; newest-first is the right default and nothing has asked for another).
+
+`account` accepts **either** a display name (`"Personal"`) **or** the raw account UUID. The name
+path needs the AppleScript lookup; the UUID path is pure sqlite and always works. Without that,
+a filter would be unusable exactly when Mail is unreachable — see [Known limitations](#known-limitations).
 
 ### The dedup rule — one CTE, shared by all three
 
@@ -188,13 +223,43 @@ All three are **reads** — `@_read_tool`, no `MACOS_APPS_READ_ONLY` interaction
 | Unknown Message-ID in `mail_thread` | `[]` |
 | Message with no RFC822 Message-ID | Excluded, as today |
 
+## Known limitations
+
+Accepted, not overlooked. Each is a consequence of a decision above, documented so nobody
+rediscovers it as a bug.
+
+**No AppleScript fallback for `mail_thread` / `mail_overview`.** `mail_search` degrades to an
+AppleScript inbox search on schema drift; these two cannot, because AppleScript has no way to
+express "fetch this conversation" or "count unread across all mailboxes". A macOS release that
+renames `conversation_id` or the `mailboxes` columns takes both tools offline until the
+fingerprint is updated — they raise the typed `NativeError` rather than inventing a degraded
+answer. This is strictly more fragile than `mail_search` and is the main upgrade risk in the
+slice.
+
+**Dedup discards the other locations.** A message in both INBOX and a filed folder is reported
+as INBOX; the filed copy does not appear. Correct for triage, occasionally lossy when the
+question was "where did I file this". Reversing it means putting a folder *list* on `Pointer`,
+which changes a contract shared by every adapter — deliberately not done here.
+
+**`mail_overview` labels depend on machine state.** Counts never need Mail; account names do. The
+same call returns `Personal` with Mail running and `AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1` without
+it. Same data, different labels. Preferred over failing the whole call for a cosmetic field.
+
+**Thread truncation drops the oldest messages.** A thread beyond `MAX_THREAD` loses its opening,
+so "how did this start" is unanswerable there. Exactly one thread on this Mac (154 rows) is
+affected.
+
+**`has_attachments` misses emailed photos.** Per the rule above.
+
 ## Testing
 
 **Unit** — a fixture sqlite built with this schema subset, asserting:
 dedup preference order (INBOX wins over Archive; same-mailbox triplicate collapses to one);
 `LIMIT` applies *after* dedup; thread chronology and that truncation drops the **old** end;
 overview counts computed live and unaffected by a deliberately wrong stored `unread_count`;
-`has_attachments` and `account` filter correctly; URL-decoding of mailbox names.
+`has_attachments` matching a `.pdf` and an extensionless name while rejecting a message whose
+only attachment is `image001.png`; `account` resolving by both display name and raw UUID;
+URL-decoding of mailbox names.
 
 **Integration** (`-m integration`, on-device only, never CI) — all three tools against the real
 Envelope Index.
