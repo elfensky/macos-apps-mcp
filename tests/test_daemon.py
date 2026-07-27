@@ -1,4 +1,5 @@
 import asyncio
+import os
 import shutil
 import socket
 import stat
@@ -12,6 +13,22 @@ from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
 from macos_apps_mcp import daemon
+
+
+@pytest.fixture(autouse=True)
+def _no_role_leak():
+    """daemon.serve() sets MACOS_APPS_MCP_ROLE=daemon as its first act (before the
+    server import), and test_serve_two_concurrent_sessions runs it in a daemon=True
+    background thread. monkeypatch can't undo a write made by another thread after
+    the test function returns, so without this the role leaks into every later test
+    in the process (#141). Restore directly via os.environ regardless of what the
+    thread did."""
+    original = os.environ.get("MACOS_APPS_MCP_ROLE")
+    yield
+    if original is None:
+        os.environ.pop("MACOS_APPS_MCP_ROLE", None)
+    else:
+        os.environ["MACOS_APPS_MCP_ROLE"] = original
 
 
 @pytest.fixture

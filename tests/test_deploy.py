@@ -175,7 +175,7 @@ def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
 
 
 def test_allow_send_round_trip(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "state" / "allow_send")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setattr(
         deploy.subprocess, "run", lambda *a, **k: _Kick(1, "not registered")
     )
@@ -200,8 +200,8 @@ def test_allow_send_file_reaches_the_gate_only_under_the_daemon(tmp_path, monkey
     stdio server (and every test run) must stay driven by the env var alone."""
     from macos_apps_mcp import server
 
-    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "allow_send")
-    (tmp_path / "allow_send").write_text("mail")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    deploy._allow_send_file().write_text("mail")  # state_dir() creates the parent
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
 
