@@ -265,3 +265,11 @@ def test_parse_emlx_deeply_nested_multipart_returns_none():
     rfc822 = b"Message-ID: <deep@x.com>\r\n" + inner
     raw = _emlx(rfc822)
     assert mail_index.parse_emlx(raw) is None
+
+
+def test_fingerprint_covers_conversation_and_attachments():
+    # conversation_id backs mail_thread; attachments backs has_attachments.
+    # Both must be fingerprinted or a macOS schema move would silently
+    # mis-answer instead of drifting.
+    assert "conversation_id" in mail_index.HEADER_FINGERPRINT["messages"]
+    assert mail_index.HEADER_FINGERPRINT["attachments"] == {"ROWID", "message", "name"}
