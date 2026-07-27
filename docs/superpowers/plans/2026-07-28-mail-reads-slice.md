@@ -30,18 +30,17 @@
 
 ---
 
-### Task 1: Extend the schema fingerprint and the shared test fixture
+### Task 1: Extend the schema fingerprint
 
-Adds the columns/tables later tasks query. Doing this first means every later task's fixture already has them.
+Declares the columns and tables later tasks query, so `read_via_sqlite` drifts loudly instead of mis-answering if a macOS release moves them. Self-contained: nothing else changes, the suite stays green.
 
 **Files:**
 - Modify: `macos_apps_mcp/adapters/mail_index.py:21-39` (`HEADER_FINGERPRINT`)
-- Modify: `tests/test_mail_search.py:13-35` (`_fake_envelope`)
 - Test: `tests/test_mail_index.py`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `HEADER_FINGERPRINT` gains `messages.conversation_id` and an `attachments: {"ROWID", "message", "name"}` entry. `_fake_envelope(path)` builds a fixture carrying `conversation_id`, an `attachments` table, and multi-mailbox duplicate rows used by Tasks 2–6.
+- Produces: `HEADER_FINGERPRINT` gains `messages.conversation_id` and an `attachments: {"ROWID", "message", "name"}` entry.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -76,7 +75,34 @@ In `macos_apps_mcp/adapters/mail_index.py`, inside `HEADER_FINGERPRINT`, add `"c
 Run: `uv run pytest tests/test_mail_index.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Extend the shared fixture**
+- [ ] **Step 5: Run the suite and commit**
+
+Run: `uv run pytest`
+Expected: PASS — this task changes a declaration only; no query reads the new entries yet.
+
+```bash
+git add macos_apps_mcp/adapters/mail_index.py tests/test_mail_index.py
+git commit -m "test(mail): fingerprint conversation_id + attachments before anything reads them"
+```
+
+---
+
+### Task 2: Dedup by Message-ID inside the header query
+
+The load-bearing change, and a **bug fix**: 27% of messages on a real Mac live in 2+ mailboxes, so `mail_search` returns the same mail several times today — up to eight for one folder on the author's machine.
+
+The fixture rewrite below **is** the red half of this cycle: giving `_fake_envelope` the duplicate shapes a real mailbox has makes the existing test fail for exactly the reason this task fixes. Fixture and fix belong in one commit; splitting them would commit a knowingly-failing test.
+
+**Files:**
+- Modify: `macos_apps_mcp/adapters/mail_index.py:73-135` (`_BASE_SQL`, `build_header_query`)
+- Modify: `tests/test_mail_search.py:13-35` (`_fake_envelope`) and its `test_search_returns_pointers_from_sqlite`
+- Test: `tests/test_mail_index.py`, `tests/test_mail_search.py`
+
+**Interfaces:**
+- Consumes: `HEADER_FINGERPRINT` from Task 1.
+- Produces: `mail_index._MAILBOX_RANK` (a SQL `CASE` string, no bound params) and `mail_index._DEDUP_SELECT_COLS`, reused verbatim by `build_thread_query` in Task 5. `build_header_query(...)` keeps its signature and returns one row per distinct `message_id_header`. `_fake_envelope(path)` gains `conversation_id`, an `attachments` table, and duplicate rows — Tasks 3, 5 and 6 all depend on that shape.
+
+- [ ] **Step 1: Replace the shared fixture**
 
 Replace `_fake_envelope` in `tests/test_mail_search.py` entirely with:
 
@@ -124,33 +150,20 @@ def _fake_envelope(path):
     c.close()
 ```
 
-- [ ] **Step 6: Run the full mail suite to verify nothing regressed**
+Then rewrite `test_search_returns_pointers_from_sqlite` to assert identity rather than row count — a count assertion would need editing again in Task 3:
 
-Run: `uv run pytest tests/test_mail_search.py tests/test_mail_index.py -v`
-Expected: PASS. `test_search_returns_pointers_from_sqlite` asserts `len(out) == 1` and still passes — Task 2 introduces dedup; today the query has no `conversation_id`/`attachments` dependency, and `subject="Invoice"` matches only `<abc@ex.com>` rows, which currently return **two** rows (INBOX + Archive). **If this test fails with `len(out) == 2`, that is expected and correct** — change the assertion to `len(out) == 2` with the comment `# deduped to 1 in Task 2` and let Task 2 flip it back.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add macos_apps_mcp/adapters/mail_index.py tests/test_mail_index.py tests/test_mail_search.py
-git commit -m "test(mail): fingerprint conversation_id + attachments, fixture grows real duplicate shapes"
+```python
+def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Invoice")
+    hit = [p for p in out if p.id == "<abc@ex.com>"]
+    assert len(hit) == 1  # INBOX + Archive copies collapse to one
+    assert hit[0].summary == "Invoice 42"
 ```
 
----
-
-### Task 2: Dedup by Message-ID inside the header query
-
-The load-bearing change. 27% of messages on a real Mac live in 2+ mailboxes, so `mail_search` returns the same mail several times today.
-
-**Files:**
-- Modify: `macos_apps_mcp/adapters/mail_index.py:73-135` (`_BASE_SQL`, `build_header_query`)
-- Test: `tests/test_mail_index.py`, `tests/test_mail_search.py`
-
-**Interfaces:**
-- Consumes: `_fake_envelope` from Task 1.
-- Produces: `mail_index._MAILBOX_RANK` (a SQL `CASE` string, no bound params) and `mail_index._DEDUP_SELECT_COLS`, reused verbatim by `build_thread_query` in Task 5. `build_header_query(...)` keeps its signature and returns one row per distinct `message_id_header`.
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 2: Write the failing tests**
 
 In `tests/test_mail_index.py`, append:
 
@@ -206,12 +219,12 @@ def test_search_limit_counts_distinct_messages(tmp_path, monkeypatch):
     assert len({p.id for p in out}) == 2
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_mail_index.py tests/test_mail_search.py -k "dedup or headerless or distinct" -v`
 Expected: FAIL — `assert 'row_number() over' in low` fails; the search tests return duplicate ids.
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 4: Write the implementation**
 
 In `macos_apps_mcp/adapters/mail_index.py`, replace `_BASE_SQL` (lines 73–84) with:
 
@@ -273,17 +286,17 @@ with:
     return sql, params
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_mail_index.py tests/test_mail_search.py -v`
-Expected: PASS. If Step 6 of Task 1 required loosening `test_search_returns_pointers_from_sqlite` to `len(out) == 2`, restore it to `len(out) == 1` now and drop the temporary comment.
+Expected: PASS — including `test_search_returns_pointers_from_sqlite`, which Step 1 left failing.
 
-- [ ] **Step 5: Run the whole suite — this changes shared behaviour**
+- [ ] **Step 6: Run the whole suite — this changes shared behaviour**
 
 Run: `uv run pytest`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add macos_apps_mcp/adapters/mail_index.py tests/test_mail_index.py tests/test_mail_search.py
