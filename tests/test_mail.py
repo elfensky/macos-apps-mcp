@@ -1154,3 +1154,37 @@ def test_atomicity_comments_do_not_overclaim():
     assert "retry can't strand a duplicate" not in mail.__doc__
     assert "retry can't strand a duplicate" not in mail._CREATE_DRAFT
     assert "#133" in mail.__doc__  # the real limit is stated instead
+
+
+def test_account_map_parses_osascript_pairs(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    m._ACCOUNT_MAP_CACHE = None
+    monkeypatch.setattr(
+        m, "run_osascript", lambda *a: "UUID-1\x1fPersonal\x1eUUID-2\x1fGoogle"
+    )
+    assert m._account_map() == {"UUID-1": "Personal", "UUID-2": "Google"}
+
+
+def test_account_map_empty_when_mail_unreachable(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    m._ACCOUNT_MAP_CACHE = None
+
+    def boom(*a):
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    # a cosmetic label must never fail the call that wanted counts
+    assert m._account_map() == {}
+
+
+def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    m._ACCOUNT_MAP_CACHE = None
+    monkeypatch.setattr(m, "run_osascript", lambda *a: "UUID-1\x1fPersonal")
+    assert m._resolve_account("Personal") == "UUID-1"
+    assert m._resolve_account("UUID-1") == "UUID-1"
+    assert m._resolve_account("Nonexistent") == "Nonexistent"

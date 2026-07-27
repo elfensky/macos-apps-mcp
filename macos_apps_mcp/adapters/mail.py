@@ -72,6 +72,71 @@ def _validate_mailbox(mailbox: str) -> str:
     return canon
 
 
+# Account UUID -> display name. The UUID is what mailboxes.url embeds; the name is
+# what a human reads. Device-verified: AppleScript `id of account` returns exactly
+# the UUID in mailboxes.url. There is NO at-rest source — MailData has no accounts
+# plist, and ~/Library/Accounts/Accounts4.sqlite omits some accounts' description
+# entirely (iCloud is blank on this Mac), so it would cost an FDA grant, a
+# fingerprint and a fallback for a cosmetic label. Cached per process: accounts
+# change about never. with timeout (#56): bound the Apple Events so an orphaned
+# osascript can't pin Mail.
+_ACCOUNT_MAP_CACHE: dict[str, str] | None = None
+
+_ACCOUNTS = (
+    STRIP_FRAMING
+    + """
+
+on run argv
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    repeat with acct in every account
+      set out to out & (id of acct) & us & (name of acct) & rs
+    end repeat
+  end tell
+  end timeout
+  return out
+end run
+"""
+)
+
+
+def _account_map() -> dict[str, str]:
+    """UUID -> account display name, cached. ``{}`` when Mail is unreachable — this is a
+    label lookup, and it must never fail a call whose real payload came from sqlite."""
+    global _ACCOUNT_MAP_CACHE
+    if _ACCOUNT_MAP_CACHE is None:
+        try:
+            raw = run_osascript(_ACCOUNTS)
+        except (NativeError, OSError):
+            # Every osascript failure mode is one of these two and all mean the same
+            # thing — no names available, never "the call failed". run_osascript raises
+            # NativeError subclasses (AutomationDenied / AppNotRunning / NativeTimeout /
+            # generic) on any script or exit failure, and Popen raises OSError when the
+            # osascript binary itself is missing. Deliberately NOT a bare except: a bug
+            # in the parsing below must surface, not be swallowed as "Mail unreachable".
+            return {}
+        out = {}
+        for rec in raw.split(RS):
+            if US in rec:
+                uuid, name = rec.split(US, 1)
+                if uuid.strip():
+                    out[uuid.strip()] = name.strip()
+        _ACCOUNT_MAP_CACHE = out
+    return _ACCOUNT_MAP_CACHE
+
+
+def _resolve_account(value: str) -> str:
+    """A display name -> its UUID; anything else (a UUID, an unknown name) unchanged, so
+    account= still works when Mail is unreachable."""
+    for uuid, name in _account_map().items():
+        if name.casefold() == value.casefold():
+            return uuid
+    return value
+
+
 # US/RS framing contract (#68): separators, the shared stripFraming AppleScript
 # handler, and the split_framed splitter all live in text.py — the protocol's single
 # home (the a6ce7fd subject-framing bug came from per-file re-declarations). Nothing
@@ -1438,6 +1503,7 @@ class MailAdapter:
         # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
         # the promised MAX_MAILS backstop (#70 review M1).
         limit = min(limit, MAX_MAILS)
+        account = _resolve_account(account) if account else None
 
         path = mail_index.envelope_index_path()
         if path is None:
