@@ -523,9 +523,13 @@ def _account_map() -> dict[str, str]:
     if _ACCOUNT_MAP_CACHE is None:
         try:
             raw = run_osascript(_ACCOUNTS)
-        except Exception:
-            # Automation denied, Mail not installed, osascript timeout — all mean "no
-            # names available", never "the call failed".
+        except (NativeError, OSError):
+            # Every osascript failure mode is one of these two and all mean the same
+            # thing — no names available, never "the call failed". run_osascript raises
+            # NativeError subclasses (AutomationDenied / AppNotRunning / NativeTimeout /
+            # generic) on any script or exit failure, and Popen raises OSError when the
+            # osascript binary itself is missing. Deliberately NOT a bare except: a bug
+            # in the parsing below must surface, not be swallowed as "Mail unreachable".
             return {}
         out = {}
         for rec in raw.split(RS):
@@ -546,7 +550,7 @@ def _resolve_account(value: str) -> str:
     return value
 ```
 
-Note the bare `except Exception` is deliberate and is the one place it is correct here: every failure mode means the same thing (no names), and the counts the caller wanted never needed Mail.
+`NativeError` is already imported in `mail.py`. The catch is typed rather than bare so a parsing bug in the loop below still raises — only a genuinely unreachable Mail yields `{}`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
