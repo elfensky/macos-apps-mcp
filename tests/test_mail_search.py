@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 import macos_apps_mcp.server as srv
 from macos_apps_mcp.adapters import mail_index
@@ -307,3 +308,34 @@ def test_overview_sorts_unread_first(tmp_path, monkeypatch):
     m._ACCOUNT_MAP_CACHE = {}
     unread = [r["unread"] for r in MailAdapter().overview()]
     assert unread == sorted(unread, reverse=True)
+
+
+def test_new_read_tools_are_registered():
+    async def go():
+        async with Client(srv.mcp) as c:
+            return {t.name for t in await c.list_tools()}
+
+    names = asyncio.run(go())
+    assert {"mail_thread", "mail_overview"} <= names
+
+
+def test_mail_search_exposes_new_filters():
+    async def go():
+        async with Client(srv.mcp) as c:
+            return {t.name: t for t in await c.list_tools()}
+
+    props = asyncio.run(go())["mail_search"].inputSchema["properties"]
+    assert "has_attachments" in props and "account" in props
+
+
+def test_mail_search_still_requires_a_filter():
+    # has_attachments/account must COUNT as filters, and an all-empty call must still
+    # raise rather than dumping the whole mailbox. mail_search is registered via
+    # @_read_tool, which wraps it in _guard — a plain ValueError raised inside the
+    # tool body surfaces to a direct caller as fastmcp's ToolError (#47), not the
+    # original ValueError, so that's what this asserts against (matches the runtime
+    # behavior verified against the actual guarded callable, not the brief's assumed
+    # `.fn()` unwrap which fastmcp 3.4.2 doesn't expose on `@mcp.tool`-registered
+    # functions).
+    with pytest.raises(ToolError):
+        srv.mail_search()
