@@ -291,3 +291,28 @@ def test_header_query_excludes_headerless_rows():
     low = sql.lower()
     assert "gd.message_id_header is not null" in low
     assert "gd.message_id_header <> ''" in low
+
+
+def test_has_attachments_excludes_inline_images():
+    # Mail records signature/newsletter images as attachment rows — device-verified,
+    # top names on a real Mac are image001.png (426) and embed0.png (285). A naive
+    # EXISTS matched 4,474 messages where only 2,223 carried a real document.
+    sql, _ = mail_index.build_header_query(has_attachments=True, limit=5)
+    low = sql.lower()
+    assert "exists" in low and "attachments" in low
+    for ext in ("png", "jpg", "jpeg", "gif"):
+        assert f"%.{ext}" in low
+
+
+def test_has_attachments_false_adds_no_clause():
+    with_f, _ = mail_index.build_header_query(
+        subject="x", has_attachments=False, limit=5
+    )
+    without, _ = mail_index.build_header_query(subject="x", limit=5)
+    assert with_f == without
+
+
+def test_account_is_a_bound_param():
+    sql, params = mail_index.build_header_query(account="AAAA", limit=5)
+    assert "AAAA" not in sql
+    assert "%AAAA%" in params

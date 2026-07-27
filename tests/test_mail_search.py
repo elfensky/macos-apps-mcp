@@ -213,3 +213,24 @@ def test_search_limit_counts_distinct_messages(tmp_path, monkeypatch):
     out = MailAdapter().search(subject="Invoice", limit=2)
     assert len(out) == 2
     assert len({p.id for p in out}) == 2
+
+
+def test_search_has_attachments_matches_document_not_image(tmp_path, monkeypatch):
+    # msg 10 (<abc@ex.com>) has contract.pdf; msg 12 (<reply@ex.com>) has only
+    # image001.png and must NOT match.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    ids = [p.id for p in MailAdapter().search(has_attachments=True)]
+    assert "<abc@ex.com>" in ids
+    assert "<reply@ex.com>" not in ids
+
+
+def test_search_account_filters_by_uuid(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    # mailbox 3 (imap://BBBB/Travel) holds <reply@ex.com> and both <dup@ex.com> copies
+    ids = [p.id for p in MailAdapter().search(account="BBBB")]
+    assert set(ids) == {"<reply@ex.com>", "<dup@ex.com>"}
+    assert "<abc@ex.com>" not in ids  # lives only under account AAAA

@@ -110,6 +110,31 @@ WHERE m.deleted = 0
   AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
 """
 
+# has_attachments means "carries a real document". Mail counts inline signature and
+# newsletter images as attachment rows, so a naive EXISTS is noise-dominated — on a real
+# Mac 4,474 messages "have an attachment" while only 2,223 carry a document. Names with
+# no extension count as documents: a false positive beats a silently dropped attachment.
+_IMAGE_EXTS = (
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "heic",
+    "bmp",
+    "tiff",
+    "tif",
+    "svg",
+    "ico",
+)
+
+_HAS_DOCUMENT = (
+    " AND EXISTS (SELECT 1 FROM attachments at WHERE at.message = m.ROWID"
+    " AND (at.name IS NULL OR NOT ("
+    + " OR ".join(f"lower(at.name) LIKE '%.{e}'" for e in _IMAGE_EXTS)
+    + ")))"
+)
+
 
 def build_header_query(
     *,
@@ -121,11 +146,15 @@ def build_header_query(
     until=None,
     unread=None,
     flagged=None,
+    has_attachments=None,
+    account=None,
     message_ids=None,
     limit=25,
 ):
     """Build (sql, params) for the header plane. All filters optional, ANDed; every
-    value is a bound param (injection-safe). Newest-first, deleted excluded."""
+    value is a bound param (injection-safe). Newest-first, deleted excluded.
+    `has_attachments` means a real document (images excluded); `account` matches a
+    UUID substring of the mailbox url."""
     sql = _BASE_SQL
     params: list = []
     if subject:
@@ -153,6 +182,13 @@ def build_header_query(
         sql += " AND m.read = 0"
     if flagged:
         sql += " AND m.flagged = 1"
+    if has_attachments:
+        sql += _HAS_DOCUMENT
+    if account:
+        # substring of mailboxes.url, which embeds the account UUID as
+        # imap://<UUID>/<path> — so a raw UUID works even when Mail is unreachable.
+        sql += " AND mb.url LIKE ?"
+        params.append(f"%{account}%")
     if message_ids:
         placeholders = ",".join("?" for _ in message_ids)
         sql += f" AND gd.message_id_header IN ({placeholders})"
