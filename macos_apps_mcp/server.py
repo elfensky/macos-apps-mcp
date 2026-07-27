@@ -407,6 +407,8 @@ def mail_search(
     unread: bool = False,
     flagged: bool = False,
     body: str = "",
+    has_attachments: bool = False,
+    account: str = "",
     limit: int = 25,
 ) -> list[dict]:
     """Indexed search across ALL mailboxes via Mail's Envelope Index — fast,
@@ -416,17 +418,22 @@ def mail_search(
     it only sees messages already downloaded AND indexed by mail_index_bodies (run that
     first; partial coverage is normal). At least one filter required. Returns citable
     Pointers, newest first. Falls back to AppleScript inbox search on missing Automation
-    access / schema drift. Read-only; needs Automation access for Mail."""
+    access / schema drift.
+    `has_attachments` means a real DOCUMENT — inline signature/newsletter images are
+    excluded, so it will not match a mail whose only attachment is a logo. `account`
+    takes a display name ("Personal") or a raw account UUID.
+    Read-only; needs Automation access for Mail."""
     # since/until=0 (epoch 0) is a valid timestamp, not an absent filter — checked via
     # `is not None` rather than truthiness so it isn't wrongly treated as unset (#70
     # review M3).
-    text_filters = [subject, from_, to, mailbox, body]
+    text_filters = [subject, from_, to, mailbox, body, account]
     if (
         not any(text_filters)
         and since is None
         and until is None
         and not unread
         and not flagged
+        and not has_attachments
     ):
         raise ValueError("mail_search needs at least one filter")
     return [
@@ -441,9 +448,33 @@ def mail_search(
             unread=unread,
             flagged=flagged,
             body=body or None,
+            has_attachments=has_attachments,
+            account=account or None,
             limit=limit,
         )
     ]
+
+
+@_read_tool
+def mail_thread(id: str, limit: int = 100) -> list[dict[str, str]]:
+    """Every message in the conversation containing `id`, oldest-first — the transcript,
+    including messages YOU sent. Deduped: a message filed in several mailboxes appears
+    once. Returns citable Pointers; use mail_body(id) for any message's text. Over
+    `limit` messages the OLDEST are dropped, since a thread is usually read to reply to
+    it. Unknown id returns []. Fast, read-only, no Mail launch.
+    Needs Full Disk Access."""
+    return [p.as_dict() for p in _mail.thread(id, limit)]
+
+
+@_read_tool
+def mail_overview() -> list[dict]:
+    """Every mailbox with its message total and unread count, unread-first — the triage
+    entry point ("what's unread where?"). Includes Junk/Trash/All Mail so you can see
+    what they are rather than having them silently filtered. Counts are computed live,
+    not read from Mail's own stored counters, which go stale. Account names need Mail
+    reachable; without it the account UUID stands in and the counts are still correct.
+    Fast, read-only, no Mail launch. Needs Full Disk Access."""
+    return _mail.overview()
 
 
 @_read_tool

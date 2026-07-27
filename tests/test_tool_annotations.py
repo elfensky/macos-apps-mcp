@@ -73,6 +73,8 @@ _PERMISSION = {
     "mail_awaiting_reply": "Automation",
     "mail_search": "Automation",
     "mail_index_bodies": "Automation",
+    "mail_thread": "Full Disk Access",
+    "mail_overview": "Full Disk Access",
     "create_draft": "Automation",
     "mail_reply": "Automation",
     "drafts": "Automation",
