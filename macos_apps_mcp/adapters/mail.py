@@ -48,6 +48,7 @@ from ..text import (
 )
 
 MAX_MAILS = 25
+MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct)
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
@@ -1577,6 +1578,41 @@ class MailAdapter:
                 len(message_ids),
             )
         return result
+
+    def thread(self, message_id: str, limit: int = MAX_THREAD) -> list[Pointer]:
+        """Every message in the conversation containing ``message_id``, deduped and
+        oldest-first — including the ones YOU sent, which is what makes it a transcript.
+        Bodies stay behind ``mail_body``: a thread is Pointers, so quoted-text
+        duplication never arises. Unknown id -> [] (a no-match read, not an error).
+
+        No AppleScript fallback: AppleScript cannot express "fetch this conversation",
+        so on schema drift this raises the typed error rather than inventing a
+        degraded answer built from a subject-substring match.
+        """
+        from ..runtime import read_via_sqlite
+        from . import mail_index
+
+        limit = min(limit, MAX_THREAD)
+        path = mail_index.envelope_index_path()
+        if path is None:
+            raise NativeError(
+                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
+                "Open Mail once to create it. Do not retry."
+            )
+        sql, params = mail_index.build_thread_query(message_id, limit)
+
+        def read(conn):
+            conn.row_factory = sqlite3.Row
+            out = []
+            for row in conn.execute(sql, params):
+                p = mail_index.row_to_pointer(row)
+                if p is not None:
+                    out.append(p)
+            return out
+
+        return read_via_sqlite(
+            path, mail_index.HEADER_FINGERPRINT, read, immutable=False
+        )
 
     def index_bodies(self, rebuild: bool = False) -> dict:
         """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx

@@ -316,3 +316,12 @@ def test_account_is_a_bound_param():
     sql, params = mail_index.build_header_query(account="AAAA", limit=5)
     assert "AAAA" not in sql
     assert "%AAAA%" in params
+
+
+def test_thread_query_binds_message_id_and_limit():
+    sql, params = mail_index.build_thread_query("<abc@ex.com>", limit=50)
+    assert "<abc@ex.com>" not in sql
+    assert params == ["<abc@ex.com>", 50]
+    low = sql.lower()
+    assert "conversation_id" in low
+    assert "row_number() over" in low  # same dedup rule as search
