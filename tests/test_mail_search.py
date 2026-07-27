@@ -11,7 +11,12 @@ from macos_apps_mcp.errors import NativeError
 
 
 def _fake_envelope(path):
-    """A minimal Envelope Index with the fingerprinted tables + columns."""
+    """A minimal Envelope Index with the fingerprinted tables + columns.
+
+    Deliberately includes the duplicate shapes found on a real Mac: <abc@ex.com> exists
+    in INBOX *and* Archive (cross-folder), and <dup@ex.com> exists twice in the SAME
+    folder (a migration copy that ran twice). Dedup tests depend on both.
+    """
     c = sqlite3.connect(path)
     c.executescript(
         """
@@ -21,15 +26,27 @@ def _fake_envelope(path):
         CREATE TABLE message_global_data(
             ROWID INTEGER PRIMARY KEY, message_id_header TEXT);
         CREATE TABLE recipients(ROWID INTEGER PRIMARY KEY, message INT, address INT);
+        CREATE TABLE attachments(
+            ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
         CREATE TABLE messages(
             ROWID INTEGER PRIMARY KEY, subject INT, sender INT, global_message_id INT,
             mailbox INT, date_received INT, date_sent INT, read INT, flagged INT,
-            deleted INT);
-        INSERT INTO subjects VALUES (1,'Invoice 42');
+            deleted INT, conversation_id INT);
+        INSERT INTO subjects VALUES (1,'Invoice 42'),(2,'Re: Invoice 42');
         INSERT INTO addresses VALUES (1,'jane@ex.com','Jane Doe');
-        INSERT INTO mailboxes VALUES (1,'imap://acct/INBOX');
-        INSERT INTO message_global_data VALUES (1,'<abc@ex.com>');
-        INSERT INTO messages VALUES (10,1,1,1,1,1700000000,1700000000,0,0,0);
+        INSERT INTO mailboxes VALUES
+            (1,'imap://AAAA/INBOX'),(2,'imap://AAAA/Archive'),(3,'imap://BBBB/Travel');
+        INSERT INTO message_global_data VALUES
+            (1,'<abc@ex.com>'),(2,'<reply@ex.com>'),(3,'<dup@ex.com>');
+        -- <abc@ex.com>: INBOX + Archive, same conversation 7 as its reply
+        INSERT INTO messages VALUES (10,1,1,1,1,1700000000,1700000000,0,0,0,7);
+        INSERT INTO messages VALUES (11,1,1,1,2,1700000000,1700000000,0,0,0,7);
+        -- the reply, newer, in Travel, conversation 7
+        INSERT INTO messages VALUES (12,2,1,2,3,1700000900,1700000900,1,0,0,7);
+        -- <dup@ex.com>: twice in the SAME mailbox, unrelated conversation
+        INSERT INTO messages VALUES (13,1,1,3,3,1700000500,1700000500,0,0,0,9);
+        INSERT INTO messages VALUES (14,1,1,3,3,1700000500,1700000500,0,0,0,9);
+        INSERT INTO attachments VALUES (1,10,'contract.pdf'),(2,12,'image001.png');
         """
     )
     c.commit()
@@ -41,9 +58,9 @@ def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
     _fake_envelope(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     out = MailAdapter().search(subject="Invoice")
-    assert len(out) == 1
-    assert out[0].id == "<abc@ex.com>"
-    assert out[0].summary == "Invoice 42"
+    hit = [p for p in out if p.id == "<abc@ex.com>"]
+    assert len(hit) == 1  # INBOX + Archive copies collapse to one
+    assert hit[0].summary == "Invoice 42"
 
 
 def test_search_falls_back_on_drift(tmp_path, monkeypatch):
@@ -165,3 +182,34 @@ def test_mail_search_tool_registered_read_only():
             assert tools["mail_index_bodies"].annotations.readOnlyHint is True
 
     asyncio.run(go())
+
+
+def test_search_dedupes_cross_folder_preferring_inbox(tmp_path, monkeypatch):
+    # <abc@ex.com> is in INBOX and Archive. One Pointer, and it cites the INBOX copy.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Invoice 42")
+    assert [p.id for p in out].count("<abc@ex.com>") == 1
+    inbox = [p for p in out if p.id == "<abc@ex.com>"][0]
+    assert inbox.folder == "imap://AAAA/INBOX"
+
+
+def test_search_dedupes_same_folder_copies(tmp_path, monkeypatch):
+    # <dup@ex.com> exists twice in the SAME mailbox (migration ran twice) — collapses.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Invoice", limit=25)
+    assert [p.id for p in out].count("<dup@ex.com>") == 1
+
+
+def test_search_limit_counts_distinct_messages(tmp_path, monkeypatch):
+    # LIMIT must apply AFTER dedup: limit=2 over 5 rows / 3 distinct ids returns 2
+    # messages, not 2 rows that collapse to 1.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Invoice", limit=2)
+    assert len(out) == 2
+    assert len({p.id for p in out}) == 2

@@ -75,17 +75,39 @@ def row_to_pointer(row) -> Pointer | None:
     )
 
 
-_BASE_SQL = """
-SELECT gd.message_id_header AS message_id_header,
+# Dedup (#75/#76/#77): a real mailbox stores the SAME RFC822 Message-ID in several
+# mailboxes — device-verified, 36,112 non-deleted rows resolving to 22,223 distinct ids.
+# Three causes, none fixable by cleaning up: Gmail shows one server message under both a
+# label and All Mail, a migration leaves copies on two accounts, and every reply makes a
+# Sent-plus-folder pair. Apple hit this too (mailboxes.unread_count_adjusted_for_
+# duplicates). So one row per Message-ID, ranked: a live INBOX copy beats a filed copy,
+# which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
+# every *filter* value is still a bound param.
+_MAILBOX_RANK = """CASE
+           WHEN mb.url LIKE '%/INBOX' THEN 0
+           WHEN mb.url LIKE '%All%Mail' OR mb.url LIKE '%/Archive'
+             OR mb.url LIKE '%/Trash'   OR mb.url LIKE '%Deleted%Messages'
+             OR mb.url LIKE '%Junk'     OR mb.url LIKE '%Spam' THEN 2
+           ELSE 1 END"""
+
+# The projected columns every deduped read returns; row_to_pointer consumes exactly
+# these names. Shared with build_thread_query.
+_DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        s.subject            AS subject,
        mb.url               AS mailbox_url,
-       m.date_received      AS date_received
+       m.date_received      AS date_received"""
+
+_BASE_SQL = f"""
+SELECT {_DEDUP_SELECT_COLS},
+       ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
+                          ORDER BY {_MAILBOX_RANK}, m.date_received DESC, m.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailboxes mb ON mb.ROWID = m.mailbox
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
+  AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
 """
 
 
@@ -135,7 +157,12 @@ def build_header_query(
         placeholders = ",".join("?" for _ in message_ids)
         sql += f" AND gd.message_id_header IN ({placeholders})"
         params += list(message_ids)
-    sql += " ORDER BY m.date_received DESC LIMIT ?"
+    # Dedup and LIMIT wrap the filtered set: rank inside, pick rn = 1, then LIMIT — so
+    # LIMIT counts distinct messages, not rows that collapse afterwards.
+    sql = (
+        f"SELECT message_id_header, subject, mailbox_url, date_received FROM ({sql})"
+        " WHERE rn = 1 ORDER BY date_received DESC LIMIT ?"
+    )
     params.append(limit)
     return sql, params
 
