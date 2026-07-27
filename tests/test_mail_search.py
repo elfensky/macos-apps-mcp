@@ -268,3 +268,42 @@ def test_thread_unknown_id_returns_empty(tmp_path, monkeypatch):
     _fake_envelope(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     assert MailAdapter().thread("<nope@ex.com>") == []
+
+
+def test_overview_reports_counts_and_decodes_names(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    m._ACCOUNT_MAP_CACHE = {"AAAA": "Personal"}
+    rows = MailAdapter().overview()
+    by_box = {r["mailbox"]: r for r in rows}
+    assert by_box["INBOX"]["account"] == "Personal"
+    assert by_box["INBOX"]["total"] == 1 and by_box["INBOX"]["unread"] == 1
+    # BBBB has no name in the map -> the UUID stands in, the call still succeeds
+    assert by_box["Travel"]["account"] == "BBBB"
+
+
+def test_overview_survives_mail_being_unreachable(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    m._ACCOUNT_MAP_CACHE = None
+    monkeypatch.setattr(m, "run_osascript", lambda *a: (_ for _ in ()).throw(OSError()))
+    rows = MailAdapter().overview()
+    assert rows  # counts never needed Mail
+    assert all(r["account"] for r in rows)  # UUID stands in for the name
+
+
+def test_overview_sorts_unread_first(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    m._ACCOUNT_MAP_CACHE = {}
+    unread = [r["unread"] for r in MailAdapter().overview()]
+    assert unread == sorted(unread, reverse=True)

@@ -239,6 +239,30 @@ SELECT message_id_header, subject, mailbox_url, date_received FROM (
     return sql, [message_id, limit]
 
 
+def build_overview_query():
+    """Build (sql, params) for per-mailbox totals and unread counts.
+
+    Counts are computed LIVE rather than read from mailboxes.unread_count: that column
+    is trigger-maintained and device-verified stale — on a real Mac the Gmail INBOX row
+    reports 1 unread where a live count returns 0, and
+    unread_count_adjusted_for_duplicates carries the same wrong value. A live count over
+    36k rows measured 16 ms, backed by the partial index on (read = 0 AND deleted = 0).
+
+    Mailboxes with no messages are included via the LEFT JOIN, so a newly-created folder
+    shows as 0/0 rather than vanishing.
+    """
+    sql = """
+SELECT mb.url                                               AS mailbox_url,
+       COUNT(m.ROWID)                                       AS total,
+       COALESCE(SUM(CASE WHEN m.read = 0 THEN 1 ELSE 0 END), 0) AS unread
+FROM mailboxes mb
+LEFT JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted = 0
+GROUP BY mb.ROWID
+ORDER BY unread DESC, mailbox_url ASC
+"""
+    return sql, []
+
+
 class _TextExtractor(HTMLParser):
     def __init__(self):
         super().__init__()
