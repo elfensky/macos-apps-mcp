@@ -234,3 +234,37 @@ def test_search_account_filters_by_uuid(tmp_path, monkeypatch):
     ids = [p.id for p in MailAdapter().search(account="BBBB")]
     assert set(ids) == {"<reply@ex.com>", "<dup@ex.com>"}
     assert "<abc@ex.com>" not in ids  # lives only under account AAAA
+
+
+def test_thread_returns_whole_conversation_oldest_first(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().thread("<abc@ex.com>")
+    # conversation 7 holds <abc@ex.com> (INBOX + Archive) and its reply
+    assert [p.id for p in out] == ["<abc@ex.com>", "<reply@ex.com>"]
+    assert out[0].folder == "imap://AAAA/INBOX"  # deduped to the INBOX copy
+
+
+def test_thread_finds_conversation_from_any_member(tmp_path, monkeypatch):
+    # asking with the REPLY's id must return the same thread, not just the reply
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert len(MailAdapter().thread("<reply@ex.com>")) == 2
+
+
+def test_thread_truncation_keeps_the_newest(tmp_path, monkeypatch):
+    # when the point of reading a thread is to reply, the OLD end is the end to drop
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().thread("<abc@ex.com>", limit=1)
+    assert [p.id for p in out] == ["<reply@ex.com>"]
+
+
+def test_thread_unknown_id_returns_empty(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert MailAdapter().thread("<nope@ex.com>") == []

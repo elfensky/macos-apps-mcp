@@ -203,6 +203,42 @@ def build_header_query(
     return sql, params
 
 
+def build_thread_query(message_id: str, limit: int):
+    """Build (sql, params) for one conversation, addressed by any member's Message-ID.
+
+    Threads on messages.conversation_id — Mail's own threading key, which carries
+    five dedicated indexes, so matching References/In-Reply-To by hand would be
+    redundant work on top of an answer Mail already computed. Deduped by the same
+    rule as search, and ordered OLDEST-first: a thread reads as a transcript.
+    Truncation keeps the NEWEST ``limit`` messages (the old end is the end to drop
+    when the point is to reply), then re-sorts ascending for the caller.
+    """
+    sql = f"""
+SELECT message_id_header, subject, mailbox_url, date_received FROM (
+  SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
+    SELECT {_DEDUP_SELECT_COLS},
+           COALESCE(m.date_sent, m.date_received) AS sort_date,
+           ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
+                              ORDER BY {_MAILBOX_RANK},
+                                       m.date_received DESC, m.ROWID) AS rn
+    FROM messages m
+    JOIN subjects s ON s.ROWID = m.subject
+    JOIN mailboxes mb ON mb.ROWID = m.mailbox
+    JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+    WHERE m.deleted = 0
+      AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
+      AND m.conversation_id = (
+            SELECT m2.conversation_id FROM messages m2
+            JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
+            WHERE gd2.message_id_header = ? LIMIT 1)
+  ) WHERE rn = 1
+  ORDER BY sort_date DESC
+  LIMIT ?
+) ORDER BY sort_date ASC
+"""
+    return sql, [message_id, limit]
+
+
 class _TextExtractor(HTMLParser):
     def __init__(self):
         super().__init__()
