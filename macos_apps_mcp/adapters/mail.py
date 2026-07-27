@@ -1417,6 +1417,8 @@ class MailAdapter:
         until=None,
         unread=None,
         flagged=None,
+        has_attachments=None,
+        account=None,
         body=None,
         limit=MAX_MAILS,
     ) -> list[Pointer]:
@@ -1469,6 +1471,8 @@ class MailAdapter:
             until=until,
             unread=unread,
             flagged=flagged,
+            has_attachments=has_attachments,
+            account=account,
             message_ids=message_ids,
             limit=limit,
         )
