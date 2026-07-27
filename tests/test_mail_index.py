@@ -54,7 +54,8 @@ def test_build_header_query_binds_all_filters():
     assert "from messages" in low and "join subjects" in low
     assert "message_global_data" in low
     assert "m.deleted = 0" in low
-    assert "order by m.date_received desc" in low
+    # final ORDER BY runs on the deduped outer query, so it's unqualified
+    assert "order by date_received desc" in low
     assert "limit ?" in low
     # every filter value is a bound param, none interpolated
     assert "inv" not in sql and "jane" not in sql
@@ -273,3 +274,20 @@ def test_fingerprint_covers_conversation_and_attachments():
     # mis-answer instead of drifting.
     assert "conversation_id" in mail_index.HEADER_FINGERPRINT["messages"]
     assert mail_index.HEADER_FINGERPRINT["attachments"] == {"ROWID", "message", "name"}
+
+
+def test_header_query_deduplicates_by_message_id():
+    sql, _ = mail_index.build_header_query(subject="x", limit=5)
+    low = sql.lower()
+    assert "row_number() over" in low
+    assert "partition by gd.message_id_header" in low
+    assert "where rn = 1" in low
+
+
+def test_header_query_excludes_headerless_rows():
+    # no Message-ID means no citable Pointer; excluding in SQL (not after) keeps LIMIT
+    # honest — otherwise LIMIT 25 can return 20 usable rows.
+    sql, _ = mail_index.build_header_query(subject="x", limit=5)
+    low = sql.lower()
+    assert "gd.message_id_header is not null" in low
+    assert "gd.message_id_header <> ''" in low
