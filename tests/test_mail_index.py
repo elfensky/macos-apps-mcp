@@ -325,3 +325,14 @@ def test_thread_query_binds_message_id_and_limit():
     low = sql.lower()
     assert "conversation_id" in low
     assert "row_number() over" in low  # same dedup rule as search
+
+
+def test_overview_query_counts_live_not_stored():
+    # mailboxes.unread_count is trigger-maintained and STALE on a real Mac — the Gmail
+    # INBOX row claims 1 unread where a live count returns 0. Never read that column.
+    sql, params = mail_index.build_overview_query()
+    low = sql.lower()
+    assert params == []
+    assert "unread_count" not in low
+    assert "count(" in low and "m.read = 0" in low
+    assert "m.deleted = 0" in low

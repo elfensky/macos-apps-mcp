@@ -1614,6 +1614,53 @@ class MailAdapter:
             path, mail_index.HEADER_FINGERPRINT, read, immutable=False
         )
 
+    def overview(self) -> list[dict]:
+        """Per-mailbox {account, mailbox, total, unread}, unread-first.
+
+        Every mailbox is listed, including Junk/Trash/All Mail — a read tool reports,
+        it does not decide what deserves attention, and Spam-with-7-unread is only
+        useful if you can see it IS Spam. Not Pointers: a count is not a citable
+        message, so this is an enumeration read like safari_tabs / messages_chats.
+
+        Account names come from Mail and are best-effort; when Mail is unreachable the
+        UUID stands in and the counts — which never needed Mail — are returned anyway.
+        """
+        from urllib.parse import unquote
+
+        from ..runtime import read_via_sqlite
+        from . import mail_index
+
+        path = mail_index.envelope_index_path()
+        if path is None:
+            raise NativeError(
+                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
+                "Open Mail once to create it. Do not retry."
+            )
+        sql, params = mail_index.build_overview_query()
+
+        def read(conn):
+            conn.row_factory = sqlite3.Row
+            return [dict(r) for r in conn.execute(sql, params)]
+
+        rows = read_via_sqlite(
+            path, mail_index.HEADER_FINGERPRINT, read, immutable=False
+        )
+        names = _account_map()
+        out = []
+        for r in rows:
+            url = r["mailbox_url"]
+            # imap://<UUID>/<percent-encoded path> — scheme is imap:// or local://
+            uuid, _, box = url.partition("://")[2].partition("/")
+            out.append(
+                {
+                    "account": names.get(uuid, uuid),
+                    "mailbox": unquote(box),
+                    "total": r["total"],
+                    "unread": r["unread"],
+                }
+            )
+        return out
+
     def index_bodies(self, rebuild: bool = False) -> dict:
         """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx
         (read-at-rest; skips not-yet-downloaded *.partial.emlx). Resumable, size-capped.
