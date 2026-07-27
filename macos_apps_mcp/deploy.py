@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import audit
 from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
@@ -211,16 +212,17 @@ def install_agent(argv: list[str]) -> None:
     )
 
 
-# Home-relative for the same reason as the daemon socket (see daemon.py): the launchd
-# daemon that READS this and the shell that WRITES it do not share an environment, so
-# audit.state_dir()'s XDG_STATE_HOME lookup would let them disagree.
-_ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
+def _allow_send_file() -> Path:
+    """Resolved per call (not at import) so tests can retarget it by pointing
+    ``XDG_STATE_HOME`` at an isolated dir (#141) — audit.state_dir() already honours
+    that var and creates the directory."""
+    return audit.state_dir() / "allow_send"
 
 
 def allow_send_file() -> str:
     """The persisted outbound opt-in (``""`` when absent) — see server._allow_send."""
     try:
-        return _ALLOW_SEND_FILE.read_text()
+        return _allow_send_file().read_text()
     except OSError:
         return ""
 
@@ -235,8 +237,9 @@ def allow_send(argv: list[str]) -> None:
         print(current or "off")
         return
     value = "" if argv[0] in ("off", "none", "") else argv[0]
-    _ALLOW_SEND_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _ALLOW_SEND_FILE.write_text(value)
+    path = _allow_send_file()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.write_text(value)
     # Registration happens at import, so the running daemon still has the old gate.
     # No agent registered (stdio-only user) → nothing to restart, and that is fine.
     kick = subprocess.run(
