@@ -411,8 +411,8 @@ def mail_search(
     account: str = "",
     limit: int = 25,
 ) -> list[dict]:
-    """Indexed search across ALL mailboxes via Mail's Envelope Index — fast,
-    read-only, no Mail launch. All filters optional and ANDed:
+    """Indexed search across ALL mailboxes via Mail's Envelope Index — fast and
+    read-only. All filters optional and ANDed:
     subject/from_/to/mailbox substrings, since/until (epoch seconds on received date),
     unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
     it only sees messages already downloaded AND indexed by mail_index_bodies (run that
@@ -421,8 +421,12 @@ def mail_search(
     access / schema drift.
     `has_attachments` means a real DOCUMENT — inline signature/newsletter images are
     excluded, so it will not match a mail whose only attachment is a logo. `account`
-    takes a display name ("Personal") or a raw account UUID.
-    Read-only; needs Automation access for Mail."""
+    takes a display name ("Personal") or a raw account UUID; the UUID form stays pure
+    sqlite, while a NAME has to be resolved through Mail and therefore LAUNCHES Mail if
+    it isn't running (an unknown name raises rather than guessing). Every other filter
+    reads the index at rest and never launches Mail.
+    Read-only; needs Full Disk Access, plus Automation access for Mail on the
+    account-name path and the AppleScript fallback."""
     # since/until=0 (epoch 0) is a valid timestamp, not an absent filter — checked via
     # `is not None` rather than truthiness so it isn't wrongly treated as unset (#70
     # review M3).
@@ -471,9 +475,14 @@ def mail_overview() -> list[dict]:
     """Every mailbox with its message total and unread count, unread-first — the triage
     entry point ("what's unread where?"). Includes Junk/Trash/All Mail so you can see
     what they are rather than having them silently filtered. Counts are computed live,
-    not read from Mail's own stored counters, which go stale. Account names need Mail
-    reachable; without it the account UUID stands in and the counts are still correct.
-    Fast, read-only, no Mail launch. Needs Full Disk Access."""
+    not read from Mail's own stored counters, which go stale, and each message is
+    counted ONCE even when it is filed in the same mailbox twice.
+    Account NAMES are looked up through Mail, so this tool does contact Mail (launching
+    it if it isn't running); when Mail is unreachable the account UUID stands in and
+    the counts — which never needed Mail — are still correct. The On My Mac store is
+    always shown as "On My Mac": Mail never lists it as an account.
+    Fast and read-only. Needs Full Disk Access for the counts and Automation access for
+    Mail for the account names."""
     return _mail.overview()
 
 

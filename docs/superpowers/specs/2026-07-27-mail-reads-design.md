@@ -138,13 +138,16 @@ a filter would be unusable exactly when Mail is unreachable — see [Known limit
 ROW_NUMBER() OVER (PARTITION BY gd.message_id_header ORDER BY
   CASE WHEN mb.url LIKE '%/INBOX'                              THEN 0
        WHEN mb.url LIKE '%All%Mail' OR mb.url LIKE '%/Archive'
-         OR mb.url LIKE '%/Trash'   OR mb.url LIKE '%Junk'     THEN 2
+         OR mb.url LIKE '%/Trash'   OR mb.url LIKE '%Deleted%Messages'
+         OR mb.url LIKE '%Junk%'    OR mb.url LIKE '%Spam%'    THEN 2
        ELSE 1 END,
   m.date_received DESC, m.ROWID) = 1
 ```
 
 Preference: a live INBOX copy beats a filed copy, which beats an All Mail / Archive / Trash /
-Junk copy. Ties break newest-first, then by ROWID so the result is deterministic.
+Junk copy. Ties break newest-first, then by ROWID so the result is deterministic. The junk/spam
+patterns are wrapped on both sides because Exchange names the folder `Junk%20E-mail`, which an
+end-anchored `'%Junk'` misses — it would then rank as a *preferred* filed folder.
 
 Applied **in SQL, not in Python**, so `LIMIT 25` returns 25 distinct messages rather than 25 rows
 that collapse to 16. Measured on the live index: a `subject LIKE '%contract%'` search returns
@@ -244,6 +247,17 @@ which changes a contract shared by every adapter — deliberately not done here.
 **`mail_overview` labels depend on machine state.** Counts never need Mail; account names do. The
 same call returns `Personal` with Mail running and `AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1` without
 it. Same data, different labels. Preferred over failing the whole call for a cosmetic field.
+Note the corollary the implementation had to face: because the name lookup runs `osascript`, it
+**launches Mail** if Mail is not running. So `account=` as a display *name* is not a
+read-at-rest path, and only the UUID form is — which is why `_resolve_account` short-circuits on
+the UUID shape before ever calling Mail.
+
+**The On My Mac store is never labelled by Mail — permanently.** Device-verified 2026-07-27:
+AppleScript's `every account` lists only the four configured IMAP accounts, so the `local://`
+store's UUID (`A2025935-B0B2-4A77-9003-68EF6E541361` on this Mac) is absent from the map whether
+or not Mail is reachable. This is **not** an instance of the limitation above; no amount of Mail
+being available fixes it. `mail_overview` therefore maps the `local://` scheme itself to the
+literal `On My Mac`, which is what Mail's own sidebar calls it.
 
 **Thread truncation drops the oldest messages.** A thread beyond `MAX_THREAD` loses its opening,
 so "how did this start" is unanswerable there. Exactly one thread on this Mac (154 rows) is
