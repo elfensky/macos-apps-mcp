@@ -97,20 +97,6 @@ def _fake_envelope(path):
     c.close()
 
 
-@pytest.fixture(autouse=True)
-def _no_account_map_leak(monkeypatch):
-    """Reset the process-wide account-name cache around every test in this file.
-
-    Without it these tests are order-dependent AND non-hermetic: an unset cache sends
-    _resolve_account/overview to osascript, which LAUNCHES the developer's real Mail,
-    and a cache one test assigns silently satisfies the next one. Cleared to None
-    (the real cold state) and restored by monkeypatch afterwards.
-    """
-    import macos_apps_mcp.adapters.mail as m
-
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
-
-
 def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)

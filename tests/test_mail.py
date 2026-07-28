@@ -1263,6 +1263,51 @@ def test_account_map_success_survives_past_the_failure_ttl(monkeypatch):
     assert len(calls) == 1
 
 
+def test_account_map_leak_repro_a_real_failure_leaks_timestamp(monkeypatch):
+    """Regression repro, part A (see `_reset_account_map_globals` in tests/conftest.py).
+    Mirrors test_account_map_empty_when_mail_unreachable above: resets
+    _ACCOUNT_MAP_CACHE but — deliberately, to reproduce the leak a reviewer found —
+    does NOT reset _ACCOUNT_MAP_FAILURE_AT. A real failure sets that global to a
+    genuine (unpatched) time.monotonic() reading that nothing in THIS test undoes.
+    Must run immediately before part B below; pytest's default file-order execution
+    (no randomization plugin in this repo) makes that ordering reliable."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+
+    def boom(*a):
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    assert m._account_map() == {}
+    # _ACCOUNT_MAP_FAILURE_AT now holds a real time.monotonic() reading, left in place
+    # on purpose — part B checks whether that survives into the next test.
+
+
+def test_account_map_leak_repro_b_stale_failure_must_not_wipe_a_later_cache(
+    monkeypatch,
+):
+    """Part B. Forcing monotonic time far enough forward reproduces "60 real seconds
+    elapsed" without an actual sleep. A cache installed here for this test's own
+    purposes must survive: before the conftest fix (which resets BOTH
+    _ACCOUNT_MAP_CACHE and _ACCOUNT_MAP_FAILURE_AT before every test), the timestamp
+    leaked by part A aged out on its own, `_account_map()` wiped THIS test's cache,
+    and fell through to run_osascript — which here is treated as a hard failure,
+    because in production that call spawns osascript against real Mail.app."""
+    import macos_apps_mcp.adapters.mail as m
+
+    future = m.time.monotonic() + m._ACCOUNT_MAP_FAILURE_TTL + 10
+    monkeypatch.setattr(m.time, "monotonic", lambda: future)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {"some-uuid": "Personal"})
+    monkeypatch.setattr(
+        m,
+        "run_osascript",
+        lambda *a: pytest.fail("stale failure timestamp wiped a live cache"),
+    )
+    assert m._account_map() == {"some-uuid": "Personal"}
+
+
 def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
     import macos_apps_mcp.adapters.mail as m
 
