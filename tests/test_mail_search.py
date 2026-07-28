@@ -359,6 +359,82 @@ def test_search_account_name_resolves_to_its_uuid(tmp_path, monkeypatch):
     assert "<reply@ex.com>" in [p.id for p in MailAdapter().search(account="Trips")]
 
 
+def _add_local_message(db):
+    """Insert one message into the fixture's local:// mailbox (ROWID 4) — the base
+    fixture leaves it empty (only exercised via overview's 0/0 count), but resolving
+    account="On My Mac" needs something filed there to prove the filter actually
+    selects local:// rows and not just that it fails to raise."""
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO subjects VALUES (8,'Local note')")
+    conn.execute("INSERT INTO message_global_data VALUES (11,'<localnote@ex.com>')")
+    conn.execute(
+        "INSERT INTO messages VALUES (60,8,1,11,4,1700004000,1700004000,0,0,0,40)"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_search_account_on_my_mac_matches_the_local_store(tmp_path, monkeypatch):
+    # N1: mail_overview maps local:// to the literal "On My Mac", so mail_search must
+    # accept that exact name — and it must resolve without contacting Mail, the same
+    # "no Mail launch" guarantee a real account UUID gets.
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_local_message(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(
+        m, "run_osascript", lambda *a: pytest.fail("On My Mac launched Mail")
+    )
+    ids = [p.id for p in MailAdapter().search(account="On My Mac")]
+    assert ids == ["<localnote@ex.com>"]
+    # and it must not leak messages filed under a real account
+    assert "<abc@ex.com>" not in ids
+
+
+def test_search_account_local_alias_matches_the_local_store(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_local_message(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    ids = [p.id for p in MailAdapter().search(account="local")]
+    assert ids == ["<localnote@ex.com>"]
+
+
+def test_on_my_mac_name_round_trips_from_overview_into_search(tmp_path, monkeypatch):
+    # N1's actual bug: mail_overview started reporting "On My Mac" as the account name
+    # while mail_search(account=...) still rejected it. Feed overview()'s own output
+    # straight back into search() so the two can't drift apart again.
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_local_message(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    overview = MailAdapter().overview()
+    local_name = next(r["account"] for r in overview if r["mailbox"] == "Some Folder")
+    assert local_name == "On My Mac"
+    ids = [p.id for p in MailAdapter().search(account=local_name)]
+    assert ids == ["<localnote@ex.com>"]
+
+
+def test_search_account_on_my_mac_no_local_store_raises_followable_error(
+    tmp_path, monkeypatch
+):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)  # base fixture: local:// mailbox exists but carries no rows —
+    # remove it so there is truly no local:// store to resolve
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM mailboxes WHERE url LIKE 'local://%'")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    with pytest.raises(NativeError, match="Open Mail once"):
+        MailAdapter().search(account="On My Mac")
+
+
 def test_search_account_wildcard_is_not_a_wildcard(tmp_path, monkeypatch):
     # '%' is a bound param (never injection) but LIKE still read it as "everything",
     # so the filter silently matched every mailbox instead of failing.

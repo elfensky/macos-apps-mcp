@@ -172,6 +172,43 @@ _ACCOUNT_UUID_RE = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.IGNORECASE
 )
 
+# What overview() prints for the local:// store (see MailAdapter.overview's docstring).
+# A single constant so the two can't drift apart again — the whole point of N1 was that
+# mail_overview started reporting this name while mail_search still rejected it.
+ON_MY_MAC = "On My Mac"
+
+# _resolve_account's accepted local-store spellings, matched case-insensitively:
+# ON_MY_MAC itself (what overview() actually prints) plus "local" as a shorter alias.
+_LOCAL_ACCOUNT_ALIASES = frozenset({ON_MY_MAC.casefold(), "local"})
+
+
+def _local_account_id() -> str | None:
+    """The account segment mailboxes.url embeds for the On My Mac store — the exact
+    value build_header_query's ``account`` clause anchors on for a ``local://``
+    mailbox. Read fresh from the Envelope Index (like overview()'s own read) rather
+    than guessed or hard-coded: the id is device-specific and AppleScript never lists
+    this store as an account, so there is no other source for it. None when there is
+    no Envelope Index yet, or the index has no ``local://`` mailbox at all.
+    """
+    from ..runtime import read_via_sqlite
+    from . import mail_index
+
+    path = mail_index.envelope_index_path()
+    if path is None:
+        return None
+    sql, params = mail_index.build_local_account_query()
+
+    def read(conn):
+        row = conn.execute(sql, params).fetchone()
+        return row[0] if row else None
+
+    url = read_via_sqlite(path, mail_index.HEADER_FINGERPRINT, read, immutable=False)
+    if not url:
+        return None
+    _, _, rest = url.partition("://")
+    uuid, _, _ = rest.partition("/")
+    return uuid or None
+
 
 def _resolve_account(value: str) -> str:
     """A Mail account display name -> the UUID that mailboxes.url embeds.
@@ -180,6 +217,11 @@ def _resolve_account(value: str) -> str:
     is what keeps the promise the read tools document: the name lookup runs osascript,
     which LAUNCHES Mail if it isn't running, so a tool that claims "no Mail launch"
     must have a path that doesn't take it — and the UUID path is that path.
+
+    ``"On My Mac"`` (case-insensitive, ``"local"`` also accepted) resolves the local
+    store the same way: read from the Envelope Index, never osascript — Mail's `every
+    account` never lists it (see overview()'s docstring), so there is nothing for
+    osascript to tell us anyway.
 
     An unresolvable name RAISES. Returning it unchanged handed a display name to a url
     match, where it degraded into a substring match over the whole mailbox path:
@@ -190,6 +232,14 @@ def _resolve_account(value: str) -> str:
     value = value.strip()
     if _ACCOUNT_UUID_RE.match(value):
         return value
+    if value.casefold() in _LOCAL_ACCOUNT_ALIASES:
+        local_id = _local_account_id()
+        if local_id:
+            return local_id
+        raise NativeError(
+            "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index) or no "
+            "On My Mac store in it. Open Mail once to create it. Do not retry."
+        )
     names = _account_map()
     for uuid, name in names.items():
         if name.casefold() == value.casefold():
@@ -198,11 +248,12 @@ def _resolve_account(value: str) -> str:
         f"known accounts: {sorted(names.values())}"
         if names
         else "Mail could not be reached to list account names, so only an account "
-        "UUID works right now"
+        'UUID or "On My Mac" works right now'
     )
     raise NativeError(
         f"unknown Mail account {value!r} — {known}. Pass an account name exactly as "
-        "Mail shows it, or the account UUID that mail_overview reports. Do not retry."
+        'Mail shows it (or "On My Mac" for the local store), or an account UUID. '
+        "Do not retry."
     )
 
 
@@ -1734,7 +1785,7 @@ class MailAdapter:
             uuid, _, box = rest.partition("/")
             # local:// is the On My Mac store; Mail never reports it as an account, so
             # its UUID would otherwise be shown raw forever (see the docstring).
-            account = "On My Mac" if scheme == "local" else names.get(uuid, uuid)
+            account = ON_MY_MAC if scheme == "local" else names.get(uuid, uuid)
             out.append(
                 {
                     "account": account,

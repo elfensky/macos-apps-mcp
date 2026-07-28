@@ -268,6 +268,19 @@ SELECT message_id_header, subject, mailbox_url, date_received FROM (
     return sql, [message_id, limit]
 
 
+def build_local_account_query():
+    """Build (sql, params) that finds the account segment mailboxes.url embeds for the
+    On My Mac store — the value ``build_header_query``'s ``account`` clause anchors on
+    for a ``local://`` mailbox (``<scheme>://<UUID>/<path>``, same shape as an
+    ``imap://`` account). AppleScript's `every account` never lists this store (see
+    ``mail.overview``'s docstring), so it has no name to resolve from Mail — this is
+    read straight from the same Envelope Index the account filter itself queries,
+    which guarantees the two agree. Every ``local://`` mailbox on a device shares the
+    same account segment, so the first row is enough; no rows means no On My Mac
+    store in this index."""
+    return "SELECT url FROM mailboxes WHERE url LIKE 'local://%' LIMIT 1", []
+
+
 def build_overview_query():
     """Build (sql, params) for per-mailbox totals and unread counts.
 
