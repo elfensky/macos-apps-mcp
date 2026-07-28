@@ -47,7 +47,8 @@ _DESTRUCTIVE_TOOLS = frozenset(
 # The full write half of the read/write seam. Everything else is read-only.
 _WRITE_TOOLS = _ADDITIVE_TOOLS | _DESTRUCTIVE_TOOLS
 
-# The permission keyword each tool's docstring must name (None = meta tool, no keyword).
+# The permission keyword(s) each tool's docstring must name — a tuple when the tool
+# needs more than one grant (None = meta tool, no keyword).
 _PERMISSION = {
     "ping": None,
     "now": None,
@@ -71,10 +72,14 @@ _PERMISSION = {
     "mail_attachments": "Automation",
     "mail_needs_response": "Automation",
     "mail_awaiting_reply": "Automation",
-    "mail_search": "Automation",
     "mail_index_bodies": "Automation",
     "mail_thread": "Full Disk Access",
-    "mail_overview": "Full Disk Access",
+    # counts are sqlite (FDA), account NAMES go through osascript — which launches
+    # Mail — so this tool genuinely needs both and must say both.
+    "mail_overview": ("Full Disk Access", "Automation"),
+    # account= as a display NAME is resolved through Mail, and the AppleScript inbox
+    # search is still the drift fallback; the index itself is read at rest under FDA.
+    "mail_search": ("Full Disk Access", "Automation"),
     "create_draft": "Automation",
     "mail_reply": "Automation",
     "drafts": "Automation",
@@ -150,9 +155,14 @@ def test_every_tool_docstring_states_permission_and_is_nontrivial():
         doc = t.description or ""
         assert len(doc) > 20, f"{t.name} docstring is too thin"
         keyword = _PERMISSION[t.name]
-        if keyword is not None:
-            assert keyword.lower() in doc.lower(), (
-                f"{t.name} docstring must name its permission ({keyword!r})"
+        if keyword is None:
+            continue
+        # A tuple means the tool needs SEVERAL grants (e.g. sqlite counts under Full
+        # Disk Access plus an osascript label lookup under Automation) — the docstring
+        # has to name every one of them, not just the cheapest.
+        for kw in (keyword,) if isinstance(keyword, str) else keyword:
+            assert kw.lower() in doc.lower(), (
+                f"{t.name} docstring must name its permission ({kw!r})"
             )
 
 
