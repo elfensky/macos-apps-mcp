@@ -12,7 +12,6 @@ import sys
 import time
 from pathlib import Path
 
-from . import audit
 from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
@@ -212,17 +211,24 @@ def install_agent(argv: list[str]) -> None:
     )
 
 
-def _allow_send_file() -> Path:
-    """Resolved per call (not at import) so tests can retarget it by pointing
-    ``XDG_STATE_HOME`` at an isolated dir (#141) — audit.state_dir() already honours
-    that var and creates the directory."""
-    return audit.state_dir() / "allow_send"
+# Home-relative, and deliberately NOT audit.state_dir() — same rationale as the daemon
+# socket (see the comment above daemon._DEFAULT_SOCKET_DIR): three processes must agree
+# on this path — the launchd daemon that READS it (no shell env at all), the
+# shell-invoked `allow-send` that WRITES it, and a client-spawned shim — and
+# XDG_STATE_HOME is not guaranteed identical across them. Routing this through
+# state_dir() (as #141 briefly did) makes the consent gate fail OPEN: an operator with
+# XDG_STATE_HOME exported runs `macos-apps-mcp allow-send off`, the write and the
+# confirming read both land in the XDG dir, and the daemon keeps reading the home path
+# and keeps send_mail/reply_all/forward_mail registered while telling the operator the
+# gate is closed. Tests isolate this by monkeypatching the constant itself (see
+# tests/conftest.py), never by moving the path.
+_ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
 
 
 def allow_send_file() -> str:
     """The persisted outbound opt-in (``""`` when absent) — see server._allow_send."""
     try:
-        return _allow_send_file().read_text()
+        return _ALLOW_SEND_FILE.read_text()
     except OSError:
         return ""
 
@@ -237,9 +243,8 @@ def allow_send(argv: list[str]) -> None:
         print(current or "off")
         return
     value = "" if argv[0] in ("off", "none", "") else argv[0]
-    path = _allow_send_file()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.write_text(value)
+    _ALLOW_SEND_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _ALLOW_SEND_FILE.write_text(value)
     # Registration happens at import, so the running daemon still has the old gate.
     # No agent registered (stdio-only user) → nothing to restart, and that is fine.
     kick = subprocess.run(
