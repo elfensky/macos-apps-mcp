@@ -31,6 +31,7 @@ from __future__ import annotations
 import email
 import re
 import sqlite3
+import time
 from urllib.parse import quote
 
 from ..contracts import Pointer
@@ -83,6 +84,23 @@ def _validate_mailbox(mailbox: str) -> str:
 # osascript can't pin Mail.
 _ACCOUNT_MAP_CACHE: dict[str, str] | None = None
 
+# monotonic() timestamp of the most recently cached FAILURE, or None when the cache
+# holds no failure (empty because never populated, or holds a real success — including
+# a genuine zero-account success, which is why this is a separate flag and not just
+# "cache == {}"). Compared with time.monotonic(), never wall-clock (must not break
+# when the clock changes — NTP sync, sleep/wake, DST).
+_ACCOUNT_MAP_FAILURE_AT: float | None = None
+
+# This adapter ships inside a launchd agent running daemon.serve() — a process that can
+# live for DAYS. The daemon can start at login before Mail has finished launching, or
+# while an Automation (TCC) prompt is still unanswered on screen; both can flip to
+# "working" long after that first failed lookup, without the daemon ever restarting.
+# Caching a failure forever (as the success cache does, correctly, below) would leave
+# mail_overview showing raw UUIDs and mail_search(account=...) raising for the rest of
+# the daemon's life, cured only by a restart. So a failure gets a short leash instead:
+# remember it for this long, then allow exactly one more attempt.
+_ACCOUNT_MAP_FAILURE_TTL = 60.0  # seconds
+
 _ACCOUNTS = (
     STRIP_FRAMING
     + """
@@ -111,10 +129,20 @@ def _account_map() -> dict[str, str]:
     The FAILURE is cached too, not just the success: on a machine where Automation is
     denied, an uncached failure re-spawns osascript on EVERY call, and the script
     carries ``with timeout of 120 seconds`` — a 120-second stall per call on tools
-    advertised as fast. Denial does not change mid-process any more than the account
-    list does, so one attempt per process is the honest budget.
+    advertised as fast. But a failure is cached only for ``_ACCOUNT_MAP_FAILURE_TTL``
+    seconds (see its comment): unlike the account list, whether Mail is running and
+    whether Automation is granted can both change while this long-lived daemon keeps
+    running, so a failure gets one more attempt after the TTL instead of being final
+    for the process's whole lifetime. A success is still cached forever.
     """
-    global _ACCOUNT_MAP_CACHE
+    global _ACCOUNT_MAP_CACHE, _ACCOUNT_MAP_FAILURE_AT
+    if (
+        _ACCOUNT_MAP_FAILURE_AT is not None
+        and time.monotonic() - _ACCOUNT_MAP_FAILURE_AT >= _ACCOUNT_MAP_FAILURE_TTL
+    ):
+        # TTL elapsed: allow exactly one more attempt.
+        _ACCOUNT_MAP_CACHE = None
+        _ACCOUNT_MAP_FAILURE_AT = None
     if _ACCOUNT_MAP_CACHE is None:
         try:
             raw = run_osascript(_ACCOUNTS)
@@ -126,6 +154,7 @@ def _account_map() -> dict[str, str]:
             # osascript binary itself is missing. Deliberately NOT a bare except: a bug
             # in the parsing below must surface, not be swallowed as "Mail unreachable".
             _ACCOUNT_MAP_CACHE = {}
+            _ACCOUNT_MAP_FAILURE_AT = time.monotonic()
             return _ACCOUNT_MAP_CACHE
         out = {}
         for rec in raw.split(RS):
@@ -134,6 +163,7 @@ def _account_map() -> dict[str, str]:
                 if uuid.strip():
                     out[uuid.strip()] = name.strip()
         _ACCOUNT_MAP_CACHE = out
+        _ACCOUNT_MAP_FAILURE_AT = None
     return _ACCOUNT_MAP_CACHE
 
 

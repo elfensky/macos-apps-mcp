@@ -1189,12 +1189,16 @@ def test_account_map_empty_when_mail_unreachable(monkeypatch):
 
 
 def test_account_map_caches_the_failure_too(monkeypatch):
-    """Automation denied is cached like a success. Uncached, every call re-spawns
-    osascript — and the script waits `with timeout of 120 seconds`."""
+    """Automation denied is cached like a success — for a bit (see
+    _ACCOUNT_MAP_FAILURE_TTL): within that window, a second call must not re-spawn
+    osascript, whose script waits `with timeout of 120 seconds`."""
     import macos_apps_mcp.adapters.mail as m
     from macos_apps_mcp.errors import NativeError
 
     monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
     calls = []
 
     def boom(*a):
@@ -1203,7 +1207,59 @@ def test_account_map_caches_the_failure_too(monkeypatch):
 
     monkeypatch.setattr(m, "run_osascript", boom)
     assert m._account_map() == {}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL - 1  # still inside the TTL
     assert m._account_map() == {}
+    assert len(calls) == 1
+
+
+def test_account_map_failure_expires_and_retries(monkeypatch):
+    """The bug this fixes: this adapter ships inside a launchd daemon that can run for
+    days. Without a TTL, a transient failure — Mail still launching at login, or an
+    unanswered Automation prompt — got cached FOREVER: mail_overview kept showing raw
+    UUIDs and mail_search(account=...) kept raising even after the user fixed the
+    underlying problem, cured only by restarting the daemon. Past the TTL, one more
+    attempt is allowed — and if Mail is reachable by then, the real names come back."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def flaky(*a):
+        calls.append(a)
+        if len(calls) == 1:
+            raise NativeError("Automation denied")
+        return f"{_UUID_1}\x1fPersonal"
+
+    monkeypatch.setattr(m, "run_osascript", flaky)
+    assert m._account_map() == {}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL  # TTL fully elapsed
+    assert m._account_map() == {_UUID_1: "Personal"}
+    assert len(calls) == 2
+
+
+def test_account_map_success_survives_past_the_failure_ttl(monkeypatch):
+    """The TTL is a FAILURE-only leash — a real success must stay cached forever, the
+    same as before this change, or the "success is stable" half of the fix is a lie."""
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def ok(*a):
+        calls.append(a)
+        return f"{_UUID_1}\x1fPersonal"
+
+    monkeypatch.setattr(m, "run_osascript", ok)
+    assert m._account_map() == {_UUID_1: "Personal"}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL * 100  # far past any failure TTL
+    assert m._account_map() == {_UUID_1: "Personal"}
     assert len(calls) == 1
 
 
