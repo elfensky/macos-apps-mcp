@@ -1156,21 +1156,29 @@ def test_atomicity_comments_do_not_overclaim():
     assert "#133" in mail.__doc__  # the real limit is stated instead
 
 
+# Real account UUIDs: _resolve_account short-circuits on the 8-4-4-4-12 shape, so a
+# placeholder like "UUID-1" would silently exercise the osascript path instead.
+_UUID_1 = "11111111-2222-3333-4444-555555555555"
+_UUID_2 = "66666666-7777-8888-9999-000000000000"
+
+
+# _ACCOUNT_MAP_CACHE is a process-wide global: set it via monkeypatch (restored at
+# teardown), never by plain assignment, or one test's cache silently satisfies the next.
 def test_account_map_parses_osascript_pairs(monkeypatch):
     import macos_apps_mcp.adapters.mail as m
 
-    m._ACCOUNT_MAP_CACHE = None
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(
-        m, "run_osascript", lambda *a: "UUID-1\x1fPersonal\x1eUUID-2\x1fGoogle"
+        m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle"
     )
-    assert m._account_map() == {"UUID-1": "Personal", "UUID-2": "Google"}
+    assert m._account_map() == {_UUID_1: "Personal", _UUID_2: "Google"}
 
 
 def test_account_map_empty_when_mail_unreachable(monkeypatch):
     import macos_apps_mcp.adapters.mail as m
     from macos_apps_mcp.errors import NativeError
 
-    m._ACCOUNT_MAP_CACHE = None
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
 
     def boom(*a):
         raise NativeError("Automation denied")
@@ -1180,11 +1188,55 @@ def test_account_map_empty_when_mail_unreachable(monkeypatch):
     assert m._account_map() == {}
 
 
+def test_account_map_caches_the_failure_too(monkeypatch):
+    """Automation denied is cached like a success. Uncached, every call re-spawns
+    osascript — and the script waits `with timeout of 120 seconds`."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    calls = []
+
+    def boom(*a):
+        calls.append(a)
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    assert m._account_map() == {}
+    assert m._account_map() == {}
+    assert len(calls) == 1
+
+
 def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
     import macos_apps_mcp.adapters.mail as m
 
-    m._ACCOUNT_MAP_CACHE = None
-    monkeypatch.setattr(m, "run_osascript", lambda *a: "UUID-1\x1fPersonal")
-    assert m._resolve_account("Personal") == "UUID-1"
-    assert m._resolve_account("UUID-1") == "UUID-1"
-    assert m._resolve_account("Nonexistent") == "Nonexistent"
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
+    assert m._resolve_account("Personal") == _UUID_1
+    assert m._resolve_account(_UUID_1) == _UUID_1
+
+
+def test_resolve_account_uuid_never_contacts_mail(monkeypatch):
+    """The UUID path is what lets mail_search/mail_overview keep their "reads the index
+    at rest" promise — resolving a NAME runs osascript, which launches Mail."""
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(
+        m, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
+    )
+    assert m._resolve_account(_UUID_1.upper()) == _UUID_1.upper()
+
+
+def test_resolve_account_unknown_name_raises(monkeypatch):
+    """Returning the name unchanged degraded into a substring match over the whole
+    mailbox url — account="Business" then matched any account's Business* FOLDER and
+    reported it as though the account filter had worked."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    with pytest.raises(NativeError, match="unknown Mail account"):
+        m._resolve_account("Nonexistent")
+    with pytest.raises(NativeError, match="Personal"):  # names what DOES exist
+        m._resolve_account("Nonexistent")

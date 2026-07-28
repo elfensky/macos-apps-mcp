@@ -106,7 +106,14 @@ end run
 
 def _account_map() -> dict[str, str]:
     """UUID -> account display name, cached. ``{}`` when Mail is unreachable — this is a
-    label lookup, and it must never fail a call whose real payload came from sqlite."""
+    label lookup, and it must never fail a call whose real payload came from sqlite.
+
+    The FAILURE is cached too, not just the success: on a machine where Automation is
+    denied, an uncached failure re-spawns osascript on EVERY call, and the script
+    carries ``with timeout of 120 seconds`` — a 120-second stall per call on tools
+    advertised as fast. Denial does not change mid-process any more than the account
+    list does, so one attempt per process is the honest budget.
+    """
     global _ACCOUNT_MAP_CACHE
     if _ACCOUNT_MAP_CACHE is None:
         try:
@@ -118,7 +125,8 @@ def _account_map() -> dict[str, str]:
             # generic) on any script or exit failure, and Popen raises OSError when the
             # osascript binary itself is missing. Deliberately NOT a bare except: a bug
             # in the parsing below must surface, not be swallowed as "Mail unreachable".
-            return {}
+            _ACCOUNT_MAP_CACHE = {}
+            return _ACCOUNT_MAP_CACHE
         out = {}
         for rec in raw.split(RS):
             if US in rec:
@@ -129,13 +137,43 @@ def _account_map() -> dict[str, str]:
     return _ACCOUNT_MAP_CACHE
 
 
+# mailboxes.url embeds the account as a plain RFC-4122 UUID (8-4-4-4-12 hex).
+_ACCOUNT_UUID_RE = re.compile(
+    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.IGNORECASE
+)
+
+
 def _resolve_account(value: str) -> str:
-    """A display name -> its UUID; anything else (a UUID, an unknown name) unchanged, so
-    account= still works when Mail is unreachable."""
-    for uuid, name in _account_map().items():
+    """A Mail account display name -> the UUID that mailboxes.url embeds.
+
+    A value that already IS a UUID is returned untouched WITHOUT contacting Mail. That
+    is what keeps the promise the read tools document: the name lookup runs osascript,
+    which LAUNCHES Mail if it isn't running, so a tool that claims "no Mail launch"
+    must have a path that doesn't take it — and the UUID path is that path.
+
+    An unresolvable name RAISES. Returning it unchanged handed a display name to a url
+    match, where it degraded into a substring match over the whole mailbox path:
+    ``account="Business"`` then matched any account's ``…/Business Docs`` folder and
+    reported it as though the account filter had worked. A confident wrong answer is
+    worse than a typed error naming the accounts that do exist.
+    """
+    value = value.strip()
+    if _ACCOUNT_UUID_RE.match(value):
+        return value
+    names = _account_map()
+    for uuid, name in names.items():
         if name.casefold() == value.casefold():
             return uuid
-    return value
+    known = (
+        f"known accounts: {sorted(names.values())}"
+        if names
+        else "Mail could not be reached to list account names, so only an account "
+        "UUID works right now"
+    )
+    raise NativeError(
+        f"unknown Mail account {value!r} — {known}. Pass an account name exactly as "
+        "Mail shows it, or the account UUID that mail_overview reports. Do not retry."
+    )
 
 
 # US/RS framing contract (#68): separators, the shared stripFraming AppleScript
@@ -1502,8 +1540,10 @@ class MailAdapter:
 
         # Clamp: an unbounded caller-supplied limit with body= would otherwise build an
         # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
-        # the promised MAX_MAILS backstop (#70 review M1).
-        limit = min(limit, MAX_MAILS)
+        # the promised MAX_MAILS backstop (#70 review M1). Clamped on BOTH sides —
+        # SQLite reads a negative LIMIT as unlimited, so a one-sided min() let
+        # limit=-1 (reachable straight from the MCP schema) return the whole store.
+        limit = max(1, min(limit, MAX_MAILS))
         account = _resolve_account(account) if account else None
 
         path = mail_index.envelope_index_path()
@@ -1592,7 +1632,9 @@ class MailAdapter:
         from ..runtime import read_via_sqlite
         from . import mail_index
 
-        limit = min(limit, MAX_THREAD)
+        # Both sides: SQLite reads a negative LIMIT as unlimited, so a one-sided min()
+        # let limit=-1 return every message in the store.
+        limit = max(1, min(limit, MAX_THREAD))
         path = mail_index.envelope_index_path()
         if path is None:
             raise NativeError(
@@ -1622,8 +1664,16 @@ class MailAdapter:
         useful if you can see it IS Spam. Not Pointers: a count is not a citable
         message, so this is an enumeration read like safari_tabs / messages_chats.
 
-        Account names come from Mail and are best-effort; when Mail is unreachable the
-        UUID stands in and the counts — which never needed Mail — are returned anyway.
+        Counts are per DISTINCT message, not per row: the same message filed twice in
+        one mailbox is one message.
+
+        Counts come from sqlite alone. Account NAMES come from Mail (osascript, which
+        LAUNCHES Mail if it isn't running) and are best-effort: when Mail is unreachable
+        the UUID stands in and the counts are returned anyway. The On My Mac store is
+        the one account Mail never names — AppleScript's `every account` lists only the
+        configured mail accounts, device-verified 2026-07-27 — so its `local://` scheme
+        is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
+        permanent for that store, not a Mail-unreachable artefact.
         """
         from urllib.parse import unquote
 
@@ -1649,11 +1699,15 @@ class MailAdapter:
         out = []
         for r in rows:
             url = r["mailbox_url"]
-            # imap://<UUID>/<percent-encoded path> — scheme is imap:// or local://
-            uuid, _, box = url.partition("://")[2].partition("/")
+            # <scheme>://<UUID>/<percent-encoded path> — scheme is imap:// or local://
+            scheme, _, rest = url.partition("://")
+            uuid, _, box = rest.partition("/")
+            # local:// is the On My Mac store; Mail never reports it as an account, so
+            # its UUID would otherwise be shown raw forever (see the docstring).
+            account = "On My Mac" if scheme == "local" else names.get(uuid, uuid)
             out.append(
                 {
-                    "account": names.get(uuid, uuid),
+                    "account": account,
                     "mailbox": unquote(box),
                     "total": r["total"],
                     "unread": r["unread"],
