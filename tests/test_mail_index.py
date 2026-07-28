@@ -315,7 +315,21 @@ def test_has_attachments_false_adds_no_clause():
 def test_account_is_a_bound_param():
     sql, params = mail_index.build_header_query(account="AAAA", limit=5)
     assert "AAAA" not in sql
-    assert "%AAAA%" in params
+    assert "AAAA" in params
+    # anchored to the account SEGMENT of <scheme>://<UUID>/<path>, not a substring of
+    # the whole url (which also matched any account's similarly-named FOLDER)
+    assert "'%://' || ? || '/%'" in sql
+
+
+def test_account_like_metacharacters_are_escaped():
+    # a bound param stops injection; it does not stop LIKE reading '%' as "everything",
+    # which turned account='%' into a filter that silently matched every mailbox.
+    _, params = mail_index.build_header_query(account="a%b_c", limit=5)
+    assert r"a\%b\_c" in params
+
+
+def test_like_escape_escapes_its_own_escape_char():
+    assert mail_index.like_escape(r"a\%") == r"a\\\%"
 
 
 def test_thread_query_binds_message_id_and_limit():
