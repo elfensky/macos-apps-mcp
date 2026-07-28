@@ -82,12 +82,14 @@ def row_to_pointer(row) -> Pointer | None:
 # Sent-plus-folder pair. Apple hit this too (mailboxes.unread_count_adjusted_for_
 # duplicates). So one row per Message-ID, ranked: a live INBOX copy beats a filed copy,
 # which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
-# every *filter* value is still a bound param.
+# every *filter* value is still a bound param. The junk/spam patterns are wrapped on
+# BOTH sides: Exchange names the folder `Junk%20E-mail`, so an end-anchored '%Junk'
+# would rank it as a preferred filed folder and let it beat a real Archive copy.
 _MAILBOX_RANK = """CASE
            WHEN mb.url LIKE '%/INBOX' THEN 0
            WHEN mb.url LIKE '%All%Mail' OR mb.url LIKE '%/Archive'
              OR mb.url LIKE '%/Trash'   OR mb.url LIKE '%Deleted%Messages'
-             OR mb.url LIKE '%Junk'     OR mb.url LIKE '%Spam' THEN 2
+             OR mb.url LIKE '%Junk%'    OR mb.url LIKE '%Spam%' THEN 2
            ELSE 1 END"""
 
 # The projected columns every deduped read returns; row_to_pointer consumes exactly
@@ -136,6 +138,16 @@ _HAS_DOCUMENT = (
 )
 
 
+def like_escape(value: str) -> str:
+    r"""Escape LIKE metacharacters so a bound value matches LITERALLY.
+
+    Binding a parameter stops injection; it does NOT stop ``%`` and ``_`` from being
+    read as wildcards, so an un-escaped ``account='%'`` quietly matches every mailbox
+    and returns a confidently wrong answer. Pair with ``ESCAPE '\'``.
+    """
+    return value.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
+
+
 def build_header_query(
     *,
     subject=None,
@@ -153,8 +165,9 @@ def build_header_query(
 ):
     """Build (sql, params) for the header plane. All filters optional, ANDed; every
     value is a bound param (injection-safe). Newest-first, deleted excluded.
-    `has_attachments` means a real document (images excluded); `account` matches a
-    UUID substring of the mailbox url."""
+    `has_attachments` means a real document (images excluded); `account` matches the
+    account segment of the mailbox url (<scheme>://<UUID>/<path>) — exactly, not as a
+    substring of the path."""
     sql = _BASE_SQL
     params: list = []
     if subject:
@@ -185,10 +198,15 @@ def build_header_query(
     if has_attachments:
         sql += _HAS_DOCUMENT
     if account:
-        # substring of mailboxes.url, which embeds the account UUID as
-        # imap://<UUID>/<path> — so a raw UUID works even when Mail is unreachable.
-        sql += " AND mb.url LIKE ?"
-        params.append(f"%{account}%")
+        # Anchored to the ACCOUNT SEGMENT of mailboxes.url (<scheme>://<UUID>/<path>),
+        # not a substring of the whole url: an unanchored '%value%' also matches any
+        # mailbox whose PATH contains the text, under any account, and reports it as
+        # though the account filter worked. The trailing '/' is appended to mb.url so
+        # an account-root mailbox with no path still matches. LIKE metacharacters in
+        # the value are escaped for the same honesty reason — account='%' must match
+        # one account, not every mailbox (it is a bound param, so never injection).
+        sql += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
+        params.append(like_escape(account))
     if message_ids:
         placeholders = ",".join("?" for _ in message_ids)
         sql += f" AND gd.message_id_header IN ({placeholders})"
@@ -212,12 +230,23 @@ def build_thread_query(message_id: str, limit: int):
     rule as search, and ordered OLDEST-first: a thread reads as a transcript.
     Truncation keeps the NEWEST ``limit`` messages (the old end is the end to drop
     when the point is to reply), then re-sorts ascending for the caller.
+
+    The seed matches EVERY conversation the Message-ID belongs to, not one of them:
+    the premise of this module is that one Message-ID has several rows, and a
+    cross-account copy can carry a DIFFERENT conversation_id, so a `= (SELECT …
+    LIMIT 1)` seed silently drops the other branch — and picks a deleted copy just as
+    happily. Which one won was up to SQLite's query plan and could flip on an OS
+    upgrade. Deleted copies are excluded from the seed for the same reason.
+
+    ``sort_date`` guards a date_sent of 0 (not just NULL): a zero sorts to the very
+    front of an oldest-first transcript and would be the first message dropped under
+    truncation.
     """
     sql = f"""
 SELECT message_id_header, subject, mailbox_url, date_received FROM (
   SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
     SELECT {_DEDUP_SELECT_COLS},
-           COALESCE(m.date_sent, m.date_received) AS sort_date,
+           COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
            ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
                               ORDER BY {_MAILBOX_RANK},
                                        m.date_received DESC, m.ROWID) AS rn
@@ -227,10 +256,10 @@ SELECT message_id_header, subject, mailbox_url, date_received FROM (
     JOIN message_global_data gd ON gd.ROWID = m.global_message_id
     WHERE m.deleted = 0
       AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
-      AND m.conversation_id = (
+      AND m.conversation_id IN (
             SELECT m2.conversation_id FROM messages m2
             JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
-            WHERE gd2.message_id_header = ? LIMIT 1)
+            WHERE gd2.message_id_header = ? AND m2.deleted = 0)
   ) WHERE rn = 1
   ORDER BY sort_date DESC
   LIMIT ?
@@ -248,15 +277,28 @@ def build_overview_query():
     unread_count_adjusted_for_duplicates carries the same wrong value. A live count over
     36k rows measured 16 ms, backed by the partial index on (read = 0 AND deleted = 0).
 
-    Mailboxes with no messages are included via the LEFT JOIN, so a newly-created folder
-    shows as 0/0 rather than vanishing.
+    Counted per DISTINCT Message-ID, not per row. A raw COUNT(m.ROWID) is inflated by
+    the same duplication the search plane dedups — device-verified against a 36k store,
+    Travel reported 4,423 against a true 1,241 (3.6x), Expense 3,535 against 1,127,
+    Investing 2,611 against 410. This is same-mailbox dedup, so it needs no mailbox
+    rank; the rows collapse inside one GROUP BY. A message with no RFC822 Message-ID
+    still counts (keyed on its ROWID) — it has no citation, but it is genuinely in the
+    mailbox, and a count that silently omits it is the same class of lie.
+
+    Mailboxes with no messages are included via the LEFT JOINs (both of them — the
+    message_global_data join must not turn the outer join inner), so a newly-created
+    folder shows as 0/0 rather than vanishing.
     """
-    sql = """
-SELECT mb.url                                               AS mailbox_url,
-       COUNT(m.ROWID)                                       AS total,
-       COALESCE(SUM(CASE WHEN m.read = 0 THEN 1 ELSE 0 END), 0) AS unread
+    # One expression, used twice: the dedup key. COUNT(DISTINCT …) ignores NULLs, so
+    # the unread count is the same key wrapped in a CASE with no ELSE.
+    key = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
+    sql = f"""
+SELECT mb.url                                       AS mailbox_url,
+       COUNT(DISTINCT {key})                        AS total,
+       COUNT(DISTINCT CASE WHEN m.read = 0 THEN {key} END) AS unread
 FROM mailboxes mb
 LEFT JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted = 0
+LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 GROUP BY mb.ROWID
 ORDER BY unread DESC, mailbox_url ASC
 """
