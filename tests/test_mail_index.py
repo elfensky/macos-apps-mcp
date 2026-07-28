@@ -76,6 +76,14 @@ def test_build_header_query_no_filters_ok():
     assert params == [5]  # only the limit
 
 
+def test_build_local_account_query_is_pure():
+    # PURE (sql, params) — no connection, matching every other builder here.
+    sql, params = mail_index.build_local_account_query()
+    assert params == []
+    assert "local://" in sql.lower()
+    assert "mailboxes" in sql.lower()
+
+
 def test_parse_emlx_plaintext():
     raw = _emlx(
         b"From: a@x.com\r\nMessage-ID: <m1@x.com>\r\n"

@@ -1296,3 +1296,19 @@ def test_resolve_account_unknown_name_raises(monkeypatch):
         m._resolve_account("Nonexistent")
     with pytest.raises(NativeError, match="Personal"):  # names what DOES exist
         m._resolve_account("Nonexistent")
+
+
+def test_resolve_account_unknown_name_error_does_not_misdirect_to_overview(
+    monkeypatch,
+):
+    """The old remediation told the caller to "use the account UUID that mail_overview
+    reports" — exactly the value mail_overview stopped reporting once it started
+    showing the "On My Mac" friendly name for the local store. The message must point
+    at something a caller can actually follow instead."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    with pytest.raises(NativeError) as exc:
+        m._resolve_account("Nonexistent")
+    assert "mail_overview reports" not in str(exc.value)
