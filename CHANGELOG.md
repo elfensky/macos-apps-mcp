@@ -4,6 +4,95 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [0.9.0] - 2026-07-27 — Outbound mail, gated
+
+### Added
+
+- **Outbound, gated (#104, #83).** `MACOS_APPS_ALLOW_SEND` opts in per adapter
+  (`mail`, `mail,messages`, or `1`/`all`); unset — the default — registers no send tools at
+  all. `MACOS_APPS_READ_ONLY` always wins. New: `send_mail`, `reply_all`, `forward_mail`,
+  each annotated destructive + open-world and defaulting to `dry_run=True`.
+- **Drafts lifecycle (#82).** `drafts` lists Mail drafts as pointers; `delete_draft`
+  removes one by message-id with `dry_run` preview and audit before-state. Both are
+  ungated by `ALLOW_SEND` — listing and deleting your own drafts is not outbound.
+
+### Fixed
+
+- **`send`/`reply_all`/`forward` reported delivery that hadn't happened (#134).**
+  Device-verified: a perfectly-formed message (correct subject, recipient, sender)
+  was accepted by AppleScript's `send` verb, this adapter returned `sent: True`, and
+  the message then sat in Mail's Outbox undelivered for minutes — a stranded
+  recipient-less message can also jam the outbox so later, valid sends queue behind
+  it and never leave. A successful return now means Mail **accepted** the message,
+  not that it was delivered; every result also reports `outbox_pending` (Mail's
+  current outbox count) and, when it's non-zero, a `note` telling the caller
+  delivery is unconfirmed and to check Mail ▸ Outbox.
+- **Empty-body AppleScript crash (`-39`).** A body-carrying Mail script reading an
+  empty tempfile via `read … as «class utf8»` raised "End of file error" — this broke
+  `forward`'s default empty note, a subject-only `send_mail`, and (shipped in 0.8.0)
+  `create_draft` with an empty body. All body reads now go through a shared
+  `readBody` handler (`macos_apps_mcp/text.py`) that treats a zero-byte file as empty
+  text, not an error.
+- **`forward_mail` dropped its `body`/note parameter.** Device-verified: `content` of
+  a forwarded message is unreadable via AppleScript at any point after `forward` is
+  invoked, so the previous "prepend a note" implementation was silently replacing the
+  whole body with just the note — and writing `content` at all, even once, stripped
+  every attachment from the outgoing message (a real 7-attachment forward arrived with
+  0). `forward_mail` now forwards the original and its attachments unchanged and
+  accepts no covering note; use `send_mail` for a fresh message with your own text.
+- **`reply_all`'s dry run showed no recipients (#129).** The preview only echoed back
+  what the caller typed — decorative for exactly the tool whose recipient set is
+  surprising (long cc lists). The dry run now resolves the original message's actual
+  to/cc recipients by message-id and reports those; this is a documented exception to
+  the "dry run makes no native call" rule (a *read* of a stored message strands
+  nothing, unlike constructing an outgoing one) — `send`/`forward` still make none.
+- **The outbound gate was unobservable, and unreachable under the daemon (#130).**
+  `doctor()`'s `deployment` now reports `outbound` (adapters currently send-enabled,
+  `[]` if none) + `outbound_note`, derived from the same registration logic
+  `MACOS_APPS_ALLOW_SEND` feeds, never a re-read of the raw env var. Documented
+  (README.md, docs/DAEMON.md) that under the daemon deployment an MCP client's `env`
+  block reaches the shim, not the daemon process that actually reads the variable —
+  setting it in a client config is a silent no-op there; use `launchctl setenv` /
+  the plist's `EnvironmentVariables` on the daemon itself, then `launchctl kickstart -k`.
+- **The gate-ON dispatch path was untested (#131).** `MACOS_APPS_ALLOW_SEND` is read
+  at import time, so a normal test run never registered `send_mail`/`reply_all`/
+  `forward_mail` — their tool→adapter forwarding (`send_mail` alone hand-forwards 8
+  parameters) was never exercised. A subprocess-based test now imports the server
+  with the gate on, replaces the adapter's send methods with recording stubs, and
+  asserts every argument forwards correctly — nothing is ever actually sent.
+
+- **A failed send ran a cleanup that deleted nothing, and the outbox counter cried
+  wolf (#135).** Device-verified: `delete` on a message Mail has already accepted via
+  `send` returns cleanly, removes nothing, and the message delivers anyway — yet every
+  send path had `send` *inside* the try whose handler deleted, so a failure at the send
+  step "rolled back" a message that was already on its way and reported success. `send`
+  now sits outside that try in send/reply_all/forward, and the rollback proves the delete
+  (`-1728` against the dead reference) instead of assuming it; anything else reports "not
+  verified" rather than guessing kindly. Separately, `outbox_pending` had measured
+  `outgoing messages` since #134 — script-session message *objects*, including delivered
+  ones — which read 2 before a send and 2 for ten seconds after while `messages of outbox`
+  went 0 → 1 → 0. Every send for the rest of the session falsely warned "delivery is NOT
+  confirmed". It now counts `messages of outbox`.
+- **We promised an atomicity Mail does not offer (#133).** Device-verified: Mail
+  autosaves *any* outgoing message into Drafts ~10–15 s after creation, asynchronously,
+  and nothing cancels it — a fully successful send litters too, and the entry persists
+  (12 h+ verified). Five suppression attempts failed (one-shot `with properties`,
+  post-creation writes, `visible:true`/`false`, `close … saving no`), and automatic
+  cleanup is unsafe: an outgoing message has no readable `message id` (`-1700`) and the
+  draft's id only exists once the autosave lands, so a sweep would guess by subject and
+  could delete a real draft. The #44-era claim that "a retry can't strand a duplicate
+  draft" was simply untrue, and that false assurance is what kept this misdiagnosed —
+  every earlier "cannot reproduce" checked within a few seconds, before the autosave
+  fired. The claim is retired, and the real limit is now documented in the
+  `send_mail`/`create_draft` tool descriptions where the caller reads it.
+
+### Notes
+
+- `send_draft` was investigated and dropped: Mail's `send` verb applies only to an
+  `outgoing message`, never to a message stored in Drafts (`-1708`, device-verified).
+- New: `docs/mail-applescript-facts.md` collects every device-verified Mail AppleScript
+  trap found this milestone, with what was observed and when.
+
 ## [0.8.0] - 2026-07-25 — New adapters & expansion
 
 New surface (a Music adapter), an indexed Mail read plane, and the distribution

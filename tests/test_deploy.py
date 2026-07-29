@@ -1,4 +1,8 @@
+import os
 import sqlite3
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -172,3 +176,68 @@ def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
     assert "Privacy_AllFiles" in out  # FDA deep-link printed
     assert '"shim"' in out  # client config snippet
     assert '"-E"' in out  # isolation flags pinned in printed snippet
+
+
+def test_allow_send_round_trip(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "state" / "allow_send")
+    monkeypatch.setattr(
+        deploy.subprocess, "run", lambda *a, **k: _Kick(1, "not registered")
+    )
+    deploy.allow_send([])
+    assert capsys.readouterr().out.strip() == "off"
+    deploy.allow_send(["mail"])
+    assert "outbound: mail" in capsys.readouterr().out
+    deploy.allow_send([])
+    assert capsys.readouterr().out.strip() == "mail"
+    deploy.allow_send(["off"])
+    assert "outbound: off" in capsys.readouterr().out
+    assert deploy.allow_send_file() == ""
+
+
+class _Kick:
+    def __init__(self, returncode, stderr):
+        self.returncode, self.stderr = returncode, stderr
+
+
+def test_allow_send_gate_ignores_xdg_state_home(tmp_path):
+    """The consent gate must NOT move with $XDG_STATE_HOME — otherwise it fails OPEN.
+
+    An operator with XDG_STATE_HOME exported runs `macos-apps-mcp allow-send off`; the
+    write and the confirming read both land in the XDG dir while the launchd daemon
+    (which has no shell env at all) keeps reading the home path and keeps
+    send_mail/reply_all/forward_mail registered. Asserted in a SUBPROCESS because the
+    constant is bound at import and the suite monkeypatches it for isolation.
+    """
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from macos_apps_mcp import deploy; print(deploy._ALLOW_SEND_FILE)",
+        ],
+        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert out == str(Path.home() / ".local/state/macos-apps-mcp/allow_send")
+
+
+def test_allow_send_file_reaches_the_gate_only_under_the_daemon(tmp_path, monkeypatch):
+    """The persisted toggle exists because env cannot reach the launchd daemon — a
+    stdio server (and every test run) must stay driven by the env var alone."""
+    from macos_apps_mcp import server
+
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "allow_send")
+    (tmp_path / "allow_send").write_text("mail")
+    monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    assert server._allow_send("mail") is False
+
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert server._allow_send("mail") is True
+
+    # READ_ONLY still wins unconditionally (#104)
+    monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
+    assert server._allow_send("mail") is False

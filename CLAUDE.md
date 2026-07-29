@@ -3,6 +3,14 @@
 One consolidated MCP server for native macOS apps. Python + **FastMCP**, managed with **`uv`**.
 Full design and rationale: [DESIGN.md](DESIGN.md).
 
+**Touching Mail? Read [docs/mail-applescript-facts.md](docs/mail-applescript-facts.md) FIRST.**
+Device-verified traps that code review cannot catch — `delete` after `send` is a silent no-op, a
+compose window is a recipient-less `outgoing message`, writing `content` on a forward destroys the
+attachments, and Mail's Drafts autosave lands ~15s late so a 3-second check reports a clean
+mailbox and lies. Verify every Mail write **by running it and inspecting the resulting message**;
+three reviews and a green suite once passed a forward that delivered empty mail and ate 7
+attachments.
+
 ## Architecture (don't drift)
 
 - **FastMCP standalone.** Tools in `macos_apps_mcp/server.py` are *thin dispatch* to adapters — no
@@ -18,6 +26,13 @@ Full design and rationale: [DESIGN.md](DESIGN.md).
   tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
   `doctor._AUTOMATION_APPS` so `doctor` probes it; it must not reach into another adapter. This is
   what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
+- **Three capability tiers, all gated at registration** (a gated-off tool is *absent*, never
+  registered-and-erroring): read → write (`@_write_tool`/`@_additive_tool`, skipped by
+  `MACOS_APPS_READ_ONLY`) → **outbound** (`@_send_tool("<adapter>")`, registered only when
+  `MACOS_APPS_ALLOW_SEND` names that adapter; `READ_ONLY` wins unconditionally). Outbound acts off
+  this machine, so it carries `openWorldHint` and defaults `dry_run=True` — and its dry-run path must
+  make **no native call at all** (building a Mail `outgoing message` can strand an autosaved draft).
+  A new send tool goes through `_send_tool` or `tests/test_tool_annotations.py` fails.
 
 ## Dev
 
@@ -33,6 +48,12 @@ uv run macos-apps-mcp            # run the server (stdio)
 **Code style.** `ruff` for lint + format (config in `pyproject.toml`): line-length 88, rules
 `E, F, I, UP, B, SIM` — same setup as the sibling repos (`lintle`, `descent-engine`). No mypy
 (neither sibling uses one); the Protocol seam keeps the tool layer testable without it.
+
+**Branches & releases.** `develop` is the trunk — every PR **rebase-merged**, so it stays linear.
+`main` is release-only: nothing but `--no-ff` release cuts, each tagged `vX.Y.Z`. Full procedure,
+including the two-file version bump and the mandatory `doctor().version` proof, is in
+[docs/RELEASING.md](docs/RELEASING.md). **The repo is not the daemon** — merging changes nothing
+about what Claude Code sees until the `.app` is rebuilt and reinstalled.
 
 **Verification.** After completing edits, run these before reporting success — if any fail, report
 the actual output, do not suppress or simplify failures:

@@ -114,6 +114,37 @@ Same snippet for Claude Desktop's `claude_desktop_config.json` and VS Code's MCP
 differs, `command`/`args` stay identical. A Terminal-spawned shim uses the same `command` +
 `args` directly on the CLI.
 
+### 5. Outbound (send) mode under the daemon
+
+```sh
+macos-apps-mcp allow-send mail    # or: messages / mail,messages / all / off
+macos-apps-mcp allow-send         # print the current setting
+```
+
+This writes `~/.local/state/macos-apps-mcp/allow_send` and runs the kickstart for you.
+
+Why a file and not an environment variable: `MACOS_APPS_ALLOW_SEND` is read once, at import time,
+by the process that registers the tools — **the daemon**, not the shim. An MCP client's `env`
+block reaches the *shim* process only, and the shipped
+`packaging/ren.lav.macos-apps-mcp.plist` has no `EnvironmentVariables` key, so setting it in a
+client config is a silent no-op for daemon users — the send tools just never register, with no
+error anywhere. The toggle file is home-pinned for the same reason as the daemon socket: the
+shell that writes it and the launchd process that reads it do not share an environment, so
+`XDG_STATE_HOME` would let them disagree. A *set* `MACOS_APPS_ALLOW_SEND` still wins over the
+file, and the file is consulted **only** in the daemon role — stdio and CI stay env-driven.
+
+The kickstart is what makes it take effect: registration happens at import, so a running daemon
+keeps whatever gate it started with. Any client connected at that moment sees its transport drop
+— respawn the shim to reconnect.
+
+`launchctl setenv MACOS_APPS_ALLOW_SEND mail` + the same kickstart also works, but does not
+survive a reboot. Baking an `EnvironmentVariables` dict into the plist persists too; the shipped
+plist deliberately does **not** ship that key — sending stays off by default under the daemon.
+Whichever route, `doctor()`'s
+`deployment.outbound` (list of adapters currently send-enabled) and `deployment.outbound_note`
+report the *effective* state as read by the daemon that's actually serving your client — run
+`doctor` after the kickstart to confirm it took.
+
 ## Manual acceptance checklist
 
 This is the part automation can't reach (it needs human grant clicks) — the on-device gate for
@@ -197,6 +228,10 @@ build:
   - `deployment.grant_identities`: per-service, per-client-identity grant map read straight from
     `TCC.db` — `None`/unreadable until Full Disk Access is granted to whichever process is
     asking (chicken-and-egg: reading `TCC.db` itself needs FDA for the reader).
+  - `deployment.outbound`: adapters with outbound send currently enabled (derived straight from
+    the running process's `MACOS_APPS_ALLOW_SEND` state, `[]` if none) + `deployment.outbound_note`
+    with the human-readable explanation — see "Outbound (send) mode under the daemon" above if
+    it's `[]` and you expected sending to be on.
   - If `deployment.agent` shows `requires-approval`, open Login Items (above) and approve it.
 
 - **Log locations.**

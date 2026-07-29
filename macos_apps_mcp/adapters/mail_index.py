@@ -30,12 +30,17 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
         "read",
         "flagged",
         "deleted",
+        "conversation_id",
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
     "mailboxes": {"ROWID", "url"},
     "message_global_data": {"ROWID", "message_id_header"},
     "recipients": {"message", "address"},
+    # conversation_id: Mail's own threading key (five dedicated indexes on it),
+    # read by build_thread_query. attachments: backs has_attachments — an indexed
+    # EXISTS, never a per-message AppleScript probe.
+    "attachments": {"ROWID", "message", "name"},
 }
 
 
@@ -70,18 +75,77 @@ def row_to_pointer(row) -> Pointer | None:
     )
 
 
-_BASE_SQL = """
-SELECT gd.message_id_header AS message_id_header,
+# Dedup (#75/#76/#77): a real mailbox stores the SAME RFC822 Message-ID in several
+# mailboxes — device-verified, 36,112 non-deleted rows resolving to 22,223 distinct ids.
+# Three causes, none fixable by cleaning up: Gmail shows one server message under both a
+# label and All Mail, a migration leaves copies on two accounts, and every reply makes a
+# Sent-plus-folder pair. Apple hit this too (mailboxes.unread_count_adjusted_for_
+# duplicates). So one row per Message-ID, ranked: a live INBOX copy beats a filed copy,
+# which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
+# every *filter* value is still a bound param. The junk/spam patterns are wrapped on
+# BOTH sides: Exchange names the folder `Junk%20E-mail`, so an end-anchored '%Junk'
+# would rank it as a preferred filed folder and let it beat a real Archive copy.
+_MAILBOX_RANK = """CASE
+           WHEN mb.url LIKE '%/INBOX' THEN 0
+           WHEN mb.url LIKE '%All%Mail' OR mb.url LIKE '%/Archive'
+             OR mb.url LIKE '%/Trash'   OR mb.url LIKE '%Deleted%Messages'
+             OR mb.url LIKE '%Junk%'    OR mb.url LIKE '%Spam%' THEN 2
+           ELSE 1 END"""
+
+# The projected columns every deduped read returns; row_to_pointer consumes exactly
+# these names. Shared with build_thread_query.
+_DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        s.subject            AS subject,
        mb.url               AS mailbox_url,
-       m.date_received      AS date_received
+       m.date_received      AS date_received"""
+
+_BASE_SQL = f"""
+SELECT {_DEDUP_SELECT_COLS},
+       ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
+                          ORDER BY {_MAILBOX_RANK}, m.date_received DESC, m.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailboxes mb ON mb.ROWID = m.mailbox
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
+  AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
 """
+
+# has_attachments means "carries a real document". Mail counts inline signature and
+# newsletter images as attachment rows, so a naive EXISTS is noise-dominated — on a real
+# Mac 4,474 messages "have an attachment" while only 2,223 carry a document. Names with
+# no extension count as documents: a false positive beats a silently dropped attachment.
+_IMAGE_EXTS = (
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "heic",
+    "bmp",
+    "tiff",
+    "tif",
+    "svg",
+    "ico",
+)
+
+_HAS_DOCUMENT = (
+    " AND EXISTS (SELECT 1 FROM attachments at WHERE at.message = m.ROWID"
+    " AND (at.name IS NULL OR NOT ("
+    + " OR ".join(f"lower(at.name) LIKE '%.{e}'" for e in _IMAGE_EXTS)
+    + ")))"
+)
+
+
+def like_escape(value: str) -> str:
+    r"""Escape LIKE metacharacters so a bound value matches LITERALLY.
+
+    Binding a parameter stops injection; it does NOT stop ``%`` and ``_`` from being
+    read as wildcards, so an un-escaped ``account='%'`` quietly matches every mailbox
+    and returns a confidently wrong answer. Pair with ``ESCAPE '\'``.
+    """
+    return value.replace("\\", r"\\").replace("%", r"\%").replace("_", r"\_")
 
 
 def build_header_query(
@@ -94,11 +158,16 @@ def build_header_query(
     until=None,
     unread=None,
     flagged=None,
+    has_attachments=None,
+    account=None,
     message_ids=None,
     limit=25,
 ):
     """Build (sql, params) for the header plane. All filters optional, ANDed; every
-    value is a bound param (injection-safe). Newest-first, deleted excluded."""
+    value is a bound param (injection-safe). Newest-first, deleted excluded.
+    `has_attachments` means a real document (images excluded); `account` matches the
+    account segment of the mailbox url (<scheme>://<UUID>/<path>) — exactly, not as a
+    substring of the path."""
     sql = _BASE_SQL
     params: list = []
     if subject:
@@ -126,13 +195,127 @@ def build_header_query(
         sql += " AND m.read = 0"
     if flagged:
         sql += " AND m.flagged = 1"
+    if has_attachments:
+        sql += _HAS_DOCUMENT
+    if account:
+        # Anchored to the ACCOUNT SEGMENT of mailboxes.url (<scheme>://<UUID>/<path>),
+        # not a substring of the whole url: an unanchored '%value%' also matches any
+        # mailbox whose PATH contains the text, under any account, and reports it as
+        # though the account filter worked. The trailing '/' is appended to mb.url so
+        # an account-root mailbox with no path still matches. LIKE metacharacters in
+        # the value are escaped for the same honesty reason — account='%' must match
+        # one account, not every mailbox (it is a bound param, so never injection).
+        sql += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
+        params.append(like_escape(account))
     if message_ids:
         placeholders = ",".join("?" for _ in message_ids)
         sql += f" AND gd.message_id_header IN ({placeholders})"
         params += list(message_ids)
-    sql += " ORDER BY m.date_received DESC LIMIT ?"
+    # Dedup and LIMIT wrap the filtered set: rank inside, pick rn = 1, then LIMIT — so
+    # LIMIT counts distinct messages, not rows that collapse afterwards.
+    sql = (
+        f"SELECT message_id_header, subject, mailbox_url, date_received FROM ({sql})"
+        " WHERE rn = 1 ORDER BY date_received DESC LIMIT ?"
+    )
     params.append(limit)
     return sql, params
+
+
+def build_thread_query(message_id: str, limit: int):
+    """Build (sql, params) for one conversation, addressed by any member's Message-ID.
+
+    Threads on messages.conversation_id — Mail's own threading key, which carries
+    five dedicated indexes, so matching References/In-Reply-To by hand would be
+    redundant work on top of an answer Mail already computed. Deduped by the same
+    rule as search, and ordered OLDEST-first: a thread reads as a transcript.
+    Truncation keeps the NEWEST ``limit`` messages (the old end is the end to drop
+    when the point is to reply), then re-sorts ascending for the caller.
+
+    The seed matches EVERY conversation the Message-ID belongs to, not one of them:
+    the premise of this module is that one Message-ID has several rows, and a
+    cross-account copy can carry a DIFFERENT conversation_id, so a `= (SELECT …
+    LIMIT 1)` seed silently drops the other branch — and picks a deleted copy just as
+    happily. Which one won was up to SQLite's query plan and could flip on an OS
+    upgrade. Deleted copies are excluded from the seed for the same reason.
+
+    ``sort_date`` guards a date_sent of 0 (not just NULL): a zero sorts to the very
+    front of an oldest-first transcript and would be the first message dropped under
+    truncation.
+    """
+    sql = f"""
+SELECT message_id_header, subject, mailbox_url, date_received FROM (
+  SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
+    SELECT {_DEDUP_SELECT_COLS},
+           COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
+           ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
+                              ORDER BY {_MAILBOX_RANK},
+                                       m.date_received DESC, m.ROWID) AS rn
+    FROM messages m
+    JOIN subjects s ON s.ROWID = m.subject
+    JOIN mailboxes mb ON mb.ROWID = m.mailbox
+    JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+    WHERE m.deleted = 0
+      AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
+      AND m.conversation_id IN (
+            SELECT m2.conversation_id FROM messages m2
+            JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
+            WHERE gd2.message_id_header = ? AND m2.deleted = 0)
+  ) WHERE rn = 1
+  ORDER BY sort_date DESC
+  LIMIT ?
+) ORDER BY sort_date ASC
+"""
+    return sql, [message_id, limit]
+
+
+def build_local_account_query():
+    """Build (sql, params) that finds the account segment mailboxes.url embeds for the
+    On My Mac store — the value ``build_header_query``'s ``account`` clause anchors on
+    for a ``local://`` mailbox (``<scheme>://<UUID>/<path>``, same shape as an
+    ``imap://`` account). AppleScript's `every account` never lists this store (see
+    ``mail.overview``'s docstring), so it has no name to resolve from Mail — this is
+    read straight from the same Envelope Index the account filter itself queries,
+    which guarantees the two agree. Every ``local://`` mailbox on a device shares the
+    same account segment, so the first row is enough; no rows means no On My Mac
+    store in this index."""
+    return "SELECT url FROM mailboxes WHERE url LIKE 'local://%' LIMIT 1", []
+
+
+def build_overview_query():
+    """Build (sql, params) for per-mailbox totals and unread counts.
+
+    Counts are computed LIVE rather than read from mailboxes.unread_count: that column
+    is trigger-maintained and device-verified stale — on a real Mac the Gmail INBOX row
+    reports 1 unread where a live count returns 0, and
+    unread_count_adjusted_for_duplicates carries the same wrong value. A live count over
+    36k rows measured 16 ms, backed by the partial index on (read = 0 AND deleted = 0).
+
+    Counted per DISTINCT Message-ID, not per row. A raw COUNT(m.ROWID) is inflated by
+    the same duplication the search plane dedups — device-verified against a 36k store,
+    Travel reported 4,423 against a true 1,241 (3.6x), Expense 3,535 against 1,127,
+    Investing 2,611 against 410. This is same-mailbox dedup, so it needs no mailbox
+    rank; the rows collapse inside one GROUP BY. A message with no RFC822 Message-ID
+    still counts (keyed on its ROWID) — it has no citation, but it is genuinely in the
+    mailbox, and a count that silently omits it is the same class of lie.
+
+    Mailboxes with no messages are included via the LEFT JOINs (both of them — the
+    message_global_data join must not turn the outer join inner), so a newly-created
+    folder shows as 0/0 rather than vanishing.
+    """
+    # One expression, used twice: the dedup key. COUNT(DISTINCT …) ignores NULLs, so
+    # the unread count is the same key wrapped in a CASE with no ELSE.
+    key = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
+    sql = f"""
+SELECT mb.url                                       AS mailbox_url,
+       COUNT(DISTINCT {key})                        AS total,
+       COUNT(DISTINCT CASE WHEN m.read = 0 THEN {key} END) AS unread
+FROM mailboxes mb
+LEFT JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted = 0
+LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+GROUP BY mb.ROWID
+ORDER BY unread DESC, mailbox_url ASC
+"""
+    return sql, []
 
 
 class _TextExtractor(HTMLParser):

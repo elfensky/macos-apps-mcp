@@ -132,6 +132,7 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
         "complete_reminder",
         "update_note",
         "delete_note",
+        "delete_draft",
     }
     assert set(srv._SNAPSHOT_SOURCES) == expected
     for source in srv._SNAPSHOT_SOURCES.values():

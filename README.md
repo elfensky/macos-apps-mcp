@@ -78,17 +78,29 @@ guessing. **Recurrence** is an RFC 5545 `RRULE` (`FREQ`/`INTERVAL`/`COUNT`/`UNTI
 
 ### Mail — id-first read + draft-and-open (Automation)
 
-Nothing here ever **sends** — replies and drafts open a compose window for you to review.
+Sending is **off by default**: reads, `create_draft`, and `mail_reply` never send — they
+open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
+`forward_mail`) exists but only runs when the operator opts in via
+`MACOS_APPS_ALLOW_SEND`, and `dry_run` still defaults to `True` even then.
 
 | Tool | Args | Notes |
 |------|------|-------|
 | `mail` | subject-OR-sender substring | inbox matches; id = stable RFC822 message-id, `message://` deeplink |
 | `mail_body` | id | one message's plaintext, bounded + truncation-marked |
+| `mail_search` | subject, from_, to, mailbox, account, since, until, unread, flagged, has_attachments, body, limit | indexed search via Envelope Index (at rest — no Mail launch **unless** `account=` is a display name, which is resolved through Mail; a UUID stays pure sqlite, an unknown name raises); one result per message (INBOX **preferred**); `has_attachments` excludes inline images; `body` best-effort (indexed only) |
+| `mail_index_bodies` | rebuild | builds/refreshes opt-in **FTS body index** from `.emlx` at rest; resumable, size-capped; skips not-yet-downloaded (partial coverage by design) |
+| `mail_thread` | id, limit (default 100) | whole conversation, oldest-first, **includes your sent messages**; deduped; over `limit` **oldest dropped** (thread read for reply) |
+| `mail_overview` | — | every mailbox with total + unread, unread-first; includes Junk/Trash/All Mail; counts live (stored counters go stale) and per distinct message; account **names** come from Mail (launches it), UUIDs stand in when it's unreachable; On My Mac always named |
 | `mail_attachments` | mailbox (`inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
 | `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
 | `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
+| `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
+| `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
+| `reply_all` | `message_id`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
+| `forward_mail` | `message_id`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 
@@ -134,6 +146,60 @@ Nothing here ever **sends** — replies and drafts open a compose window for you
 
 Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
+
+### Outbound (send) mode
+
+Sending is **off by default** — the server creates drafts and never sends. Turn it on with:
+
+```sh
+macos-apps-mcp allow-send mail    # or: messages / mail,messages / all / off
+macos-apps-mcp allow-send         # print the current setting
+```
+
+That persists the opt-in and restarts the daemon so it re-registers (registration happens at
+import, so a restart is unavoidable — reconnect your MCP client afterward). It is a **CLI
+command, not a tool**: the gate is your consent, so the model can neither grant itself sending
+nor restart the server out from under your session.
+
+The same choice is available as `MACOS_APPS_ALLOW_SEND` in the environment, which is what a
+stdio server reads (a set variable always wins over the persisted toggle):
+
+| Value | Effect |
+|---|---|
+| unset (default) | no send tools are registered at all |
+| `mail` | Mail outbound only (`send_mail`, `reply_all`, `forward_mail`) |
+| `mail,messages` | named adapters (comma list) |
+| `1` / `true` / `yes` / `all` | every adapter's outbound |
+
+`MACOS_APPS_READ_ONLY` always wins: with both set, no send tools are registered.
+
+Send tools take `dry_run`, which **defaults to `True`** — deliberately inverted from the
+id-addressed deletes. A delete targets an item a read already returned; a send *constructs* its
+recipient, and a wrong recipient is the failure that matters. The dry run makes no call into Mail
+at all and reports the resolved envelope; pass `dry_run=False` to actually send. `reply_all` is
+the one exception: its dry run reads (never sends) the original message's actual to/cc
+recipients, because that's exactly the recipient set a caller can't predict.
+
+A successful `send_mail` / `reply_all` / `forward_mail` result (`sent: True`) means Mail
+**accepted** the message — not that it was delivered. Device-verified: a perfectly-formed message
+can sit in Mail's Outbox undelivered for minutes after `send` returns, and a stranded
+recipient-less message can jam the outbox so later, valid sends queue behind it and never leave.
+Every result also reports `outbox_pending`, Mail's current outbox count; when it's greater than
+zero the result carries a `note` explaining that delivery is not confirmed and to check Mail ▸
+Outbox.
+
+Run the `doctor` tool to check whether sending is actually enabled — `deployment.outbound` lists
+every adapter currently send-enabled (`[]` if none), derived from the same registration logic
+above rather than a re-read of the raw env var, so it can never disagree with what got registered;
+`deployment.outbound_note` explains the state in prose.
+
+**Under the daemon deployment**, setting `MACOS_APPS_ALLOW_SEND` in an MCP client's config is a
+silent no-op: the client's `env` block reaches the shim, not the long-lived daemon process that
+reads the variable at import time, and the shipped LaunchAgent plist ships no
+`EnvironmentVariables` key. This is exactly why `allow-send` exists — it writes state the daemon
+can read (`~/.local/state/macos-apps-mcp/allow_send`, home-pinned so the shell that writes it and
+the launchd process that reads it always agree) and survives reboots, unlike `launchctl setenv`.
+See [docs/DAEMON.md](docs/DAEMON.md) ("Outbound (send) mode under the daemon").
 
 ## Develop
 

@@ -555,6 +555,58 @@ def test_read_only_unset_is_false(monkeypatch):
     assert srv._read_only() is False
 
 
+@pytest.mark.parametrize(
+    "val,want",
+    [
+        ("", False),
+        ("0", False),
+        ("off", False),
+        ("messages", False),
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+        ("all", True),
+        ("mail", True),
+        ("mail,messages", True),
+        ("MAIL", True),
+        (" mail , ", True),
+        ("mail,,", True),
+    ],
+)
+def test_allow_send_parse(monkeypatch, val, want):
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", val)
+    assert srv._allow_send("mail") is want
+
+
+def test_allow_send_unset_is_false(monkeypatch):
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
+    assert srv._allow_send("mail") is False
+
+
+def test_read_only_beats_allow_send(monkeypatch):
+    # READ_ONLY is the safe-deploy guard — a send tier cannot punch through it.
+    monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
+    monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "all")
+    assert srv._allow_send("mail") is False
+
+
+def test_allow_send_is_per_adapter(monkeypatch):
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
+    assert srv._allow_send("mail") is True
+    assert srv._allow_send("messages") is False
+
+
+def test_send_annotations_are_destructive_and_open_world():
+    assert srv._SEND_ANNOTATIONS == {
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "openWorldHint": True,
+    }
+
+
 # Tools emit Pointer.as_dict() directly — the wire shape lives on the type.
 
 

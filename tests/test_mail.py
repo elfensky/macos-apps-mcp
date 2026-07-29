@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 
+from macos_apps_mcp.adapters import mail
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
@@ -13,6 +16,7 @@ from macos_apps_mcp.adapters.mail import (
     _validate_mailbox,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_summary_subject_and_sender():
@@ -186,7 +190,10 @@ def test_get_body_huge_body_overflows(monkeypatch):
 def test_create_draft_never_sends():
     # the SAFETY invariant: the draft script has NO `send` verb anywhere — it can only
     # create-and-open, never send (joshrutkowski's two-tier gate; the #62 acceptance).
-    assert "send" not in _CREATE_DRAFT.lower()
+    # Anchored on the VERB, not the substring: the shared #135 rollback preamble prose
+    # contains the word "sends", and a bare substring check would fail on that while
+    # still not proving anything about the verb.
+    assert not re.search(r"^\s*send \w+\s*$", _CREATE_DRAFT, re.M)
     assert "make new outgoing message" in _CREATE_DRAFT
     assert "visible:true" in _CREATE_DRAFT  # opens for human review
 
@@ -230,24 +237,41 @@ def test_create_draft_empty_recipient_raises():
 
 
 def test_create_draft_returns_locator_dict(monkeypatch):
-    # #43: an unsent draft has no stable Message-ID, so create_draft returns a locator
-    # (where to find it) instead of a fabricated id.
+    # #43: a freshly opened compose window has no stable Message-ID YET, so
+    # create_draft returns a locator (where to find it) instead of a fabricated id.
+    # #82/F4 review: once saved to Drafts it DOES get one (drafts()/delete_draft()
+    # resolve by it) — the note must point at that recovery path, not claim drafts
+    # are permanently unaddressable.
     monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "")
     out = MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
     assert out["subject"] == "Hi"
-    assert "no stable id" in out["note"].lower()
+    assert "drafts()" in out["note"]
+
+
+def test_create_draft_reads_body_through_shared_handler():
+    # Bug 1 (device-verified): a bare `read (POSIX file …) as «class utf8»` raises -39
+    # ("End of file error") on a ZERO-BYTE file — an empty create_draft body crashed
+    # since 0.8.0. The script must compose the shared readBody handler instead of
+    # reading directly.
+    assert "on readBody(p)" in _CREATE_DRAFT
+    assert "my readBody(item 3 of argv)" in _CREATE_DRAFT
+    # "read (POSIX file" legitimately appears ONCE, inside the readBody handler itself
+    # — the `on run` body must never call it bare (a second, direct occurrence).
+    assert _CREATE_DRAFT.count("read (POSIX file") == 1
 
 
 def test_create_draft_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
-    # deleted in the error path. Assert the STRUCTURE (delete msg between `on error` and
-    # the re-raise), not just the words: a substring check would pass even if the block
-    # were gutted and a stray "delete"/"on error" comment left behind (#43/#44 review).
-    assert re.search(r"on error errMsg\s+delete msg\s+error errMsg", _CREATE_DRAFT), (
-        "the on-error handler must delete the partial draft, then re-raise"
-    )
+    # deleted in the error path. Assert the STRUCTURE (the rollback between `on error`
+    # and the re-raise), not just the words: a substring check would pass even if the
+    # block were gutted and a stray "delete"/"on error" comment left behind (#43/#44
+    # review). Since #135 the delete goes through the VERIFYING rollback handler, so the
+    # structure is `on error` -> rollback -> re-raise either way.
+    assert re.search(
+        r"on error errMsg\s+if my rollback\(msg\) then\s+error errMsg", _CREATE_DRAFT
+    ), "the on-error handler must roll back the partial draft, then re-raise"
 
 
 def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
@@ -392,7 +416,13 @@ def test_framed_templates_compose_the_one_strip_framing_handler():
     # the single STRIP_FRAMING constant — exactly one handler definition per script.
     import macos_apps_mcp.adapters.mail as mail
 
-    framed = (mail._ORIGINAL, mail._ATTACHMENTS, mail._INBOX_TRIAGE, mail._SENT_TRIAGE)
+    framed = (
+        mail._ORIGINAL,
+        mail._ATTACHMENTS,
+        mail._INBOX_TRIAGE,
+        mail._SENT_TRIAGE,
+        mail._REPLY_ALL_RECIPIENTS,
+    )
     for tpl in framed:
         assert tpl.startswith(mail.STRIP_FRAMING)
         assert tpl.count("on stripFraming") == 1
@@ -558,18 +588,772 @@ def test_reply_empty_body_raises():
 
 
 def test_reply_never_sends():
-    # the SAFETY invariant: neither template contains a `send` verb (as opposed to
-    # `sender`, which legitimately appears in _ORIGINAL) — a reply can only open a
-    # draft window for the human, never send on its own.
-    assert not re.search(r"\bsend\b", _ORIGINAL.lower())
-    assert not re.search(r"\bsend\b", _REPLY.lower())
+    # the SAFETY invariant: neither template contains a `send` VERB (as opposed to
+    # `sender`, which legitimately appears in _ORIGINAL, or the #135 rollback preamble's
+    # prose, which mentions sending) — a reply can only open a draft window for the
+    # human, never send on its own. Anchored on the verb in statement position.
+    assert not re.search(r"^\s*send \w+\s*$", _ORIGINAL, re.M)
+    assert not re.search(r"^\s*send \w+\s*$", _REPLY, re.M)
     assert "reply (" in _REPLY  # uses Mail's native reply verb (real threading)
     assert "opening window yes" in _REPLY  # opens for human review
 
 
+def test_reply_reads_body_through_shared_handler():
+    # Bug 1: same -39-on-empty-file hazard as _CREATE_DRAFT — _REPLY must compose the
+    # shared readBody handler rather than reading the tempfile directly.
+    assert "on readBody(p)" in _REPLY
+    assert "my readBody(item 2 of argv)" in _REPLY
+    assert _REPLY.count("read (POSIX file") == 1  # only inside the handler itself
+
+
 def test_reply_cleanup_on_failure_is_in_script():
     # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
-    # deleted in the error path, structurally (not just present as loose words).
-    assert re.search(r"on error errMsg\s+delete r\s+error errMsg", _REPLY), (
-        "the on-error handler must delete the partial reply, then re-raise"
+    # deleted in the error path, structurally (not just present as loose words). Since
+    # #135 that delete goes through the verifying rollback handler.
+    assert re.search(
+        r"on error errMsg\s+if my rollback\(r\) then\s+error errMsg", _REPLY
+    ), "the on-error handler must roll back the partial reply, then re-raise"
+
+
+# --- drafts (#82) ---------------------------------------------------------------
+
+
+def test_list_drafts_parses_framed_records(monkeypatch):
+    raw = (
+        f"<a@b.com>{US}Q3 numbers{US}boss@corp.com{RS}"
+        f"<c@d.com>{US}Lunch?{US}pal@example.org{RS}"
     )
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    out = mail.MailAdapter().list_drafts()
+    assert [p.id for p in out] == ["<a@b.com>", "<c@d.com>"]
+    assert out[0].summary == "Q3 numbers — to boss@corp.com"
+    assert out[0].deeplink.startswith("message://")
+
+
+def test_list_drafts_skips_records_without_message_id(monkeypatch):
+    # a draft with no Message-ID has no stable citation — never emit a garbage id.
+    raw = f"missing value{US}No id{US}x@y.com{RS}<ok@z>{US}Fine{US}a@b.com{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    assert [p.id for p in mail.MailAdapter().list_drafts()] == ["<ok@z>"]
+
+
+def test_list_drafts_empty_mailbox(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    assert mail.MailAdapter().list_drafts() == []
+
+
+def test_list_drafts_summary_without_recipient(monkeypatch):
+    raw = f"<a@b>{US}Just a subject{US}{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    assert mail.MailAdapter().list_drafts()[0].summary == "Just a subject"
+
+
+def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
+    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    p = mail.MailAdapter().snapshot("<a@b>")
+    assert p.summary == "Q3 numbers — to boss@corp.com"
+
+
+def test_snapshot_returns_none_for_unknown_id(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    assert mail.MailAdapter().snapshot("<nope@nowhere>") is None
+
+
+def test_delete_draft_dry_run_makes_no_native_call(monkeypatch):
+    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
+    calls = []
+
+    def fake(script, *argv):
+        calls.append(script)
+        return raw
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "<a@b>"
+    # exactly one call — the snapshot read. Never the delete script.
+    assert calls == [mail._DRAFTS]
+
+
+def test_delete_draft_dry_run_unknown_id_raises(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    with pytest.raises(ValueError, match="no draft"):
+        mail.MailAdapter().delete_draft("<nope@nowhere>", dry_run=True)
+
+
+def test_delete_draft_deletes_by_message_id(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("a@b")
+    assert out == {"deleted": True, "id": "a@b"}
+    assert seen[mail._DELETE_DRAFT] == ("a@b",)
+
+
+def test_delete_draft_rejects_empty_id():
+    with pytest.raises(ValueError, match="draft id"):
+        mail.MailAdapter().delete_draft("   ")
+
+
+# --- M1 review: delete_draft accepts a bracketed id like every other id-taking method -
+
+
+def test_delete_draft_accepts_bracketed_id(monkeypatch):
+    # a caller passing "<id>" (the RFC822-looking form, matching what get_body/reply/
+    # reply_all/forward all accept) must resolve — not fail loudly. Brackets are
+    # stripped before the id reaches the AppleScript argv.
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().delete_draft("<a@b>")
+    assert out == {"deleted": True, "id": "a@b"}
+    assert seen[mail._DELETE_DRAFT] == ("a@b",)  # bare on the wire, not "<a@b>"
+
+
+def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkeypatch):
+    # snapshot() must match regardless of whether the caller's id or the stored
+    # Pointer.id is bracketed (M1 review) — the dry-run path depends on this.
+    raw = f"a@b{US}Q3 numbers{US}boss@corp.com{RS}"  # stored id is BARE
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)  # caller id bracketed
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "a@b"
+
+
+# --- send (#83) -------------------------------------------------------------------
+
+
+def test_split_addrs_accepts_string_and_list():
+    assert mail._split_addrs("a@b.com, c@d.com") == ["a@b.com", "c@d.com"]
+    assert mail._split_addrs(["a@b.com", " c@d.com "]) == ["a@b.com", "c@d.com"]
+    assert mail._split_addrs(None) == []
+    assert mail._split_addrs(" , ") == []
+
+
+def test_split_addrs_strips_unit_separator_injection():
+    # F1 review: a literal U+001F (the wire's own field separator, US) embedded in an
+    # address must NOT survive into the list — otherwise US.join(...) on the result
+    # produces a string that _SEND's `text items of` (which splits on US) parses back
+    # into TWO recipients, even though this function only ever emitted one entry.
+    # Written as an explicit \u001f escape (never a literal control glyph in source),
+    # and asserted on the actual bytes of the result.
+    injected = "alice@corp.com\u001fexfil@evil.tld"
+    out = mail._split_addrs(injected)
+    assert out == ["alice@corp.comexfil@evil.tld"]  # ONE entry — the US byte is gone
+    assert "\u001f" not in out[0]
+    # the wire-level invariant this exists to protect: joining the result and
+    # re-splitting on US (exactly what _SEND's AppleScript does) must yield the SAME
+    # count as the parsed list — no smuggled extra recipient.
+    joined = mail.US.join(out)
+    assert len(joined.split(mail.US)) == len(out) == 1
+
+
+def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
+    # F1 review: the dry-run preview (what the model sees before deciding to send) and
+    # the argv actually handed to run_osascript (what Mail actually sends to) must
+    # describe the SAME recipient set — an injected \u001f must not let them diverge
+    # (the preview showing ONE recipient while the wire actually carries TWO).
+    seen = {}
+
+    def fake(script, *argv):
+        # a real send now makes TWO calls: _SEND, then the outbox truth-check
+        # (_OUTBOX_COUNT). Dispatch on script identity so the outbox call (whose
+        # argv is empty) can't clobber the _SEND argv this test cares about.
+        if script is mail._SEND:
+            seen["argv"] = argv
+            return "sent"
+        return "0"
+
+    # Patched BEFORE the first send() call below: that call is dry_run=True by
+    # default and relies on the early return to never reach run_osascript, but
+    # patching up front means a regression in that early return fails loudly here
+    # instead of firing a real osascript send into Mail.app under a plain
+    # `uv run pytest`.
+    monkeypatch.setattr(mail, "run_osascript", fake)
+
+    injected_to = "alice@corp.com\u001fexfil@evil.tld"
+    preview = mail.MailAdapter().send(injected_to, "Hi", "body")
+    previewed_to = preview["would_send"]["to"]
+    assert previewed_to == ["alice@corp.comexfil@evil.tld"]
+
+    mail.MailAdapter().send(injected_to, "Hi", "body", dry_run=False)
+    _subj, _path, _html, _from, to_j, _cc_j, _bcc_j = seen["argv"]
+    wire_to = [a for a in to_j.split(mail.US) if a]
+    assert wire_to == previewed_to  # preview and wire agree by construction
+
+
+def test_send_dry_run_touches_nothing(monkeypatch):
+    # A dry run must make NO native call: constructing an outgoing message can strand an
+    # autosaved copy in Drafts even when the script deletes it (device-verified). This
+    # is the load-bearing safety invariant for `send` — the most dangerous of the three
+    # outbound paths — mirroring the equivalent guard on forward below. reply_all is a
+    # documented exception (#129): its dry run DOES make one native call, a read of the
+    # original message's recipients — see test_reply_all_dry_run_reads_recipients_only.
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().send(
+        "a@b.com", "Hi", "body text", cc="c@d.com", from_address="me@corp.com"
+    )
+    assert out == {
+        "dry_run": True,
+        "would_send": {
+            "to": ["a@b.com"],
+            "cc": ["c@d.com"],
+            "bcc": [],
+            "from": "me@corp.com",
+            "subject": "Hi",
+            "body_chars": 9,
+            "html": False,
+        },
+    }
+
+
+def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    out = mail.MailAdapter().send("a@b.com", "Hi", "x")
+    # Mail's default sender is NOT predictable from account order (device-verified), so
+    # never report a computed guess.
+    assert out["would_send"]["from"] == "(Mail default account)"
+
+
+def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        # a real send now dispatches TWO scripts: _SEND, then _OUTBOX_COUNT (#134's
+        # outbox truth-check) — recorded separately so asserting the _SEND argv can't
+        # be clobbered by the outbox call's (empty) argv.
+        if script is mail._SEND:
+            seen["send_script"], seen["send_argv"] = script, argv
+            return "sent"
+        seen["outbox_script"] = script
+        return "3"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().send(
+        "a@b.com,e@f.com",
+        "Hi",
+        "body",
+        cc="c@d.com",
+        bcc="x@y.com",
+        html=True,
+        from_address="me@corp.com",
+        dry_run=False,
+    )
+    assert out["sent"] is True
+    # outbox_pending (#134) reports the real outbox count and, when non-zero, a note
+    # for the model to relay — a "sent" result alone is not delivery confirmation.
+    assert out["outbox_pending"] == 3
+    assert "Outbox" in out["note"]
+    subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["send_argv"]
+    assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
+    assert to_j == f"a@b.com{US}e@f.com"
+    assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
+    assert seen["outbox_script"] is mail._OUTBOX_COUNT  # the truth-check ran too
+
+
+def test_send_reads_body_through_shared_handler():
+    # Bug 1 (device-verified): a subject-only send leaves the body tempfile EMPTY,
+    # which crashes a bare `read … as «class utf8»` with -39. _SEND must compose the
+    # shared readBody handler instead.
+    assert "on readBody(p)" in mail._SEND
+    assert "my readBody(item 2 of argv)" in mail._SEND
+    assert mail._SEND.count("read (POSIX file") == 1  # only inside the handler itself
+
+
+# --- outbox_pending truth-check (#134) -------------------------------------------
+
+
+def test_outbox_count_script_counts_the_outgoing_messages():
+    # the AppleScript that backs outbox_pending must count Mail's REAL send queue (see
+    # test_outbox_count_reads_the_real_queue_not_session_objects for why that is
+    # `messages of outbox` and not `outgoing messages`) and be bounded like every other
+    # template in this file.
+    assert "count of (messages of outbox)" in mail._OUTBOX_COUNT
+    assert "with timeout of 120 seconds" in mail._OUTBOX_COUNT
+
+
+def test_outbox_pending_runs_the_count_script(monkeypatch):
+    seen = []
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: seen.append(a) or "4")
+    assert mail._outbox_pending() == 4
+    assert seen == [(mail._OUTBOX_COUNT,)]  # no argv — the script needs none
+
+
+def test_with_outbox_pending_zero_omits_note(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "0")
+    out = mail._with_outbox_pending({"sent": True})
+    assert out == {"sent": True, "outbox_pending": 0}
+    assert "note" not in out
+
+
+def test_with_outbox_pending_nonzero_adds_actionable_note(monkeypatch):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "2")
+    out = mail._with_outbox_pending({"sent": True})
+    assert out["outbox_pending"] == 2
+    # worded so a model relaying it to a human states delivery is NOT confirmed and
+    # points at where to check.
+    assert "not confirmed" in out["note"].lower()
+    assert "Outbox" in out["note"]
+
+
+def test_send_rejects_missing_recipient():
+    with pytest.raises(ValueError, match="recipient"):
+        mail.MailAdapter().send("  ", "Hi", "body", dry_run=False)
+
+
+def test_send_rejects_empty_subject_and_body():
+    with pytest.raises(ValueError, match="subject or a body"):
+        mail.MailAdapter().send("a@b.com", "", "", dry_run=False)
+
+
+def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
+    # #129: reply_all's dry run is a documented exception to the "no native call" rule
+    # — it reads the original message's recipients (a read strands nothing) but must
+    # NEVER reach the send script (_REPLY_ALL) itself.
+    seen = []
+
+    def fake(script, *argv):
+        seen.append(script)
+        if script is mail._REPLY_ALL_RECIPIENTS:
+            return (
+                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
+                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+            )
+        raise AssertionError(f"dry run must not call {script!r} (the send script)")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good")
+    assert out == {
+        "dry_run": True,
+        "would_send": {
+            "to": ["alice@corp.com", "bob@corp.com"],
+            "cc": ["carol@corp.com"],
+            "reply_to": "<orig@x>",
+            "reply_all": True,
+            "body_chars": 11,
+            "include_quote": True,
+        },
+    }
+    assert seen == [mail._REPLY_ALL_RECIPIENTS]  # exactly one call — the read, only
+
+
+def test_reply_all_sends_with_quote(monkeypatch):
+    seen = {}
+    bodies = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail._ORIGINAL:
+            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        # #134: reply_all now also runs the outbox truth-check (_OUTBOX_COUNT)
+        # after _REPLY_ALL — return a real count for it, "sent" for _REPLY_ALL.
+        if script is mail._OUTBOX_COUNT:
+            return "0"
+        return "sent"
+
+    def fake_body_file(text):
+        bodies["text"] = text
+        return nullcontext("/tmp/fake-body")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail, "body_file", fake_body_file)
+    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good", dry_run=False)
+    assert out == {
+        "sent": True,
+        "reply_to": "<orig@x>",
+        "reply_all": True,
+        "outbox_pending": 0,
+    }
+    assert "note" not in out  # zero pending: no caveat needed
+    assert bodies["text"].startswith("Sounds good")
+    assert "> Original text" in bodies["text"]
+    assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body")
+    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
+
+
+def test_reply_all_reads_body_through_shared_handler():
+    # Bug 1: same -39-on-empty-file hazard — _REPLY_ALL must compose the shared
+    # readBody handler rather than reading the tempfile directly.
+    assert "on readBody(p)" in mail._REPLY_ALL
+    assert "my readBody(item 2 of argv)" in mail._REPLY_ALL
+    # only inside the handler itself
+    assert mail._REPLY_ALL.count("read (POSIX file") == 1
+
+
+def test_reply_all_rejects_empty_body():
+    with pytest.raises(ValueError, match="non-empty"):
+        mail.MailAdapter().reply_all("<orig@x>", "   ", dry_run=False)
+
+
+def test_forward_dry_run_reports_recipients(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com, c@d.com")
+    assert out["dry_run"] is True
+    assert out["would_send"] == {
+        "to": ["a@b.com", "c@d.com"],
+        "forwarding": "<orig@x>",
+    }
+
+
+def test_forward_sends_via_argv(monkeypatch):
+    # forward carries NO body/note — its argv is just (message id, US-joined
+    # recipients); no tempfile is ever created for it.
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        # #134: forward now also runs the outbox truth-check (_OUTBOX_COUNT) after
+        # _FORWARD — it must return a real count, not the opaque "sent" _FORWARD uses.
+        if script is mail._OUTBOX_COUNT:
+            return "2"
+        return "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().forward("<orig@x>", "a@b.com", dry_run=False)
+    assert out["sent"] is True
+    assert out["to"] == ["a@b.com"]
+    assert out["forwarding"] == "<orig@x>"
+    assert out["outbox_pending"] == 2
+    assert "Outbox" in out["note"]  # non-zero pending: caveat included
+    assert seen[mail._FORWARD] == ("orig@x", "a@b.com")
+    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
+
+
+def test_forward_rejects_missing_recipient():
+    with pytest.raises(ValueError, match="recipient"):
+        mail.MailAdapter().forward("<orig@x>", "", dry_run=False)
+
+
+def test_forward_script_never_touches_content():
+    # Bug 2 (device-verified): writing `content` of a forward is both a no-op read
+    # (the original is permanently unreadable via AppleScript) and destructive
+    # (writing it at all strips every attachment — a real 7-attachment forward was
+    # delivered with 0 once `content` was touched). _FORWARD must never set it.
+    assert "set content of" not in mail._FORWARD
+
+
+# --- #135: never delete after send; verify the pre-send rollback ------------------
+
+# the three scripts that hand a message to Mail's `send` verb, vs. the two that roll
+# back but never send. Every one of them must roll back through the verifying handler.
+_SENDING_SCRIPTS = ("_SEND", "_REPLY_ALL", "_FORWARD")
+_ROLLING_BACK_SCRIPTS = _SENDING_SCRIPTS + ("_CREATE_DRAFT", "_REPLY")
+
+
+@pytest.mark.parametrize("name", _SENDING_SCRIPTS)
+def test_send_scripts_never_delete_after_the_send_verb(name):
+    # #135, device-verified 2026-07-26: `delete` on a message Mail has already accepted
+    # via `send` is a SILENT NO-OP — both `delete <ref>` and `delete outgoing message i`
+    # returned cleanly, removed nothing, and the message delivered anyway. A post-send
+    # rollback therefore cannot succeed; it can only report a cleanup that never
+    # happened. So `send` must sit outside the rollback `try` entirely. This is the test
+    # that fails if anyone re-nests it.
+    script = getattr(mail, name)
+    verb = re.search(r"^\s*send \w+\s*$", script, re.M)
+    assert verb, f"{name} has no `send <msg>` verb to anchor on"
+    assert "delete" not in script[verb.start() :], (
+        f"{name} deletes after `send` — that strands a zombie in Mail's outbox (#135)"
+    )
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_rollback_goes_through_the_verifying_handler(name):
+    # a bare `delete` reports success whether or not it removed anything, so every
+    # rollback path composes the handler and calls it instead.
+    script = getattr(mail, name)
+    assert "on rollback(msg)" in script, f"{name} lacks the rollback handler"
+    assert "my rollback(" in script, f"{name} never calls the rollback handler"
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_rollback_is_the_only_delete_in_a_rollback_script(name):
+    # the handler owns the delete; a stray `delete` elsewhere would be an unverified
+    # rollback sneaking back in.
+    assert getattr(mail, name).count("delete ") == 1
+
+
+def test_rollback_handler_trusts_only_1728_as_proof_of_deletion():
+    # device-verified: a successfully deleted outgoing message's reference goes DEAD,
+    # and reading a property off it raises -1728. Any OTHER error (a timeout, say)
+    # leaves the outcome unknown — and unknown must never be reported as a clean
+    # rollback, or we hand the caller the reassuring lie this issue is made of.
+    assert "delete msg" in mail._ROLLBACK
+    assert "-1728" in mail._ROLLBACK
+    assert "return false" in mail._ROLLBACK  # still readable => the delete did not take
+
+
+@pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
+def test_unverified_rollback_warns_about_the_leftover(name):
+    # when the handler returns false the original error still propagates, but it carries
+    # the fact that a partial message may remain — and where to look for it. Both
+    # warning
+    # texts live in the shared preamble, so assert the CALL SITE: a script that sends
+    # leaves an outbox leftover, one that only drafts leaves a Drafts leftover. Checking
+    # for the words themselves would pass vacuously on every script.
+    script = getattr(mail, name)
+    expected = (
+        "my outgoingLeftover()" if name in _SENDING_SCRIPTS else "my draftLeftover()"
+    )
+    assert expected in script
+    assert "error errMsg" in script  # the ORIGINAL failure still propagates
+
+
+def test_outbox_count_reads_the_real_queue_not_session_objects():
+    # #135, device-verified 2026-07-26 by sampling BOTH counters across one real send:
+    # `count of outgoing messages` counts script-created message OBJECTS alive in Mail's
+    # session — including already-delivered ones — and read 2 before the send and 2 for
+    # ten seconds after, never moving. `messages of outbox` is the real queue: 0 -> 1 on
+    # send, back to 0 within ~10s on delivery. Counting objects (how #134 shipped) means
+    # a permanent non-zero after the session's first send, so the "delivery is NOT
+    # confirmed" note fires on every later send forever and trains the caller to ignore
+    # the one signal that matters.
+    assert "messages of outbox" in mail._OUTBOX_COUNT
+    assert "count of outgoing messages" not in mail._OUTBOX_COUNT
+
+
+# --- #133: the autosave limit is documented, not silently claimed away ---------------
+
+
+def test_send_tools_document_the_unsuppressable_autosave():
+    # #133, device-verified 2026-07-26: Mail autosaves ANY outgoing message into Drafts
+    # ~10-15s after creation, asynchronously — verified across a delete, a rollback AND
+    # a fully successful send, and unsuppressed by all five construction/teardown
+    # variants tried (one-shot `with properties`, post-creation writes, visible:true,
+    # visible:false, `close … saving no`). It cannot be swept safely either: an outgoing
+    # message has no readable `message id` (-1700) and the draft's id is only assigned
+    # at autosave, so matching would have to guess by subject and could delete a real
+    # draft. Since the behaviour cannot be fixed, it MUST be documented where the caller
+    # reads it — the tool docstring is the MCP tool description.
+    from macos_apps_mcp import server
+
+    for tool in (server.send_mail, server.reply_all, server.forward_mail):
+        doc = tool.__doc__ or ""
+        assert "#133" in doc, f"{tool.__name__} does not document the autosave"
+        assert "delete_draft" in doc, f"{tool.__name__} omits the recovery path"
+
+
+def test_atomicity_comments_do_not_overclaim():
+    # the #44 comments used to promise "a retry can't strand a duplicate draft". That is
+    # false (see above), and a false safety claim in a comment is worse than none — it
+    # is what let #133 sit misdiagnosed. Assert the claim stays retired.
+    assert "retry can't strand a duplicate" not in mail.__doc__
+    assert "retry can't strand a duplicate" not in mail._CREATE_DRAFT
+    assert "#133" in mail.__doc__  # the real limit is stated instead
+
+
+# Real account UUIDs: _resolve_account short-circuits on the 8-4-4-4-12 shape, so a
+# placeholder like "UUID-1" would silently exercise the osascript path instead.
+_UUID_1 = "11111111-2222-3333-4444-555555555555"
+_UUID_2 = "66666666-7777-8888-9999-000000000000"
+
+
+# _ACCOUNT_MAP_CACHE is a process-wide global: set it via monkeypatch (restored at
+# teardown), never by plain assignment, or one test's cache silently satisfies the next.
+def test_account_map_parses_osascript_pairs(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(
+        m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle"
+    )
+    assert m._account_map() == {_UUID_1: "Personal", _UUID_2: "Google"}
+
+
+def test_account_map_empty_when_mail_unreachable(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+
+    def boom(*a):
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    # a cosmetic label must never fail the call that wanted counts
+    assert m._account_map() == {}
+
+
+def test_account_map_caches_the_failure_too(monkeypatch):
+    """Automation denied is cached like a success — for a bit (see
+    _ACCOUNT_MAP_FAILURE_TTL): within that window, a second call must not re-spawn
+    osascript, whose script waits `with timeout of 120 seconds`."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def boom(*a):
+        calls.append(a)
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    assert m._account_map() == {}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL - 1  # still inside the TTL
+    assert m._account_map() == {}
+    assert len(calls) == 1
+
+
+def test_account_map_failure_expires_and_retries(monkeypatch):
+    """The bug this fixes: this adapter ships inside a launchd daemon that can run for
+    days. Without a TTL, a transient failure — Mail still launching at login, or an
+    unanswered Automation prompt — got cached FOREVER: mail_overview kept showing raw
+    UUIDs and mail_search(account=...) kept raising even after the user fixed the
+    underlying problem, cured only by restarting the daemon. Past the TTL, one more
+    attempt is allowed — and if Mail is reachable by then, the real names come back."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def flaky(*a):
+        calls.append(a)
+        if len(calls) == 1:
+            raise NativeError("Automation denied")
+        return f"{_UUID_1}\x1fPersonal"
+
+    monkeypatch.setattr(m, "run_osascript", flaky)
+    assert m._account_map() == {}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL  # TTL fully elapsed
+    assert m._account_map() == {_UUID_1: "Personal"}
+    assert len(calls) == 2
+
+
+def test_account_map_success_survives_past_the_failure_ttl(monkeypatch):
+    """The TTL is a FAILURE-only leash — a real success must stay cached forever, the
+    same as before this change, or the "success is stable" half of the fix is a lie."""
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def ok(*a):
+        calls.append(a)
+        return f"{_UUID_1}\x1fPersonal"
+
+    monkeypatch.setattr(m, "run_osascript", ok)
+    assert m._account_map() == {_UUID_1: "Personal"}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL * 100  # far past any failure TTL
+    assert m._account_map() == {_UUID_1: "Personal"}
+    assert len(calls) == 1
+
+
+def test_account_map_leak_repro_a_real_failure_leaks_timestamp(monkeypatch):
+    """Regression repro, part A (see `_reset_account_map_globals` in tests/conftest.py).
+    Mirrors test_account_map_empty_when_mail_unreachable above: resets
+    _ACCOUNT_MAP_CACHE but — deliberately, to reproduce the leak a reviewer found —
+    does NOT reset _ACCOUNT_MAP_FAILURE_AT. A real failure sets that global to a
+    genuine (unpatched) time.monotonic() reading that nothing in THIS test undoes.
+    Must run immediately before part B below; pytest's default file-order execution
+    (no randomization plugin in this repo) makes that ordering reliable."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+
+    def boom(*a):
+        raise NativeError("Automation denied")
+
+    monkeypatch.setattr(m, "run_osascript", boom)
+    assert m._account_map() == {}
+    # _ACCOUNT_MAP_FAILURE_AT now holds a real time.monotonic() reading, left in place
+    # on purpose — part B checks whether that survives into the next test.
+
+
+def test_account_map_leak_repro_b_stale_failure_must_not_wipe_a_later_cache(
+    monkeypatch,
+):
+    """Part B. Forcing monotonic time far enough forward reproduces "60 real seconds
+    elapsed" without an actual sleep. A cache installed here for this test's own
+    purposes must survive: before the conftest fix (which resets BOTH
+    _ACCOUNT_MAP_CACHE and _ACCOUNT_MAP_FAILURE_AT before every test), the timestamp
+    leaked by part A aged out on its own, `_account_map()` wiped THIS test's cache,
+    and fell through to run_osascript — which here is treated as a hard failure,
+    because in production that call spawns osascript against real Mail.app."""
+    import macos_apps_mcp.adapters.mail as m
+
+    future = m.time.monotonic() + m._ACCOUNT_MAP_FAILURE_TTL + 10
+    monkeypatch.setattr(m.time, "monotonic", lambda: future)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {"some-uuid": "Personal"})
+    monkeypatch.setattr(
+        m,
+        "run_osascript",
+        lambda *a: pytest.fail("stale failure timestamp wiped a live cache"),
+    )
+    assert m._account_map() == {"some-uuid": "Personal"}
+
+
+def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
+    assert m._resolve_account("Personal") == _UUID_1
+    assert m._resolve_account(_UUID_1) == _UUID_1
+
+
+def test_resolve_account_uuid_never_contacts_mail(monkeypatch):
+    """The UUID path is what lets mail_search/mail_overview keep their "reads the index
+    at rest" promise — resolving a NAME runs osascript, which launches Mail."""
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(
+        m, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
+    )
+    assert m._resolve_account(_UUID_1.upper()) == _UUID_1.upper()
+
+
+def test_resolve_account_unknown_name_raises(monkeypatch):
+    """Returning the name unchanged degraded into a substring match over the whole
+    mailbox url — account="Business" then matched any account's Business* FOLDER and
+    reported it as though the account filter had worked."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    with pytest.raises(NativeError, match="unknown Mail account"):
+        m._resolve_account("Nonexistent")
+    with pytest.raises(NativeError, match="Personal"):  # names what DOES exist
+        m._resolve_account("Nonexistent")
+
+
+def test_resolve_account_unknown_name_error_does_not_misdirect_to_overview(
+    monkeypatch,
+):
+    """The old remediation told the caller to "use the account UUID that mail_overview
+    reports" — exactly the value mail_overview stopped reporting once it started
+    showing the "On My Mac" friendly name for the local store. The message must point
+    at something a caller can actually follow instead."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    with pytest.raises(NativeError) as exc:
+        m._resolve_account("Nonexistent")
+    assert "mail_overview reports" not in str(exc.value)

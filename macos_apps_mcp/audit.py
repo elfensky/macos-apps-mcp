@@ -153,6 +153,12 @@ def _audit_op(tool: str) -> str:
         "run_shortcut": "action",
         "safari_open": "open",
         "mail_reply": "reply",
+        # outbound — distinct from the generic "write" so the audit log is filterable
+        # for "what actually left this machine" (M3 review; the log is one of the
+        # three things carrying consent for a send).
+        "send_mail": "send",
+        "reply_all": "send",
+        "forward_mail": "send",
     }.get(tool, "write")
 
 

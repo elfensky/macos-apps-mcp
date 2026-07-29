@@ -13,6 +13,7 @@ _ROLES = (
     "unregister",
     "install-agent",
     "uninstall-agent",
+    "allow-send",
 )
 
 
@@ -44,6 +45,10 @@ def main() -> None:
         from . import deploy
 
         deploy.uninstall_agent()
+    elif role == "allow-send":
+        from . import deploy
+
+        deploy.allow_send(args[1:])
     else:
         print(f"unknown role {role!r}; one of: {', '.join(_ROLES)}", file=sys.stderr)
         raise SystemExit(2)

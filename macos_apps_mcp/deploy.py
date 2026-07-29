@@ -5,6 +5,7 @@ executable; the pip-side install-agent invokes them (never SMAppService directly
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -207,6 +208,58 @@ def install_agent(argv: list[str]) -> None:
         "  open 'x-apple.systempreferences:com.apple.preference.security"
         "?Privacy_AllFiles'\n"
         f"Point each MCP client at the shim:\n{json.dumps(snippet, indent=2)}"
+    )
+
+
+# Home-relative, and deliberately NOT audit.state_dir() — same rationale as the daemon
+# socket (see the comment above daemon._DEFAULT_SOCKET_DIR): three processes must agree
+# on this path — the launchd daemon that READS it (no shell env at all), the
+# shell-invoked `allow-send` that WRITES it, and a client-spawned shim — and
+# XDG_STATE_HOME is not guaranteed identical across them. Routing this through
+# state_dir() (as #141 briefly did) makes the consent gate fail OPEN: an operator with
+# XDG_STATE_HOME exported runs `macos-apps-mcp allow-send off`, the write and the
+# confirming read both land in the XDG dir, and the daemon keeps reading the home path
+# and keeps send_mail/reply_all/forward_mail registered while telling the operator the
+# gate is closed. Tests isolate this by monkeypatching the constant itself (see
+# tests/conftest.py), never by moving the path.
+_ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
+
+
+def allow_send_file() -> str:
+    """The persisted outbound opt-in (``""`` when absent) — see server._allow_send."""
+    try:
+        return _ALLOW_SEND_FILE.read_text()
+    except OSError:
+        return ""
+
+
+def allow_send(argv: list[str]) -> None:
+    """`allow-send [mail|messages|all|off]` — show or set the outbound gate, then
+    restart the daemon so it re-registers. Deliberately NOT an MCP tool: the gate is the
+    operator's consent, so the model must not be able to grant itself sending (and the
+    restart would drop the caller's own connection)."""
+    current = allow_send_file().strip()
+    if not argv:
+        print(current or "off")
+        return
+    value = "" if argv[0] in ("off", "none", "") else argv[0]
+    _ALLOW_SEND_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _ALLOW_SEND_FILE.write_text(value)
+    # Registration happens at import, so the running daemon still has the old gate.
+    # No agent registered (stdio-only user) → nothing to restart, and that is fine.
+    kick = subprocess.run(
+        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{_BUNDLE_ID}"],
+        capture_output=True,
+        text=True,
+    )
+    print(
+        f"outbound: {value or 'off'}"
+        + (
+            "\ndaemon restarted — reconnect your MCP client"
+            if kick.returncode == 0
+            else f"\nno daemon restarted ({kick.stderr.strip()}); restart your "
+            "stdio server for this to take effect"
+        )
     )
 
 

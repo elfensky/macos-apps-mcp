@@ -54,7 +54,8 @@ def test_build_header_query_binds_all_filters():
     assert "from messages" in low and "join subjects" in low
     assert "message_global_data" in low
     assert "m.deleted = 0" in low
-    assert "order by m.date_received desc" in low
+    # final ORDER BY runs on the deduped outer query, so it's unqualified
+    assert "order by date_received desc" in low
     assert "limit ?" in low
     # every filter value is a bound param, none interpolated
     assert "inv" not in sql and "jane" not in sql
@@ -73,6 +74,14 @@ def test_build_header_query_message_ids_uses_in_clause():
 def test_build_header_query_no_filters_ok():
     sql, params = mail_index.build_header_query(limit=5)
     assert params == [5]  # only the limit
+
+
+def test_build_local_account_query_is_pure():
+    # PURE (sql, params) — no connection, matching every other builder here.
+    sql, params = mail_index.build_local_account_query()
+    assert params == []
+    assert "local://" in sql.lower()
+    assert "mailboxes" in sql.lower()
 
 
 def test_parse_emlx_plaintext():
@@ -265,3 +274,87 @@ def test_parse_emlx_deeply_nested_multipart_returns_none():
     rfc822 = b"Message-ID: <deep@x.com>\r\n" + inner
     raw = _emlx(rfc822)
     assert mail_index.parse_emlx(raw) is None
+
+
+def test_fingerprint_covers_conversation_and_attachments():
+    # conversation_id backs mail_thread; attachments backs has_attachments.
+    # Both must be fingerprinted or a macOS schema move would silently
+    # mis-answer instead of drifting.
+    assert "conversation_id" in mail_index.HEADER_FINGERPRINT["messages"]
+    assert mail_index.HEADER_FINGERPRINT["attachments"] == {"ROWID", "message", "name"}
+
+
+def test_header_query_deduplicates_by_message_id():
+    sql, _ = mail_index.build_header_query(subject="x", limit=5)
+    low = sql.lower()
+    assert "row_number() over" in low
+    assert "partition by gd.message_id_header" in low
+    assert "where rn = 1" in low
+
+
+def test_header_query_excludes_headerless_rows():
+    # no Message-ID means no citable Pointer; excluding in SQL (not after) keeps LIMIT
+    # honest — otherwise LIMIT 25 can return 20 usable rows.
+    sql, _ = mail_index.build_header_query(subject="x", limit=5)
+    low = sql.lower()
+    assert "gd.message_id_header is not null" in low
+    assert "gd.message_id_header <> ''" in low
+
+
+def test_has_attachments_excludes_inline_images():
+    # Mail records signature/newsletter images as attachment rows — device-verified,
+    # top names on a real Mac are image001.png (426) and embed0.png (285). A naive
+    # EXISTS matched 4,474 messages where only 2,223 carried a real document.
+    sql, _ = mail_index.build_header_query(has_attachments=True, limit=5)
+    low = sql.lower()
+    assert "exists" in low and "attachments" in low
+    for ext in ("png", "jpg", "jpeg", "gif"):
+        assert f"%.{ext}" in low
+
+
+def test_has_attachments_false_adds_no_clause():
+    with_f, _ = mail_index.build_header_query(
+        subject="x", has_attachments=False, limit=5
+    )
+    without, _ = mail_index.build_header_query(subject="x", limit=5)
+    assert with_f == without
+
+
+def test_account_is_a_bound_param():
+    sql, params = mail_index.build_header_query(account="AAAA", limit=5)
+    assert "AAAA" not in sql
+    assert "AAAA" in params
+    # anchored to the account SEGMENT of <scheme>://<UUID>/<path>, not a substring of
+    # the whole url (which also matched any account's similarly-named FOLDER)
+    assert "'%://' || ? || '/%'" in sql
+
+
+def test_account_like_metacharacters_are_escaped():
+    # a bound param stops injection; it does not stop LIKE reading '%' as "everything",
+    # which turned account='%' into a filter that silently matched every mailbox.
+    _, params = mail_index.build_header_query(account="a%b_c", limit=5)
+    assert r"a\%b\_c" in params
+
+
+def test_like_escape_escapes_its_own_escape_char():
+    assert mail_index.like_escape(r"a\%") == r"a\\\%"
+
+
+def test_thread_query_binds_message_id_and_limit():
+    sql, params = mail_index.build_thread_query("<abc@ex.com>", limit=50)
+    assert "<abc@ex.com>" not in sql
+    assert params == ["<abc@ex.com>", 50]
+    low = sql.lower()
+    assert "conversation_id" in low
+    assert "row_number() over" in low  # same dedup rule as search
+
+
+def test_overview_query_counts_live_not_stored():
+    # mailboxes.unread_count is trigger-maintained and STALE on a real Mac — the Gmail
+    # INBOX row claims 1 unread where a live count returns 0. Never read that column.
+    sql, params = mail_index.build_overview_query()
+    low = sql.lower()
+    assert params == []
+    assert "unread_count" not in low
+    assert "count(" in low and "m.read = 0" in low
+    assert "m.deleted = 0" in low
