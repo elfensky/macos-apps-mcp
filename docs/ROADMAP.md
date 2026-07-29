@@ -15,6 +15,15 @@ That combination is this repo — the roadmap deepens it rather than chasing bre
 read; writes gated, id-addressed, dry-runnable; native stores (EventKit / sqlite) over AppleScript
 where they exist; one adapter per app.
 
+**Release cadence.** Ship in small cuts. A release is one coherent slice that works on its own —
+`0.9.1`, `0.9.2`, `0.9.3` — not a milestone waiting to be complete. Minor bumps (`0.10.0`) mark a
+change of theme, not a bigger pile of work. **Milestones and releases are different things and do
+not have to line up:** `0.9.0` shipped with its milestone still open, and the rest of that
+milestone lands across `0.9.x`. Procedure in [RELEASING.md](RELEASING.md).
+
+Small cuts also keep the deploy honest — every release is a rebuild of the `.app`, and the daemon
+serves its old build until you do it.
+
 ## Shipped
 
 - **v1** — Calendar + Reminders read/write (EventKit), RRULE subset · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/1)
@@ -23,35 +32,27 @@ where they exist; one adapter per app.
 - **0.5.0 — Native data planes** — Messages via chat.db, Notes via NoteStore.sqlite, id-first Mail + draft-and-open · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/4)
 - **0.7.0 — Differentiators** — `free_busy` availability, Notes create/update with stable ids, JSONL write audit trail + `audit()`, Mail triage (needs-response / awaiting-reply as ranked Pointers) · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/5)
 - **0.8.0 — New adapters & expansion** — indexed Mail search (Envelope Index + FTS body sidecar, #70), launchd daemon + TCC-to-bundle so one grant serves every client (#71), Full-Disk-Access visibility (#123), and the **Music** adapter — search / now-playing / additive playback (#69) · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/6)
+- **0.9.0 — Mail depth & outbound** — **gated** outbound (#82 drafts lifecycle, #83 send / reply-all / forward, #104 the tier), flipped by the `allow-send` **CLI** command so the model cannot grant itself sending; and the Mail read plane completed — #75 rich search, #76 inbox overview, #77 thread view, all deduped by RFC822 Message-ID · [milestone](https://github.com/elfensky/macos-apps-mcp/milestone/7) (**stays open** — the rest lands across 0.9.x)
 
-## 0.9.0 — Mail depth & outbound ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/7))
+## 0.9.x — the rest of Mail depth
 
-Close the gap to the deepest specialist ([patrickfreyer/apple-mail-mcp](https://github.com/patrickfreyer/apple-mail-mcp),
-22 tools) and introduce **gated** outbound. "Never sends" stays the default; send becomes an
-explicit opt-in tier (`MACOS_APPS_ALLOW_SEND`, see [#104](https://github.com/elfensky/macos-apps-mcp/issues/104)),
-not a ceiling.
+Candidate cuts, smallest coherent slice each. Ordering is a proposal, not a commitment.
 
-**Mail reads:** [#75](https://github.com/elfensky/macos-apps-mcp/issues/75) rich search (body/dates/flags/attachments/accounts) ·
-[#76](https://github.com/elfensky/macos-apps-mcp/issues/76) inbox overview + unread counts ·
-[#77](https://github.com/elfensky/macos-apps-mcp/issues/77) thread view
+| Cut | Contents | Note |
+|---|---|---|
+| **0.9.1 — Mail organize** | [#78](https://github.com/elfensky/macos-apps-mcp/issues/78) mailbox hierarchy: list/create/move/archive · [#79](https://github.com/elfensky/macos-apps-mcp/issues/79) mark read/unread, flag (+colour) | #78's **read** half is nearly free — `build_overview_query` already reads the `mailboxes` table and the hierarchy is derivable from its URLs. #79 is small but quietly unrecoverable: nothing remembers which messages *were* unread. |
+| **0.9.2 — Mail cleanup** | [#80](https://github.com/elfensky/macos-apps-mcp/issues/80) trash: soft/permanent/empty · [#140](https://github.com/elfensky/macos-apps-mcp/issues/140) dedupe duplicate messages | Same verb, same dry-run discipline — build together rather than doing trash twice. #140 is measured: 9,881 redundant rows on the dev machine. |
+| **0.9.3 — Mail extras** | [#81](https://github.com/elfensky/macos-apps-mcp/issues/81) save attachments to disk · [#85](https://github.com/elfensky/macos-apps-mcp/issues/85) statistics + export | #85 rides the query plane `mail_overview` established, and depends on the dedup fix — stats over raw rows would be wrong by the same margin `mail_overview` was. |
+| **0.9.4 — Body download** | [#119](https://github.com/elfensky/macos-apps-mcp/issues/119) `download-bodies` | A **CLI command** mirroring `allow-send`, never an MCP tool: hours of IMAP and GB of disk, so a human starts it. Unblocked by 0.9.0. |
+| **0.9.5 — Messages depth** | [#86](https://github.com/elfensky/macos-apps-mcp/issues/86) gated send · [#87](https://github.com/elfensky/macos-apps-mcp/issues/87) attachments · [#88](https://github.com/elfensky/macos-apps-mcp/issues/88) unread + date filters | #86 reuses the existing gate — `allow-send messages`; the second-adapter plumbing already exists. |
 
-**Mail organization:** [#78](https://github.com/elfensky/macos-apps-mcp/issues/78) mailboxes: list/create/move/archive ·
-[#79](https://github.com/elfensky/macos-apps-mcp/issues/79) mark read / flag ·
-[#80](https://github.com/elfensky/macos-apps-mcp/issues/80) trash management ·
-[#81](https://github.com/elfensky/macos-apps-mcp/issues/81) save attachments to disk
+Floating: [#84](https://github.com/elfensky/macos-apps-mcp/issues/84) scheduled send (outbound tier, small — attach to whichever cut is light).
 
-**Mail outbound (gated):** [#82](https://github.com/elfensky/macos-apps-mcp/issues/82) drafts lifecycle ·
-[#83](https://github.com/elfensky/macos-apps-mcp/issues/83) direct send / reply-all / forward ·
-[#84](https://github.com/elfensky/macos-apps-mcp/issues/84) scheduled send ·
-[#85](https://github.com/elfensky/macos-apps-mcp/issues/85) statistics + export
+## 0.10.x — Adapter depth parity ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/8))
 
-**Messages:** [#86](https://github.com/elfensky/macos-apps-mcp/issues/86) send — iMessage/SMS auto-routing, group chats (gated) ·
-[#87](https://github.com/elfensky/macos-apps-mcp/issues/87) attachments via progressive disclosure ·
-[#88](https://github.com/elfensky/macos-apps-mcp/issues/88) unread + date-range read filters
-
-## 0.10.0 — Adapter depth parity ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/8))
-
-Depth for adapters we already ship, stealing the best single feature from each specialist.
+Depth for adapters we already ship, stealing the best single feature from each specialist. Cut per
+adapter — Calendar (#89, #90) as `0.10.0`, Reminders (#91, #92) as `0.10.1`, and so on — rather
+than one release waiting on all nine.
 
 | Issue | What | Prior art |
 |---|---|---|
@@ -65,7 +66,7 @@ Depth for adapters we already ship, stealing the best single feature from each s
 | [#96](https://github.com/elfensky/macos-apps-mcp/issues/96) | Photos albums, metadata, export | sweetrb, osxphotos |
 | [#97](https://github.com/elfensky/macos-apps-mcp/issues/97) | Safari bookmarks, reading list, history | apple-mcp-pro; history = survey gap |
 
-## 0.11.0 — New domains ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/9))
+## 0.11.x — New domains ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/9))
 
 Domains we don't cover; iMCP parity is the anchor. Each is a new adapter module per the
 one-adapter-per-app rule.
@@ -82,7 +83,7 @@ one-adapter-per-app rule.
 ## Platform & DX ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/10))
 
 Cross-cutting, unversioned — pulled into whichever release needs them first
-([#104](https://github.com/elfensky/macos-apps-mcp/issues/104) gates 0.9.0's sends).
+([#104](https://github.com/elfensky/macos-apps-mcp/issues/104) gated 0.9.0's sends; [#143](https://github.com/elfensky/macos-apps-mcp/issues/143) is the daemon-drift guard's blind spot).
 
 | Issue | What | Prior art |
 |---|---|---|
