@@ -1656,7 +1656,24 @@ class MailAdapter:
         sidecar (built by `index_bodies`); the FTS hits are intersected with the header
         query via message-ids. If the sidecar has no matches (absent, empty, or no hit
         for this query) this returns [] rather than raising — a body search is opt-in
-        and its absence isn't an error condition."""
+        and its absence isn't an error condition.
+
+        At least one filter is required (an unfiltered search would walk the whole
+        store); "" and None are both absent for the text filters, while since/until
+        are compared ``is not None`` — epoch 0 is a real filter (#70 review M3).
+        This is the adapter's domain rule (C5c), not tool-layer decoration."""
+        subject, from_, to, mailbox, body, account = (
+            v or None for v in (subject, from_, to, mailbox, body, account)
+        )
+        if (
+            not any((subject, from_, to, mailbox, body, account))
+            and since is None
+            and until is None
+            and not unread
+            and not flagged
+            and not has_attachments
+        ):
+            raise ValueError("mail_search needs at least one filter")
         # Clamp: an unbounded caller-supplied limit with body= would otherwise build an
         # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
         # the promised MAX_MAILS backstop (#70 review M1). Clamped on BOTH sides —
