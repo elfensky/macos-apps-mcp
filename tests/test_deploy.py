@@ -89,6 +89,75 @@ def test_grant_identities_unreadable_returns_none(tmp_path, monkeypatch):
     assert deploy.grant_identities() is None
 
 
+# --- C7: TCC reads get honest failure classification --------------------------------
+
+
+def test_tcc_rows_absent_is_classified(tmp_path):
+    # C7: a missing db and a chmod-000 db produce BYTE-IDENTICAL sqlite
+    # OperationalErrors — the old `except sqlite3.Error: return None` swallowed both.
+    rows, reason = deploy._tcc_rows(tmp_path / "absent" / "TCC.db", ["kTCCServiceX"])
+    assert rows is None and reason == "absent"
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="root bypasses file permissions")
+def test_tcc_rows_permission_denied_is_fda(tmp_path):
+    # mirror of test_sqlite_plane's chmod-000 stand-in for a real FDA denial.
+    db = tmp_path / "TCC.db"
+    _fake_tcc(db)
+    os.chmod(db, 0o000)
+    try:
+        rows, reason = deploy._tcc_rows(db, ["kTCCServiceCalendar"])
+        assert rows is None and reason == "no-full-disk-access"
+    finally:
+        os.chmod(db, 0o644)
+
+
+def test_tcc_rows_dropped_column_is_schema_drift(tmp_path):
+    db = tmp_path / "TCC.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE access (service TEXT, client TEXT)")  # auth_value gone
+    c.commit()
+    c.close()
+    rows, reason = deploy._tcc_rows(db, ["kTCCServiceCalendar"])
+    assert rows is None and reason == "schema-drift"
+
+
+def test_tcc_rows_hash_in_path_still_reads(tmp_path):
+    # the old raw f"file:{db}?mode=ro" URI truncated at a `#` fragment → "no such
+    # table" → swallowed None; runtime's opener percent-quotes the path.
+    d = tmp_path / "weird#dir"
+    d.mkdir()
+    db = d / "TCC.db"
+    _fake_tcc(db)
+    rows, reason = deploy._tcc_rows(db, ["kTCCServiceCalendar"])
+    assert reason is None and len(rows) == 2
+
+
+def test_grant_identities_limited_carries_status(tmp_path, monkeypatch):
+    # C7: limited(3) (partial access) used to masquerade as a plain denial — it still
+    # reports granted=False (wire-stable) but now carries status="limited".
+    db = tmp_path / "TCC.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
+    c.execute("INSERT INTO access VALUES ('kTCCServiceCalendar','limited.app',3)")
+    c.commit()
+    c.close()
+    monkeypatch.setattr(deploy, "_TCC_DB", db)
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
+    out = deploy.grant_identities(["kTCCServiceCalendar"])
+    assert out["kTCCServiceCalendar"] == [
+        {"client": "limited.app", "granted": False, "status": "limited"}
+    ]
+
+
+def test_grant_report_carries_classified_reasons(tmp_path, monkeypatch):
+    monkeypatch.setattr(deploy, "_TCC_DB", tmp_path / "absent" / "TCC.db")
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent2" / "TCC.db")
+    report = deploy.grant_report()
+    assert report["identities"] is None
+    assert report["reasons"] == {"user": "absent", "system": "absent"}
+
+
 def test_agent_status_maps_ints(monkeypatch):
     class FakeSvc:
         def status(self):

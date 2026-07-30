@@ -241,6 +241,19 @@ def _outbound_state() -> dict[str, list[str]]:
     return server.outbound_status()
 
 
+def _tcc_note(reasons: dict[str, str | None]) -> str:
+    """Why the grant-identity report is empty — the CLASSIFIED reason (C7), not an
+    unconditional FDA blame: a missing db, schema drift, and an FDA denial used to
+    collapse into the same swallowed None."""
+    detail = ", ".join(f"{k} db: {v or 'ok'}" for k, v in reasons.items())
+    if "no-full-disk-access" in reasons.values():
+        return (
+            f"TCC.db unreadable ({detail}) — grant Full Disk Access (FDA) to THIS "
+            "process's responsible identity (grant it, or run via the daemon)."
+        )
+    return f"TCC.db unreadable ({detail}) — not an FDA denial; see the reason codes."
+
+
 def diagnose(request: bool = False) -> dict:
     """Per-surface macOS permission + health report with exact remediation (#48).
 
@@ -270,7 +283,8 @@ def diagnose(request: bool = False) -> dict:
     else:
         summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
 
-    ids = deploy.grant_identities()
+    grants = deploy.grant_report()
+    ids = grants["identities"]
     try:
         agent = deploy.agent_status()
     except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
@@ -295,14 +309,11 @@ def diagnose(request: bool = False) -> dict:
             "block cannot reach it (see README 'Outbound (send) mode')."
         ),
         "note": (
-            "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
-            "for THIS process's responsible identity (grant it, or run via the "
-            "daemon)."
+            _tcc_note(grants["reasons"])
             if ids is None
             else "grants listed per identity; the daemon identity is "
-            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) also reports "
-            "granted=False here — if a service looks unexpectedly denied, check "
-            "System Settings before assuming it's actually off."
+            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
+            'granted=False plus status="limited" — not a plain denial.'
         ),
     }
     # Registration is fixed at import; the toggle/env is re-read per call. When they
