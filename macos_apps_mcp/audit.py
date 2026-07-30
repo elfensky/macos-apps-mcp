@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -158,6 +159,24 @@ def usage_read() -> dict[str, dict]:
             if ts:
                 entry["last"] = ts
     return out
+
+
+def usage_report(registered: Iterable[str]) -> dict:
+    """The full ``usage`` tool report from the tally + the registered-tool names
+    (C5b — report logic lives here, the tool is a one-line delegation): ``tools``
+    busiest-first, ``never_used`` (registered minus called — the pruning list),
+    ``total_calls``."""
+    tally = usage_read()
+    tools = sorted(
+        ({"tool": t, **stats} for t, stats in tally.items()),
+        key=lambda e: e["count"],
+        reverse=True,
+    )
+    return {
+        "tools": tools,
+        "never_used": sorted(set(registered) - tally.keys()),
+        "total_calls": sum(e["count"] for e in tally.values()),
+    }
 
 
 # --- record schema -----------------------------------------------------------------

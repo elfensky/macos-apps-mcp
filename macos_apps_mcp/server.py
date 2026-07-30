@@ -25,7 +25,7 @@ from .adapters.photos import PhotosAdapter
 from .adapters.reminders import RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
-from .audit import AuditMiddleware, audit_read, usage_read
+from .audit import AuditMiddleware, audit_read, usage_report
 from .contracts import (
     CalendarEventData,
     ContactData,
@@ -316,18 +316,7 @@ async def usage() -> dict:
     (each `{tool, count, first, last}`, busiest first), `never_used` (registered tools
     with zero calls — the pruning list), and `total_calls`. Read-only; no permission
     (reads a local log at ~/.local/state/macos-apps-mcp)."""
-    tally = usage_read()
-    tools = sorted(
-        ({"tool": t, **stats} for t, stats in tally.items()),
-        key=lambda e: e["count"],
-        reverse=True,
-    )
-    registered = {t.name for t in await mcp.list_tools()}
-    return {
-        "tools": tools,
-        "never_used": sorted(registered - tally.keys()),
-        "total_calls": sum(e["count"] for e in tally.values()),
-    }
+    return usage_report({t.name for t in await mcp.list_tools()})
 
 
 @_read_tool
