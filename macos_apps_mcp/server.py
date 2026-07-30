@@ -444,33 +444,20 @@ def mail_search(
     reads the index at rest and never launches Mail.
     Read-only; needs Full Disk Access, plus Automation access for Mail on the
     account-name path and the AppleScript fallback."""
-    # since/until=0 (epoch 0) is a valid timestamp, not an absent filter — checked via
-    # `is not None` rather than truthiness so it isn't wrongly treated as unset (#70
-    # review M3).
-    text_filters = [subject, from_, to, mailbox, body, account]
-    if (
-        not any(text_filters)
-        and since is None
-        and until is None
-        and not unread
-        and not flagged
-        and not has_attachments
-    ):
-        raise ValueError("mail_search needs at least one filter")
     return [
         p.as_dict()
         for p in _mail.search(
-            subject=subject or None,
-            from_=from_ or None,
-            to=to or None,
-            mailbox=mailbox or None,
+            subject=subject,
+            from_=from_,
+            to=to,
+            mailbox=mailbox,
             since=since,
             until=until,
             unread=unread,
             flagged=flagged,
-            body=body or None,
+            body=body,
             has_attachments=has_attachments,
-            account=account or None,
+            account=account,
             limit=limit,
         )
     ]

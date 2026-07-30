@@ -238,15 +238,37 @@ def test_search_clamps_limit_to_max_mails(tmp_path, monkeypatch):
     assert captured["limit"] == MAX_MAILS
 
 
-def test_mail_search_since_zero_not_rejected(monkeypatch):
-    # since=0 (epoch 0) is a valid timestamp, not an absent filter — the `not any([...
-    # since ...])` guard wrongly treated it as falsy (#70 review M3).
-    class _F:
-        def search(self, **kwargs):
-            return []
+def test_search_requires_at_least_one_filter():
+    # C5c: the at-least-one-filter rule is the ADAPTER's domain rule, enforced before
+    # any index read (an unfiltered search would walk the whole store).
+    with pytest.raises(ValueError, match="at least one filter"):
+        MailAdapter().search()
 
-    monkeypatch.setattr(srv, "_mail", _F())
-    assert srv.mail_search(since=0) == []
+
+def test_search_empty_strings_are_absent_filters():
+    # the ""→None normalization lives in the adapter too (C5c): all-empty text
+    # filters are no filters at all.
+    with pytest.raises(ValueError, match="at least one filter"):
+        MailAdapter().search(subject="", from_="", to="", mailbox="", account="")
+
+
+def test_search_since_zero_not_rejected(tmp_path, monkeypatch):
+    # since=0 (epoch 0) is a valid timestamp, not an absent filter — compared
+    # `is not None`, never truthiness (#70 review M3). Adapter-level since C5c moved
+    # the guard out of the tool layer.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert isinstance(MailAdapter().search(since=0), list)  # guard lets it through
+
+
+def test_mail_search_tool_delegates_guard_to_adapter():
+    # the tool body is a plain delegation — the adapter's rule surfaces through
+    # _guard as the agent-directed ToolError.
+    from fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="at least one filter"):
+        srv.mail_search()
 
 
 def test_mail_search_tool_registered_read_only():
