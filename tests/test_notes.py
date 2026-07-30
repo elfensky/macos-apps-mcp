@@ -13,12 +13,13 @@ from macos_apps_mcp.adapters.notes import (
     _parse_bodies,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_parse_all_id_folder_title():
     raw = (
-        "x-coredata://S/ICNote/p1\tiCloud / Groceries\tMilk\n"
-        "x-coredata://S/ICNote/p2\tOn My Mac / Ideas\tRocket\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Groceries{US}Milk{RS}"
+        f"x-coredata://S/ICNote/p2{US}On My Mac / Ideas{US}Rocket{RS}"
     )
     ptrs = _parse_all(raw)
     assert len(ptrs) == 2
@@ -30,9 +31,15 @@ def test_parse_all_id_folder_title():
 
 
 def test_parse_all_untitled():
-    ptrs = _parse_all("x-coredata://S/ICNote/p3\tiCloud / Notes\t\n")
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p3{US}iCloud / Notes{US}{RS}")
     assert ptrs[0].summary == "(untitled note)"
     assert ptrs[0].folder == "iCloud / Notes"
+
+
+def test_parse_all_survives_newline_in_title():
+    # US/RS framing (C4-B): a newline in a note title no longer splits the record.
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}A\nB{RS}")
+    assert len(ptrs) == 1 and ptrs[0].summary == "A B"
 
 
 def test_parse_all_skips_blank():
@@ -363,7 +370,7 @@ def test_get_all_fallback_caps_at_max_notes(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = "".join(
-        f"x-coredata://S/ICNote/p{i}\tiCloud / Notes\tN{i}\n"
+        f"x-coredata://S/ICNote/p{i}{US}iCloud / Notes{US}N{i}{RS}"
         for i in range(MAX_NOTES + 10)
     )
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
@@ -462,8 +469,8 @@ def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = (
-        "x-coredata://S/ICNote/p1\tiCloud / Notes\tCafé résumé\n"
-        "x-coredata://S/ICNote/p2\tiCloud / Notes\tOther\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Café résumé{RS}"
+        f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Other{RS}"
     )
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_pointers("cafe resume")
@@ -483,8 +490,8 @@ def test_search_fallback_ignores_untitled_placeholder(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = (
-        "x-coredata://S/ICNote/p1\tiCloud / Notes\t\n"  # untitled (empty title)
-        "x-coredata://S/ICNote/p2\tiCloud / Notes\tShopping\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}{RS}"  # untitled (empty title)
+        f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Shopping{RS}"
     )
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     assert NotesAdapter().get_pointers("note") == []  # placeholder must not match
@@ -501,7 +508,7 @@ def test_schema_drift_falls_back_to_applescript(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
-    canned = "x-coredata://S/ICNote/p1\tiCloud / Notes\tFrom AppleScript\n"
+    canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}From AppleScript{RS}"
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_all()
     assert [p.summary for p in ptrs] == ["From AppleScript"]  # the fallback ran
@@ -514,7 +521,7 @@ def test_missing_fda_falls_back_to_applescript(notestore, monkeypatch):
     # (the whole reason Notes keeps its AppleScript reader).
     os.chmod(notestore, 0o000)
     try:
-        canned = "x-coredata://S/ICNote/p1\tiCloud / Notes\tFallback\n"
+        canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Fallback{RS}"
         monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
         ptrs = NotesAdapter().get_all()
         assert [p.summary for p in ptrs] == ["Fallback"]
