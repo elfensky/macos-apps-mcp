@@ -1,11 +1,23 @@
 from macos_apps_mcp import doctor
 
 
+def _mock_grants(monkeypatch, identities, reasons=None):
+    # doctor reads deploy.grant_report (identities + classified read reasons, C7).
+    monkeypatch.setattr(
+        "macos_apps_mcp.deploy.grant_report",
+        lambda: {
+            "identities": identities,
+            "reasons": reasons
+            or {"user": "no-full-disk-access", "system": "no-full-disk-access"},
+        },
+    )
+
+
 def test_deployment_section_stdio_graceful(monkeypatch):
     monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
-    monkeypatch.setattr("macos_apps_mcp.deploy.grant_identities", lambda: None)
+    _mock_grants(monkeypatch, None)
     monkeypatch.setattr(
         "macos_apps_mcp.deploy.agent_status",
         lambda: (_ for _ in ()).throw(Exception("no bundle")),
@@ -30,7 +42,7 @@ def test_deployment_section_outbound_pending_when_configured_not_registered(
     # send tools (the `allow-send` + failed-kickstart branch, deploy.py).
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
-    monkeypatch.setattr("macos_apps_mcp.deploy.grant_identities", lambda: None)
+    _mock_grants(monkeypatch, None)
     monkeypatch.setattr(
         "macos_apps_mcp.deploy.agent_status",
         lambda: (_ for _ in ()).throw(Exception("no bundle")),
@@ -47,7 +59,7 @@ def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     # nothing configured there is no pending delta either.
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "all")
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
-    monkeypatch.setattr("macos_apps_mcp.deploy.grant_identities", lambda: None)
+    _mock_grants(monkeypatch, None)
     monkeypatch.setattr(
         "macos_apps_mcp.deploy.agent_status",
         lambda: (_ for _ in ()).throw(Exception("no bundle")),
@@ -73,13 +85,14 @@ def test_outbound_status_splits_capable_registered_configured(monkeypatch):
 
 def test_deployment_section_daemon_mode(monkeypatch):
     monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
-    monkeypatch.setattr(
-        "macos_apps_mcp.deploy.grant_identities",
-        lambda: {
+    _mock_grants(
+        monkeypatch,
+        {
             "kTCCServiceCalendar": [
                 {"client": "ren.lav.macos-apps-mcp", "granted": True}
             ]
         },
+        reasons={"user": None, "system": None},
     )
     monkeypatch.setattr("macos_apps_mcp.deploy.agent_status", lambda: "enabled")
     d = doctor.diagnose()["deployment"]
