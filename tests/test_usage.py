@@ -58,6 +58,26 @@ def test_usage_log_rotates_at_cap(tmp_path, monkeypatch):
     assert (tmp_path / "usage.jsonl").exists()  # a fresh current file remains
 
 
+def test_usage_report_builds_the_whole_report(tmp_path, monkeypatch):
+    # C5b: the report logic lives in audit (no async, no mcp) — the tool is a
+    # one-line delegation over the registered-tool names.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.usage_log("busy")
+    au.usage_log("busy")
+    au.usage_log("quiet")
+    report = au.usage_report({"busy", "quiet", "never"})
+    assert [e["tool"] for e in report["tools"]] == ["busy", "quiet"]  # busiest first
+    assert report["tools"][0]["count"] == 2
+    assert report["never_used"] == ["never"]
+    assert report["total_calls"] == 3
+
+
+def test_usage_report_empty_tally(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    report = au.usage_report({"a", "b"})
+    assert report == {"tools": [], "never_used": ["a", "b"], "total_calls": 0}
+
+
 def test_usage_tool_reports_never_used(tmp_path, monkeypatch):
     from macos_apps_mcp.server import usage as usage_tool
 
