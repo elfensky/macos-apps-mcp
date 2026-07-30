@@ -214,6 +214,35 @@ def _local_account_id() -> str | None:
     return uuid or None
 
 
+def _resolve_mailbox(name: str, account: str | None = None) -> list[str]:
+    """Raw mailboxes.url values whose DECODED path contains ``name`` (#144).
+
+    The one mailbox vocabulary: ``mail_overview`` reports the decoded name
+    ("Junk E-mail"), the url stores the encoded one ("Junk%20E-mail"), and matching
+    happened against the encoded side — so feeding overview's own output back into
+    a search returned 0 hits for every name that encodes. Match decoded-vs-decoded:
+    the NEEDLE is unquoted too, so the encoded spelling models already learned
+    keeps resolving. Case-insensitive substring — today's semantics, kept on
+    purpose (a pure bug fix, not a stricter matcher). Decoding cannot happen in SQL
+    (no urldecode, and Mail's encoding is not reproducible by ``quote()``), which
+    is why this is an adapter helper feeding exact urls to the query, not a LIKE.
+
+    ``account`` (name or UUID) restricts to that account's mailboxes. Reads take
+    every match; the 0.9.1 write tools reuse this and demand exactly one.
+    """
+    account_uuid = _resolve_account(account).casefold() if account else None
+    needle = unquote(name).casefold()
+    out = []
+    for url in mail_index.query_mailbox_urls():
+        _, _, rest = url.partition("://")
+        uuid, _, path = rest.partition("/")
+        if account_uuid and uuid.casefold() != account_uuid:
+            continue
+        if needle in unquote(path).casefold():
+            out.append(url)
+    return out
+
+
 def _resolve_account(value: str) -> str:
     """A Mail account display name -> the UUID that mailboxes.url embeds.
 
@@ -1628,6 +1657,17 @@ class MailAdapter:
         limit = max(1, min(limit, MAX_MAILS))
         account = _resolve_account(account) if account else None
 
+        mailbox_urls = None
+        if mailbox:
+            # #144: resolve the DECODED name (what mail_overview reports) to exact
+            # urls. No match is a no-match read — the same 0-hit answer the old
+            # substring filter gave — and it must not fall through to an
+            # unfiltered query. Resolution itself raises on a missing store,
+            # preserving the raise-before-anything ordering.
+            mailbox_urls = _resolve_mailbox(mailbox, account=account)
+            if not mailbox_urls:
+                return []
+
         message_ids = None
         if body:
             # The missing-store raise must come BEFORE the FTS sidecar is consulted:
@@ -1678,7 +1718,7 @@ class MailAdapter:
             subject=subject,
             from_=from_,
             to=to,
-            mailbox=mailbox,
+            mailbox_urls=mailbox_urls,
             since=since,
             until=until,
             unread=unread,

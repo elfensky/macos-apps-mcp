@@ -376,6 +376,79 @@ def test_rank_still_demotes_gmail_all_mail(tmp_path, monkeypatch):
     assert out[0].folder == f"imap://{ACCT_B}/Travel"
 
 
+def test_search_mailbox_accepts_the_decoded_name_overview_reports(
+    tmp_path, monkeypatch
+):
+    # #144: mail_overview reports "Junk E-mail" (decoded); mail_search matched the
+    # ENCODED url, so feeding overview's own output back in returned 0 hits for
+    # every mailbox whose name encodes (10 of 51 on the reference Mac).
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    ids = [p.id for p in MailAdapter().search(mailbox="Junk E-mail")]
+    assert ids == ["<junky@ex.com>"]
+
+
+def test_search_mailbox_encoded_spelling_keeps_working(tmp_path, monkeypatch):
+    # the encoded form worked before the fix (it's what the url literally contains);
+    # models learned it from error output, so it must not break now.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    ids = [p.id for p in MailAdapter().search(mailbox="Junk%20E-mail")]
+    assert ids == ["<junky@ex.com>"]
+
+
+def test_search_mailbox_is_case_insensitive(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert MailAdapter().search(mailbox="travel")  # Travel, lowercased
+
+
+def test_resolve_mailbox_matches_decoded_paths(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_rank_overmatch_messages(db)  # adds Junkyard under ACCT_B
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    urls = m._resolve_mailbox("junk")
+    assert set(urls) == {
+        f"imap://{ACCT_A}/Junk%20E-mail",
+        f"imap://{ACCT_B}/Junkyard",
+    }
+
+
+def test_resolve_mailbox_account_restricts_to_that_uuid(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_rank_overmatch_messages(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert m._resolve_mailbox("junk", account=ACCT_A) == [
+        f"imap://{ACCT_A}/Junk%20E-mail"
+    ]
+
+
+def test_resolve_mailbox_no_store_raises(monkeypatch):
+    import macos_apps_mcp.adapters.mail as m
+
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    with pytest.raises(NativeError, match="Open Mail once"):
+        m._resolve_mailbox("Travel")
+
+
+def test_query_mailbox_urls_lists_every_mailbox(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    urls = mail_index.query_mailbox_urls()
+    assert f"imap://{ACCT_A}/INBOX" in urls
+    assert len(urls) == 5  # the base fixture's five mailboxes
+
+
 def test_search_has_attachments_matches_document_not_image(tmp_path, monkeypatch):
     # msg 10 (<abc@ex.com>) has contract.pdf; msg 12 (<reply@ex.com>) has only
     # image001.png and must NOT match.

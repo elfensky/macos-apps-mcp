@@ -413,7 +413,9 @@ def mail_search(
 ) -> list[dict]:
     """Indexed search across ALL mailboxes via Mail's Envelope Index — fast and
     read-only. All filters optional and ANDed:
-    subject/from_/to/mailbox substrings, since/until (epoch seconds on received date),
+    subject/from_/to substrings, `mailbox` a mailbox NAME exactly as mail_overview
+    reports it ("Junk E-mail" — case-insensitive substring; the encoded spelling also
+    works), since/until (epoch seconds on received date),
     unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
     it only sees messages already downloaded AND indexed by mail_index_bodies (run that
     first; partial coverage is normal). At least one filter required. Returns citable
