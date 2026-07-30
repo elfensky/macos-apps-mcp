@@ -698,7 +698,7 @@ def test_delete_draft_deletes_by_message_id(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().delete_draft("a@b")
-    assert out == {"deleted": True, "id": "a@b"}
+    assert out == {"deleted": "a@b"}  # C5d: the ONE deletion envelope
     assert seen[mail._DELETE_DRAFT] == ("a@b",)
 
 
@@ -722,7 +722,7 @@ def test_delete_draft_accepts_bracketed_id(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().delete_draft("<a@b>")
-    assert out == {"deleted": True, "id": "a@b"}
+    assert out == {"deleted": "a@b"}  # C5d envelope; id bare like the wire
     assert seen[mail._DELETE_DRAFT] == ("a@b",)  # bare on the wire, not "<a@b>"
 
 

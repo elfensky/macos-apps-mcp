@@ -90,6 +90,16 @@ def parse_all_day(value: str) -> datetime:
     return dt
 
 
+def deletion_result(ident: str, preview: Pointer | None) -> dict:
+    """The ONE wire shape for every delete tool (C5d): a dry run answers
+    ``{"dry_run": True, "would_delete": <pointer dict>}``; a real delete answers
+    ``{"deleted": ident}``. Adapters own ``dry_run`` and build this envelope —
+    tools stay one-line delegations."""
+    if preview is not None:
+        return {"dry_run": True, "would_delete": preview.as_dict()}
+    return {"deleted": ident}
+
+
 def parse_optional(label: str, value: str | None) -> datetime | None:
     """Optional ISO datetime tool-arg → naive local; empty/absent → None. A bad value
     fails at the tool boundary, labeled with the failing param (C5a — lives here with

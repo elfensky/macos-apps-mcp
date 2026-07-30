@@ -20,7 +20,7 @@ import html
 import zlib
 from pathlib import Path
 
-from ..contracts import NoteData, Pointer
+from ..contracts import NoteData, Pointer, deletion_result
 from ..errors import (
     NativeError,
     OutputOverflow,
@@ -700,8 +700,9 @@ class NotesAdapter:
 
     def delete(
         self, ident: str, expect_title: str | None = None, dry_run: bool = False
-    ) -> Pointer | None:
-        """Delete a note by id → Recently Deleted (recoverable).
+    ) -> dict:
+        """Delete a note by id → Recently Deleted (recoverable); returns the
+        ``deletion_result`` envelope (C5d).
 
         When expect_title is given, the note is deleted only if its current title
         matches — content-verify first by passing it. Without it, delete-by-id fires
@@ -709,9 +710,9 @@ class NotesAdapter:
 
         ``dry_run=True`` runs the SAME id + expect_title guard as the real delete — in
         AppleScript, so the case/whitespace semantics are byte-identical — but returns
-        the pointer that WOULD be deleted instead of deleting it. A title mismatch or
-        unknown id raises exactly as the real delete would, so the preview can never
-        disagree with the real op (#54).
+        the preview envelope instead of deleting. A title mismatch or unknown id
+        raises exactly as the real delete would, so the preview can never disagree
+        with the real op (#54).
         """
         if not ident.strip():
             raise ValueError("delete_note needs a note id")
@@ -719,13 +720,16 @@ class NotesAdapter:
         args = (ident,) if expect_title is None else (ident, expect_title)
         if dry_run:
             title = run_osascript(_PREVIEW_DELETE, *args)
-            return Pointer(
-                id=ident,
-                summary=clean_summary(title) or "(untitled note)",
-                deeplink="",
+            return deletion_result(
+                ident,
+                Pointer(
+                    id=ident,
+                    summary=clean_summary(title) or "(untitled note)",
+                    deeplink="",
+                ),
             )
         run_osascript(_DELETE, *args)
-        return None
+        return deletion_result(ident, None)
 
     def create(self, data: NoteData) -> Pointer:
         """Create a note from plaintext title+body; return its stable x-coredata id.

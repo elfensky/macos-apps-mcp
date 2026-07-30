@@ -4,6 +4,15 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [Unreleased]
+
+### Changed
+
+- **One deletion envelope (C5d).** `delete_draft`'s real-delete answer changes from
+  `{"deleted": true, "id": "<mid>"}` to `{"deleted": "<mid>"}` — the shape
+  `delete_event` and `delete_note` already spoke, now built by one
+  `contracts.deletion_result`. Dry-run answers are unchanged everywhere.
+
 ## [0.9.0] - 2026-07-27 — Outbound mail, gated
 
 ### Added
