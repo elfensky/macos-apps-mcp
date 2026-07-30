@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..contracts import Pointer
 from ..runtime import mac_region, read_via_sqlite, run_osascript
-from ..text import clean_body, clean_summary
+from ..text import STRIP_FRAMING, Field, clean_body, clean_summary, parse_framed
 
 MAX_CHATS = 30
 MAX_MESSAGES = 40  # default cap on a content read
@@ -249,26 +249,32 @@ _WITH_SQL = f"""
 _BODY_SQL = "SELECT text, attributedBody FROM message WHERE guid = ? LIMIT 1"
 
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
-_CHATS = """with timeout of 120 seconds
+# US/RS-framed (#68); id and chat name pass through the shared STRIP_FRAMING handler.
+_CHATS = (
+    STRIP_FRAMING
+    + """
+
+with timeout of 120 seconds
 tell application "Messages"
+  set us to character id 31
+  set rs to character id 30
   set out to ""
   repeat with c in chats
-    set out to out & (id of c) & tab & (name of c) & linefeed
+    set out to out & (my stripFraming(id of c)) & us & ¬
+      (my stripFraming(name of c)) & rs
   end repeat
   return out
 end tell
 end timeout"""
+)
 
 
 def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        guid, _, name = line.partition("\t")
-        summary = clean_summary(name) or "(chat)"
-        out.append(Pointer(id=guid, summary=summary, deeplink=""))
-    return out
+    """Parse the _CHATS payload: US/RS-framed (chat guid, name) records."""
+    return [
+        Pointer(id=r["id"], summary=clean_summary(r["name"]) or "(chat)", deeplink="")
+        for r in parse_framed(raw, [Field("id"), Field("name")], min_fields=1)
+    ]
 
 
 class MessagesAdapter:
