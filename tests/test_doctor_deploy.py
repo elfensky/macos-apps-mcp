@@ -20,9 +20,14 @@ def test_deployment_section_stdio_graceful(monkeypatch):
     assert "OFF" in d["outbound_note"]
 
 
-def test_deployment_section_outbound_reports_enabled_adapters(monkeypatch):
-    # Derived from server._allow_send, never a re-read of the raw env var (#130) — so
-    # doctor can't disagree with what actually got registered.
+def test_deployment_section_outbound_pending_when_configured_not_registered(
+    monkeypatch,
+):
+    # C6: registration happened at import (gate off in this test process), so setting
+    # ALLOW_SEND now can NOT retroactively register send tools. doctor must report the
+    # REGISTERED truth (off) plus the configured-but-not-live delta as outbound_pending
+    # with a restart directive — never claim sending is ON while the daemon serves no
+    # send tools (the `allow-send` + failed-kickstart branch, deploy.py).
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     monkeypatch.setattr("macos_apps_mcp.deploy.grant_identities", lambda: None)
@@ -31,13 +36,15 @@ def test_deployment_section_outbound_reports_enabled_adapters(monkeypatch):
         lambda: (_ for _ in ()).throw(Exception("no bundle")),
     )
     d = doctor.diagnose()["deployment"]
-    assert d["outbound"] == ["mail"]
-    assert "mail" in d["outbound_note"]
+    assert d["outbound"] == []  # what actually got registered at import
+    assert d["outbound_pending"] == ["mail"]  # what the config now asks for
+    assert "restart" in d["outbound_note"].lower()
 
 
 def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     # MACOS_APPS_READ_ONLY wins unconditionally over MACOS_APPS_ALLOW_SEND (#104) —
-    # the outbound report must reflect that, not the raw ALLOW_SEND value.
+    # the outbound report must reflect that, not the raw ALLOW_SEND value; and with
+    # nothing configured there is no pending delta either.
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "all")
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
     monkeypatch.setattr("macos_apps_mcp.deploy.grant_identities", lambda: None)
@@ -47,6 +54,21 @@ def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     )
     d = doctor.diagnose()["deployment"]
     assert d["outbound"] == []
+    assert "outbound_pending" not in d
+
+
+def test_outbound_status_splits_capable_registered_configured(monkeypatch):
+    # C6: three distinct truths. capable = every adapter a @_send_tool names;
+    # registered = gate state at import (off in the test process); configured = what
+    # the env/toggle enables RIGHT NOW.
+    from macos_apps_mcp import server
+
+    monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    st = server.outbound_status()
+    assert st["capable"] == ["mail"]
+    assert st["registered"] == []  # the import-time gate was off in this process
+    assert st["configured"] == ["mail"]
 
 
 def test_deployment_section_daemon_mode(monkeypatch):
