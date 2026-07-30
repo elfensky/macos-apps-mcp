@@ -242,6 +242,16 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     assert len(json.dumps(report, ensure_ascii=False)) < 6000
 
 
+def test_probe_carries_applescript_side_timeout():
+    # #56's second line of defense: the in-script `with timeout` self-terminates a
+    # hung child even if the Python side died first. _PROBE — the template most
+    # likely to strand an orphan (it launches each quit app in turn) — was the one
+    # template without it; test_applescript_timeout.py sweeps only the adapters
+    # package, so it never saw this one.
+    assert "with timeout of" in doc._PROBE
+    assert doc._PROBE.count("with timeout of") == doc._PROBE.count("end timeout")
+
+
 # --- integration: real TCC on this Mac (never in CI) ---------------------------------
 
 
