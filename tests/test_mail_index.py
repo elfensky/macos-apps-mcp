@@ -17,15 +17,15 @@ def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
 
 def test_text_filter_like_metacharacters_are_escaped():
     # like_escape existed for exactly this and was applied to `account` only: the
-    # other four LIKE filters still read '%'/'_' as wildcards, so subject='50% off'
+    # other LIKE filters still read '%'/'_' as wildcards, so subject='50% off'
     # matched '50 anything off' — a confidently wrong answer, not a literal match.
+    # (mailbox is no longer a LIKE at all — #144 resolves it to exact urls.)
     _, params = mail_index.build_header_query(
-        subject="50%", from_="j_x", to="a%b", mailbox="P_G", limit=5
+        subject="50%", from_="j_x", to="a%b", limit=5
     )
     assert r"%50\%%" in params
     assert r"%j\_x%" in params
     assert r"%a\%b%" in params
-    assert r"%P\_G%" in params
 
 
 class _Row(dict):
@@ -70,7 +70,7 @@ def test_build_header_query_binds_all_filters():
     sql, params = mail_index.build_header_query(
         subject="inv",
         from_="jane",
-        mailbox="INBOX",
+        mailbox_urls=["imap://A/INBOX"],
         since=1000,
         until=2000,
         unread=True,
@@ -88,6 +88,18 @@ def test_build_header_query_binds_all_filters():
     assert "inv" not in sql and "jane" not in sql
     assert "%inv%" in params and "%jane%" in params
     assert 1000 in params and 2000 in params and 10 in params
+
+
+def test_build_header_query_mailbox_urls_uses_in_clause():
+    # #144: the mailbox filter binds RESOLVED urls exactly (IN), never a LIKE over
+    # the encoded url — exact IN also kills the '%Trash%'-matches-"Trash Archive"
+    # trap the account clause already documents.
+    sql, params = mail_index.build_header_query(
+        mailbox_urls=["imap://A/INBOX", "imap://A/Junk%20E-mail"], limit=5
+    )
+    assert "mb.url in (?,?)" in sql.lower()
+    assert "imap://A/INBOX" in params and "imap://A/Junk%20E-mail" in params
+    assert "like" not in sql.lower().split("mb.url in")[1].split("and")[0]
 
 
 def test_build_header_query_message_ids_uses_in_clause():

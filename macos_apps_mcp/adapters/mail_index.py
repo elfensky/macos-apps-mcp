@@ -184,7 +184,7 @@ def build_header_query(
     subject=None,
     from_=None,
     to=None,
-    mailbox=None,
+    mailbox_urls=None,
     since=None,
     until=None,
     unread=None,
@@ -198,7 +198,9 @@ def build_header_query(
     value is a bound param (injection-safe). Newest-first, deleted excluded.
     `has_attachments` means a real document (images excluded); `account` matches the
     account segment of the mailbox url (<scheme>://<UUID>/<path>) — exactly, not as a
-    substring of the path."""
+    substring of the path. `mailbox_urls` are RESOLVED raw urls matched with exact
+    IN, never a LIKE over the encoded url (#144): name→url resolution cannot happen
+    in SQL (no urldecode), so it lives in the adapter's _resolve_mailbox."""
     # Every LIKE filter escapes its value: a bound param stops injection, not '%'/'_'
     # being read as wildcards — subject='50% off' matched '50 anything off', and
     # mailbox='_' matched every mailbox (the exact failure like_escape documents).
@@ -217,9 +219,10 @@ def build_header_query(
             r" AND ra.address LIKE ? ESCAPE '\')"
         )
         params.append(f"%{like_escape(to)}%")
-    if mailbox:
-        sql += r" AND mb.url LIKE ? ESCAPE '\'"
-        params.append(f"%{like_escape(mailbox)}%")
+    if mailbox_urls:
+        placeholders = ",".join("?" for _ in mailbox_urls)
+        sql += f" AND mb.url IN ({placeholders})"
+        params += list(mailbox_urls)
     if since is not None:
         sql += " AND m.date_received >= ?"
         params.append(since)
@@ -408,7 +411,7 @@ def query_search(
     subject=None,
     from_=None,
     to=None,
-    mailbox=None,
+    mailbox_urls=None,
     since=None,
     until=None,
     unread=None,
@@ -421,15 +424,16 @@ def query_search(
 ) -> list[Pointer]:
     """Header search over ALL mailboxes, deduped, newest-first → Pointers.
 
-    ``account`` must already be a resolved UUID segment (name resolution talks to
-    Mail and is the adapter's job). FTS body search stays with the caller too — it
-    is a different store with a different lifecycle; pass its hits as
+    ``account`` must already be a resolved UUID segment and ``mailbox_urls``
+    already-resolved raw urls (both resolutions are adapter jobs — one can talk to
+    Mail, the other needs urldecode). FTS body search stays with the caller too —
+    it is a different store with a different lifecycle; pass its hits as
     ``message_ids``."""
     sql, params = build_header_query(
         subject=subject,
         from_=from_,
         to=to,
-        mailbox=mailbox,
+        mailbox_urls=mailbox_urls,
         since=since,
         until=until,
         unread=unread,
@@ -440,6 +444,18 @@ def query_search(
         limit=limit,
     )
     return _pointer_rows(sql, params, fallback=fallback)
+
+
+def query_mailbox_urls() -> list[str]:
+    """Every mailboxes.url, raw/encoded — the resolver's input. Raises on a missing
+    store: a mailbox filter against no store is the followable error, same as the
+    other raising reads."""
+    path = _require_index_path()
+
+    def read(conn):
+        return [r[0] for r in conn.execute("SELECT url FROM mailboxes")]
+
+    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
 
 
 def query_thread(message_id: str, limit: int) -> list[Pointer]:
