@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import functools
 import os
-from datetime import datetime
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -34,8 +33,8 @@ from .contracts import (
     ReminderData,
     Snapshotter,
     now_local,
-    parse_all_day,
-    parse_datetime,
+    parse_bound,
+    parse_optional,
     parse_recurrence,
     parse_recurrence_update,
 )
@@ -746,34 +745,6 @@ def shortcuts(name: str = "") -> list[dict[str, str]]:
     return [p.as_dict() for p in _shortcuts.get_pointers(name)]
 
 
-def _parse(label: str, s: str | None) -> datetime | None:
-    """Optional ISO datetime → naive local (contracts.parse_datetime). Empty/absent →
-    None. A bad value fails at the tool boundary, labeled with the failing param."""
-    return _parse_required(label, s) if s else None
-
-
-def _parse_required(label: str, s: str) -> datetime:
-    """Required ISO datetime (event start/end) → naive local.
-
-    Bad/empty input fails clearly at the tool boundary.
-    """
-    try:
-        return parse_datetime(s)
-    except ValueError as e:
-        raise ValueError(f"{label}: {e}") from e
-
-
-def _parse_all_day(label: str, s: str) -> datetime:
-    """Required all-day date (a calendar DATE, not an instant) → naive datetime.
-
-    A timestamp with a UTC offset fails clearly at the tool boundary.
-    """
-    try:
-        return parse_all_day(s)
-    except ValueError as e:
-        raise ValueError(f"{label}: {e}") from e
-
-
 @_additive_tool
 def create_reminder(
     title: str,
@@ -791,11 +762,11 @@ def create_reminder(
     name is refused (with the candidate ids listed), never guessed."""
     data = ReminderData(
         title=title,
-        due=_parse("due", due),
+        due=parse_optional("due", due),
         list_name=list_name,
         notes=notes,
         priority=priority,
-        start=_parse("start", start),
+        start=parse_optional("start", start),
         recurrence=parse_recurrence(recurrence),
     )
     return _reminders.create_reminder(data).as_dict()
@@ -820,11 +791,11 @@ def update_reminder(
     reminders."""
     data = ReminderData(
         title=title,
-        due=_parse("due", due),
+        due=parse_optional("due", due),
         list_name=list_name,
         notes=notes,
         priority=priority,
-        start=_parse("start", start),
+        start=parse_optional("start", start),
         recurrence=parse_recurrence_update(recurrence),
     )
     return _reminders.update_reminder(id, data).as_dict()
@@ -854,11 +825,10 @@ def create_event(
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
-    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=parse("start", start),
-        end=parse("end", end),
+        start=parse_bound("start", start, all_day=all_day),
+        end=parse_bound("end", end, all_day=all_day),
         calendar=calendar,
         location=location,
         notes=notes,
@@ -887,11 +857,10 @@ def update_event(
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
     events."""
-    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=parse("start", start),
-        end=parse("end", end),
+        start=parse_bound("start", start, all_day=all_day),
+        end=parse_bound("end", end, all_day=all_day),
         calendar=calendar,
         location=location,
         notes=notes,
