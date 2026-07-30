@@ -90,6 +90,31 @@ def parse_all_day(value: str) -> datetime:
     return dt
 
 
+def parse_optional(label: str, value: str | None) -> datetime | None:
+    """Optional ISO datetime tool-arg → naive local; empty/absent → None. A bad value
+    fails at the tool boundary, labeled with the failing param (C5a — lives here with
+    parse_datetime/parse_all_day so the datetime domain rules aren't smeared into the
+    dispatch layer, the parse_recurrence principle)."""
+    if not value:
+        return None
+    try:
+        return parse_datetime(value)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
+def parse_bound(label: str, value: str, *, all_day: bool) -> datetime:
+    """Required event bound (start/end) tool-arg → naive local, labeled on failure.
+
+    ``all_day=True`` parses a calendar DATE (an aware timestamp is rejected — see
+    parse_all_day); otherwise an ISO datetime. Bad/empty input fails clearly at the
+    tool boundary."""
+    try:
+        return parse_all_day(value) if all_day else parse_datetime(value)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
 def _format_offset(offset: timedelta | None) -> str:
     """A UTC offset as ``±HH:MM`` (``+00:00`` if unknown)."""
     total = int((offset or timedelta()).total_seconds())

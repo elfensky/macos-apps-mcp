@@ -17,7 +17,9 @@ from macos_apps_mcp.contracts import (
     _format_offset,
     now_local,
     parse_all_day,
+    parse_bound,
     parse_datetime,
+    parse_optional,
 )
 from macos_apps_mcp.runtime import run_native
 
@@ -294,3 +296,32 @@ def test_now_local_default_has_all_keys():
         "Saturday",
         "Sunday",
     }
+
+
+# --- tool-boundary datetime parsers (C5a — moved out of the dispatch layer) ----------
+
+
+def test_parse_optional_none_and_empty_pass_through():
+    assert parse_optional("due", None) is None
+    assert parse_optional("due", "") is None
+
+
+def test_parse_optional_parses_and_labels_errors():
+    assert parse_optional("due", "2026-06-24T09:00:00").hour == 9
+    with pytest.raises(ValueError, match="due:"):
+        parse_optional("due", "not-a-date")
+
+
+def test_parse_bound_timed_and_labels_errors():
+    assert parse_bound("start", "2026-06-24T09:00:00", all_day=False).hour == 9
+    with pytest.raises(ValueError, match="start:"):
+        parse_bound("start", "nope", all_day=False)
+    with pytest.raises(ValueError, match="end:"):
+        parse_bound("end", "", all_day=False)
+
+
+def test_parse_bound_all_day_takes_a_date_not_an_instant():
+    assert parse_bound("start", "2026-07-01", all_day=True).day == 1
+    # the domain rule rides along: an aware timestamp is rejected for all-day
+    with pytest.raises(ValueError, match="start:.*calendar date"):
+        parse_bound("start", "2026-07-01T00:00:00Z", all_day=True)
