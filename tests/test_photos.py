@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from macos_apps_mcp.adapters.photos import _parse
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_parse_id_and_filename():
-    ptrs = _parse("ABC123\tIMG_0001.jpg\nDEF456\t\n")
+    ptrs = _parse(f"ABC123{US}IMG_0001.jpg{RS}DEF456{US}{RS}")
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
     assert ptrs[0].id == "ABC123" and ptrs[0].summary == "IMG_0001.jpg"
@@ -22,5 +23,11 @@ def test_parse_skips_blank():
 def test_parse_sanitizes_control_chars_in_summary():
     # #52 routing: a filename carrying a control char is stripped before it reaches the
     # model (deleting clean_summary from _parse would fail this).
-    ptr = _parse("ABC123\tIMG\x07_1.jpg\n")[0]
+    ptr = _parse(f"ABC123{US}IMG\x07_1.jpg{RS}")[0]
     assert ptr.summary == "IMG_1.jpg" and "\x07" not in ptr.summary
+
+
+def test_parse_survives_newline_in_filename():
+    # US/RS framing (C4-B): a newline in a filename no longer splits the record.
+    ptr = _parse(f"ABC123{US}IMG\n_1.jpg{RS}")[0]
+    assert ptr.summary == "IMG _1.jpg"
