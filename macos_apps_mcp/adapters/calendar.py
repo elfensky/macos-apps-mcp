@@ -12,7 +12,7 @@ from typing import Literal
 
 import EventKit as EK
 
-from ..contracts import CalendarEventData, Pointer, parse_datetime
+from ..contracts import CalendarEventData, Pointer, deletion_result, parse_datetime
 from ..errors import (
     SpanRequired,
     VerificationFailed,
@@ -487,10 +487,11 @@ class CalendarAdapter:
 
     def delete_event(
         self, ident: str, span: Span | None = None, dry_run: bool = False
-    ) -> Pointer | None:
-        """Delete an event by id. ``dry_run=True`` resolves the target — and its span,
-        so a recurring event still surfaces ``SpanRequired`` exactly as the real delete
-        would — then returns the pointer that WOULD be deleted, no mutation (#54)."""
+    ) -> dict:
+        """Delete an event by id → the ``deletion_result`` envelope (C5d).
+        ``dry_run=True`` resolves the target — and its span, so a recurring event
+        still surfaces ``SpanRequired`` exactly as the real delete would — then
+        returns the preview envelope, no mutation (#54)."""
 
         def work():
             s = store()
@@ -499,10 +500,10 @@ class CalendarAdapter:
                 e, span
             )  # recurring + no span → SpanRequired, no write
             if dry_run:
-                return _event_pointer(e)  # preview only — nothing is removed
+                return deletion_result(ident, _event_pointer(e))  # nothing removed
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise refused_write("event delete", "calendar", err)
-            return None
+            return deletion_result(ident, None)
 
         return run_native(work)

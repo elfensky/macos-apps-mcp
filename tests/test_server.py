@@ -246,8 +246,9 @@ class _FakeWriter:
         self.calls.append(("update_event", ident, data, span))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def delete_event(self, ident: str, span: str | None = None) -> None:
+    def delete_event(self, ident: str, span: str | None = None, dry_run: bool = False):
         self.calls.append(("delete_event", ident, span))
+        return {"deleted": ident}  # the adapter owns the envelope (C5d)
 
     def create_contact(self, data: ContactData) -> Pointer:
         self.calls.append(("create_contact", data))
@@ -655,8 +656,9 @@ def test_delete_note_dispatches(monkeypatch):
         def __init__(self):
             self.calls = []
 
-        def delete(self, ident, expect_title=None):
+        def delete(self, ident, expect_title=None, dry_run=False):
             self.calls.append((ident, expect_title))
+            return {"deleted": ident}  # the adapter owns the envelope (C5d)
 
     fake = _FakeNotes()
     monkeypatch.setattr(srv, "_notes", fake)
@@ -877,20 +879,11 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
 # --- dry_run dispatch (#54) ----------------------------------------------------------
 
 
-def test_delete_event_dry_run_dispatches_and_formats_preview(monkeypatch):
+def test_delete_event_dry_run_dispatches_and_passes_envelope_through(monkeypatch):
+    # C5d: the adapter builds the deletion envelope (contracts.deletion_result);
+    # the tool is a one-line delegation that must not reshape it.
     calls = []
-
-    class _Cal:
-        def delete_event(self, ident, span=None, dry_run=False):
-            calls.append((ident, span, dry_run))
-            return Pointer(
-                id=ident, summary="Standup 09:00–09:15", deeplink="calshow:1"
-            )
-
-    monkeypatch.setattr(srv, "_calendar", _Cal())
-    out = srv.delete_event("E-1", dry_run=True)
-    assert calls == [("E-1", None, True)]  # dry_run flag reached the adapter
-    assert out == {
+    envelope = {
         "dry_run": True,
         "would_delete": {
             "id": "E-1",
@@ -898,6 +891,16 @@ def test_delete_event_dry_run_dispatches_and_formats_preview(monkeypatch):
             "deeplink": "calshow:1",
         },
     }
+
+    class _Cal:
+        def delete_event(self, ident, span=None, dry_run=False):
+            calls.append((ident, span, dry_run))
+            return envelope
+
+    monkeypatch.setattr(srv, "_calendar", _Cal())
+    out = srv.delete_event("E-1", dry_run=True)
+    assert calls == [("E-1", None, True)]  # dry_run flag reached the adapter
+    assert out == envelope
 
 
 def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypatch):
@@ -907,28 +910,29 @@ def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypa
     class _Cal:
         def delete_event(self, ident, span=None, dry_run=False):
             calls.append((ident, span, dry_run))
-            return None
+            return {"deleted": ident}
 
     monkeypatch.setattr(srv, "_calendar", _Cal())
     assert srv.delete_event("E-1") == {"deleted": "E-1"}
     assert calls == [("E-1", None, False)]
 
 
-def test_delete_note_dry_run_dispatches_and_formats_preview(monkeypatch):
+def test_delete_note_dry_run_dispatches_and_passes_envelope_through(monkeypatch):
     calls = []
+    envelope = {
+        "dry_run": True,
+        "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
+    }
 
     class _Notes:
         def delete(self, ident, expect_title=None, dry_run=False):
             calls.append((ident, expect_title, dry_run))
-            return Pointer(id=ident, summary="Groceries", deeplink="")
+            return envelope
 
     monkeypatch.setattr(srv, "_notes", _Notes())
     out = srv.delete_note("N-1", dry_run=True)
     assert calls == [("N-1", None, True)]
-    assert out == {
-        "dry_run": True,
-        "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
-    }
+    assert out == envelope
 
 
 def test_audit_tool_reads(monkeypatch):

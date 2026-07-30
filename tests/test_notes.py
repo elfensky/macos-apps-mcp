@@ -12,7 +12,6 @@ from macos_apps_mcp.adapters.notes import (
     _parse_all,
     _parse_bodies,
 )
-from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.text import RS, US
 
 
@@ -105,8 +104,9 @@ def test_delete_without_title_passes_only_id(monkeypatch):
         "macos_apps_mcp.adapters.notes.run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
-    NotesAdapter().delete("N-1")
+    out = NotesAdapter().delete("N-1")
     assert calls == [("N-1",)]
+    assert out == {"deleted": "N-1"}  # C5d: the ONE deletion envelope
 
 
 def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
@@ -144,8 +144,10 @@ def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
         return "Groceries"  # the preview script returns the live title
 
     monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
-    p = NotesAdapter().delete("N-1", dry_run=True)
-    assert isinstance(p, Pointer) and p.id == "N-1" and p.summary == "Groceries"
+    out = NotesAdapter().delete("N-1", dry_run=True)
+    # C5d: the adapter owns the deletion envelope — tools pass it through
+    assert out["dry_run"] is True
+    assert out["would_delete"] == {"id": "N-1", "summary": "Groceries", "deeplink": ""}
     assert calls == [(_PREVIEW_DELETE, ("N-1",))]  # only id passed, no expect_title
     assert all(s != _DELETE for s, _ in calls)  # ACCEPTANCE: nothing was deleted
 

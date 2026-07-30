@@ -853,15 +853,7 @@ def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dic
     for single events. `dry_run=True` previews the event that WOULD be deleted (pointer,
     no mutation) — call it first to confirm the target before the real delete.
     Destructive; needs EventKit (Calendar) access. `id` from events."""
-    if dry_run:
-        return {
-            "dry_run": True,
-            "would_delete": _calendar.delete_event(
-                id, span=span, dry_run=True
-            ).as_dict(),
-        }
-    _calendar.delete_event(id, span=span)
-    return {"deleted": id}
+    return _calendar.delete_event(id, span=span, dry_run=dry_run)
 
 
 @_write_tool(snapshot=_notes)
@@ -872,13 +864,7 @@ def delete_note(
     Pass expect_title to verify the target before deleting (content-verify first).
     `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation).
     Needs Automation access for Notes. `id` from notes / notes_all."""
-    if dry_run:
-        return {
-            "dry_run": True,
-            "would_delete": _notes.delete(id, expect_title, dry_run=True).as_dict(),
-        }
-    _notes.delete(id, expect_title)
-    return {"deleted": id}
+    return _notes.delete(id, expect_title, dry_run=dry_run)
 
 
 @_additive_tool

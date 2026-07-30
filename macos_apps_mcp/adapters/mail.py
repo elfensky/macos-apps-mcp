@@ -33,7 +33,7 @@ import re
 import time
 from urllib.parse import unquote
 
-from ..contracts import Pointer
+from ..contracts import Pointer, deletion_result
 from ..errors import AmbiguousTarget, NativeError
 from ..runtime import body_file, log, run_osascript
 from ..text import (
@@ -1374,9 +1374,11 @@ class MailAdapter:
         bracketed or bare id — brackets are stripped like every other id-taking mail
         method (`get_body`/`reply`/`reply_all`/`forward`, M1 review), so a caller
         passing `<id>` resolves instead of failing loudly. ``dry_run=True`` resolves
-        the target and returns the Pointer that WOULD be deleted, no mutation — the
-        `delete_event` shape. Raises if the id resolves to no draft, so a stale id
-        fails loudly instead of silently deleting nothing."""
+        the target and returns the preview envelope, no mutation. Answers with the
+        shared ``deletion_result`` shape (C5d — the real delete used to say
+        ``{"deleted": True, "id": mid}``, the one odd envelope out). Raises if the id
+        resolves to no draft, so a stale id fails loudly instead of silently deleting
+        nothing."""
         mid = ident.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError(
@@ -1386,9 +1388,9 @@ class MailAdapter:
             found = self.snapshot(mid)
             if found is None:
                 raise ValueError(f"no draft with message id {mid!r}")
-            return {"dry_run": True, "would_delete": found.as_dict()}
+            return deletion_result(mid, found)
         run_osascript(_DELETE_DRAFT, mid)
-        return {"deleted": True, "id": mid}
+        return deletion_result(mid, None)
 
     def send(
         self,

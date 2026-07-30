@@ -325,3 +325,16 @@ def test_parse_bound_all_day_takes_a_date_not_an_instant():
     # the domain rule rides along: an aware timestamp is rejected for all-day
     with pytest.raises(ValueError, match="start:.*calendar date"):
         parse_bound("start", "2026-07-01T00:00:00Z", all_day=True)
+
+
+def test_deletion_result_is_the_one_delete_envelope():
+    # C5d: every delete tool answers with this shape — adapters own dry_run.
+    p = Pointer(id="X-1", summary="s", deeplink="d")
+    assert parse_datetime  # keep import block honest under ruff
+    from macos_apps_mcp.contracts import deletion_result
+
+    assert deletion_result("X-1", p) == {
+        "dry_run": True,
+        "would_delete": {"id": "X-1", "summary": "s", "deeplink": "d"},
+    }
+    assert deletion_result("X-1", None) == {"deleted": "X-1"}
