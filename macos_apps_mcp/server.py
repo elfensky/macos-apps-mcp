@@ -156,11 +156,15 @@ def _read_tool(fn):
     return mcp.tool(annotations=_READ_ANNOTATIONS)(_guard(fn))
 
 
-def _write_tool(fn=None, *, snapshot: Snapshotter | None = None):
+def _write_tool(
+    fn=None, *, snapshot: Snapshotter | None = None, open_world: bool = False
+):
     """Register a write that modifies/overwrites/deletes existing state — skipped in
     read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57).
     ``snapshot``: the adapter answering ``snapshot(id)`` for audit before-state — pass
-    it on every id-addressed update/delete/complete tool (#67)."""
+    it on every id-addressed update/delete/complete tool (#67). ``open_world``: the
+    tool MAY reach beyond this machine (run_shortcut — a shortcut can call a webhook)
+    without being outbound-by-design; the send tier stays ``_send_tool`` (C6c)."""
 
     def deco(f):
         if _read_only():
@@ -168,7 +172,10 @@ def _write_tool(fn=None, *, snapshot: Snapshotter | None = None):
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
             _SNAPSHOT_SOURCES[f.__name__] = snapshot
-        return mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(f))
+        ann = _DESTRUCTIVE_ANNOTATIONS
+        if open_world:
+            ann = {**ann, "openWorldHint": True}
+        return mcp.tool(annotations=ann)(_guard(f))
 
     return deco(fn) if fn is not None else deco
 
@@ -968,13 +975,17 @@ def create_contact(
     return _contacts.create_contact(data).as_dict()
 
 
-@_write_tool
-def run_shortcut(name: str, input_text: str | None = None) -> dict[str, str]:
+@_write_tool(open_world=True)
+def run_shortcut(
+    name: str, input_text: str | None = None, dry_run: bool = False
+) -> dict[str, str]:
     """Run a Shortcut by name OR its UUID id (from shortcuts — the id is unambiguous
     across renames/duplicate names); optional `input_text` piped in. Returns a pointer
-    citing the run + a bounded output snippet. Side effect (runs arbitrary automation
-    the user owns); uses the Shortcuts CLI (no TCC prompt)."""
-    return _shortcuts.run_shortcut(name, input_text).as_dict()
+    citing the run + a bounded output snippet. `dry_run=True` resolves the shortcut
+    and reports what WOULD run without running anything. Side effect (runs arbitrary
+    automation the user owns, which may reach beyond this machine — a shortcut can
+    call web services); uses the Shortcuts CLI (no TCC prompt)."""
+    return _shortcuts.run_shortcut(name, input_text, dry_run=dry_run).as_dict()
 
 
 @_additive_tool
