@@ -630,10 +630,10 @@ def notes(title: str) -> list[dict[str, str]]:
 
 @_read_tool
 def notes_all() -> list[dict[str, str]]:
-    """List every note as pointers (id + "Account / Folder" + snippet), excluding
-    Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk
-    Access); degrades to Automation (Notes) enumeration without it (very large libraries
-    can hit the osascript timeout, all-or-nothing). See note_bodies."""
+    """List the 25 newest notes as pointers (id + "Account / Folder" + snippet),
+    excluding Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full
+    Disk Access); degrades to Automation (Notes) enumeration without it (very large
+    libraries can hit the osascript timeout, all-or-nothing). See note_bodies."""
     return [p.as_dict() for p in _notes.get_all()]
 
 
