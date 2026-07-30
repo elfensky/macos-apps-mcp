@@ -314,10 +314,18 @@ def _resolve_account(value: str) -> str:
 # (AppleScript has no LIMIT), but the *output* is capped at the source, so a common
 # subject can't return thousands of records and blow the buffer (FradSer #66/#69).
 # Matches subject OR sender (#61). with timeout (#56): bound the Apple Events so an
-# orphaned osascript can't pin Mail.
-_SEARCH = """on run argv
+# orphaned osascript can't pin Mail. US/RS-framed; subject and sender pass through the
+# shared STRIP_FRAMING handler — on the old tab wire an unstripped tab in a subject
+# shifted the sender into the subject slot.
+_SEARCH = (
+    STRIP_FRAMING
+    + """
+
+on run argv
   set q to item 1 of argv
   set maxN to (item 2 of argv) as integer
+  set us to character id 31
+  set rs to character id 30
   set out to ""
   set c to 0
   with timeout of 120 seconds
@@ -329,13 +337,15 @@ _SEARCH = """on run argv
       if mid is not missing value and mid is not "" then
         set c to c + 1
         if c > maxN then exit repeat
-        set out to out & mid & tab & (subject of m) & tab & (sender of m) & linefeed
+        set out to out & (my stripFraming(mid)) & us & ¬
+          (my stripFraming(subject of m)) & us & (my stripFraming(sender of m)) & rs
       end if
     end repeat
   end tell
   end timeout
   return out
 end run"""
+)
 
 
 # mail_body: hydrate ONE message's plaintext by its RFC822 message-id (the citation from
@@ -1198,29 +1208,26 @@ def _classify_awaiting_reply(
 
 
 def _parse_search_results(raw: str) -> list[Pointer]:
-    """Parse the _SEARCH payload: newline-separated records, tab-separated as id,
-    subject, sender. Records with no stable message-id are skipped."""
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        mid = parts[0]
-        # a message with no Message-ID header has no stable citation — skip it rather
-        # than emit a non-resolvable id ("missing value" is AppleScript's coercion of an
-        # unset property; "" is the alternative some Mail versions return). #61 review.
-        if mid.strip() in ("", "missing value"):
-            continue
-        subject = parts[1] if len(parts) > 1 else ""
-        sender = parts[2] if len(parts) > 2 else ""
-        out.append(
-            Pointer(
-                id=mid,
-                summary=clean_summary(_summary(subject, sender)),
-                deeplink=_deeplink(mid),
-            )
+    """Parse the _SEARCH payload: US/RS-framed (message id, subject, sender) records.
+    Records with no stable message-id are skipped — a message without a Message-ID
+    header has no resolvable citation ("missing value"/"" on the wire). #61 review."""
+    recs = parse_framed(
+        raw,
+        [
+            Field("id", str.strip, required=True),
+            Field("subject"),
+            Field("sender"),
+        ],
+        min_fields=1,
+    )
+    return [
+        Pointer(
+            id=r["id"],
+            summary=clean_summary(_summary(r["subject"], r["sender"])),
+            deeplink=_deeplink(r["id"]),
         )
-    return out
+        for r in recs
+    ]
 
 
 def _parse_draft_records(raw: str) -> list[Pointer]:

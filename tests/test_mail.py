@@ -46,8 +46,8 @@ def test_deeplink_percent_encodes_special_chars():
     assert _deeplink("a b@ho st") == "message://%3Ca%20b@ho%20st%3E"
 
 
-def test_parse_tab_lines():
-    raw = "abc@host\tInvoice\tBob\n<def@host>\tHello\t\n"
+def test_parse_framed_records():
+    raw = f"abc@host{US}Invoice{US}Bob{RS}<def@host>{US}Hello{US}{RS}"
     ptrs = _parse_search_results(raw)
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
@@ -64,22 +64,29 @@ def test_parse_skips_missing_message_id():
     # a header-less message has no stable RFC822 citation: AppleScript emits "missing
     # value" (or ""), which must be skipped, never a garbage id/deeplink (#61).
     raw = (
-        "missing value\tNo header\tSpammer\n\tEmpty id\tNobody\ngood@host\tReal\tBob\n"
+        f"missing value{US}No header{US}Spammer{RS}"
+        f"{US}Empty id{US}Nobody{RS}"
+        f"good@host{US}Real{US}Bob{RS}"
     )
     ptrs = _parse_search_results(raw)
     assert [p.id for p in ptrs] == ["good@host"]  # only the message with a real id
 
 
+def test_parse_survives_newline_in_subject():
+    # US/RS framing (C4-B): a literal newline in a subject no longer splits the
+    # record — the old tab/linefeed wire broke here — and clean_summary folds it.
+    raw = f"m@host{US}Line one\nline two{US}Bob{RS}"
+    ptr = _parse_search_results(raw)[0]
+    assert ptr.summary == "Line one line two — Bob"
+
+
 def test_parse_sanitizes_control_chars_in_summary():
     # #52: control chars in a subject (which blanked Claude Desktop, carterlasalle #2)
-    # must be stripped before the summary reaches the model. NUL/BEL/US are used here
-    # because the tab-delimited parser frames records with splitlines(), which would
-    # itself split on U+2028/NEL — that framing fragility is pre-existing (a literal
-    # newline in a subject splits too) and out of #52's scope; the helper's own
-    # U+2028/9 folding is covered in test_runtime.
-    raw = "m@host\tInv\x00oice\x1fQ3\x07\tBob\n"
+    # must be stripped before the summary reaches the model. (A raw US/RS byte in a
+    # subject never reaches the parser — the template's stripFraming removes it.)
+    raw = f"m@host{US}Inv\x00oice Q3\x07{US}Bob{RS}"
     ptr = _parse_search_results(raw)[0]
-    assert ptr.summary == "InvoiceQ3 — Bob"
+    assert ptr.summary == "Invoice Q3 — Bob"
     assert "\x00" not in ptr.summary and "\x07" not in ptr.summary
 
 
