@@ -48,7 +48,17 @@ _AUTOMATION_APPS = (
 # check — so a probe asking for them proves nothing; it must send a REAL event, and
 # `count windows` is the cheapest read-only command that does. Trade-off: it launches
 # a quit app, and a never-authorized one can surface the one-time consent dialog.
-_PROBE = "on run argv\n  tell application (item 1 of argv) to count windows\nend run"
+# with timeout (#56's second line of defense): self-terminates a hung child even if
+# the Python side died first — this probe launches each quit app in turn, making it
+# the template most likely to strand an orphan. test_applescript_timeout.py sweeps
+# only the adapters package, so this one is pinned by test_doctor.py instead.
+_PROBE = (
+    "on run argv\n"
+    "  with timeout of 120 seconds\n"
+    "  tell application (item 1 of argv) to count windows\n"
+    "  end timeout\n"
+    "end run"
+)
 # Budget for the one-time Automation consent dialog — a human answer, same rationale as
 # runtime._ACCESS_TIMEOUT; already-granted/denied probes return in well under a second.
 _PROBE_TIMEOUT = 120.0

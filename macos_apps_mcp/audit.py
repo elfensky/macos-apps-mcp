@@ -62,12 +62,24 @@ def audit_write(record: dict) -> None:
         log.debug("audit_write failed: %s", e)
 
 
+def _instant(ts) -> datetime | None:
+    """Parse an ISO datetime string into an aware instant; a naive value is taken as
+    LOCAL time (the only form ``audit_write`` writes). None when unparseable."""
+    try:
+        return datetime.fromisoformat(ts).astimezone()
+    except (ValueError, TypeError):
+        return None
+
+
 def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
     """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
-    drops older entries by lexical ts compare (entries are naive-local, one format).
-    Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
-    log yields a single explicit error entry — never a raw ``OSError``, and never an
-    empty list masquerading as "no writes"."""
+    drops older entries by INSTANT compare, not string compare: entries are written
+    naive-local, but the audit tool tells the model to ground ``since`` via now() —
+    which returns an offset-carrying ISO string, and lexically ``…T12:00:00`` <
+    ``…T12:00:00+02:00`` silently dropped boundary entries. Unparseable values fall
+    back to the old lexical compare. Malformed lines are skipped; a missing log is
+    empty. NEVER raises: an unreadable log yields a single explicit error entry —
+    never a raw ``OSError``, and never an empty list masquerading as "no writes"."""
     path = _audit_path()
     if not path.exists():
         return []
@@ -76,14 +88,21 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     except OSError as e:
         log.debug("audit_read failed: %s", e)
         return [{"error": f"audit log unreadable: {e}"}]
+    since_i = _instant(since) if since else None
     out = []
     for line in text.splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
             continue  # skip a truncated/corrupt line, never fail the read
-        if since and rec.get("ts", "") < since:
-            continue
+        if since:
+            ts = rec.get("ts", "")
+            rec_i = _instant(ts) if ts else None
+            if since_i is not None and rec_i is not None:
+                if rec_i < since_i:
+                    continue
+            elif str(ts) < since:
+                continue
         out.append(rec)
     out.reverse()  # newest first
     return out[:limit]
