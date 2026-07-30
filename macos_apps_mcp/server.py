@@ -189,6 +189,11 @@ def _additive_tool(fn):
 # currently enabled — which is what makes doctor able to say "mail: off".
 _SEND_ADAPTERS: set[str] = set()
 
+# Adapters whose send tools actually GOT registered — the gate as it stood at import.
+# `_allow_send` re-reads env + toggle per call, so after `allow-send` flips the toggle
+# without a daemon restart the two diverge; outbound_status() surfaces that (C6).
+_SEND_REGISTERED: set[str] = set()
+
 
 def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
@@ -201,12 +206,27 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
         _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
         if not _allow_send(adapter):
             return f
+        _SEND_REGISTERED.add(adapter)  # the gate was ON when this tool registered
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
             _SNAPSHOT_SOURCES[f.__name__] = snapshot
         return mcp.tool(annotations=_SEND_ANNOTATIONS)(_guard(f))
 
     return deco
+
+
+def outbound_status() -> dict[str, list[str]]:
+    """One truth for the outbound tier (C6): ``capable`` = every adapter a
+    ``@_send_tool`` names; ``registered`` = the ones whose tools actually got
+    registered at import; ``configured`` = what the env/toggle enables RIGHT NOW.
+    They diverge when ``macos-apps-mcp allow-send`` writes the toggle but the daemon
+    keeps running (deploy's "no daemon restarted" branch) — doctor reports the delta
+    as ``outbound_pending`` with a restart directive."""
+    return {
+        "capable": sorted(_SEND_ADAPTERS),
+        "registered": sorted(_SEND_REGISTERED),
+        "configured": sorted(a for a in _SEND_ADAPTERS if _allow_send(a)),
+    }
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------

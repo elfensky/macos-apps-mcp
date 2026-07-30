@@ -231,17 +231,14 @@ def _version() -> str:
         return "unknown"
 
 
-def _outbound_state() -> list[str]:
-    """Adapters with OUTBOUND send currently enabled (#130) — read straight from
-    ``server._allow_send``/``server._SEND_ADAPTERS`` rather than re-reading
-    ``MACOS_APPS_ALLOW_SEND`` here, so this report can never disagree with what
-    actually got registered at import time. Imported LOCALLY: ``server.py`` does
-    ``from .doctor import diagnose`` at module level, so a module-level `import
-    server` here would be circular — this is the one place doctor.py reaches into
-    server.py, and it does so lazily."""
+def _outbound_state() -> dict[str, list[str]]:
+    """``server.outbound_status()`` — registered vs configured outbound adapters
+    (#130, C6). Imported LOCALLY: ``server.py`` does ``from .doctor import diagnose``
+    at module level, so a module-level `import server` here would be circular — this
+    is the one place doctor.py reaches into server.py, and it does so lazily."""
     from . import server
 
-    return sorted(a for a in server._SEND_ADAPTERS if server._allow_send(a))
+    return server.outbound_status()
 
 
 def diagnose(request: bool = False) -> dict:
@@ -278,7 +275,8 @@ def diagnose(request: bool = False) -> dict:
         agent = deploy.agent_status()
     except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
         agent = f"unavailable: {e}"
-    outbound = _outbound_state()
+    ob = _outbound_state()
+    outbound = ob["registered"]  # what this process actually serves, not the config
     deployment = {
         "mode": "daemon"
         if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
@@ -307,6 +305,16 @@ def diagnose(request: bool = False) -> dict:
             "System Settings before assuming it's actually off."
         ),
     }
+    # Registration is fixed at import; the toggle/env is re-read per call. When they
+    # differ (allow-send flipped the toggle but the daemon kept running — deploy's
+    # "no daemon restarted" branch), say so instead of reporting config as live state.
+    if ob["configured"] != ob["registered"]:
+        deployment["outbound_pending"] = ob["configured"]
+        deployment["outbound_note"] += (
+            " Outbound config changed since this process launched (configured: "
+            + (", ".join(ob["configured"]) or "none")
+            + ") — restart the daemon to apply it."
+        )
 
     return {
         "version": _version(),
