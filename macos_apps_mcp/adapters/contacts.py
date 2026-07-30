@@ -14,7 +14,7 @@ from __future__ import annotations
 from ..contracts import ContactData, Pointer
 from ..errors import VerificationFailed, verify_persisted
 from ..runtime import run_osascript
-from ..text import US, clean_summary, norm_text, split_framed
+from ..text import US, Field, clean_summary, norm_text, parse_framed
 
 MAX_CONTACTS = 50  # cap a broad name match
 
@@ -149,21 +149,21 @@ def _deeplink(ident: str) -> str:
 
 
 def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for parts in split_framed(raw):
-        ident = parts[0]
-        name = parts[1] if len(parts) > 1 else ""
-        org = parts[2] if len(parts) > 2 else ""
-        phone = parts[3] if len(parts) > 3 else ""
-        email = parts[4] if len(parts) > 4 else ""
-        out.append(
-            Pointer(
-                id=ident,
-                summary=clean_summary(_summary(name, org, phone, email)),
-                deeplink=_deeplink(ident),
-            )
+    recs = parse_framed(
+        raw,
+        [Field("id"), Field("name"), Field("org"), Field("phone"), Field("email")],
+        min_fields=1,
+    )
+    return [
+        Pointer(
+            id=r["id"],
+            summary=clean_summary(
+                _summary(r["name"], r["org"], r["phone"], r["email"])
+            ),
+            deeplink=_deeplink(r["id"]),
         )
-    return out
+        for r in recs
+    ]
 
 
 class ContactsAdapter:

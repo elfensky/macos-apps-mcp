@@ -41,8 +41,15 @@ from ..text import (
     RS,
     STRIP_FRAMING,
     US,
+    Field,
+    addr_list,
+    bool_or_none,
+    bool_strict,
     clean_body,
     clean_summary,
+    int_or_none,
+    int_or_zero,
+    parse_framed,
     sanitize_line,
     split_framed,
 )
@@ -906,70 +913,51 @@ def _parse_attachments(raw: str) -> list[dict]:
     """Parse the _ATTACHMENTS payload: RS-separated records, each US-separated as
     subject then (name, size, downloaded) triples. Malformed/partial trailing records
     are skipped."""
-    out = []
-    for parts in split_framed(raw):
-        summary = clean_summary(parts[0])
-        atts = []
-        rest = parts[1:]
-        for i in range(0, len(rest) - 2, 3):
-            name = rest[i].strip()
-            if not name:
-                continue
-            size_s = rest[i + 1].strip()
-            down_s = rest[i + 2].strip().lower()
-            atts.append(
-                {
-                    "name": clean_summary(name),
-                    "size": int(size_s) if size_s.isdigit() else None,
-                    "downloaded": (down_s == "true")
-                    if down_s in ("true", "false")
-                    else None,
-                }
-            )
-        out.append({"summary": summary or "(no subject)", "attachments": atts})
-    return out
+    recs = parse_framed(
+        raw,
+        [Field("summary", clean_summary)],
+        repeat=[
+            Field("name", clean_summary, required=True),
+            Field("size", int_or_none),
+            Field("downloaded", bool_or_none),
+        ],
+        repeat_key="attachments",
+    )
+    for r in recs:
+        r["summary"] = r["summary"] or "(no subject)"
+    return recs
 
 
 def _parse_triage_records(raw: str) -> list[dict]:
     """Parse _INBOX_TRIAGE: RS-separated records, US-separated fields (id, subject,
     sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
     Malformed/partial records are skipped; addresses lowercased."""
-    out = []
-    for f in split_framed(raw):
-        if len(f) < 8:
-            continue
-        out.append(
-            {
-                "id": f[0],
-                "subject": f[1],
-                "sender": f[2].strip().lower(),
-                "to_addrs": [a.strip().lower() for a in f[3].split(",") if a.strip()],
-                "secs_ago": int(f[4]) if f[4].strip().lstrip("-").isdigit() else 0,
-                "was_replied_to": f[5].strip().lower() == "true",
-                "read": f[6].strip().lower() == "true",
-                "flagged": f[7].strip().lower() == "true",
-            }
-        )
-    return out
+    return parse_framed(
+        raw,
+        [
+            Field("id"),
+            Field("subject"),
+            Field("sender", lambda s: s.strip().lower()),
+            Field("to_addrs", addr_list),
+            Field("secs_ago", int_or_zero),
+            Field("was_replied_to", bool_strict),
+            Field("read", bool_strict),
+            Field("flagged", bool_strict),
+        ],
+    )
 
 
 def _parse_sent_records(raw: str) -> list[dict]:
     """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
-    out = []
-    for f in split_framed(raw):
-        if len(f) < 4:
-            continue
-        out.append(
-            {
-                "id": f[0],
-                "subject": f[1],
-                "recipient_addrs": [
-                    a.strip().lower() for a in f[2].split(",") if a.strip()
-                ],
-                "secs_ago": int(f[3]) if f[3].strip().lstrip("-").isdigit() else 0,
-            }
-        )
-    return out
+    return parse_framed(
+        raw,
+        [
+            Field("id"),
+            Field("subject"),
+            Field("recipient_addrs", addr_list),
+            Field("secs_ago", int_or_zero),
+        ],
+    )
 
 
 def _parse_my_addrs(raw: str) -> set[str]:
@@ -1209,22 +1197,25 @@ def _parse_draft_records(raw: str) -> list[Pointer]:
     """Parse the _DRAFTS payload: US-framed (message id, subject, first recipient)
     records. Records with no stable message-id are skipped — same rule as the inbox
     reads (#61): never emit a non-resolvable id."""
-    out = []
-    for fields in split_framed(raw):
-        mid = fields[0].strip()
-        if mid in ("", "missing value"):
-            continue
-        subject = fields[1] if len(fields) > 1 else ""
-        rcpt = fields[2].strip() if len(fields) > 2 else ""
-        who = f"to {rcpt}" if rcpt else ""
-        out.append(
-            Pointer(
-                id=mid,
-                summary=clean_summary(_summary(subject, who)),
-                deeplink=_deeplink(mid),
-            )
+    recs = parse_framed(
+        raw,
+        [
+            Field("id", str.strip, required=True),
+            Field("subject"),
+            Field("rcpt", str.strip),
+        ],
+        min_fields=1,
+    )
+    return [
+        Pointer(
+            id=r["id"],
+            summary=clean_summary(
+                _summary(r["subject"], f"to {r['rcpt']}" if r["rcpt"] else "")
+            ),
+            deeplink=_deeplink(r["id"]),
         )
-    return out
+        for r in recs
+    ]
 
 
 def _parse_reply_all_recipients(raw: str) -> dict:
