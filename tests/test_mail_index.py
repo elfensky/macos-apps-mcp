@@ -1,6 +1,33 @@
 from macos_apps_mcp.adapters import mail_index
 
 
+def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
+    # sorted() on p.parts is LEXICOGRAPHIC: 'V10' < 'V9', so a Mac that kept an old
+    # V9 dir from before an OS upgrade silently read the STALE index — every index
+    # tool (search/thread/overview) reporting success against outdated data.
+    for v in ("V2", "V9", "V10"):
+        d = tmp_path / "Library" / "Mail" / v / "MailData"
+        d.mkdir(parents=True)
+        (d / "Envelope Index").touch()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = mail_index.envelope_index_path()
+    assert path is not None
+    assert path.parts[-3] == "V10"
+
+
+def test_text_filter_like_metacharacters_are_escaped():
+    # like_escape existed for exactly this and was applied to `account` only: the
+    # other four LIKE filters still read '%'/'_' as wildcards, so subject='50% off'
+    # matched '50 anything off' — a confidently wrong answer, not a literal match.
+    _, params = mail_index.build_header_query(
+        subject="50%", from_="j_x", to="a%b", mailbox="P_G", limit=5
+    )
+    assert r"%50\%%" in params
+    assert r"%j\_x%" in params
+    assert r"%a\%b%" in params
+    assert r"%P\_G%" in params
+
+
 class _Row(dict):
     # sqlite3.Row supports __getitem__ by column name; a dict stands in for tests.
     pass

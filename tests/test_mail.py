@@ -891,6 +891,40 @@ def test_outbox_pending_runs_the_count_script(monkeypatch):
     assert seen == [(mail._OUTBOX_COUNT,)]  # no argv — the script needs none
 
 
+def test_with_outbox_pending_failure_degrades_to_unknown_not_error(monkeypatch):
+    """The truth-check runs AFTER Mail accepted the send. If that follow-up READ
+    fails (a timeout counting the outbox), raising turns a COMPLETED send into a
+    reported failure — and a model that retries a "failed" send sends the mail
+    twice. Same principle as never rolling back past the `send` verb, applied to
+    the reporting side: degrade to unknown + note, never an error."""
+    from macos_apps_mcp.errors import NativeError
+
+    def boom(*a):
+        raise NativeError("timeout counting outbox")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail._with_outbox_pending({"sent": True})
+    assert out["sent"] is True
+    assert out["outbox_pending"] is None  # unknown, never a fake clean 0
+    assert "not confirmed" in out["note"].lower()
+    assert "Outbox" in out["note"]
+
+
+def test_send_still_reports_sent_when_outbox_count_fails(monkeypatch):
+    # end-to-end guard: the NativeError from the outbox read must not escape send().
+    from macos_apps_mcp.errors import NativeError
+
+    def fake(script, *argv):
+        if script is mail._SEND:
+            return "sent"
+        raise NativeError("timeout counting outbox")
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().send("a@b.com", "Hi", "body", dry_run=False)
+    assert out["sent"] is True
+    assert out["outbox_pending"] is None
+
+
 def test_with_outbox_pending_zero_omits_note(monkeypatch):
     monkeypatch.setattr(mail, "run_osascript", lambda *a: "0")
     out = mail._with_outbox_pending({"sent": True})
@@ -1186,6 +1220,46 @@ def test_account_map_empty_when_mail_unreachable(monkeypatch):
     monkeypatch.setattr(m, "run_osascript", boom)
     # a cosmetic label must never fail the call that wanted counts
     assert m._account_map() == {}
+
+
+def test_account_map_empty_success_is_leashed_not_cached_forever(monkeypatch):
+    """The 872767d symptom, reachable through the branch that fix didn't touch: Mail
+    launched at login can RETURN (exit 0) with no account records yet. That empty map
+    took the success path — cached forever, failure leash explicitly cleared — so
+    mail_overview showed raw UUIDs and mail_search(account=name) raised for the
+    daemon's whole life. An empty success is indistinguishable from that transient,
+    so it gets the same TTL leash a failure does."""
+    import macos_apps_mcp.adapters.mail as m
+
+    now = [1_000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    calls = []
+
+    def warming_up(*a):
+        calls.append(a)
+        return "" if len(calls) == 1 else f"{_UUID_1}\x1fPersonal"
+
+    monkeypatch.setattr(m, "run_osascript", warming_up)
+    assert m._account_map() == {}
+    now[0] += m._ACCOUNT_MAP_FAILURE_TTL - 1  # inside the TTL: no re-spawn
+    assert m._account_map() == {}
+    assert len(calls) == 1
+    now[0] += 1  # TTL elapsed: one more attempt, and the real names come back
+    assert m._account_map() == {_UUID_1: "Personal"}
+    assert len(calls) == 2
+
+
+def test_resolve_account_duplicate_display_names_raise_ambiguous(monkeypatch):
+    """Two accounts named 'Work' resolved silently to whichever Mail listed first —
+    the docstring's own rule ('a confident wrong answer is worse than a typed
+    error') applied to the unresolvable case but not the ambiguous one. #55's
+    AmbiguousTarget names the candidate UUIDs so the caller can re-issue."""
+    import macos_apps_mcp.adapters.mail as m
+    from macos_apps_mcp.errors import AmbiguousTarget
+
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Work", _UUID_2: "work"})
+    with pytest.raises(AmbiguousTarget, match=_UUID_1):
+        m._resolve_account("Work")
 
 
 def test_account_map_caches_the_failure_too(monkeypatch):
