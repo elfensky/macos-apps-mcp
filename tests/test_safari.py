@@ -12,10 +12,11 @@ from macos_apps_mcp.adapters.safari import (
     _parse,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_parse_url_and_title():
-    raw = "https://x.com/a\tPage A\nhttps://y.com/\t\n"
+    raw = f"https://x.com/a{US}Page A{RS}https://y.com/{US}{RS}"
     ptrs = _parse(raw)
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
@@ -59,7 +60,7 @@ def test_normalize_url_rejects_app_scheme():
 
 def test_get_tabs_caps_at_max_tabs(monkeypatch):
     # a tab hoarder's windows must not land unbounded in the model's context.
-    canned = "".join(f"https://x.com/{i}\tPage {i}\n" for i in range(MAX_TABS + 10))
+    canned = "".join(f"https://x.com/{i}{US}Page {i}{RS}" for i in range(MAX_TABS + 10))
     monkeypatch.setattr(safari_mod, "run_osascript", lambda *a: canned)
     assert len(SafariAdapter().get_tabs()) == MAX_TABS
 
@@ -67,5 +68,11 @@ def test_get_tabs_caps_at_max_tabs(monkeypatch):
 def test_parse_sanitizes_control_chars_in_summary():
     # #52 routing: a web page title (attacker-controllable) carrying a control char is
     # stripped before it reaches the model (deleting clean_summary from _parse fails).
-    ptr = _parse("https://x.com/a\tBreaking\x07 News\n")[0]
+    ptr = _parse(f"https://x.com/a{US}Breaking\x07 News{RS}")[0]
     assert ptr.summary == "Breaking News" and "\x07" not in ptr.summary
+
+
+def test_parse_survives_newline_in_title():
+    # US/RS framing (C4-B): a newline in a page title no longer splits the record.
+    ptr = _parse(f"https://x.com/a{US}Line one\nline two{RS}")[0]
+    assert ptr.summary == "Line one line two"

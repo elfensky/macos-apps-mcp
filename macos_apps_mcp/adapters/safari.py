@@ -9,22 +9,31 @@ from __future__ import annotations
 
 from ..contracts import Pointer
 from ..runtime import run_osascript
-from ..text import clean_summary
+from ..text import STRIP_FRAMING, Field, clean_summary, parse_framed
 
 MAX_TABS = 50  # cap a tab hoarder's windows; a listing tool, not an export
 
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
-_TABS = """with timeout of 120 seconds
+# US/RS-framed (#68); URL and page title pass through the shared STRIP_FRAMING handler.
+_TABS = (
+    STRIP_FRAMING
+    + """
+
+with timeout of 120 seconds
 tell application "Safari"
+  set us to character id 31
+  set rs to character id 30
   set out to ""
   repeat with w in windows
     repeat with t in tabs of w
-      set out to out & (URL of t) & tab & (name of t) & linefeed
+      set out to out & (my stripFraming(URL of t)) & us & ¬
+        (my stripFraming(name of t)) & rs
     end repeat
   end repeat
   return out
 end tell
 end timeout"""
+)
 
 # A new tab in the front window, or a fresh document if Safari has no window open.
 _OPEN = """on run argv
@@ -43,13 +52,15 @@ end run"""
 
 
 def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        url, _, name = line.partition("\t")
-        out.append(Pointer(id=url, summary=clean_summary(name) or url, deeplink=url))
-    return out
+    """Parse the _TABS payload: US/RS-framed (url, title) records."""
+    return [
+        Pointer(
+            id=r["url"],
+            summary=clean_summary(r["title"]) or r["url"],
+            deeplink=r["url"],
+        )
+        for r in parse_framed(raw, [Field("url"), Field("title")], min_fields=1)
+    ]
 
 
 def _normalize_url(url: str) -> str:
