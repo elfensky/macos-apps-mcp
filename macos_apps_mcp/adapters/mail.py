@@ -30,13 +30,12 @@ from __future__ import annotations
 
 import email
 import re
-import sqlite3
 import time
-from urllib.parse import quote
+from urllib.parse import unquote
 
 from ..contracts import Pointer
-from ..errors import NativeError
-from ..runtime import body_file, run_osascript
+from ..errors import AmbiguousTarget, NativeError
+from ..runtime import body_file, log, run_osascript
 from ..text import (
     READ_BODY,
     RS,
@@ -47,6 +46,8 @@ from ..text import (
     sanitize_line,
     split_framed,
 )
+from . import mail_index
+from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
 MAX_MAILS = 25
 MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct)
@@ -84,11 +85,13 @@ def _validate_mailbox(mailbox: str) -> str:
 # osascript can't pin Mail.
 _ACCOUNT_MAP_CACHE: dict[str, str] | None = None
 
-# monotonic() timestamp of the most recently cached FAILURE, or None when the cache
-# holds no failure (empty because never populated, or holds a real success — including
-# a genuine zero-account success, which is why this is a separate flag and not just
-# "cache == {}"). Compared with time.monotonic(), never wall-clock (must not break
-# when the clock changes — NTP sync, sleep/wake, DST).
+# monotonic() timestamp of the most recently cached FAILURE-OR-EMPTY result, or None
+# when the cache is unpopulated or holds a non-empty success. An exit-0 run that
+# returned no account records is leashed exactly like a failure: Mail still launching
+# at login can answer with an empty list, and a genuine zero-account Mac merely
+# re-probes once per TTL — while caching that empty forever reproduced the 872767d
+# symptom through the success branch. Compared with time.monotonic(), never wall-clock
+# (must not break when the clock changes — NTP sync, sleep/wake, DST).
 _ACCOUNT_MAP_FAILURE_AT: float | None = None
 
 # This adapter ships inside a launchd agent running daemon.serve() — a process that can
@@ -133,7 +136,10 @@ def _account_map() -> dict[str, str]:
     seconds (see its comment): unlike the account list, whether Mail is running and
     whether Automation is granted can both change while this long-lived daemon keeps
     running, so a failure gets one more attempt after the TTL instead of being final
-    for the process's whole lifetime. A success is still cached forever.
+    for the process's whole lifetime. A non-empty success is still cached forever; an
+    EMPTY success gets the same leash as a failure — Mail launching at login can
+    return exit 0 with no records yet, and that transient cached forever is the same
+    raw-UUIDs-until-restart bug the failure TTL exists to prevent.
     """
     global _ACCOUNT_MAP_CACHE, _ACCOUNT_MAP_FAILURE_AT
     if (
@@ -163,7 +169,7 @@ def _account_map() -> dict[str, str]:
                 if uuid.strip():
                     out[uuid.strip()] = name.strip()
         _ACCOUNT_MAP_CACHE = out
-        _ACCOUNT_MAP_FAILURE_AT = None
+        _ACCOUNT_MAP_FAILURE_AT = None if out else time.monotonic()
     return _ACCOUNT_MAP_CACHE
 
 
@@ -190,21 +196,12 @@ def _local_account_id() -> str | None:
     this store as an account, so there is no other source for it. None when there is
     no Envelope Index yet, or the index has no ``local://`` mailbox at all.
     """
-    from ..runtime import read_via_sqlite
-    from . import mail_index
-
-    path = mail_index.envelope_index_path()
-    if path is None:
-        return None
-    sql, params = mail_index.build_local_account_query()
-
-    def read(conn):
-        row = conn.execute(sql, params).fetchone()
-        return row[0] if row else None
-
-    url = read_via_sqlite(path, mail_index.HEADER_FINGERPRINT, read, immutable=False)
+    url = mail_index.query_local_account_url()
     if not url:
         return None
+    # <scheme>://<UUID>/<path> — the UUID segment is what the account clause anchors
+    # on. URL-shape parsing is Mail domain knowledge, so it stays here, not in the
+    # store accessor.
     _, _, rest = url.partition("://")
     uuid, _, _ = rest.partition("/")
     return uuid or None
@@ -241,9 +238,20 @@ def _resolve_account(value: str) -> str:
             "On My Mac store in it. Open Mail once to create it. Do not retry."
         )
     names = _account_map()
-    for uuid, name in names.items():
-        if name.casefold() == value.casefold():
-            return uuid
+    matches = [
+        uuid for uuid, name in names.items() if name.casefold() == value.casefold()
+    ]
+    if len(matches) > 1:
+        # Same rule as the unresolvable case below: never a confident wrong answer.
+        # First-match-wins picked whichever account Mail happened to list first.
+        raise AmbiguousTarget(
+            f"{len(matches)} Mail accounts are named {value!r} — macos-apps-mcp "
+            "never auto-picks an ambiguous target. Pass one of these account UUIDs "
+            f"instead: {', '.join(matches)} (or rename the accounts in Mail so the "
+            "names are unique)."
+        )
+    if matches:
+        return matches[0]
     known = (
         f"known accounts: {sorted(names.values())}"
         if names
@@ -679,8 +687,24 @@ def _outbox_pending() -> int:
 def _with_outbox_pending(result: dict) -> dict:
     """Merge the outbox truth into a send/reply_all/forward result dict. When Mail's
     outbox is non-empty, add a `note` a model can relay to the human verbatim — the
-    caller must not treat `sent: True` alone as delivery confirmation."""
-    pending = _outbox_pending()
+    caller must not treat `sent: True` alone as delivery confirmation.
+
+    A FAILURE of this follow-up read degrades to ``outbox_pending: None`` + note,
+    never an exception: the send already happened, and raising here reports a
+    COMPLETED send as a failed call — a model that retries that "failure" sends the
+    mail twice. Same principle as never rolling back past the `send` verb, applied
+    to the reporting side. None is "unknown", which is honest; 0 would be a fake
+    clean queue."""
+    try:
+        pending = _outbox_pending()
+    except (NativeError, OSError, ValueError):
+        result["outbox_pending"] = None
+        result["note"] = (
+            "Mail accepted the message but its Outbox could not be read — delivery "
+            "is NOT confirmed. Tell the user to open Mail ▸ Outbox to check before "
+            "assuming this was delivered. Do NOT retry the send."
+        )
+        return result
     result["outbox_pending"] = pending
     if pending > 0:
         result["note"] = (
@@ -1076,15 +1100,6 @@ def _summary(subject: str, sender: str) -> str:
     if subject and sender:
         return f"{subject} — {sender}"
     return subject or sender or "(no subject)"
-
-
-def _deeplink(message_id: str) -> str:
-    # message://%3C<id>%3E opens the message in Mail. The angle brackets are percent-
-    # encoded (%3C/%3E) and the id itself is percent-encoded with safe='@' (an RFC822
-    # message-id is local@domain, so '@' stays literal; spaces/other chars escaped) —
-    # the patrickfreyer recipe (#61). Best-effort; verified on-device (integration).
-    mid = message_id.strip().lstrip("<").rstrip(">")
-    return f"message://%3C{quote(mid, safe='@')}%3E"
 
 
 def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Pointer]:
@@ -1614,11 +1629,6 @@ class MailAdapter:
         query via message-ids. If the sidecar has no matches (absent, empty, or no hit
         for this query) this returns [] rather than raising — a body search is opt-in
         and its absence isn't an error condition."""
-        # imported lazily: mail_index imports _deeplink from this module at load time,
-        # so a module-level import here would be a cycle.
-        from ..runtime import log, read_via_sqlite
-        from . import mail_index
-
         # Clamp: an unbounded caller-supplied limit with body= would otherwise build an
         # oversized `message_ids IN (...)` clause (SQLite variable ceiling) and ignore
         # the promised MAX_MAILS backstop (#70 review M1). Clamped on BOTH sides —
@@ -1627,15 +1637,12 @@ class MailAdapter:
         limit = max(1, min(limit, MAX_MAILS))
         account = _resolve_account(account) if account else None
 
-        path = mail_index.envelope_index_path()
-        if path is None:
-            raise NativeError(
-                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
-                "Open Mail once to create it. Do not retry."
-            )
-
         message_ids = None
         if body:
+            # The missing-store raise must come BEFORE the FTS sidecar is consulted:
+            # body= with no Envelope Index is the followable error, not a silent []
+            # (the sidecar alone cannot answer a search honestly).
+            mail_index._require_index_path()
             # ponytail: body= caps at `limit` FTS rows BEFORE header filters apply, so
             # a narrow header filter over many body hits can under-return; acceptable
             # for the best-effort body layer — widen limit or add ORDER BY if it bites.
@@ -1650,7 +1657,33 @@ class MailAdapter:
                 )
                 return []
 
-        sql, params = mail_index.build_header_query(
+        # Fallback: the AppleScript inbox scan can express a subject/sender substring
+        # — NOTHING else. It is offered only when no other filter is set: falling
+        # back with unread=/since=/account=/… silently returned unfiltered inbox
+        # hits while the caller believed the filters applied, and a to= filter
+        # degraded into a SENDER match. body= is the same rule (AppleScript cannot
+        # do body FTS). A search that can't reach the sqlite plane with any of those
+        # filters set raises the typed remediation instead — honest failure over a
+        # confidently wrong answer. since/until compare against None because 0
+        # (epoch) is a real filter value.
+        needle = subject or from_ or ""
+        dropped = (
+            bool(to)
+            or bool(mailbox)
+            or since is not None
+            or until is not None
+            or bool(unread)
+            or bool(flagged)
+            or bool(has_attachments)
+            or bool(account)
+            or bool(body)
+        )
+        fallback = (
+            (lambda: self.get_pointers(needle)[:limit])
+            if (needle and not dropped)
+            else None
+        )
+        result = mail_index.query_search(
             subject=subject,
             from_=from_,
             to=to,
@@ -1663,34 +1696,7 @@ class MailAdapter:
             account=account,
             message_ids=message_ids,
             limit=limit,
-        )
-
-        def read(conn):
-            conn.row_factory = sqlite3.Row
-            out = []
-            for row in conn.execute(sql, params):
-                p = mail_index.row_to_pointer(row)
-                if p is not None:
-                    out.append(p)
-            return out
-
-        # Fallback: the existing AppleScript inbox search needs a substring — use the
-        # most specific text filter provided (subject/from/mailbox), else empty
-        # (raises). Disabled entirely for a body search: AppleScript cannot do body
-        # FTS, so falling back there would silently swap in unrelated header-substring
-        # matches while the body= caller believes they got FTS-matched results
-        # (dishonest). A body search that can't reach the sqlite plane raises the
-        # typed remediation instead.
-        needle = subject or from_ or to or mailbox or ""
-        fallback = (
-            (lambda: self.get_pointers(needle)) if (needle and not body) else None
-        )
-        result = read_via_sqlite(
-            path,
-            mail_index.HEADER_FINGERPRINT,
-            read,
             fallback=fallback,
-            immutable=False,
         )
         if body:
             log.info(
@@ -1710,32 +1716,16 @@ class MailAdapter:
         so on schema drift this raises the typed error rather than inventing a
         degraded answer built from a subject-substring match.
         """
-        from ..runtime import read_via_sqlite
-        from . import mail_index
-
         # Both sides: SQLite reads a negative LIMIT as unlimited, so a one-sided min()
         # let limit=-1 return every message in the store.
         limit = max(1, min(limit, MAX_THREAD))
-        path = mail_index.envelope_index_path()
-        if path is None:
-            raise NativeError(
-                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
-                "Open Mail once to create it. Do not retry."
-            )
-        sql, params = mail_index.build_thread_query(message_id, limit)
-
-        def read(conn):
-            conn.row_factory = sqlite3.Row
-            out = []
-            for row in conn.execute(sql, params):
-                p = mail_index.row_to_pointer(row)
-                if p is not None:
-                    out.append(p)
-            return out
-
-        return read_via_sqlite(
-            path, mail_index.HEADER_FINGERPRINT, read, immutable=False
-        )
+        # The index stores Message-IDs WITH angle brackets; AppleScript's `message id`
+        # reports them BARE (which is why every id-taking method strips <>). Normalize
+        # to the stored form so a Pointer.id from either plane threads — without this,
+        # every id the AppleScript tools emit matched zero rows, indistinguishable
+        # from a genuine miss.
+        bare = message_id.strip().lstrip("<").rstrip(">").strip()
+        return mail_index.query_thread(f"<{bare}>", limit)
 
     def overview(self) -> list[dict]:
         """Per-mailbox {account, mailbox, total, unread}, unread-first.
@@ -1756,26 +1746,7 @@ class MailAdapter:
         is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
         permanent for that store, not a Mail-unreachable artefact.
         """
-        from urllib.parse import unquote
-
-        from ..runtime import read_via_sqlite
-        from . import mail_index
-
-        path = mail_index.envelope_index_path()
-        if path is None:
-            raise NativeError(
-                "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index). "
-                "Open Mail once to create it. Do not retry."
-            )
-        sql, params = mail_index.build_overview_query()
-
-        def read(conn):
-            conn.row_factory = sqlite3.Row
-            return [dict(r) for r in conn.execute(sql, params)]
-
-        rows = read_via_sqlite(
-            path, mail_index.HEADER_FINGERPRINT, read, immutable=False
-        )
+        rows = mail_index.query_overview_rows()
         names = _account_map()
         out = []
         for r in rows:
@@ -1800,8 +1771,6 @@ class MailAdapter:
         """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx
         (read-at-rest; skips not-yet-downloaded *.partial.emlx). Resumable, size-capped.
         Returns counts + coverage. Never launches Mail, never writes in Mail's data."""
-        from . import mail_index
-
         root = mail_index.mail_root()
         if root is None:
             raise NativeError("no Mail data found; open Mail once. Do not retry.")

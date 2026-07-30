@@ -97,6 +97,38 @@ def _fake_envelope(path):
     c.close()
 
 
+def _add_rank_overmatch_messages(db):
+    """Copies whose NEWER row lives in a real user folder that a wildcard rank
+    pattern mis-reads as Junk/All Mail ('Junkyard', 'Wallets/Old Mail'), plus one
+    genuine [Gmail]/All Mail copy as the keep-demoting guard. The rank picks which
+    physical copy a Pointer cites — and which copy a future move/status write acts
+    on — so an over-match is not cosmetic."""
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        f"""
+        INSERT INTO mailboxes VALUES
+            (6,'imap://{ACCT_B}/Junkyard'),
+            (7,'imap://{ACCT_B}/Wallets/Old%20Mail'),
+            (8,'imap://{ACCT_A}/%5BGmail%5D/All%20Mail');
+        INSERT INTO subjects VALUES
+            (9,'Yard sale'),(10,'Old mail folder'),(11,'Gmail label');
+        INSERT INTO message_global_data VALUES
+            (12,'<yard@ex.com>'),(13,'<oldmail@ex.com>'),(14,'<label@ex.com>');
+        -- <yard@ex.com>: newer copy in Junkyard (a real folder), older in Travel
+        INSERT INTO messages VALUES (70,9,1,12,6,1700005000,1700005000,1,0,0,50);
+        INSERT INTO messages VALUES (71,9,1,12,3,1700004900,1700004900,1,0,0,50);
+        -- <oldmail@ex.com>: newer copy in Wallets/Old Mail, older in Travel
+        INSERT INTO messages VALUES (72,10,1,13,7,1700005100,1700005100,1,0,0,51);
+        INSERT INTO messages VALUES (73,10,1,13,3,1700005000,1700005000,1,0,0,51);
+        -- <label@ex.com>: newer copy in [Gmail]/All Mail, older in Travel
+        INSERT INTO messages VALUES (74,11,1,14,8,1700005200,1700005200,1,0,0,52);
+        INSERT INTO messages VALUES (75,11,1,14,3,1700005100,1700005100,1,0,0,52);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)
@@ -287,6 +319,60 @@ def test_search_ranks_exchange_junk_below_a_real_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     out = MailAdapter().search(subject="Junk ranking")
     assert [p.id for p in out] == ["<junky@ex.com>"]
+    assert out[0].folder == f"imap://{ACCT_B}/Travel"
+
+
+def test_search_subject_wildcard_is_not_a_wildcard(tmp_path, monkeypatch):
+    # '%' is a bound param (never injection) but LIKE still read it as "everything":
+    # subject='%' matched every message in the store. It must match only a literal
+    # '%' — the same honesty rule the account filter already got.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert MailAdapter().search(subject="%") == []
+
+
+def test_search_mailbox_underscore_is_not_a_wildcard(tmp_path, monkeypatch):
+    # '_' is LIKE's any-one-char wildcard: mailbox='_' matched every mailbox.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert MailAdapter().search(mailbox="_") == []
+
+
+def test_rank_does_not_treat_junkyard_as_junk(tmp_path, monkeypatch):
+    # '%Junk%' also matched a real folder named 'Junkyard' and demoted it to the
+    # junk tier — so the OLDER Travel copy was cited instead of the newest one.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_rank_overmatch_messages(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Yard sale")
+    assert [p.id for p in out] == ["<yard@ex.com>"]
+    assert out[0].folder == f"imap://{ACCT_B}/Junkyard"
+
+
+def test_rank_does_not_treat_old_mail_folder_as_all_mail(tmp_path, monkeypatch):
+    # '%All%Mail' is wildcarded on BOTH sides of 'All', so any url containing 'all'
+    # and ending in 'Mail' — 'Wallets/Old Mail' — ranked as an All Mail copy.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_rank_overmatch_messages(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Old mail folder")
+    assert [p.id for p in out] == ["<oldmail@ex.com>"]
+    assert out[0].folder == f"imap://{ACCT_B}/Wallets/Old%20Mail"
+
+
+def test_rank_still_demotes_gmail_all_mail(tmp_path, monkeypatch):
+    # the guard for the two tests above: a GENUINE [Gmail]/All Mail copy must keep
+    # losing to a filed copy even when the All Mail row is newer.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_rank_overmatch_messages(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Gmail label")
+    assert [p.id for p in out] == ["<label@ex.com>"]
     assert out[0].folder == f"imap://{ACCT_B}/Travel"
 
 
@@ -511,11 +597,132 @@ def test_thread_orders_a_zero_date_sent_by_date_received(tmp_path, monkeypatch):
     ]
 
 
+def test_thread_accepts_the_bare_id_the_applescript_plane_reports(
+    tmp_path, monkeypatch
+):
+    # AppleScript's `message id of m` returns the BARE form (which is why every
+    # id-taking method strips <>), while the index stores '<bracketed>'. thread()
+    # passed the id through to an EXACT match, so a Pointer.id from mail /
+    # mail_needs_response / drafts always threaded to [] — indistinguishable from a
+    # genuine miss.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().thread("abc@ex.com")
+    assert [p.id for p in out] == ["<abc@ex.com>", "<reply@ex.com>"]
+
+
+def test_search_fallback_refuses_when_a_filter_would_be_dropped(tmp_path, monkeypatch):
+    # The AppleScript inbox scan can express a subject/sender substring — nothing
+    # else. Falling back with unread=True silently returned unfiltered inbox hits
+    # while the caller believed the filter applied.
+    db = tmp_path / "Envelope Index"
+    sqlite3.connect(db).executescript("CREATE TABLE messages(ROWID INTEGER);")
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    adapter = MailAdapter()
+    monkeypatch.setattr(
+        adapter, "get_pointers", lambda q: pytest.fail("dropped unread= and fell back")
+    )
+    with pytest.raises(NativeError):
+        adapter.search(subject="x", unread=True)
+
+
+def test_search_fallback_refuses_a_to_filter(tmp_path, monkeypatch):
+    # get_pointers matches subject OR SENDER — a to= filter is not expressible, so
+    # falling back turned "sent TO alice" into "mentions alice anywhere".
+    db = tmp_path / "Envelope Index"
+    sqlite3.connect(db).executescript("CREATE TABLE messages(ROWID INTEGER);")
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    adapter = MailAdapter()
+    monkeypatch.setattr(
+        adapter, "get_pointers", lambda q: pytest.fail("to= became a sender match")
+    )
+    with pytest.raises(NativeError):
+        adapter.search(to="alice@ex.com")
+
+
+def test_search_fallback_honors_the_limit(tmp_path, monkeypatch):
+    # get_pointers slices to MAX_MAILS, not to the caller's clamped limit.
+    db = tmp_path / "Envelope Index"
+    sqlite3.connect(db).executescript("CREATE TABLE messages(ROWID INTEGER);")
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    adapter = MailAdapter()
+    monkeypatch.setattr(adapter, "get_pointers", lambda q: ["a", "b", "c"])
+    assert adapter.search(subject="x", limit=2) == ["a", "b"]
+
+
 def test_thread_unknown_id_returns_empty(tmp_path, monkeypatch):
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     assert MailAdapter().thread("<nope@ex.com>") == []
+
+
+# --- mail_index query_* accessors (C1): the ONE sqlite entry per read shape --------
+
+
+def test_query_search_returns_pointers(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = mail_index.query_search(subject="Invoice 42")
+    # deduped (one <abc@ex.com> despite INBOX+Archive copies), newest-first
+    ids = [p.id for p in out]
+    assert ids == ["<dup@ex.com>", "<reply@ex.com>", "<abc@ex.com>"]
+
+
+def test_query_search_missing_store_raises(monkeypatch):
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    with pytest.raises(NativeError, match="Open Mail once"):
+        mail_index.query_search(subject="x")
+
+
+def test_query_search_passes_fallback_through(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    # missing cols → drift → the passed-through fallback answers
+    sqlite3.connect(db).executescript("CREATE TABLE messages(ROWID INTEGER);")
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert mail_index.query_search(subject="x", fallback=lambda: ["FB"]) == ["FB"]
+
+
+def test_query_thread_returns_conversation(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = mail_index.query_thread("<abc@ex.com>", limit=100)
+    assert [p.id for p in out] == ["<abc@ex.com>", "<reply@ex.com>"]
+
+
+def test_query_overview_rows_returns_raw_rows(tmp_path, monkeypatch):
+    # RAW rows by design — encoded mailbox_url, no account names: decoding and
+    # account naming are adapter concerns (the "_rows" suffix is the warning).
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    rows = mail_index.query_overview_rows()
+    assert rows and set(rows[0]) == {"mailbox_url", "total", "unread"}
+    assert any("%20" in r["mailbox_url"] for r in rows)  # still percent-encoded
+
+
+def test_query_overview_rows_missing_store_raises(monkeypatch):
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    with pytest.raises(NativeError, match="Open Mail once"):
+        mail_index.query_overview_rows()
+
+
+def test_query_local_account_url_returns_url(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    url = mail_index.query_local_account_url()
+    assert url is not None and url.startswith(f"local://{ACCT_LOCAL}")
+
+
+def test_query_local_account_url_missing_store_is_none(monkeypatch):
+    # Asymmetric by contract: the account resolver owns the richer error, so a
+    # missing store answers None here — never the _NO_MAIL_DATA raise.
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    assert mail_index.query_local_account_url() is None
 
 
 def test_overview_reports_counts_and_decodes_names(tmp_path, monkeypatch):
