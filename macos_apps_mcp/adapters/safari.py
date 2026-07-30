@@ -11,6 +11,8 @@ from ..contracts import Pointer
 from ..runtime import run_osascript
 from ..text import clean_summary
 
+MAX_TABS = 50  # cap a tab hoarder's windows; a listing tool, not an export
+
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin the app.
 _TABS = """with timeout of 120 seconds
 tell application "Safari"
@@ -73,8 +75,11 @@ def _normalize_url(url: str) -> str:
 
 class SafariAdapter:
     def get_tabs(self) -> list[Pointer]:
-        """All open Safari tabs (id/deeplink = URL, summary = page title)."""
-        return _parse(run_osascript(_TABS))
+        """The first MAX_TABS open Safari tabs (id/deeplink = URL, summary = title).
+
+        ponytail: post-fetch slice — push the cap into the AppleScript repeat (exit
+        repeat past MAX_TABS, cf. contacts) if enumeration itself ever gets slow."""
+        return _parse(run_osascript(_TABS))[:MAX_TABS]
 
     def open_url(self, url: str) -> Pointer:
         """Open ``url`` in a new Safari tab (a new window if none is open)."""

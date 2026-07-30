@@ -6,6 +6,7 @@ import pytest
 
 from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
+    MAX_NOTES,
     NotesAdapter,
     _compose_html,
     _parse_all,
@@ -341,6 +342,32 @@ def test_sqlite_all_excludes_recently_deleted(notestore):
         "x-coredata://STORE-UUID/ICNote/p3",
         "x-coredata://STORE-UUID/ICNote/p4",
     }
+
+
+def test_get_all_caps_at_max_notes(tmp_path, monkeypatch):
+    # notes_all is a listing tool, not an export — without a cap the whole note
+    # library lands in the model's context (get_pointers already caps; this must too).
+    extra = [(pk, f"N{pk}", f"note {pk}") for pk in range(100, 100 + MAX_NOTES + 10)]
+    path = _make_notestore(tmp_path / "NoteStore.sqlite", extra_notes=extra)
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    assert len(NotesAdapter().get_all()) == MAX_NOTES
+
+
+def test_get_all_fallback_caps_at_max_notes(tmp_path, monkeypatch):
+    # same cap on the AppleScript fallback — degrading must not also unbound the read.
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = "".join(
+        f"x-coredata://S/ICNote/p{i}\tiCloud / Notes\tN{i}\n"
+        for i in range(MAX_NOTES + 10)
+    )
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    assert len(NotesAdapter().get_all()) == MAX_NOTES
 
 
 def test_note_pointer_folder_null_branches():

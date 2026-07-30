@@ -21,7 +21,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
 
 import EventKit as EK
 
@@ -66,7 +65,8 @@ _PROBE_TIMEOUT = 120.0
 # A read of this path is gated by Full Disk Access and it always exists on macOS, so a
 # PermissionError vs a clean read cleanly separates FDA-denied from FDA-granted. The
 # 0.5.0 sqlite read planes (chat.db, NoteStore.sqlite) need FDA — surface it now.
-_FDA_PATH = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
+# One declaration: deploy owns the user TCC.db path (it also reads grant rows from it).
+_FDA_PATH = deploy._TCC_DB
 
 # EKAuthorizationStatus integer values (stable across SDKs — map by value, not by
 # constant name, so a missing WriteOnly symbol on an older pyobjc can't crash import).

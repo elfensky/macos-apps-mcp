@@ -137,12 +137,13 @@ def _account_map() -> dict[str, str]:
     label lookup, and it must never fail a call whose real payload came from sqlite.
 
     The FAILURE is cached too, not just the success: on a machine where Automation is
-    denied, an uncached failure re-spawns osascript on EVERY call, and the script
-    carries ``with timeout of 120 seconds`` — a 120-second stall per call on tools
-    advertised as fast. But a failure is cached only for ``_ACCOUNT_MAP_FAILURE_TTL``
-    seconds (see its comment): unlike the account list, whether Mail is running and
-    whether Automation is granted can both change while this long-lived daemon keeps
-    running, so a failure gets one more attempt after the TTL instead of being final
+    denied, an uncached failure re-spawns osascript on EVERY call, and Python kills
+    each spawn only at ``runtime._OSASCRIPT_TIMEOUT`` (30s) — a 30-second stall per
+    call on tools advertised as fast. But a failure is cached only for
+    ``_ACCOUNT_MAP_FAILURE_TTL`` seconds (see its comment): unlike the account list,
+    whether Mail is running and whether Automation is granted can both change while
+    this long-lived daemon keeps running, so a failure gets one more attempt after
+    the TTL instead of being final
     for the process's whole lifetime. A non-empty success is still cached forever; an
     EMPTY success gets the same leash as a failure — Mail launching at login can
     return exit 0 with no records yet, and that transient cached forever is the same
@@ -1074,7 +1075,7 @@ _MY_ADDRESSES = """on run argv
   set us to character id 31
   set AppleScript's text item delimiters to us
   set out to ""
-  with timeout of 60 seconds
+  with timeout of 120 seconds
   tell application "Mail"
     repeat with acc in accounts
       set out to out & ((email addresses of acc) as text) & us

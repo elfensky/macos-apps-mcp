@@ -549,19 +549,25 @@ class NotesAdapter:
         )
 
     def get_all(self) -> list[Pointer]:
-        """Every live note (excludes Recently Deleted + tombstoned) as account-qualified
-        pointers (sqlite, read-only, newest first). Folder is "Account / Folder". Falls
-        back to the AppleScript enumeration on missing FDA / schema drift."""
+        """The MAX_NOTES newest live notes (excludes Recently Deleted + tombstoned) as
+        account-qualified pointers (sqlite, read-only, newest first). Folder is
+        "Account / Folder". Falls back to the AppleScript enumeration on missing FDA /
+        schema drift. Capped: a listing tool, not an export — an unbounded read lands
+        the whole note library in the model's context."""
 
         def read(conn):
             uuid = _store_uuid(conn)
-            return [_note_pointer(r, uuid) for r in conn.execute(_ALL_SQL).fetchall()]
+            # cap here, not in _ALL_SQL — get_pointers scans ALL rows for its fold
+            return [
+                _note_pointer(r, uuid)
+                for r in conn.execute(_ALL_SQL).fetchmany(MAX_NOTES)
+            ]
 
         return read_via_sqlite(
             NOTESTORE,
             _FINGERPRINT,
             read,
-            fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
+            fallback=lambda: _parse_all(run_osascript(_LIST_ALL))[:MAX_NOTES],
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
