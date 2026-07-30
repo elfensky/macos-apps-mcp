@@ -137,6 +137,15 @@ def test_every_tool_is_annotated_from_the_read_write_seam():
         )
 
 
+def test_run_shortcut_carries_open_world_hint():
+    # C6c: a shortcut can reach off-machine (post to a webhook), so run_shortcut
+    # carries openWorldHint — but it stays in the destructive write tier, NOT the send
+    # tier: most shortcuts are local ("unknown world" is the honest label), and the
+    # send tier would silently unregister the tool for every existing user.
+    by_name = {t.name: t for t in _tools()}
+    assert by_name["run_shortcut"].annotations.openWorldHint is True
+
+
 def test_permission_map_matches_registered_tools():
     # a new tool that isn't classified here (read/write + permission) fails loudly.
     # Robust to MACOS_APPS_READ_ONLY=1 (writes unregistered): only unclassified tools

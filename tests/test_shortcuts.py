@@ -176,6 +176,24 @@ def test_run_shortcut_rejects_empty_name(monkeypatch):
         ShortcutsAdapter().run_shortcut("   ")
 
 
+def test_run_shortcut_dry_run_runs_nothing(monkeypatch):
+    # C6c: dry_run resolves the handle and reports what WOULD run — the CLI is never
+    # invoked (a fake that raises if reached proves it).
+    def boom(*a, **kw):
+        raise AssertionError("dry_run must not invoke the shortcuts CLI")
+
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", boom)
+    p = ShortcutsAdapter().run_shortcut("Weather", dry_run=True)
+    assert p.id == "Weather"
+    assert "would run" in p.summary.lower() and "Weather" in p.summary
+
+
+def test_run_shortcut_dry_run_still_rejects_empty_name(monkeypatch):
+    _fake_run(monkeypatch)  # never reached
+    with pytest.raises(ValueError, match="needs a shortcut name"):
+        ShortcutsAdapter().run_shortcut("  ", dry_run=True)
+
+
 def test_list_pointer_summary_sanitized_uuid_id():
     # #52 + #63: the display summary is control-stripped; with a UUID the id is the
     # clean UUID (an oddly-named shortcut runs by its stable id, not the raw name).

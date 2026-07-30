@@ -499,14 +499,14 @@ def test_run_shortcut_dispatches(monkeypatch):
         def __init__(self):
             self.calls = []
 
-        def run_shortcut(self, name, input_text=None):
-            self.calls.append((name, input_text))
+        def run_shortcut(self, name, input_text=None, *, dry_run=False):
+            self.calls.append((name, input_text, dry_run))
             return Pointer(id=name, summary=f"ran {name}", deeplink="")
 
     fake = _FakeShortcuts()
     monkeypatch.setattr(srv, "_shortcuts", fake)
     out = srv.run_shortcut("Driving Mode", input_text="go")
-    assert fake.calls == [("Driving Mode", "go")]
+    assert fake.calls == [("Driving Mode", "go", False)]  # dry_run defaults OFF
     assert out == {"id": "Driving Mode", "summary": "ran Driving Mode", "deeplink": ""}
 
 
