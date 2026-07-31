@@ -222,14 +222,16 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
 
 
 def outbound_status() -> dict[str, list[str]]:
-    """One truth for the outbound tier (C6): ``capable`` = every adapter a
-    ``@_send_tool`` names; ``registered`` = the ones whose tools actually got
-    registered at import; ``configured`` = what the env/toggle enables RIGHT NOW.
-    They diverge when ``macos-apps-mcp allow-send`` writes the toggle but the daemon
-    keeps running (deploy's "no daemon restarted" branch) — doctor reports the delta
-    as ``outbound_pending`` with a restart directive."""
+    """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
+    whose tools actually got registered at import; ``configured`` = what the env/toggle
+    enables RIGHT NOW. They diverge when ``macos-apps-mcp allow-send`` writes the toggle
+    but the daemon keeps running (deploy's "no daemon restarted" branch) — doctor
+    reports the delta as ``outbound_pending`` with a restart directive.
+
+    A third key, ``capable`` (= every adapter a ``@_send_tool`` names), was carried here
+    and read by nothing; ``_SEND_ADAPTERS`` is right there for whoever needs it. Add it
+    back when a second send adapter gives it a job."""
     return {
-        "capable": sorted(_SEND_ADAPTERS),
         "registered": sorted(_SEND_REGISTERED),
         "configured": sorted(a for a in _SEND_ADAPTERS if _allow_send(a)),
     }

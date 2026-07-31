@@ -252,6 +252,27 @@ def test_search_empty_strings_are_absent_filters():
         MailAdapter().search(subject="", from_="", to="", mailbox="", account="")
 
 
+def test_search_normalizes_empty_text_filters_to_none_downstream(tmp_path, monkeypatch):
+    # The line above only proves the GUARD rejects all-empty. The normalization itself
+    # was unobservable — deleting it kept the suite green, because every downstream
+    # consumer happens to be truthiness-based today. Pin what the adapter actually hands
+    # over, so a future consumer that distinguishes "" from None can't silently break.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    captured = {}
+    real_build_header_query = mail_index.build_header_query
+
+    def spy(**kwargs):
+        captured.update(kwargs)
+        return real_build_header_query(**kwargs)
+
+    monkeypatch.setattr(mail_index, "build_header_query", spy)
+    MailAdapter().search(subject="Invoice", from_="", to="")
+    assert captured["subject"] == "Invoice"
+    assert captured["from_"] is None and captured["to"] is None  # not ""
+
+
 def test_search_since_zero_not_rejected(tmp_path, monkeypatch):
     # since=0 (epoch 0) is a valid timestamp, not an absent filter — compared
     # `is not None`, never truthiness (#70 review M3). Adapter-level since C5c moved
