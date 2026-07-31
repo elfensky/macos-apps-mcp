@@ -1438,3 +1438,16 @@ def test_resolve_account_unknown_name_error_does_not_misdirect_to_overview(
     with pytest.raises(NativeError) as exc:
         m._resolve_account("Nonexistent")
     assert "mail_overview reports" not in str(exc.value)
+
+
+def test_parse_search_absent_subject_falls_through_to_sender():
+    # A mail with no subject puts the literal "missing value" on the wire; _summary is
+    # `subject or sender or "(no subject)"`, so a truthy bogus subject stopped it ever
+    # reaching the sender.
+    raw = f"<mid@ex.com>{US}missing value{US}alice@ex.com{RS}"
+    assert _parse_search_results(raw)[0].summary == "alice@ex.com"
+
+
+def test_parse_search_absent_subject_and_sender_use_the_placeholder():
+    raw = f"<mid@ex.com>{US}missing value{US}missing value{RS}"
+    assert _parse_search_results(raw)[0].summary == "(no subject)"

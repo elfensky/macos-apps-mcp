@@ -33,6 +33,7 @@ from ..text import (
     STRIP_FRAMING,
     US,
     Field,
+    blank_if_missing,
     clean_body,
     clean_summary,
     fold_text,
@@ -254,7 +255,14 @@ end run"""
 
 # The ONE field spec for _LIST_ALL records — both _parse_all and get_pointers'
 # fallback (which must filter on the RAW title before Pointers exist) read through it.
-_ALL_FIELDS = [Field("id"), Field("folder", lambda s: s or None), Field("title")]
+_ALL_FIELDS = [
+    Field("id"),
+    Field("folder", lambda s: blank_if_missing(s) or None),
+    # blanked, not just placeholder-fixed: get_pointers folds on the RAW title (#64),
+    # so a literal "missing value" would make a search for "missing" match every
+    # untitled note — the same spurious match #64 exists to prevent.
+    Field("title", blank_if_missing),
+]
 
 
 def _all_pointers(recs: list[dict]) -> list[Pointer]:

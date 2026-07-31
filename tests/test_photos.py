@@ -31,3 +31,11 @@ def test_parse_survives_newline_in_filename():
     # US/RS framing (C4-B): a newline in a filename no longer splits the record.
     ptr = _parse(f"ABC123{US}IMG\n_1.jpg{RS}")[0]
     assert ptr.summary == "IMG _1.jpg"
+
+
+def test_parse_absent_filename_falls_back_to_the_placeholder():
+    # AppleScript reports an absent property as the literal "missing value" once it is
+    # concatenated into the wire — indistinguishable from a real value, so it defeated
+    # the `or "(photo)"` fallback and shipped `missing value` as the summary.
+    ptr = _parse(f"ABC123{US}missing value{RS}")[0]
+    assert ptr.summary == "(photo)"

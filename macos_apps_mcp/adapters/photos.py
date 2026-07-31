@@ -11,7 +11,13 @@ from __future__ import annotations
 
 from ..contracts import Pointer
 from ..runtime import run_osascript
-from ..text import STRIP_FRAMING, Field, clean_summary, parse_framed
+from ..text import (
+    STRIP_FRAMING,
+    Field,
+    blank_if_missing,
+    clean_summary,
+    parse_framed,
+)
 
 MAX_PHOTOS = 25
 
@@ -43,7 +49,9 @@ def _parse(raw: str) -> list[Pointer]:
     """Parse the _SEARCH payload: US/RS-framed (media id, filename) records."""
     return [
         Pointer(id=r["id"], summary=clean_summary(r["name"]) or "(photo)", deeplink="")
-        for r in parse_framed(raw, [Field("id"), Field("name")], min_fields=1)
+        for r in parse_framed(
+            raw, [Field("id"), Field("name", blank_if_missing)], min_fields=1
+        )
     ]
 
 

@@ -479,3 +479,10 @@ def test_message_body_unknown_id_raises(bodydb):
 def test_message_body_empty_id_raises(bodydb):
     with pytest.raises(ValueError, match="message id"):
         messages.MessagesAdapter().message_body("  ")
+
+
+def test_parse_absent_chat_name_falls_back_to_the_placeholder():
+    # An unnamed 1:1 chat has no `name`; AppleScript writes the literal "missing value"
+    # onto the wire, which is truthy and defeated the `or "(chat)"` fallback.
+    ptr = _parse(f"guid-1{US}missing value{RS}")[0]
+    assert ptr.summary == "(chat)"

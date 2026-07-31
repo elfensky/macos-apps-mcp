@@ -21,7 +21,14 @@ from pathlib import Path
 
 from ..contracts import Pointer
 from ..runtime import mac_region, read_via_sqlite, run_osascript
-from ..text import STRIP_FRAMING, Field, clean_body, clean_summary, parse_framed
+from ..text import (
+    STRIP_FRAMING,
+    Field,
+    blank_if_missing,
+    clean_body,
+    clean_summary,
+    parse_framed,
+)
 
 MAX_CHATS = 30
 MAX_MESSAGES = 40  # default cap on a content read
@@ -273,7 +280,9 @@ def _parse(raw: str) -> list[Pointer]:
     """Parse the _CHATS payload: US/RS-framed (chat guid, name) records."""
     return [
         Pointer(id=r["id"], summary=clean_summary(r["name"]) or "(chat)", deeplink="")
-        for r in parse_framed(raw, [Field("id"), Field("name")], min_fields=1)
+        for r in parse_framed(
+            raw, [Field("id"), Field("name", blank_if_missing)], min_fields=1
+        )
     ]
 
 
