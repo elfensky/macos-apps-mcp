@@ -6,12 +6,23 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **AppleScript's `missing value` no longer ships as a summary.** An absent property
+  reaches the wire as the literal text `"missing value"`, which is truthy and so
+  defeated every `or "(placeholder)"` fallback. Confirmed on real data: **115 of 115**
+  chats in `messages_chats` were listed as `missing value` instead of `(chat)`. Also
+  affected `mail_search` (a no-subject mail never fell through to the sender),
+  `notes_all` and `photos`. Pre-existing — the old tab-delimited wire produced the
+  identical string.
+
 ### Changed
 
 - **One deletion envelope (C5d).** `delete_draft`'s real-delete answer changes from
   `{"deleted": true, "id": "<mid>"}` to `{"deleted": "<mid>"}` — the shape
   `delete_event` and `delete_note` already spoke, now built by one
   `contracts.deletion_result`. Dry-run answers are unchanged everywhere.
+- **`safari_tabs` is bounded to 50 tabs** and now says so in its tool docstring.
 
 ## [0.9.0] - 2026-07-27 — Outbound mail, gated
 
