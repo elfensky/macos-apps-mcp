@@ -50,6 +50,42 @@ def test_deployment_note_does_not_blame_fda_for_a_missing_tcc_db(monkeypatch):
     assert "user db: absent" in note and "system db: absent" in note
 
 
+def test_deployment_note_reports_a_partial_tcc_read(monkeypatch):
+    # C7 follow-up: FDA rows live ONLY in the system db (#123), so a readable user db
+    # plus a denied system db yields an identity map with no FDA row — which reads as
+    # "FDA not granted" unless the reason is surfaced. Reporting reasons only when BOTH
+    # dbs failed left the #123 misdiagnosis alive in exactly the partial case.
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    _mock_grants(
+        monkeypatch,
+        {"kTCCServiceAppleEvents": [{"client": "com.example.app", "granted": True}]},
+        reasons={"user": None, "system": "no-full-disk-access"},
+    )
+    monkeypatch.setattr(
+        "macos_apps_mcp.deploy.agent_status",
+        lambda: (_ for _ in ()).throw(Exception("no bundle")),
+    )
+    d = doctor.diagnose()["deployment"]
+    assert d["grant_identities"] is not None  # the user db DID answer
+    assert "PARTIAL read" in d["note"]
+    assert "system db: no-full-disk-access" in d["note"]
+    assert "user db" not in d["note"]  # only the db that actually failed is named
+
+
+def test_deployment_note_has_no_partial_marker_when_both_dbs_read(monkeypatch):
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    _mock_grants(
+        monkeypatch,
+        {"kTCCServiceAppleEvents": []},
+        reasons={"user": None, "system": None},
+    )
+    monkeypatch.setattr(
+        "macos_apps_mcp.deploy.agent_status",
+        lambda: (_ for _ in ()).throw(Exception("no bundle")),
+    )
+    assert "PARTIAL" not in doctor.diagnose()["deployment"]["note"]
+
+
 def test_deployment_section_outbound_pending_when_configured_not_registered(
     monkeypatch,
 ):
@@ -87,16 +123,18 @@ def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     assert "outbound_pending" not in d
 
 
-def test_outbound_status_splits_capable_registered_configured(monkeypatch):
-    # C6: three distinct truths. capable = every adapter a @_send_tool names;
-    # registered = gate state at import (off in the test process); configured = what
-    # the env/toggle enables RIGHT NOW.
+def test_outbound_status_splits_registered_from_configured(monkeypatch):
+    # C6: the two truths that can DISAGREE. registered = gate state at import (off in
+    # this process); configured = what the env/toggle enables RIGHT NOW. The former
+    # third key, `capable`, was read by nothing and is gone — _SEND_ADAPTERS serves
+    # anyone who needs it. The non-empty `registered` case is pinned by the gate-on
+    # subprocess in test_gate_on_dispatch.py, the only process where the gate is on.
     from macos_apps_mcp import server
 
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     st = server.outbound_status()
-    assert st["capable"] == ["mail"]
+    assert set(st) == {"registered", "configured"}
     assert st["registered"] == []  # the import-time gate was off in this process
     assert st["configured"] == ["mail"]
 

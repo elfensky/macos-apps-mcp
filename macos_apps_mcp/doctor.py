@@ -316,6 +316,15 @@ def diagnose(request: bool = False) -> dict:
             'granted=False plus status="limited" — not a plain denial.'
         ),
     }
+    # A PARTIAL read (one db answered, the other did not) still has to say so. FDA rows
+    # live only in the SYSTEM db (#123), so an unreadable system db yields an identity
+    # map with no FDA row — indistinguishable, to the reader, from "FDA not granted".
+    # That is the misdiagnosis C7 exists to end; reporting it only when BOTH dbs fail
+    # left it alive in exactly the case it started as.
+    if ids is not None and any(grants["reasons"].values()):
+        deployment["note"] += " PARTIAL read — " + ", ".join(
+            f"{k} db: {v}" for k, v in grants["reasons"].items() if v
+        )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's
     # "no daemon restarted" branch), say so instead of reporting config as live state.

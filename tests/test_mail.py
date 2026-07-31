@@ -419,20 +419,39 @@ def test_original_strips_framing_from_sender_and_date():
 
 def test_framed_templates_compose_the_one_strip_framing_handler():
     # The a6ce7fd bug was a template emitting a raw field because its pasted handler
-    # copy drifted. Every template that emits US/RS-framed free text must now COMPOSE
-    # the single STRIP_FRAMING constant — exactly one handler definition per script.
-    import macos_apps_mcp.adapters.mail as mail
+    # copy drifted. Every template that emits US/RS-framed free text must COMPOSE the
+    # single STRIP_FRAMING constant — exactly one handler definition per script.
+    #
+    # DISCOVERED, not enumerated: the old hand-listed tuple named 5 of mail's 8 framed
+    # templates and none of the other adapters', so the five C4-B conversions adopted an
+    # invariant nothing checked. Walking the modules means a NEW template is covered the
+    # day it is written, which a list cannot promise.
+    import importlib
 
-    framed = (
-        mail._ORIGINAL,
-        mail._ATTACHMENTS,
-        mail._INBOX_TRIAGE,
-        mail._SENT_TRIAGE,
-        mail._REPLY_ALL_RECIPIENTS,
-    )
-    for tpl in framed:
-        assert tpl.startswith(mail.STRIP_FRAMING)
-        assert tpl.count("on stripFraming") == 1
+    from macos_apps_mcp.text import STRIP_FRAMING
+
+    checked = []
+    for name in ("mail", "messages", "notes", "photos", "safari", "music", "contacts"):
+        mod = importlib.import_module(f"macos_apps_mcp.adapters.{name}")
+        for attr in dir(mod):
+            tpl = getattr(mod, attr)
+            if not isinstance(tpl, str) or "on stripFraming" not in tpl:
+                continue
+            if attr == "STRIP_FRAMING":  # the constant itself, not a template
+                continue
+            assert tpl.startswith(STRIP_FRAMING), (
+                f"{name}.{attr} carries a stripFraming handler that is not the shared "
+                "constant — a pasted copy can drift (a6ce7fd)"
+            )
+            assert tpl.count("on stripFraming") == 1, (
+                f"{name}.{attr} defines the handler more than once"
+            )
+            checked.append(f"{name}.{attr}")
+
+    # guard the guard: if discovery silently matches nothing, the test goes vacuous
+    assert len(checked) >= 10, f"expected to find framed templates, found {checked}"
+    assert any(c.startswith("messages.") for c in checked), checked
+    assert "mail._SEARCH" in checked, checked
 
 
 def testsplit_framed_skips_blank_records_and_splits_fields():

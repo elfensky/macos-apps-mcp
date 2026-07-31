@@ -89,3 +89,17 @@ def test_usage_tool_reports_never_used(tmp_path, monkeypatch):
     # a registered tool we never logged shows up in the pruning list
     assert "usage" in result["never_used"]
     assert "audit" not in result["never_used"]
+
+
+def test_usage_report_keeps_a_tool_that_is_no_longer_registered(tmp_path, monkeypatch):
+    # A tool RENAMED after its audit rows exist is still in the tally but no longer in
+    # `registered`. It must stay visible in `tools` and keep counting toward
+    # total_calls — dropping it would quietly rewrite usage history, and filtering the
+    # comprehension by `registered` passed the whole suite before this test.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.usage_log("old_name")
+    au.usage_log("current")
+    report = au.usage_report({"current"})  # old_name no longer registered
+    assert {e["tool"] for e in report["tools"]} == {"old_name", "current"}
+    assert report["total_calls"] == 2
+    assert report["never_used"] == []  # registered−tally, not tally−registered
