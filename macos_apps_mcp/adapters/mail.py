@@ -43,6 +43,7 @@ from ..text import (
     US,
     Field,
     addr_list,
+    blank_if_missing,
     bool_or_none,
     bool_strict,
     clean_body,
@@ -1215,8 +1216,8 @@ def _parse_search_results(raw: str) -> list[Pointer]:
         raw,
         [
             Field("id", str.strip, required=True),
-            Field("subject"),
-            Field("sender"),
+            Field("subject", blank_if_missing),
+            Field("sender", blank_if_missing),
         ],
         min_fields=1,
     )

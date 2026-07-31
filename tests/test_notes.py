@@ -823,3 +823,14 @@ def test_update_refuses_folder(monkeypatch):
         NotesAdapter().update(
             "x-coredata://S/ICNote/p1", NoteData(title="T", folder="Work")
         )
+
+
+def test_parse_all_absent_title_and_folder_fall_back():
+    # AppleScript's absent-property marker reaches the wire as the literal
+    # "missing value". Untitled must show the placeholder, and an absent folder must
+    # be omitted (None) — not reported as a folder literally named "missing value".
+    # It also must not leak into the #64 raw-title fold, where searching "missing"
+    # would otherwise match every untitled note.
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p3{US}missing value{US}missing value{RS}")
+    assert ptrs[0].summary == "(untitled note)"
+    assert "missing value" not in ptrs[0].as_dict().get("folder", "")

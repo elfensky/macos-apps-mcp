@@ -16,6 +16,7 @@ from macos_apps_mcp.text import (
     US,
     Field,
     addr_list,
+    blank_if_missing,
     bool_or_none,
     bool_strict,
     clean_body,
@@ -263,3 +264,17 @@ def test_clean_helpers_are_idempotent_on_clean_text():
     assert sanitize_line(clean) == clean == clean_summary(clean)
     body = "first line\nsecond line"
     assert sanitize_block(body) == body == clean_body(body)
+
+
+# --- missing value (AppleScript's absent property) ------------------------------------
+
+
+def test_blank_if_missing_blanks_the_applescript_absent_marker():
+    # AppleScript has no null: an absent property concatenated into text becomes the
+    # literal "missing value", indistinguishable on the wire from a real value.
+    assert blank_if_missing("missing value") == ""
+    assert blank_if_missing("  missing value  ") == ""
+    assert blank_if_missing("") == ""
+    assert blank_if_missing("Real Name") == "Real Name"
+    # a value merely CONTAINING the marker is a real value — only an exact match blanks
+    assert blank_if_missing("re: missing value") == "re: missing value"

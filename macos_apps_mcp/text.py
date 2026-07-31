@@ -80,6 +80,20 @@ def split_framed(raw: str) -> list[list[str]]:
 _MISSING = ("", "missing value")
 
 
+def blank_if_missing(v: str) -> str:
+    """An absent AppleScript property → ``""`` so the caller's placeholder fires.
+
+    ``required=True`` drops the whole record; an OPTIONAL free-text field wants the
+    opposite — keep the record, blank the value, let ``or "(chat)"`` do its job.
+    Without this the literal "missing value" is truthy and ships as the summary.
+
+    Exact match only: a real value merely CONTAINING the marker is left alone. A chat
+    genuinely named "missing value" is blanked, which is unavoidable — AppleScript
+    gives the wire no way to tell the two apart.
+    """
+    return "" if v.strip() in _MISSING else v
+
+
 @dataclass(frozen=True)
 class Field:
     """One field of a framed record: output key, coercer, and whether an empty /
