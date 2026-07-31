@@ -649,7 +649,7 @@ def note_bodies(ids: list[str]) -> list[dict[str, str]]:
 
 @_read_tool
 def safari_tabs() -> list[dict[str, str]]:
-    """List open Safari tabs as pointers (url + title).
+    """List open Safari tabs as pointers (url + title). Bounded to 50.
     Read-only; needs Automation access for Safari. See safari_open to open a URL."""
     return [p.as_dict() for p in _safari.get_tabs()]
 

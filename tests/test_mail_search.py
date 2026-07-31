@@ -271,6 +271,38 @@ def test_mail_search_tool_delegates_guard_to_adapter():
         srv.mail_search()
 
 
+def test_mail_search_tool_forwards_every_filter_to_the_adapter(monkeypatch):
+    # C5c left the tool a pure delegation, which means NOTHING but this pins the
+    # wiring: every kwarg was independently replaceable with None and the suite
+    # stayed green. A swapped pair (to=from_) would silently answer the wrong
+    # question — mail_search(to="boss@x") returning mail FROM the boss.
+    # Distinct sentinel per field so a swap can't alias.
+    sent = {
+        "subject": "s-subject",
+        "from_": "s-from",
+        "to": "s-to",
+        "mailbox": "s-mailbox",
+        "since": 11,
+        "until": 22,
+        "unread": True,
+        "flagged": True,
+        "body": "s-body",
+        "has_attachments": True,
+        "account": "s-account",
+        "limit": 7,
+    }
+    got = {}
+
+    class _Recorder:
+        def search(self, **kwargs):
+            got.update(kwargs)
+            return []
+
+    monkeypatch.setattr(srv, "_mail", _Recorder())
+    assert srv.mail_search(**sent) == []
+    assert got == sent
+
+
 def test_mail_search_tool_registered_read_only():
     async def go():
         async with Client(srv.mcp) as c:
