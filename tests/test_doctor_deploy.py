@@ -25,11 +25,29 @@ def test_deployment_section_stdio_graceful(monkeypatch):
     d = doctor.diagnose()["deployment"]
     assert d["mode"] == "stdio"
     assert d["grant_identities"] is None
-    assert "FDA" in d["note"]
+    # the FDA-blame branch specifically — "FDA" alone is vacuous, the OTHER branch
+    # says "not an FDA denial" and contains the substring too.
+    assert "grant Full Disk Access" in d["note"]
     assert d["agent"].startswith("unavailable")
     # #130: the gate must be OBSERVABLE — off by default, never a bare "".
     assert d["outbound"] == []
     assert "OFF" in d["outbound_note"]
+
+
+def test_deployment_note_does_not_blame_fda_for_a_missing_tcc_db(monkeypatch):
+    # C7: the whole point of the classified reasons is that a missing db, schema drift
+    # and an FDA denial stop collapsing into one unconditional "grant FDA". A machine
+    # with no TCC.db must NOT be told to grant a permission that can't fix it.
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    _mock_grants(monkeypatch, None, reasons={"user": "absent", "system": "absent"})
+    monkeypatch.setattr(
+        "macos_apps_mcp.deploy.agent_status",
+        lambda: (_ for _ in ()).throw(Exception("no bundle")),
+    )
+    note = doctor.diagnose()["deployment"]["note"]
+    assert "not an FDA denial" in note
+    assert "grant Full Disk Access" not in note
+    assert "user db: absent" in note and "system db: absent" in note
 
 
 def test_deployment_section_outbound_pending_when_configured_not_registered(

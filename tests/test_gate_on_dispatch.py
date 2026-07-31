@@ -21,9 +21,17 @@ import macos_apps_mcp.server as srv
 def test_gate_on_registers_the_three_send_tools():
     # The one true import-time-gate assertion: with ALLOW_SEND=mail set BEFORE import,
     # the three outbound tools register. Everything else about them tests in-process.
+    #
+    # C6a rides along here because this is the ONLY process where the gate is on:
+    # outbound_status()["registered"] must report mail. Every in-process test sees the
+    # gate off and can only assert the empty set, so without this the ON path is
+    # unpinned — drop `_SEND_REGISTERED.add` and doctor tells a correctly-configured
+    # daemon that sending is OFF while send_mail is live.
     code = (
         "import asyncio, json, macos_apps_mcp.server as srv; "
-        "print(json.dumps(sorted(t.name for t in asyncio.run(srv.mcp.list_tools()))))"
+        "print(json.dumps({"
+        "'tools': sorted(t.name for t in asyncio.run(srv.mcp.list_tools())), "
+        "'outbound': srv.outbound_status()}))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code],
@@ -37,8 +45,11 @@ def test_gate_on_registers_the_three_send_tools():
         },
     )
     assert out.returncode == 0, out.stderr
-    registered = set(json.loads(out.stdout.strip().splitlines()[-1]))
-    assert {"send_mail", "reply_all", "forward_mail"} <= registered
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    assert {"send_mail", "reply_all", "forward_mail"} <= set(got["tools"])
+    # registration actually happened — not just "configured says so"
+    assert got["outbound"]["registered"] == ["mail"]
+    assert got["outbound"]["configured"] == ["mail"]  # they agree: no pending delta
 
 
 def test_send_mail_forwards_every_argument_to_the_adapter(monkeypatch):
