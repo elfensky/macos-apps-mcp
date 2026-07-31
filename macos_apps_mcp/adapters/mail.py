@@ -77,10 +77,52 @@ def _validate_mailbox(mailbox: str) -> str:
     canon = mailbox.strip().lower()
     if canon not in _SYSTEM_MAILBOXES:
         raise ValueError(
-            f"unknown system mailbox {mailbox!r}; expected one of "
-            f"{sorted(_SYSTEM_MAILBOXES)}"
+            f"unknown mailbox {mailbox!r} — pass the `folder` value from a mail_search "
+            "result back VERBATIM (an imap:// url; it is an opaque token, not a name), "
+            f"or one of {sorted(_SYSTEM_MAILBOXES)}. Do not retry with a folder name."
         )
     return canon
+
+
+def _mailbox_args(mailbox: str) -> tuple[str, str]:
+    """``(account-id, mailbox path)`` argv pair for the shared ``mailboxFor`` handler —
+    the INVERSE of ``_resolve_mailbox`` (#146).
+
+    ``mailbox`` is a search result's ``folder`` value passed back verbatim: the raw
+    percent-encoded mailboxes.url (``imap://<account-uuid>/%5BGmail%5D/Spam``). It is an
+    opaque ROUND-TRIP TOKEN, deliberately not a human-readable name — requiring a name
+    would hand #144's encoding mismatch (``%5BGmail%5D`` vs ``[Gmail]``) back to the
+    caller, and the url's account segment also makes same-named folders under two
+    accounts, and the same Message-ID living in several mailboxes, unambiguous by
+    construction.
+
+    Device-verified 2026-07-31: ``mailbox "[Gmail]/Spam" of account …`` resolves and the
+    encoded spelling does not — so the path is DECODED here, exactly as
+    ``_resolve_mailbox`` decodes before matching. The On My Mac store gets the
+    ``"local"`` sentinel instead of its UUID: Mail's ``every account`` never lists it
+    (see ``overview()``), so those mailboxes hang off the application itself. A UUID can
+    never collide with that sentinel.
+
+    The five special names (inbox/sent/drafts/trash/junk) are still accepted as an alias
+    layer — an empty account id selects Mail's unified accessors — so ``mailbox`` reads
+    the same everywhere and mail_attachments' existing vocabulary keeps working.
+    """
+    value = mailbox.strip()
+    if not value:
+        raise ValueError(
+            "this call needs a mailbox — pass the `folder` value from the mail_search "
+            "result that produced this message id, verbatim"
+        )
+    scheme, sep, rest = value.partition("://")
+    if not sep:
+        return "", _validate_mailbox(value)
+    account, _, path = rest.partition("/")
+    if not account:
+        raise ValueError(f"mailbox url {mailbox!r} names no account")
+    path = unquote(path)
+    if not path:
+        raise ValueError(f"mailbox url {mailbox!r} names no mailbox")
+    return ("local" if scheme.lower() == "local" else account), path
 
 
 # Account UUID -> display name. The UUID is what mailboxes.url embeds; the name is
@@ -349,21 +391,81 @@ end run"""
 )
 
 
-# mail_body: hydrate ONE message's plaintext by its RFC822 message-id (the citation from
-# a read). Scoped to the inbox — the same source the reads cite; a message-id from
-# elsewhere raises loudly rather than scanning every mailbox. id via argv (no injection)
-_BODY = """on run argv
-  set mid to item 1 of argv
+# The ONE mailbox resolver (#146): every id-addressed script composes this handler and
+# calls `my mailboxFor(acct, path)` instead of naming a mailbox itself. Both arguments
+# come from _mailbox_args via argv (no interpolation).
+#
+# It exists as a shared handler precisely because the bug it fixes was SEVEN copies of
+# `messages of inbox` drifting apart from the read plane: #62 scoped the body path to
+# the inbox when the reads were inbox-only too, then #70/#75 widened search to every
+# mailbox and nobody re-read the six copies of the old premise. One resolver, one place
+# to widen.
+#
+# It carries its OWN `with timeout` (#56): AppleScript's timeout is lexical, so the
+# caller's wrapper does not cover a handler body called from inside it.
+#
+# Device-verified 2026-07-31, all branches: "" -> the unified accessors (inbox 27 msgs,
+# drafts 15); "local" -> `mailbox "Outbox"` off the application (the On My Mac store,
+# which `every account` never lists); a UUID -> `mailbox "[Gmail]/Spam" of account …`
+# (80 msgs), with the path DECODED — the encoded "%5BGmail%5D/Spam" does not resolve.
+# Both miss paths raise loudly rather than falling back to some other mailbox: an
+# unknown folder gives "Can't get mailbox "Nope" of account …", an unknown account
+# "Can't get account 1 whose id = …". The reference returned survives the handler's tell
+# boundary and is usable in the caller's own tell block (verified against a real filed
+# message).
+_MAILBOX_REF = """on mailboxFor(acctId, mbPath)
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    if acctId is "" then
+      if mbPath is "inbox" then
+        return inbox
+      else if mbPath is "sent" then
+        return sent mailbox
+      else if mbPath is "drafts" then
+        return drafts mailbox
+      else if mbPath is "trash" then
+        return trash mailbox
+      else if mbPath is "junk" then
+        return junk mailbox
+      else
+        error "unknown system mailbox " & mbPath
+      end if
+    else if acctId is "local" then
+      return mailbox mbPath
+    else
+      return mailbox mbPath of (first account whose id is acctId)
+    end if
+  end tell
+  end timeout
+end mailboxFor"""
+
+
+# mail_body: hydrate ONE message's plaintext by its RFC822 message-id (the citation from
+# a read), in the mailbox the citation came from. NOT inbox-scoped (#146): the original
+# rationale — "the inbox is the same source the reads cite" — was true at #62 and was
+# falsified by #70/#75, which widened search to every mailbox and every account, so the
+# guard started rejecting ids this project's own search had just produced. The scope is
+# now whatever mailbox the caller names, and an id absent THERE still raises loudly (the
+# guard's real intent). id and mailbox via argv (no injection).
+_BODY = (
+    _MAILBOX_REF
+    + """
+
+on run argv
+  set mid to item 1 of argv
+  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 3 of argv)
     set c to content of (item 1 of matches)
     if c is missing value then error "message body is not available locally"
     return c
   end tell
   end timeout
 end run"""
+)
 
 # AppleScript coerces an unset property to this literal string on stdout; guard the body
 # path against it exactly as the id paths do (#61/#62 review) — never hand back a
@@ -616,15 +718,19 @@ _REPLY_ALL = (
     READ_BODY
     + "\n\n"
     + _ROLLBACK
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set mid to item 1 of argv
   set bodyText to my readBody(item 2 of argv)
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 4 of argv)
     set r to reply (item 1 of matches) opening window no reply to all yes
     try
       set content of r to bodyText
@@ -658,16 +764,20 @@ end run"""
 # original unchanged and carries no note. Recipients arrive US-joined in one argv item.
 _FORWARD = (
     _ROLLBACK
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set mid to item 1 of argv
   set toList to item 2 of argv
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   set us to character id 31
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 4 of argv)
     set f to forward (item 1 of matches) opening window no
     try
       set AppleScript's text item delimiters to us
@@ -777,17 +887,21 @@ def _with_outbox_pending(result: dict) -> dict:
 # field (address, sender) passes through the shared stripFraming handler first.
 _REPLY_ALL_RECIPIENTS = (
     STRIP_FRAMING
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set mid to item 1 of argv
+  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
   set us to character id 31
   set rs to character id 30
   set out to ""
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 3 of argv)
     set m to item 1 of matches
     repeat with r in (to recipients of m)
       set out to out & "to" & us & (my stripFraming(address of r)) & rs
@@ -812,15 +926,19 @@ end run"""
 # chars from it in _build_quote).
 _ORIGINAL = (
     STRIP_FRAMING
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set mid to item 1 of argv
+  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
   set us to character id 31
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 3 of argv)
     set m to item 1 of matches
     set snd to sender of m
     set dt to (date received of m) as text
@@ -844,15 +962,19 @@ _REPLY = (
     READ_BODY
     + "\n\n"
     + _ROLLBACK
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set mid to item 1 of argv
   set bodyText to my readBody(item 2 of argv)
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of inbox whose message id is mid)
-    if (count of matches) is 0 then error "no inbox message with that message id"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 4 of argv)
     set r to reply (item 1 of matches) opening window yes
     try
       set content of r to bodyText
@@ -880,14 +1002,15 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 
 
 # list_attachments (#45): attachments of messages in a mailbox matching a subject query.
-# Mailbox addressing uses Mail's UNIFIED, cross-account, locale-independent accessors
-# (verified on-device: `drafts mailbox`->"All Drafts", `sent mailbox`->"All Sent",
-# `trash mailbox`->"All Trash", `junk mailbox`->"All Junk", `inbox`->unified inbox) — no
-# per-account name search, so this can't pick the wrong (often empty) same-named mailbox
-# on a multi-account Mac the way a "first account with a matching mailbox name" loop
-# would. Since these accessors are locale-independent, only the canonical name travels
-# via argv — no localized candidate list needed. An empty query lists ALL messages in
-# the mailbox (bounded by maxN) rather than none — AppleScript's `contains ""` is
+# Mailbox addressing goes through the shared mailboxFor resolver, so this reaches ANY
+# mailbox (#146) — #45 shipped it with the five special names only, which left a filed
+# message's attachments as unreachable as its body. A special name still resolves
+# through Mail's UNIFIED, cross-account, locale-independent accessors (verified
+# on-device: `drafts mailbox`->"All Drafts", `sent mailbox`->"All Sent", `trash
+# mailbox`->"All Trash", `junk mailbox`->"All Junk", `inbox`->unified inbox), so that
+# case still can't pick the wrong (often empty) same-named mailbox on a multi-account
+# Mac; a url names its account outright, so neither can that one. An empty query lists
+# ALL messages in the mailbox (bounded by maxN) rather than none — `contains ""` is
 # false, so that case is branched explicitly. Fields framed per the US/RS contract:
 # per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
 # subject and each attachment name pass through the shared STRIP_FRAMING handler
@@ -896,31 +1019,20 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 # argv (no interpolation).
 _ATTACHMENTS = (
     STRIP_FRAMING
+    + "\n\n"
+    + _MAILBOX_REF
     + """
 
 on run argv
   set q to item 1 of argv
   set maxN to (item 2 of argv) as integer
-  set canon to item 3 of argv
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   set us to character id 31
   set rs to character id 30
   set out to ""
   set c to 0
   with timeout of 120 seconds
   tell application "Mail"
-    if canon is "inbox" then
-      set mb to inbox
-    else if canon is "sent" then
-      set mb to sent mailbox
-    else if canon is "drafts" then
-      set mb to drafts mailbox
-    else if canon is "trash" then
-      set mb to trash mailbox
-    else if canon is "junk" then
-      set mb to junk mailbox
-    else
-      error "unknown mailbox " & canon
-    end if
     if q is "" then
       set msgs to messages of mb
     else
@@ -1304,15 +1416,18 @@ class MailAdapter:
             :MAX_MAILS
         ]
 
-    def get_body(self, message_id: str) -> str:
-        """Plaintext body of one inbox message by its RFC822 message-id, budgeted (#52):
+    def get_body(self, message_id: str, mailbox: str) -> str:
+        """Plaintext body of one message by its RFC822 message-id, budgeted (#52):
         control-stripped, truncated with a marker past BODY_MAX, and OutputOverflow past
-        the hard cap (a pasted dump → open it in Mail). Raises if the id isn't in the
-        inbox (the read source). Accepts a bracketed or bare id."""
+        the hard cap (a pasted dump → open it in Mail). Accepts a bracketed or bare id.
+
+        ``mailbox`` is required (#146) and is the ``folder`` value from the search
+        result that produced the id, passed back VERBATIM — see ``_mailbox_args``. Any
+        mailbox in any account is reachable; an id absent from THAT mailbox raises."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("mail_body needs a message id")
-        body = run_osascript(_BODY, mid)
+        body = run_osascript(_BODY, mid, *_mailbox_args(mailbox))
         # defense in depth: the _BODY script already errors on a missing-value content,
         # but a Mail version that returns the coerced literal instead of erroring must
         # not surface it as the body (#62 review).
@@ -1460,11 +1575,12 @@ class MailAdapter:
     def reply_all(
         self,
         message_id: str,
+        mailbox: str,
         body: str,
         include_quote: bool = True,
         dry_run: bool = True,
     ) -> dict:
-        """Reply-all to an inbox message and SEND it. Mail's native reply verb sets the
+        """Reply-all to a message and SEND it. Mail's native reply verb sets the
         threading headers; ``include_quote`` appends the `On <date>, <sender> wrote:`
         block, built in Python exactly as ``reply`` builds it. The sending account is
         inherited from the original message — the correct identity for a thread.
@@ -1476,8 +1592,11 @@ class MailAdapter:
         by message-id and reports them — not merely what the caller typed — before
         anything leaves. That read is safe where a send/forward dry run isn't, because
         the no-native-call rule exists to stop CONSTRUCTING an outgoing message (which
-        can strand an autosaved draft in Drafts); reading an already-stored inbox
-        message strands nothing.
+        can strand an autosaved draft in Drafts); reading an already-stored message
+        strands nothing.
+
+        ``mailbox`` is required (#146): the ``folder`` value from the search result that
+        produced ``message_id``, verbatim.
 
         A successful return (``sent: True``) means Mail ACCEPTED the reply — NOT
         that it was delivered (device-verified: an accepted send can sit undelivered
@@ -1489,9 +1608,10 @@ class MailAdapter:
             raise ValueError("reply_all needs the original message's id")
         if not body.strip():
             raise ValueError("reply_all needs a non-empty body")
+        mb = _mailbox_args(mailbox)
         if dry_run:
             recipients = _parse_reply_all_recipients(
-                run_osascript(_REPLY_ALL_RECIPIENTS, mid)
+                run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb)
             )
             return {
                 "dry_run": True,
@@ -1506,7 +1626,7 @@ class MailAdapter:
             }
         full = body
         if include_quote:
-            raw = run_osascript(_ORIGINAL, mid)
+            raw = run_osascript(_ORIGINAL, mid, *mb)
             if raw.strip() and raw.strip() != _MISSING_VALUE:
                 sender, _, rest = raw.partition(US)
                 date_str, _, original = rest.partition(US)
@@ -1518,13 +1638,13 @@ class MailAdapter:
                     )
                 )
         with body_file(full) as path:
-            run_osascript(_REPLY_ALL, mid, path)
+            run_osascript(_REPLY_ALL, mid, path, *mb)
         return _with_outbox_pending(
             {"sent": True, "reply_to": message_id.strip(), "reply_all": True}
         )
 
-    def forward(self, message_id: str, to, dry_run: bool = True) -> dict:
-        """Forward an inbox message and SEND it. The original message and its
+    def forward(self, message_id: str, mailbox: str, to, dry_run: bool = True) -> dict:
+        """Forward a message and SEND it. The original message and its
         attachments are forwarded UNCHANGED — there is no way to attach a covering
         note. Device-verified: `content` of a forwarded message is permanently
         unreadable via AppleScript (Mail assembles the quoted original only at send
@@ -1534,7 +1654,12 @@ class MailAdapter:
         forward was delivered with 0 once `content` was touched; untouched, all 7
         arrived intact with the full original body). So this method carries no
         covering-note parameter; use ``send`` for a fresh message with your own text.
-        ``dry_run=True`` (default) makes no call into Mail.
+        ``dry_run=True`` (default) makes no call into Mail. It still VALIDATES
+        ``mailbox`` — that is pure string work, and a preview that accepts a token the
+        real send would reject is the kind of preview that teaches nothing.
+
+        ``mailbox`` is required (#146): the ``folder`` value from the search result that
+        produced ``message_id``, verbatim.
 
         A successful return (``sent: True``) means Mail ACCEPTED the forward — NOT
         that it was delivered (device-verified: an accepted send can sit undelivered
@@ -1546,34 +1671,44 @@ class MailAdapter:
         to_list = _split_addrs(to)
         if not to_list:
             raise ValueError("forward needs at least one recipient address (to)")
+        mb = _mailbox_args(mailbox)
         if dry_run:
             return {
                 "dry_run": True,
                 "would_send": {"to": to_list, "forwarding": message_id.strip()},
             }
-        run_osascript(_FORWARD, mid, US.join(to_list))
+        run_osascript(_FORWARD, mid, US.join(to_list), *mb)
         return _with_outbox_pending(
             {"sent": True, "to": to_list, "forwarding": message_id.strip()}
         )
 
     def reply(
-        self, message_id: str, reply_body: str, include_quote: bool = True
+        self,
+        message_id: str,
+        mailbox: str,
+        reply_body: str,
+        include_quote: bool = True,
     ) -> dict:
-        """Reply to an inbox message by its RFC822 message-id: opens a threaded draft
+        """Reply to a message by its RFC822 message-id: opens a threaded draft
         for the human to review/send — NEVER sends. Uses Mail's native reply verb so
         In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
         include_quote appends `On <date>, <sender> wrote:` + the `> `-quoted original.
         Keystroke-free (#46); atomic (#44). Returns the same locator dict as
         create_draft — save it to Drafts and it gets a stable message-id, addressable
-        via drafts()/delete_draft()."""
+        via drafts()/delete_draft().
+
+        ``mailbox`` is required (#146): the ``folder`` value from the search result that
+        produced ``message_id``, verbatim. It scopes BOTH native calls — the quote read
+        and the draft build — so a filed original can't reply with an empty quote."""
         mid = message_id.strip().lstrip("<").rstrip(">")
         if not mid:
             raise ValueError("reply needs the original message's id")
         if not reply_body.strip():
             raise ValueError("reply needs a non-empty reply_body")
+        mb = _mailbox_args(mailbox)
         body = reply_body
         if include_quote:
-            raw = run_osascript(_ORIGINAL, mid)
+            raw = run_osascript(_ORIGINAL, mid, *mb)
             if raw.strip() and raw.strip() != _MISSING_VALUE:
                 sender, _, rest = raw.partition(US)
                 date_str, _, original = rest.partition(US)
@@ -1586,7 +1721,7 @@ class MailAdapter:
                 date_str = sanitize_line(date_str)
                 body = reply_body + "\n\n" + _build_quote(sender, date_str, original)
         with body_file(body) as path:
-            run_osascript(_REPLY, mid, path)
+            run_osascript(_REPLY, mid, path, *mb)
         return {
             "created": True,
             "subject": "(reply)",
@@ -1596,17 +1731,21 @@ class MailAdapter:
         }
 
     def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:
-        """List attachments of messages in `mailbox` (canonical inbox/sent/drafts/
-        trash/junk) whose subject contains `query`. Works for Drafts (no message-id
-        needed); mailbox resolution uses Mail's unified, cross-account accessors
-        (`drafts mailbox`/`sent mailbox`/`trash mailbox`/`junk mailbox`/`inbox`), which
-        are locale-independent. query is optional: an empty/omitted query lists ALL
+        """List attachments of messages in `mailbox` whose subject contains `query`.
+        `mailbox` is a search result's `folder` value passed back verbatim, or one of
+        the canonical inbox/sent/drafts/trash/junk (#146 — #45 shipped those five
+        only, so a filed message's attachments were as unreachable as its body). Works
+        for Drafts (no message-id needed); a special name resolves through Mail's
+        unified, cross-account accessors (`drafts mailbox`/`sent mailbox`/`trash
+        mailbox`/`junk mailbox`/`inbox`), which are locale-independent, and a url names
+        its own account. query is optional: an empty/omitted query lists ALL
         messages in the mailbox (bounded by MAX_MAILS) — this deliberately differs from
         `get_pointers`, which rejects an empty query. Returns up to MAX_MAILS records:
         [{"summary", "attachments": [{"name","size","downloaded"}]}]. A read — never
         mutates."""
-        canon = _validate_mailbox(mailbox)
-        raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), canon)
+        raw = run_osascript(
+            _ATTACHMENTS, query.strip(), str(MAX_MAILS), *_mailbox_args(mailbox)
+        )
         return _parse_attachments(raw)[:MAX_MAILS]
 
     def get_needs_response(self) -> list[Pointer]:

@@ -86,21 +86,21 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | Tool | Args | Notes |
 |------|------|-------|
 | `mail` | subject-OR-sender substring | inbox matches; id = stable RFC822 message-id, `message://` deeplink |
-| `mail_body` | id | one message's plaintext, bounded + truncation-marked |
+| `mail_body` | id, mailbox | one message's plaintext, bounded + truncation-marked; `mailbox` is the `folder` value from a `mail_search` result passed back **verbatim** (or a canonical name) — **any** mailbox, not just the inbox |
 | `mail_search` | subject, from_, to, mailbox, account, since, until, unread, flagged, has_attachments, body, limit | indexed search via Envelope Index (at rest — no Mail launch **unless** `account=` is a display name, which is resolved through Mail; a UUID stays pure sqlite, an unknown name raises); one result per message (INBOX **preferred**); `has_attachments` excludes inline images; `body` best-effort (indexed only) |
 | `mail_index_bodies` | rebuild | builds/refreshes opt-in **FTS body index** from `.emlx` at rest; resumable, size-capped; skips not-yet-downloaded (partial coverage by design) |
 | `mail_thread` | id, limit (default 100) | whole conversation, oldest-first, **includes your sent messages**; deduped; over `limit` **oldest dropped** (thread read for reply) |
 | `mail_overview` | — | every mailbox with total + unread, unread-first; includes Junk/Trash/All Mail; counts live (stored counters go stale) and per distinct message; account **names** come from Mail (launches it), UUIDs stand in when it's unreachable; On My Mac always named |
-| `mail_attachments` | mailbox (`inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
+| `mail_attachments` | mailbox (a search result's `folder`, verbatim — or `inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
 | `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
-| `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
-| `reply_all` | `message_id`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
-| `forward_mail` | `message_id`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
+| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
+| `forward_mail` | `message_id`, `mailbox`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 

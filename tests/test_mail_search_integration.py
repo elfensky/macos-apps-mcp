@@ -29,3 +29,22 @@ def test_search_all_mailboxes_beats_inbox_only():
     # sqlite path reaches non-inbox folders the AppleScript inbox search cannot.
     out = MailAdapter().search(mailbox="Sent", limit=5)
     assert isinstance(out, list)
+
+
+def test_a_filed_message_search_cites_can_be_opened_and_its_attachments_listed():
+    """#146's acceptance, end to end on real Mail: take a hit from a NON-inbox folder
+    and feed its `folder` value straight back. Before the fix this raised "no inbox
+    message with that message id" — the read plane cited what the body plane refused
+    to open. Reads only; nothing is created or sent."""
+    adapter = MailAdapter()
+    filed = [
+        p
+        for p in adapter.search(has_attachments=True, limit=50)
+        if p.folder and not p.folder.rstrip("/").upper().endswith("INBOX")
+    ]
+    if not filed:
+        pytest.skip("every indexed message on this Mac is in an INBOX")
+    hit = filed[0]
+    # the folder value goes back VERBATIM — it is a round-trip token, not a name
+    assert adapter.get_body(hit.id, hit.folder) is not None
+    assert isinstance(adapter.list_attachments(hit.folder), list)

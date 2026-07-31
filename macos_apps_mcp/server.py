@@ -374,18 +374,26 @@ def mail(query: str) -> list[dict[str, str]]:
 
 
 @_read_tool
-def mail_body(id: str) -> str:
-    """Full plaintext body of one inbox message by id (bounded + truncation-marked).
-    Read-only; needs Automation access for Mail. `id` is a message-id from `mail`."""
-    return _mail.get_body(id)
+def mail_body(id: str, mailbox: str) -> str:
+    """Full plaintext body of one message by id (bounded + truncation-marked).
+
+    `id` is a message-id from `mail`/`mail_search`. `mailbox` is REQUIRED: pass the
+    `folder` value from the SAME search result back VERBATIM — it is an opaque
+    round-trip token (`imap://<uuid>/<path>`), not a folder name to retype. The five
+    canonical names ("inbox"/"sent"/"drafts"/"trash"/"junk") also work. Any mailbox in
+    any account is readable; an id absent from that mailbox raises. Read-only; needs
+    Automation access for Mail."""
+    return _mail.get_body(id, mailbox)
 
 
 @_read_tool
 def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
     """List attachments on messages in a Mail mailbox (Automation).
 
-    mailbox: canonical system mailbox — "inbox" | "sent" | "drafts" | "trash" |
-    "junk" (resolved via Mail's unified, cross-account accessors). query: optional
+    mailbox: the `folder` value from a `mail_search` result passed back VERBATIM (an
+    opaque `imap://<uuid>/<path>` token, not a name to retype), or a canonical system
+    mailbox — "inbox" | "sent" | "drafts" | "trash" | "junk" (resolved via Mail's
+    unified, cross-account accessors). query: optional
     subject substring — an empty/omitted query lists ALL messages in the mailbox
     (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
     confirm an attachment landed on a DRAFT before it's saved (a freshly opened compose
@@ -518,14 +526,19 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
 
 
 @_additive_tool
-def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> dict:
-    """Reply to an inbox message, opening a threaded draft for review (Automation).
+def mail_reply(
+    message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
+) -> dict:
+    """Reply to a message, opening a threaded draft for review (Automation).
 
-    NEVER sends. message_id: the RFC822 id from a mail read. Mail sets the threading
-    headers natively; include_quote appends the quoted original. Returns a locator
-    dict — save the draft to Drafts and `drafts()` resolves it by a stable message-id.
+    NEVER sends. message_id: the RFC822 id from a mail read. mailbox is REQUIRED: the
+    `folder` value from the SAME search result, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
+    threading headers natively; include_quote appends the quoted original. Returns a
+    locator dict — save the draft to Drafts and `drafts()` resolves it by a stable
+    message-id.
     """
-    return _mail.reply(message_id, reply_body, include_quote)
+    return _mail.reply(message_id, mailbox, reply_body, include_quote)
 
 
 @_read_tool
@@ -583,31 +596,37 @@ def send_mail(
 @_send_tool("mail")
 def reply_all(
     message_id: str,
+    mailbox: str,
     body: str,
     include_quote: bool = True,
     dry_run: bool = True,
 ) -> dict:
-    """Reply-all to an inbox message and SEND it — this leaves your machine.
+    """Reply-all to a message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
-    message_id is the RFC822 id from a mail read; Mail sets the threading headers
-    natively and the sending account is inherited from the original. Registered ONLY
-    when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for
-    Mail.
+    message_id is the RFC822 id from a mail read and mailbox is REQUIRED — the `folder`
+    value from the SAME search result, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
+    threading headers natively and the sending account is inherited from the original.
+    Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
+    Automation access for Mail.
 
     Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
     outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
     it — so a successful send still litters. Remove it with `drafts()` +
     `delete_draft()`. A dry run constructs nothing and so leaves nothing.
     """
-    return _mail.reply_all(message_id, body, include_quote, dry_run=dry_run)
+    return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
 @_send_tool("mail")
-def forward_mail(message_id: str, to: str, dry_run: bool = True) -> dict:
-    """Forward an inbox message and SEND it — this leaves your machine.
+def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -> dict:
+    """Forward a message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
+    mailbox is REQUIRED — the `folder` value from the SAME search result that gave you
+    message_id, passed back VERBATIM (an opaque `imap://<uuid>/<path>` token; the five
+    canonical names also work).
     The original message and its attachments are forwarded intact and unchanged.
     There is NO covering-note parameter: AppleScript cannot add text to a forward
     without destroying the original body and its attachments (device-verified) — if
@@ -620,7 +639,7 @@ def forward_mail(message_id: str, to: str, dry_run: bool = True) -> dict:
     it — so a successful send still litters. Remove it with `drafts()` +
     `delete_draft()`. A dry run constructs nothing and so leaves nothing.
     """
-    return _mail.forward(message_id, to, dry_run=dry_run)
+    return _mail.forward(message_id, mailbox, to, dry_run=dry_run)
 
 
 @_read_tool

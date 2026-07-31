@@ -8,6 +8,16 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **Mail's body/reply/forward/attachment tools reach any mailbox, not just the inbox**
+  (#146). `mail_search` reads every mailbox via the Envelope Index, but six tools were
+  hard-scoped to `messages of inbox`, so a filed message could be found and then not
+  opened, replied to or forwarded — `mail_body` answered *"no inbox message with that
+  message id"* for an id the project's own search had just produced. The scope was
+  correct when `mail_body` shipped (#62, reads were inbox-only) and was falsified by
+  #70/#75 widening search; nobody re-read the six copies of the premise. All of them now
+  resolve the mailbox through one shared AppleScript handler, and a test asserts none of
+  them names `inbox` itself.
+
 - **AppleScript's `missing value` no longer ships as a summary.** An absent property
   reaches the wire as the literal text `"missing value"`, which is truthy and so
   defeated every `or "(placeholder)"` fallback. Confirmed on real data: **115 of 115**
@@ -18,6 +28,16 @@ surface may still shift between minor versions.
 
 ### Changed
 
+- **BREAKING — `mailbox` is now a required argument** on `mail_body`, `mail_reply`,
+  `reply_all` and `forward_mail`, and `mail_attachments` accepts far more than before
+  (#146). Its value is the `folder` field of the `mail_search` result that produced the
+  message id, passed back **verbatim**: an opaque round-trip token
+  (`imap://<account-uuid>/%5BGmail%5D/Spam`), *not* a human-readable name. Requiring a
+  name would hand #144's percent-encoding mismatch back to the caller; the url also
+  carries the account, so same-named folders under two accounts cannot collide and a
+  Message-ID that genuinely lives in several mailboxes is unambiguous by construction.
+  The five canonical names (`inbox`/`sent`/`drafts`/`trash`/`junk`) still work as an
+  alias layer, so existing `mail_attachments` callers are unaffected.
 - **One deletion envelope (C5d).** `delete_draft`'s real-delete answer changes from
   `{"deleted": true, "id": "<mid>"}` to `{"deleted": "<mid>"}` — the shape
   `delete_event` and `delete_note` already spoke, now built by one

@@ -94,9 +94,10 @@ def test_send_mail_forwards_every_argument_to_the_adapter(monkeypatch):
 def test_reply_all_forwards_every_argument_to_the_adapter(monkeypatch):
     calls = {}
 
-    def record(message_id, body, include_quote, *, dry_run):
+    def record(message_id, mailbox, body, include_quote, *, dry_run):
         calls.update(
             message_id=message_id,
+            mailbox=mailbox,
             body=body,
             include_quote=include_quote,
             dry_run=dry_run,
@@ -104,9 +105,18 @@ def test_reply_all_forwards_every_argument_to_the_adapter(monkeypatch):
         return {"sent": True}
 
     monkeypatch.setattr(srv._mail, "reply_all", record)
-    srv.reply_all("<msg-1@x>", "REPLY-BODY-VALUE", include_quote=False, dry_run=False)
+    srv.reply_all(
+        "<msg-1@x>",
+        "imap://UUID/Leasing",
+        "REPLY-BODY-VALUE",
+        include_quote=False,
+        dry_run=False,
+    )
     assert calls == {
         "message_id": "<msg-1@x>",
+        # #146: the mailbox has to reach the adapter UNTOUCHED — it is an opaque
+        # round-trip token, so any normalizing in the tool layer would break it.
+        "mailbox": "imap://UUID/Leasing",
         "body": "REPLY-BODY-VALUE",
         "include_quote": False,
         "dry_run": False,
@@ -116,14 +126,17 @@ def test_reply_all_forwards_every_argument_to_the_adapter(monkeypatch):
 def test_forward_mail_forwards_every_argument_to_the_adapter(monkeypatch):
     calls = {}
 
-    def record(message_id, to, *, dry_run):
-        calls.update(message_id=message_id, to=to, dry_run=dry_run)
+    def record(message_id, mailbox, to, *, dry_run):
+        calls.update(message_id=message_id, mailbox=mailbox, to=to, dry_run=dry_run)
         return {"sent": True}
 
     monkeypatch.setattr(srv._mail, "forward", record)
-    srv.forward_mail("<msg-2@x>", "to2@example.com", dry_run=False)
+    srv.forward_mail(
+        "<msg-2@x>", "imap://UUID/Leasing", "to2@example.com", dry_run=False
+    )
     assert calls == {
         "message_id": "<msg-2@x>",
+        "mailbox": "imap://UUID/Leasing",  # #146: verbatim, see reply_all above
         "to": "to2@example.com",
         "dry_run": False,
     }

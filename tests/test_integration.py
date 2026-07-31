@@ -1343,7 +1343,9 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     if not mid:
         pytest.skip("no messages in this Mac's inbox")
     marker = "macos-apps-mcp-itest-reply-marker-do-not-send"
-    MailAdapter().reply(mid, marker, include_quote=True)
+    # "inbox" is the canonical-name alias for the mailbox this id was just read from
+    # (#146) — the url form is what a mail_search result hands back.
+    MailAdapter().reply(mid, "inbox", marker, include_quote=True)
     # assert the SPECIFIC reply draft exists as an UNSENT outgoing message (identify it
     # by our marker in the body, not a fragile count delta over a mailbox that may hold
     # other drafts). A sent message would have left the outgoing collection.

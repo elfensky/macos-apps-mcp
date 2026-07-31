@@ -110,7 +110,7 @@ def test_validate_mailbox_returns_canonical_lowercase():
 
 
 def test_validate_mailbox_unknown_raises():
-    with pytest.raises(ValueError, match="unknown system mailbox"):
+    with pytest.raises(ValueError, match="unknown mailbox"):
         _validate_mailbox("archive")
 
 
@@ -157,15 +157,15 @@ def test_get_body_resolves_and_bounds(monkeypatch):
         return "Hello\x00 body"
 
     monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", fake)
-    out = MailAdapter().get_body("<abc@host>")
+    out = MailAdapter().get_body("<abc@host>", "inbox")
     assert out == "Hello body"  # NUL stripped by clean_body
     assert seen["call"][0] is _BODY
-    assert seen["call"][1] == ("abc@host",)  # brackets stripped, bare id via argv
+    assert seen["call"][1] == ("abc@host", "", "inbox")  # bare id + mailbox via argv
 
 
 def test_get_body_empty_id_raises():
     with pytest.raises(ValueError, match="message id"):
-        MailAdapter().get_body("   ")
+        MailAdapter().get_body("   ", "inbox")
 
 
 def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
@@ -177,7 +177,7 @@ def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
         "macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
     )
     with pytest.raises(NativeError, match="not available locally"):
-        MailAdapter().get_body("abc@host")
+        MailAdapter().get_body("abc@host", "inbox")
 
 
 def test_get_body_huge_body_overflows(monkeypatch):
@@ -191,7 +191,7 @@ def test_get_body_huge_body_overflows(monkeypatch):
         lambda *a: "z" * (BODY_HARD_MAX + 1),
     )
     with pytest.raises(OutputOverflow):
-        MailAdapter().get_body("abc@host")
+        MailAdapter().get_body("abc@host", "inbox")
 
 
 def test_create_draft_never_sends():
@@ -335,9 +335,10 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments("drafts", "Logo")
-    # only query, cap, and canonical mailbox travel via argv now — no localized
-    # candidates (the unified `drafts mailbox` accessor is locale-independent)
-    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "drafts")
+    # query, cap, and the (account, path) mailbox pair travel via argv — no localized
+    # candidates (the unified `drafts mailbox` accessor is locale-independent), and an
+    # empty account id is what selects that unified branch in the shared resolver
+    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "", "drafts")
     assert len(out) == mail.MAX_MAILS
 
 
@@ -361,7 +362,7 @@ def test_list_attachments_unknown_mailbox_raises():
 
     from macos_apps_mcp.adapters.mail import MailAdapter
 
-    with pytest.raises(ValueError, match="unknown system mailbox"):
+    with pytest.raises(ValueError, match="unknown mailbox"):
         MailAdapter().list_attachments("nope", "x")
 
 
@@ -398,7 +399,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
         return f"Jane <j@x.com>\x1f2026-07-01\x1f{huge}"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().reply("<abc@x>", "thanks", include_quote=True)
+    out = mail.MailAdapter().reply("<abc@x>", "inbox", "thanks", include_quote=True)
     assert out["created"] is True
 
 
@@ -500,7 +501,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
         return "Jane\x07 <j@x.com>\x1f2026-07-01\x1foriginal body"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     header_line = next(
         line for line in bodies[0].splitlines() if line.startswith("On ")
     )
@@ -525,7 +526,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
         return ""
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
     # both scripts ran: _ORIGINAL then _REPLY
@@ -553,7 +554,7 @@ def test_reply_without_quote_omits_original(monkeypatch):
         raise AssertionError("_ORIGINAL should not run when include_quote=False")
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    mail.MailAdapter().reply("<abc@x>", "just this", include_quote=False)
+    mail.MailAdapter().reply("<abc@x>", "inbox", "just this", include_quote=False)
     assert bodies and bodies[0] == "just this"
     assert ">" not in bodies[0]
 
@@ -574,7 +575,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
         return "missing value"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().reply("<abc@x>", "my reply", include_quote=True)
+    out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert bodies[0] == "my reply"  # no quote appended
 
@@ -591,7 +592,7 @@ def test_reply_cleans_up_tempfile(monkeypatch):
         return ""
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    mail.MailAdapter().reply("<abc@x>", "body", include_quote=False)
+    mail.MailAdapter().reply("<abc@x>", "inbox", "body", include_quote=False)
     assert paths and not os.path.exists(paths[0])
 
 
@@ -601,7 +602,7 @@ def test_reply_empty_id_raises():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
     with pytest.raises(ValueError, match="message"):
-        MailAdapter().reply("", "body")
+        MailAdapter().reply("", "inbox", "body")
 
 
 def test_reply_empty_body_raises():
@@ -610,7 +611,7 @@ def test_reply_empty_body_raises():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
     with pytest.raises(ValueError, match="reply_body"):
-        MailAdapter().reply("<abc@x>", "  ")
+        MailAdapter().reply("<abc@x>", "inbox", "  ")
 
 
 def test_reply_never_sends():
@@ -994,7 +995,7 @@ def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
         raise AssertionError(f"dry run must not call {script!r} (the send script)")
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good")
+    out = mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good")
     assert out == {
         "dry_run": True,
         "would_send": {
@@ -1029,7 +1030,9 @@ def test_reply_all_sends_with_quote(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     monkeypatch.setattr(mail, "body_file", fake_body_file)
-    out = mail.MailAdapter().reply_all("<orig@x>", "Sounds good", dry_run=False)
+    out = mail.MailAdapter().reply_all(
+        "<orig@x>", "inbox", "Sounds good", dry_run=False
+    )
     assert out == {
         "sent": True,
         "reply_to": "<orig@x>",
@@ -1039,7 +1042,7 @@ def test_reply_all_sends_with_quote(monkeypatch):
     assert "note" not in out  # zero pending: no caveat needed
     assert bodies["text"].startswith("Sounds good")
     assert "> Original text" in bodies["text"]
-    assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body")
+    assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body", "", "inbox")
     assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
@@ -1054,7 +1057,7 @@ def test_reply_all_reads_body_through_shared_handler():
 
 def test_reply_all_rejects_empty_body():
     with pytest.raises(ValueError, match="non-empty"):
-        mail.MailAdapter().reply_all("<orig@x>", "   ", dry_run=False)
+        mail.MailAdapter().reply_all("<orig@x>", "inbox", "   ", dry_run=False)
 
 
 def test_forward_dry_run_reports_recipients(monkeypatch):
@@ -1062,7 +1065,7 @@ def test_forward_dry_run_reports_recipients(monkeypatch):
         raise AssertionError("dry run must not call osascript")
 
     monkeypatch.setattr(mail, "run_osascript", boom)
-    out = mail.MailAdapter().forward("<orig@x>", "a@b.com, c@d.com")
+    out = mail.MailAdapter().forward("<orig@x>", "inbox", "a@b.com, c@d.com")
     assert out["dry_run"] is True
     assert out["would_send"] == {
         "to": ["a@b.com", "c@d.com"],
@@ -1084,19 +1087,19 @@ def test_forward_sends_via_argv(monkeypatch):
         return "sent"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
-    out = mail.MailAdapter().forward("<orig@x>", "a@b.com", dry_run=False)
+    out = mail.MailAdapter().forward("<orig@x>", "inbox", "a@b.com", dry_run=False)
     assert out["sent"] is True
     assert out["to"] == ["a@b.com"]
     assert out["forwarding"] == "<orig@x>"
     assert out["outbox_pending"] == 2
     assert "Outbox" in out["note"]  # non-zero pending: caveat included
-    assert seen[mail._FORWARD] == ("orig@x", "a@b.com")
+    assert seen[mail._FORWARD] == ("orig@x", "a@b.com", "", "inbox")
     assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def test_forward_rejects_missing_recipient():
     with pytest.raises(ValueError, match="recipient"):
-        mail.MailAdapter().forward("<orig@x>", "", dry_run=False)
+        mail.MailAdapter().forward("<orig@x>", "inbox", "", dry_run=False)
 
 
 def test_forward_script_never_touches_content():
@@ -1470,3 +1473,219 @@ def test_parse_search_absent_subject_falls_through_to_sender():
 def test_parse_search_absent_subject_and_sender_use_the_placeholder():
     raw = f"<mid@ex.com>{US}missing value{US}missing value{RS}"
     assert _parse_search_results(raw)[0].summary == "(no subject)"
+
+
+# --- mailbox scope: any mailbox, not just the inbox (#146) ----------------------------
+#
+# `mail_search` reads every mailbox via the Envelope Index, but the body/reply/forward/
+# attachment scripts were hard-scoped to `messages of inbox` — so a filed message could
+# be found and then not opened. The fix: every one of them takes a `mailbox` argument,
+# the `folder` value from a search result passed back VERBATIM (an opaque round-trip
+# token, NOT a name — requiring a name hands #144's percent-encoding mismatch back to
+# the model). `_mailbox_args` is the inverse of `_resolve_mailbox`: url -> the
+# (account-id, decoded path) pair the shared `mailboxFor` AppleScript handler needs.
+
+_GMAIL_UUID = "5936B2CE-D3DC-4072-A81B-E79E6DA94B15"
+_SPAM_URL = f"imap://{_GMAIL_UUID}/%5BGmail%5D/Spam"
+
+
+def test_mailbox_args_decodes_the_url_into_account_and_path():
+    # device-verified: `mailbox "[Gmail]/Spam" of account …` resolves; the ENCODED
+    # spelling ("%5BGmail%5D/Spam") does not — AppleScript wants the decoded path.
+    assert mail._mailbox_args(_SPAM_URL) == (_GMAIL_UUID, "[Gmail]/Spam")
+
+
+def test_mailbox_args_decodes_spaces_and_leaves_literal_ampersands():
+    # live sample: Mail encodes the space but NOT the "&" (Social%20&%20SEO), which is
+    # exactly why the url can't be reproduced with quote() and must be round-tripped.
+    url = f"imap://{_GMAIL_UUID}/Social%20&%20SEO"
+    assert mail._mailbox_args(url) == (_GMAIL_UUID, "Social & SEO")
+
+
+def test_mailbox_args_maps_the_local_store_to_the_account_less_sentinel():
+    # On My Mac mailboxes hang off the application, not an account — Mail's `every
+    # account` never lists that store, so its UUID would never resolve.
+    url = "local://A2025935-B0B2-4A77-9003-68EF6E541361/Outbox"
+    assert mail._mailbox_args(url) == ("local", "Outbox")
+
+
+def test_mailbox_args_still_accepts_the_five_special_names():
+    # the alias layer: mail_attachments' existing vocabulary keeps working, and an
+    # empty account id selects Mail's unified accessors in the handler.
+    for canonical in ("inbox", "sent", "drafts", "trash", "junk"):
+        assert mail._mailbox_args(f"  {canonical.upper()} ") == ("", canonical)
+
+
+def test_mailbox_args_rejects_an_empty_mailbox():
+    with pytest.raises(ValueError, match="mailbox"):
+        mail._mailbox_args("   ")
+
+
+def test_mailbox_args_rejects_a_bare_name_and_says_where_to_get_one():
+    # a human-readable folder name is exactly the thing that must NOT be accepted —
+    # the error has to point at the `folder` field of a search result.
+    with pytest.raises(ValueError) as exc:
+        mail._mailbox_args("Leasing")
+    assert "folder" in str(exc.value)
+
+
+def test_mailbox_args_rejects_a_url_with_no_path():
+    with pytest.raises(ValueError, match="names no mailbox"):
+        mail._mailbox_args(f"imap://{_GMAIL_UUID}/")
+
+
+def test_mailbox_args_rejects_a_url_with_no_account():
+    with pytest.raises(ValueError, match="no account"):
+        mail._mailbox_args("imap:///Leasing")
+
+
+_MAILBOX_SCOPED_SCRIPTS = (
+    "_ATTACHMENTS",
+    "_BODY",
+    "_FORWARD",
+    "_ORIGINAL",
+    "_REPLY",
+    "_REPLY_ALL",
+    "_REPLY_ALL_RECIPIENTS",
+)
+
+
+@pytest.mark.parametrize("name", _MAILBOX_SCOPED_SCRIPTS)
+def test_mailbox_scoped_scripts_resolve_the_mailbox_instead_of_hard_coding_inbox(name):
+    """The guard that stops #146 recurring. Each script that addresses a message by id
+    must take its mailbox from argv through the ONE shared resolver — not name `inbox`
+    itself. This is the assertion whose absence let the #62 inbox scope survive #70/#75
+    widening search to every mailbox."""
+    script = getattr(mail, name)
+    assert script.count("on mailboxFor(") == 1  # composes the shared resolver, once
+    assert "my mailboxFor(" in script  # ...and actually calls it
+    assert "messages of inbox" not in script  # #146: no hard-coded inbox scope
+
+
+def test_mailbox_resolver_is_the_only_place_a_mailbox_accessor_is_named():
+    # the unified accessors (`sent mailbox`/`drafts mailbox`/…) live in one handler, so
+    # the alias layer can't drift apart across seven scripts the way the scope did.
+    for name in _MAILBOX_SCOPED_SCRIPTS:
+        script = getattr(mail, name)
+        body = script.replace(mail._MAILBOX_REF, "")
+        assert "sent mailbox" not in body
+        assert "junk mailbox" not in body
+
+
+def test_get_body_passes_the_mailbox_through_argv(monkeypatch):
+    seen = {}
+
+    def fake(script, *a):
+        seen["call"] = (script, a)
+        return "Filed body"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().get_body("<abc@host>", _SPAM_URL)
+    assert out == "Filed body"
+    assert seen["call"][1] == ("abc@host", _GMAIL_UUID, "[Gmail]/Spam")
+
+
+def test_get_body_rejects_a_missing_mailbox():
+    with pytest.raises(ValueError, match="mailbox"):
+        mail.MailAdapter().get_body("<abc@host>", "")
+
+
+def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
+    # the quote read (_ORIGINAL) and the draft build (_REPLY) must target the SAME
+    # mailbox — a reply that quotes nothing because the original wasn't in the inbox
+    # is the silent half of this bug.
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail._ORIGINAL:
+            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        return ""
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail, "body_file", lambda text: nullcontext("/tmp/fake-body"))
+    mail.MailAdapter().reply("<orig@x>", _SPAM_URL, "Sounds good")
+    assert seen[mail._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+    assert seen[mail._REPLY] == (
+        "orig@x",
+        "/tmp/fake-body",
+        _GMAIL_UUID,
+        "[Gmail]/Spam",
+    )
+
+
+def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
+    def fake(script, *argv):
+        assert script is mail._REPLY_ALL_RECIPIENTS
+        assert argv == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+        return f"to{US}alice@corp.com{RS}sender{US}orig@corp.com{RS}"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "Sounds good")
+    assert out["would_send"]["to"] == ["alice@corp.com"]
+
+
+def test_reply_all_send_passes_the_mailbox(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail._ORIGINAL:
+            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        if script is mail._OUTBOX_COUNT:
+            return "0"
+        return "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail, "body_file", lambda text: nullcontext("/tmp/fake-body"))
+    mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "ok", dry_run=False)
+    assert seen[mail._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+    assert seen[mail._REPLY_ALL] == (
+        "orig@x",
+        "/tmp/fake-body",
+        _GMAIL_UUID,
+        "[Gmail]/Spam",
+    )
+
+
+def test_forward_passes_the_mailbox(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return "0" if script is mail._OUTBOX_COUNT else "sent"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    mail.MailAdapter().forward("<orig@x>", _SPAM_URL, "a@b.com", dry_run=False)
+    assert seen[mail._FORWARD] == (
+        "orig@x",
+        "a@b.com",
+        _GMAIL_UUID,
+        "[Gmail]/Spam",
+    )
+
+
+def test_forward_dry_run_still_makes_no_native_call(monkeypatch):
+    # the mailbox argument must not tempt the dry run into a resolve-it-first call:
+    # constructing an outgoing message is what strands an autosaved draft (#133).
+    def boom(*a, **k):
+        raise AssertionError("dry run must not call osascript")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    out = mail.MailAdapter().forward("<orig@x>", _SPAM_URL, "a@b.com")
+    assert out["dry_run"] is True
+
+
+def test_list_attachments_reaches_a_user_folder(monkeypatch):
+    # #45 gave mail_attachments a mailbox, but only the five special ones — a user
+    # folder was unreachable there too.
+    seen = {}
+
+    def fake(script, *args):
+        seen["args"] = args
+        return "Contract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = mail.MailAdapter().list_attachments(f"imap://{_GMAIL_UUID}/Backup")
+    assert out[0]["attachments"][0]["name"] == "deal.pdf"
+    assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup")
