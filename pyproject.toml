@@ -52,7 +52,7 @@ macos-apps-mcp = "macos_apps_mcp:main"
 dev = [
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
-    "ruff>=0.15,<0.16",
+    "ruff>=0.15,<0.17",
 ]
 
 [build-system]
