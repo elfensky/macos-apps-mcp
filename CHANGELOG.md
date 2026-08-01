@@ -9,11 +9,11 @@ surface may still shift between minor versions.
 ### Changed
 
 - **Repo conformance sweep.** Added `dependabot.yml` (pip + github-actions, minor/patch
-  grouped), a version-bump gate workflow (advisory, PR-triggered), a `gitleaks` job in `ci.yml`
-  (its own `ubuntu-latest` job since the `check` job runs on macOS), and `.python-version`
-  (3.14). `AGENTS.md` is now the real agent file with `CLAUDE.md` symlinked to it; `graphify-out/`
-  is generated locally and git-ignored. Dependabot security updates and secret-scanning push
-  protection enabled repo-side. No version bump — notes accumulate under `[Unreleased]`.
+  grouped), a version-bump gate workflow (advisory, PR-triggered), and `.python-version` (3.14).
+  `AGENTS.md` is now the real agent file with `CLAUDE.md` symlinked to it; `graphify-out/` is
+  generated locally and git-ignored. Dependabot security updates and GitHub-native secret scanning
+  + push protection enabled repo-side (no third-party gitleaks). No version bump — notes accumulate
+  under `[Unreleased]`.
 
 ### Fixed
 
