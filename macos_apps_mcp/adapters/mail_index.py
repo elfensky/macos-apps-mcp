@@ -81,6 +81,21 @@ def _deeplink(message_id: str) -> str:
     return f"message://%3C{quote(mid, safe='@')}%3E"
 
 
+def account_of(mailbox_url: str) -> str | None:
+    """The account id embedded in a mailbox url — ``<scheme>://<UUID>/<path>`` (#155).
+
+    The account is already inside the token every mail read returns, but that token is
+    documented as opaque and a model must not be doing string surgery on it to answer
+    "which inbox is this?". Lifting it into its own field costs no query and launches
+    nothing; ``mail_overview`` reports the same id next to its display name, so one call
+    gives the caller the whole map."""
+    _, sep, rest = mailbox_url.partition("://")
+    if not sep:
+        return None
+    uuid, _, _ = rest.partition("/")
+    return uuid or None
+
+
 def row_to_pointer(row) -> Pointer | None:
     """Map one joined Envelope Index row → Pointer. None when the message has no RFC822
     Message-ID (no stable citation — same rule the adapter documents for header-less
@@ -88,11 +103,13 @@ def row_to_pointer(row) -> Pointer | None:
     mid = row["message_id_header"]
     if not mid or not str(mid).strip():
         return None
+    url = row["mailbox_url"]
     return Pointer(
         id=str(mid),
         summary=row["subject"] or "",
         deeplink=_deeplink(str(mid)),
-        folder=row["mailbox_url"],
+        folder=url,
+        account=account_of(url),
     )
 
 

@@ -167,9 +167,14 @@ class Pointer:
     summary: str
     deeplink: str
     # notes reads (notes_all, search): "Account / Folder"; create_note: the requested
-    # bare folder name; None elsewhere
+    # bare folder name; mail reads: the round-trip mailbox token; None elsewhere
     folder: str | None = None
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
+    # mail reads: the owning account's id — the uuid segment of ``folder``'s url, so it
+    # costs no extra query and no Mail launch (#155). Deliberately UNSET, never guessed,
+    # on the reads that go through Mail's unified cross-account accessors: there the
+    # account genuinely is unknown. ``mail_overview`` maps it to a display name.
+    account: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         """The wire shape: required fields always; optional fields only when set.
@@ -179,6 +184,8 @@ class Pointer:
             d["folder"] = self.folder
         if self.reason is not None:
             d["reason"] = self.reason
+        if self.account is not None:
+            d["account"] = self.account
         return d
 
 

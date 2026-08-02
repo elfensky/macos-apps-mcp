@@ -368,8 +368,10 @@ def contacts(name: str) -> list[dict[str, str]]:
 @_read_tool
 def mail(query: str) -> list[dict[str, str]]:
     """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
-    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL.
-    Read-only; needs Automation access for Mail. Bodies are never fetched."""
+    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL,
+    folder = "inbox" (this scans the inbox only) — pass that folder straight to
+    `mail_body`. Prefer `mail_search`, which reaches every mailbox and reports the
+    account. Read-only; needs Automation access for Mail. Bodies are never fetched."""
     return [p.as_dict() for p in _mail.get_pointers(query)]
 
 
@@ -398,7 +400,10 @@ def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
     (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
     confirm an attachment landed on a DRAFT before it's saved (a freshly opened compose
     window has no stable id yet — once saved to Drafts it does, see drafts()). Returns
-    [{summary, attachments: [{name, size, downloaded}]}], bounded.
+    [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}], bounded.
+    `id`/`deeplink` identify the carrying message and `folder` echoes the mailbox you
+    passed, so a row is actionable on its own. An unsaved draft has no message-id yet:
+    its `id` is "" and it carries no `deeplink` — it is still listed.
     """
     return _mail.list_attachments(mailbox, query)
 
@@ -408,7 +413,11 @@ def mail_needs_response() -> list[dict[str, str]]:
     """Inbox messages that likely need your response, ranked with a machine-readable
     `reason` (flagged / unread-direct / unanswered-direct). Heuristic over headers +
     message properties — no body is read; keeps direct-addressed, not-yet-replied mail.
-    Read-only; needs Automation access for Mail. Bounded to 25."""
+    Each pointer carries folder = "inbox", so an id from here goes straight into
+    `mail_body`/`mail_reply` with no second lookup. No `account`: this reads Mail's
+    unified inbox across every account, so the owning account is genuinely unknown —
+    use `mail_search` when you need it. Read-only; needs Automation access for Mail.
+    Bounded to 25."""
     return [p.as_dict() for p in _mail.get_needs_response()]
 
 
@@ -416,8 +425,10 @@ def mail_needs_response() -> list[dict[str, str]]:
 def mail_awaiting_reply(days: int = 3) -> list[dict[str, str]]:
     """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
     oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
-    group send is cleared once any recipient replies. Read-only; needs Automation access
-    for Mail. Bounded to 25."""
+    group send is cleared once any recipient replies. Each pointer carries
+    folder = "sent" — ready for `mail_body`/`reply_all`; no `account` (unified accessor,
+    see mail_needs_response). Read-only; needs Automation access for Mail.
+    Bounded to 25."""
     return [p.as_dict() for p in _mail.get_awaiting_reply(days)]
 
 
@@ -453,7 +464,10 @@ def mail_search(
     it isn't running (an unknown name raises rather than guessing). Every other filter
     reads the index at rest and never launches Mail.
     Read-only; needs Full Disk Access, plus Automation access for Mail on the
-    account-name path and the AppleScript fallback."""
+    account-name path and the AppleScript fallback.
+    Each Pointer carries `folder` (the round-trip mailbox token) and `account` (the
+    owning account's uuid — map it to a name with one `mail_overview` call), so a hit
+    is complete on its own: no second read to work out where it lives."""
     return [
         p.as_dict()
         for p in _mail.search(
@@ -487,9 +501,13 @@ def mail_thread(id: str, limit: int = 100) -> list[dict[str, str]]:
 @_read_tool
 def mail_overview() -> list[dict]:
     """Every mailbox with its message total and unread count, unread-first — the triage
-    entry point ("what's unread where?"). Includes Junk/Trash/All Mail so you can see
-    what they are rather than having them silently filtered. Counts are computed live,
-    not read from Mail's own stored counters, which go stale, and each message is
+    entry point ("what's unread where?"). Rows are {account, account_id, mailbox,
+    folder, total, unread}: `account_id` is the same uuid every mail Pointer reports as
+    `account`, so ONE call here is the whole uuid -> name map; `folder` is the exact
+    mailbox url, so a mailbox picked here round-trips into `mail_search`/`mail_body`
+    without going back through name matching. Includes Junk/Trash/All Mail so you can
+    see what they are rather than having them silently filtered. Counts are computed
+    live, not read from Mail's own stored counters, which go stale, and each message is
     counted ONCE even when it is filed in the same mailbox twice.
     Account NAMES are looked up through Mail, so this tool does contact Mail (launching
     it if it isn't running); when Mail is unreachable the account UUID stands in and
@@ -544,8 +562,10 @@ def mail_reply(
 @_read_tool
 def drafts() -> list[dict[str, str]]:
     """List Mail drafts as pointers (id + "subject — to recipient"), newest mailbox
-    order, bounded. The id is the RFC822 message-id — pass it to delete_draft.
-    Read-only; needs Automation access for Mail."""
+    order, bounded. The id is the RFC822 message-id — pass it to delete_draft. Each
+    pointer carries folder = "drafts", so it also round-trips into `mail_attachments`.
+    A compose window Mail has not autosaved yet (~10-15s) is absent here — wait, do not
+    retry the create. Read-only; needs Automation access for Mail."""
     return [p.as_dict() for p in _mail.list_drafts()]
 
 

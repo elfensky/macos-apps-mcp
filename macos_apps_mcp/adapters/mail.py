@@ -1041,7 +1041,15 @@ on run argv
     repeat with m in msgs
       set c to c + 1
       if c > maxN then exit repeat
-      set out to out & my stripFraming(subject of m)
+      -- #155: the id first, so an attachment row is addressable. A draft that Mail has
+      -- not autosaved yet has no message id and raises here — that is expected, not an
+      -- error: it degrades to "" and the row still lists its attachments, which is the
+      -- documented reason this tool works on Drafts at all.
+      set mid to ""
+      try
+        set mid to (message id of m) as text
+      end try
+      set out to out & mid & us & my stripFraming(subject of m)
       repeat with a in (mail attachments of m)
         set aSize to ""
         try
@@ -1064,11 +1072,17 @@ end run"""
 
 def _parse_attachments(raw: str) -> list[dict]:
     """Parse the _ATTACHMENTS payload: RS-separated records, each US-separated as
-    subject then (name, size, downloaded) triples. Malformed/partial trailing records
-    are skipped."""
+    message-id, subject, then (name, size, downloaded) triples. Malformed/partial
+    trailing records are skipped.
+
+    The id (#155) makes a row addressable — #81 (save an attachment to disk) has nothing
+    to name a file by without it, and "the attachment on THIS message" used to cost a
+    whole-mailbox scan. A blank id is kept, not dropped: an unsaved draft has no
+    Message-ID yet, and listing its attachments is this tool's documented job. `folder`
+    is filled in by the caller, which knows the mailbox it was asked about."""
     recs = parse_framed(
         raw,
-        [Field("summary", clean_summary)],
+        [Field("id", str.strip), Field("summary", clean_summary)],
         repeat=[
             Field("name", clean_summary, required=True),
             Field("size", int_or_none),
@@ -1078,6 +1092,10 @@ def _parse_attachments(raw: str) -> list[dict]:
     )
     for r in recs:
         r["summary"] = r["summary"] or "(no subject)"
+        # Only a real id yields a deeplink: message://%3C%3E resolves to nothing, and a
+        # citation that opens an empty window is worse than an absent one.
+        if r["id"]:
+            r["deeplink"] = _deeplink(r["id"])
     return recs
 
 
@@ -1248,7 +1266,14 @@ def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Po
     messages; keeps those directly addressed to the user (my_addrs ∩ to_addrs). If
     my_addrs is empty (extraction failed) it degrades to FLAGGED-ONLY rather than
     flooding the inbox. Reasons (stable): flagged > unread-direct > unanswered-direct;
-    recency (smallest secs_ago) breaks ties within a tier. Bounded to MAX_MAILS."""
+    recency (smallest secs_ago) breaks ties within a tier. Bounded to MAX_MAILS.
+
+    ``folder="inbox"`` (#155): the triage scan runs against Mail's unified `inbox`, so
+    "inbox" is both the truth and one of the five canonical names the id-taking tools
+    accept. Without it this tool — the documented triage ENTRY POINT — handed back ids
+    that ``mail_body``/``mail_reply`` could not take, since both require a mailbox they
+    said would come from the read. ``account`` stays unset: a unified accessor spans
+    every account, and guessing one would be worse than admitting we don't know."""
     out: list[tuple[int, int, Pointer]] = []
     for r in records:
         if r["was_replied_to"]:
@@ -1268,6 +1293,7 @@ def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Po
             id=r["id"],
             summary=clean_summary(_summary(r["subject"], r["sender"])),
             deeplink=_deeplink(r["id"]),
+            folder="inbox",
             reason=reason,
         )
         out.append((tier, r["secs_ago"], p))
@@ -1300,7 +1326,13 @@ def _classify_awaiting_reply(
     (real In-Reply-To/References threading — accurate, no fuzzy subject matching).
     Reason: stable 'awaiting-reply'. Sorted oldest-sent-first (most overdue). Bounded
     to MAX_MAILS. A group-thread send is cleared if ANY recipient's reply cites it
-    (documented)."""
+    (documented).
+
+    ``folder="sent"`` (#155): the scan runs through Mail's unified `sent mailbox`
+    accessor, so "sent" is the literal truth AND one of the five canonical names the
+    id-taking tools accept — a pointer from here now reaches ``mail_body`` unaided.
+    ``account`` stays unset: a unified accessor spans every account, so there is nothing
+    honest to put there."""
     cutoff = days * 86400
     out: list[tuple[int, Pointer]] = []
     for r in sent:
@@ -1313,6 +1345,7 @@ def _classify_awaiting_reply(
             id=r["id"],
             summary=clean_summary(f"{r['subject']} — to {to}"),
             deeplink=_deeplink(r["id"]),
+            folder="sent",
             reason="awaiting-reply",
         )
         out.append((r["secs_ago"], p))
@@ -1323,7 +1356,12 @@ def _classify_awaiting_reply(
 def _parse_search_results(raw: str) -> list[Pointer]:
     """Parse the _SEARCH payload: US/RS-framed (message id, subject, sender) records.
     Records with no stable message-id are skipped — a message without a Message-ID
-    header has no resolvable citation ("missing value"/"" on the wire). #61 review."""
+    header has no resolvable citation ("missing value"/"" on the wire). #61 review.
+
+    ``folder="inbox"`` (#155): this script scans the inbox and nothing else, so the
+    round-trip token is knowable without asking. Before this, an id from the fallback
+    path — or from ``mail()`` — could not be handed to ``mail_body``, whose docstring
+    promises the folder comes "from the SAME search result"."""
     recs = parse_framed(
         raw,
         [
@@ -1338,6 +1376,7 @@ def _parse_search_results(raw: str) -> list[Pointer]:
             id=r["id"],
             summary=clean_summary(_summary(r["subject"], r["sender"])),
             deeplink=_deeplink(r["id"]),
+            folder="inbox",
         )
         for r in recs
     ]
@@ -1346,7 +1385,10 @@ def _parse_search_results(raw: str) -> list[Pointer]:
 def _parse_draft_records(raw: str) -> list[Pointer]:
     """Parse the _DRAFTS payload: US-framed (message id, subject, first recipient)
     records. Records with no stable message-id are skipped — same rule as the inbox
-    reads (#61): never emit a non-resolvable id."""
+    reads (#61): never emit a non-resolvable id.
+
+    ``folder="drafts"`` (#155) — the canonical name, so a draft pointer round-trips
+    into ``mail_attachments`` (confirming an attachment landed) without guessing."""
     recs = parse_framed(
         raw,
         [
@@ -1363,6 +1405,7 @@ def _parse_draft_records(raw: str) -> list[Pointer]:
                 _summary(r["subject"], f"to {r['rcpt']}" if r["rcpt"] else "")
             ),
             deeplink=_deeplink(r["id"]),
+            folder="drafts",
         )
         for r in recs
     ]
@@ -1746,7 +1789,14 @@ class MailAdapter:
         raw = run_osascript(
             _ATTACHMENTS, query.strip(), str(MAX_MAILS), *_mailbox_args(mailbox)
         )
-        return _parse_attachments(raw)[:MAX_MAILS]
+        recs = _parse_attachments(raw)[:MAX_MAILS]
+        # #155: hand back the mailbox the caller passed, VERBATIM. It is already the
+        # round-trip token every id-taking tool wants, and echoing it means a row from
+        # here is complete on its own — id + deeplink + folder — instead of only being
+        # usable by a caller who still remembers what it asked for.
+        for r in recs:
+            r["folder"] = mailbox
+        return recs
 
     def get_needs_response(self) -> list[Pointer]:
         """Inbox messages that likely need the user's response, ranked with a reason
@@ -1943,6 +1993,14 @@ class MailAdapter:
         configured mail accounts, device-verified 2026-07-27 — so its `local://` scheme
         is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
         permanent for that store, not a Mail-unreachable artefact.
+
+        `account_id` and `folder` are the machine-readable halves (#155). Every mail
+        Pointer now carries the same `account` uuid and the same `folder` url, so ONE
+        call here is the whole uuid → display-name map — which is what lets the other
+        reads report an account without ever contacting Mail. `mailbox` stays the
+        decoded human name (the one `mail_search(mailbox=…)` matches); `folder` is the
+        exact url, so a mailbox chosen here round-trips into a search without going
+        back through substring matching.
         """
         rows = mail_index.query_overview_rows()
         names = _account_map()
@@ -1958,7 +2016,9 @@ class MailAdapter:
             out.append(
                 {
                     "account": account,
+                    "account_id": uuid,
                     "mailbox": unquote(box),
+                    "folder": url,
                     "total": r["total"],
                     "unread": r["unread"],
                 }

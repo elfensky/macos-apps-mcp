@@ -305,8 +305,9 @@ def test_parse_attachments_groups_by_message():
 
     us, rs = "\x1f", "\x1e"
     raw = (
-        f"Logo files{us}LOGO.zip{us}1200000{us}true{us}spec.pdf{us}0{us}false{rs}"
-        f"No attach subject{rs}"
+        f"<a@x>{us}Logo files{us}LOGO.zip{us}1200000{us}true"
+        f"{us}spec.pdf{us}0{us}false{rs}"
+        f"{us}No attach subject{rs}"
     )
     out = _parse_attachments(raw)
     assert out[0]["summary"] == "Logo files"
@@ -316,6 +317,12 @@ def test_parse_attachments_groups_by_message():
     ]
     assert out[1]["summary"] == "No attach subject"
     assert out[1]["attachments"] == []
+    # #155: the row is addressable — id + deeplink — and an unsaved draft (blank id) is
+    # still listed rather than dropped, but gets NO deeplink to a message that has none.
+    assert out[0]["id"] == "<a@x>"
+    assert out[0]["deeplink"] == "message://%3Ca@x%3E"
+    assert out[1]["id"] == ""
+    assert "deeplink" not in out[1]
 
 
 def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
@@ -328,7 +335,7 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
         captured["args"] = args
         # more records than MAX_MAILS — the cap must actually bite
         records = "".join(
-            f"Logo files {i}\x1fLOGO.zip\x1f100\x1ftrue\x1e"
+            f"<m{i}@x>\x1fLogo files {i}\x1fLOGO.zip\x1f100\x1ftrue\x1e"
             for i in range(mail.MAX_MAILS + 5)
         )
         return records
@@ -347,14 +354,17 @@ def test_list_attachments_empty_query_lists_all(monkeypatch):
 
     def fake(script, *args):
         return (
-            "First\x1fa.pdf\x1f10\x1ftrue\x1e"
-            "Second\x1fb.pdf\x1f20\x1ffalse\x1e"
-            "Third\x1e"
+            "<1@x>\x1fFirst\x1fa.pdf\x1f10\x1ftrue\x1e"
+            "<2@x>\x1fSecond\x1fb.pdf\x1f20\x1ffalse\x1e"
+            "<3@x>\x1fThird\x1e"
         )
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments("inbox")
     assert [r["summary"] for r in out] == ["First", "Second", "Third"]
+    # #155: the mailbox the caller passed is echoed back, so each row round-trips on its
+    # own into mail_body / a future save-attachment tool.
+    assert {r["folder"] for r in out} == {"inbox"}
 
 
 def test_list_attachments_unknown_mailbox_raises():
@@ -1683,9 +1693,87 @@ def test_list_attachments_reaches_a_user_folder(monkeypatch):
 
     def fake(script, *args):
         seen["args"] = args
-        return "Contract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
+        return "<c@x>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments(f"imap://{_GMAIL_UUID}/Backup")
     assert out[0]["attachments"][0]["name"] == "deal.pdf"
     assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup")
+
+
+# --- the addressing triple: id + folder + account (#155) ------------------------------
+
+
+def test_applescript_path_pointers_carry_their_canonical_folder(monkeypatch):
+    # The whole point: an id from ANY read must reach mail_body, which requires a
+    # mailbox and documents it as coming "from the SAME search result". Before #155
+    # only the indexed path emitted `folder`, so the triage entry point handed back
+    # ids that were dead on arrival.
+    from macos_apps_mcp.adapters.mail import _parse_draft_records
+
+    assert _parse_search_results(f"<a@x>{US}Subject{US}her@x{RS}")[0].folder == "inbox"
+    assert _parse_draft_records(f"<d@x>{US}Draft{US}to@x{RS}")[0].folder == "drafts"
+
+
+def test_needs_response_and_awaiting_reply_carry_a_folder(monkeypatch):
+    from macos_apps_mcp.adapters.mail import (
+        _classify_awaiting_reply,
+        _classify_needs_response,
+    )
+
+    needs = _classify_needs_response(
+        [
+            {
+                "id": "<n@x>",
+                "subject": "Ping",
+                "sender": "her@x",
+                "to_addrs": ["me@x"],
+                "secs_ago": 10,
+                "was_replied_to": False,
+                "read": False,
+                "flagged": False,
+            }
+        ],
+        {"me@x"},
+    )
+    assert needs[0].folder == "inbox"
+
+    awaiting = _classify_awaiting_reply(
+        [
+            {
+                "id": "<s@x>",
+                "subject": "Quote?",
+                "recipient_addrs": ["them@x"],
+                "secs_ago": 10 * 86400,
+            }
+        ],
+        set(),
+        days=3,
+    )
+    assert awaiting[0].folder == "sent"
+
+
+def test_indexed_pointer_carries_the_account_without_touching_mail():
+    # The account is already inside the folder url; lifting it out costs no query and
+    # launches nothing — which is what lets mail_search keep its no-Mail-launch promise
+    # while still answering "which inbox is this?".
+    from macos_apps_mcp.adapters import mail_index
+
+    row = {
+        "message_id_header": "<m@x>",
+        "subject": "Hi",
+        "mailbox_url": f"imap://{_GMAIL_UUID}/Archive",
+    }
+    p = mail_index.row_to_pointer(row)
+    assert p.account == _GMAIL_UUID
+    assert p.as_dict()["account"] == _GMAIL_UUID
+    # local:// (On My Mac) parses the same way; a url with no scheme has no account
+    assert mail_index.account_of("local://ABC/Notes") == "ABC"
+    assert mail_index.account_of("not-a-url") is None
+
+
+def test_pointer_omits_account_when_unset():
+    # Unified cross-account accessors genuinely do not know the account. Omitting the
+    # key is honest; emitting a guessed or empty one is what would send a reply from
+    # the wrong address.
+    assert "account" not in Pointer(id="1", summary="s", deeplink="d").as_dict()

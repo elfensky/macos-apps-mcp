@@ -997,3 +997,25 @@ def test_mail_search_still_requires_a_filter():
     # functions).
     with pytest.raises(ToolError):
         srv.mail_search()
+
+
+def test_overview_reports_the_account_id_search_pointers_carry(tmp_path, monkeypatch):
+    # #155: overview() is the uuid -> display-name map. It only works as one if the id
+    # it reports is byte-identical to the `account` every search Pointer carries —
+    # otherwise the caller is back to string surgery on the opaque folder token.
+    import macos_apps_mcp.adapters.mail as m
+
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+
+    row = next(r for r in MailAdapter().overview() if r["account"] == "Personal")
+    assert row["account_id"] == ACCT_A
+    assert row["folder"].startswith(f"imap://{ACCT_A}/")
+
+    pointers = MailAdapter().search(account="Personal")
+    assert pointers, "fixture must yield at least one hit to compare against"
+    assert {p.account for p in pointers} == {ACCT_A}
+    # and the folder overview reports is the exact token the pointer round-trips
+    assert all(p.folder.startswith(f"imap://{ACCT_A}/") for p in pointers)
