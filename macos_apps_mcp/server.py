@@ -366,31 +366,36 @@ def contacts(name: str) -> list[dict[str, str]]:
 
 
 @_read_tool
-def mail(query: str) -> list[dict[str, str]]:
+def mail(query: str) -> dict:
     """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
     RFC822 message-id, summary = subject — sender, deeplink = a message:// URL,
     folder = "inbox" (this scans the inbox only) — pass that folder straight to
     `mail_body`. Prefer `mail_search`, which reaches every mailbox and reports the
-    account. Read-only; needs Automation access for Mail. Bodies are never fetched."""
-    return [p.as_dict() for p in _mail.get_pointers(query)]
+    account. Returns {results, truncated?} — `truncated` means the 25-message cap was
+    reached and there may be more. Read-only; needs Automation access for Mail. Bodies
+    are never fetched."""
+    return _mail.inbox_search(query)
 
 
 @_read_tool
-def mail_body(id: str, mailbox: str) -> str:
+def mail_body(id: str, mailbox: str = "") -> str:
     """Full plaintext body of one message by id (bounded + truncation-marked).
 
-    `id` is a message-id from `mail`/`mail_search`. `mailbox` is REQUIRED: pass the
-    `folder` value from the SAME search result back VERBATIM — it is an opaque
-    round-trip token (`imap://<uuid>/<path>`), not a folder name to retype. The five
-    canonical names ("inbox"/"sent"/"drafts"/"trash"/"junk") also work. Any mailbox in
-    any account is readable; an id absent from that mailbox raises. Read-only; needs
-    Automation access for Mail."""
+    `id` is a message-id from `mail`/`mail_search` — or from a note written months ago:
+    an id resolves ON ITS OWN, so a stored citation still works after the message was
+    filed or moved. `mailbox` is OPTIONAL and is the disambiguator: pass the `folder`
+    value from the SAME search result back VERBATIM — it is an opaque round-trip token
+    (`imap://<uuid>/<path>`), not a folder name to retype — or one of the five canonical
+    names ("inbox"/"sent"/"drafts"/"trash"/"junk"). With it the read is Automation-only
+    and an id absent from that mailbox raises; without it the id is resolved through
+    Mail's index (Full Disk Access) to the same copy every other read cites. Read-only.
+    """
     return _mail.get_body(id, mailbox)
 
 
 @_read_tool
-def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
-    """List attachments on messages in a Mail mailbox (Automation).
+def mail_attachments(mailbox: str = "", query: str = "", message_id: str = "") -> dict:
+    """List attachments on messages in a Mail mailbox, or on ONE message (Automation).
 
     mailbox: the `folder` value from a `mail_search` result passed back VERBATIM (an
     opaque `imap://<uuid>/<path>` token, not a name to retype), or a canonical system
@@ -399,37 +404,42 @@ def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
     subject substring — an empty/omitted query lists ALL messages in the mailbox
     (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
     confirm an attachment landed on a DRAFT before it's saved (a freshly opened compose
-    window has no stable id yet — once saved to Drafts it does, see drafts()). Returns
-    [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}], bounded.
-    `id`/`deeplink` identify the carrying message and `folder` echoes the mailbox you
-    passed, so a row is actionable on its own. An unsaved draft has no message-id yet:
+    window has no stable id yet — once saved to Drafts it does, see drafts()).
+    message_id: address ONE message instead of scanning; with no `mailbox` the id
+    resolves on its own (Full Disk Access), and `query` is then ignored. Prefer it when
+    you know the message — a mailbox scan stops at 25 records, so the one you meant is
+    often past the cap. Either `mailbox` or `message_id` is required.
+    Returns {results, truncated?} over
+    [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}].
+    `id`/`deeplink` identify the carrying message and `folder` names the mailbox read,
+    so a row is actionable on its own. An unsaved draft has no message-id yet:
     its `id` is "" and it carries no `deeplink` — it is still listed.
     """
-    return _mail.list_attachments(mailbox, query)
+    return _mail.list_attachments(mailbox, query, message_id)
 
 
 @_read_tool
-def mail_needs_response() -> list[dict[str, str]]:
+def mail_needs_response() -> dict:
     """Inbox messages that likely need your response, ranked with a machine-readable
     `reason` (flagged / unread-direct / unanswered-direct). Heuristic over headers +
     message properties — no body is read; keeps direct-addressed, not-yet-replied mail.
     Each pointer carries folder = "inbox", so an id from here goes straight into
     `mail_body`/`mail_reply` with no second lookup. No `account`: this reads Mail's
     unified inbox across every account, so the owning account is genuinely unknown —
-    use `mail_search` when you need it. Read-only; needs Automation access for Mail.
-    Bounded to 25."""
-    return [p.as_dict() for p in _mail.get_needs_response()]
+    use `mail_search` when you need it. Returns {results, truncated?}; `truncated`
+    means the 25 cap was reached. Read-only; needs Automation access for Mail."""
+    return _mail.get_needs_response()
 
 
 @_read_tool
-def mail_awaiting_reply(days: int = 3) -> list[dict[str, str]]:
+def mail_awaiting_reply(days: int = 3) -> dict:
     """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
     oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
     group send is cleared once any recipient replies. Each pointer carries
     folder = "sent" — ready for `mail_body`/`reply_all`; no `account` (unified accessor,
-    see mail_needs_response). Read-only; needs Automation access for Mail.
-    Bounded to 25."""
-    return [p.as_dict() for p in _mail.get_awaiting_reply(days)]
+    see mail_needs_response). Returns {results, truncated?}; `truncated` means the 25
+    cap was reached. Read-only; needs Automation access for Mail."""
+    return _mail.get_awaiting_reply(days)
 
 
 @_read_tool
@@ -446,12 +456,14 @@ def mail_search(
     has_attachments: bool = False,
     account: str = "",
     limit: int = 25,
-) -> list[dict]:
+) -> dict:
     """Indexed search across ALL mailboxes via Mail's Envelope Index — fast and
     read-only. All filters optional and ANDed:
     subject/from_/to substrings, `mailbox` a mailbox NAME exactly as mail_overview
     reports it ("Junk E-mail" — case-insensitive substring; the encoded spelling also
-    works), since/until (epoch seconds on received date),
+    works; a name that matches nothing RAISES — it is a typo, not an empty mailbox —
+    while a stale `folder` url just returns no results), since/until (epoch seconds on
+    received date),
     unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
     it only sees messages already downloaded AND indexed by mail_index_bodies (run that
     first; partial coverage is normal). At least one filter required. Returns citable
@@ -467,35 +479,37 @@ def mail_search(
     account-name path and the AppleScript fallback.
     Each Pointer carries `folder` (the round-trip mailbox token) and `account` (the
     owning account's uuid — map it to a name with one `mail_overview` call), so a hit
-    is complete on its own: no second read to work out where it lives."""
-    return [
-        p.as_dict()
-        for p in _mail.search(
-            subject=subject,
-            from_=from_,
-            to=to,
-            mailbox=mailbox,
-            since=since,
-            until=until,
-            unread=unread,
-            flagged=flagged,
-            body=body,
-            has_attachments=has_attachments,
-            account=account,
-            limit=limit,
-        )
-    ]
+    is complete on its own: no second read to work out where it lives.
+    Returns {results, truncated?, plane?, coverage?}. `truncated` means the answer came
+    back AT `limit` (25 max) and there may be more — do NOT report such a search as
+    exhaustive. `plane` = "applescript-inbox" means the sqlite index was unreachable and
+    this scanned the INBOX ONLY. `coverage` explains an empty `body=` answer: most local
+    messages are headers-only until their bodies are downloaded and indexed."""
+    return _mail.search(
+        subject=subject,
+        from_=from_,
+        to=to,
+        mailbox=mailbox,
+        since=since,
+        until=until,
+        unread=unread,
+        flagged=flagged,
+        body=body,
+        has_attachments=has_attachments,
+        account=account,
+        limit=limit,
+    )
 
 
 @_read_tool
-def mail_thread(id: str, limit: int = 100) -> list[dict[str, str]]:
+def mail_thread(id: str, limit: int = 100) -> dict:
     """Every message in the conversation containing `id`, oldest-first — the transcript,
     including messages YOU sent. Deduped: a message filed in several mailboxes appears
-    once. Returns citable Pointers; use mail_body(id) for any message's text. Over
-    `limit` messages the OLDEST are dropped, since a thread is usually read to reply to
-    it. Unknown id returns []. Fast, read-only, no Mail launch.
-    Needs Full Disk Access."""
-    return [p.as_dict() for p in _mail.thread(id, limit)]
+    once. Returns {results, truncated?} of citable Pointers; use mail_body(id) for any
+    message's text. Over `limit` messages the OLDEST are dropped (and `truncated` says
+    so), since a thread is usually read to reply to it. Unknown id returns no results.
+    Fast, read-only, no Mail launch. Needs Full Disk Access."""
+    return _mail.thread(id, limit)
 
 
 @_read_tool
@@ -560,13 +574,14 @@ def mail_reply(
 
 
 @_read_tool
-def drafts() -> list[dict[str, str]]:
+def drafts() -> dict:
     """List Mail drafts as pointers (id + "subject — to recipient"), newest mailbox
-    order, bounded. The id is the RFC822 message-id — pass it to delete_draft. Each
-    pointer carries folder = "drafts", so it also round-trips into `mail_attachments`.
+    order. Returns {results, truncated?}; `truncated` means the 25 cap was reached. The
+    id is the RFC822 message-id — pass it to delete_draft. Each pointer carries
+    folder = "drafts", so it also round-trips into `mail_attachments`.
     A compose window Mail has not autosaved yet (~10-15s) is absent here — wait, do not
     retry the create. Read-only; needs Automation access for Mail."""
-    return [p.as_dict() for p in _mail.list_drafts()]
+    return _mail.list_drafts()
 
 
 @_write_tool(snapshot=_mail)

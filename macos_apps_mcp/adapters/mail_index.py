@@ -733,3 +733,45 @@ def fts_search(fts_db: Path, query: str, limit: int = 200) -> list[str]:
         return [r[0] for r in rows]
     finally:
         conn.close()
+
+
+def body_coverage() -> str:
+    """One line saying how much of the store ``body=`` can actually SEE (#156 case 4).
+
+    A ``body=`` search that finds nothing is indistinguishable from a store that
+    contains nothing — and on this machine 62.5% of local messages are
+    ``.partial.emlx`` (headers only, never downloaded), so an empty answer is the
+    COMMON case, not a corner one. Two counts, both cheap and both read-at-rest: how
+    many bodies the sidecar holds, and the same distinct-Message-ID denominator every
+    search dedups to. A sidecar that is absent or unreadable counts as 0 — that is the
+    honest reading, and it is exactly the case the remediation addresses.
+    """
+    indexed = 0
+    fts = fts_path()
+    if fts.exists():
+        conn = sqlite3.connect(f"file:{fts}?mode=ro", uri=True)
+        conn.execute("PRAGMA busy_timeout=5000")  # wait out a build, don't error
+        try:
+            indexed = conn.execute("SELECT count(*) FROM bodies").fetchone()[0]
+        except sqlite3.Error:
+            indexed = 0  # no bodies table yet: never built
+        finally:
+            conn.close()
+
+    def read(conn):
+        return conn.execute(
+            "SELECT COUNT(DISTINCT gd.message_id_header) FROM messages m"
+            " JOIN message_global_data gd ON gd.ROWID = m.global_message_id"
+            " WHERE m.deleted = 0 AND gd.message_id_header IS NOT NULL"
+            " AND gd.message_id_header <> ''"
+        ).fetchone()[0]
+
+    total = read_via_sqlite(
+        _require_index_path(), HEADER_FINGERPRINT, read, immutable=False
+    )
+    return (
+        f"{indexed} of {total} messages have a searchable body — body= can only match "
+        "those. Run mail_index_bodies to index newly downloaded mail; a message whose "
+        "body was never downloaded (.partial.emlx) cannot be indexed at all until "
+        "download-bodies (#119) fetches it."
+    )

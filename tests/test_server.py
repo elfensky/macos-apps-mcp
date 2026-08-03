@@ -21,6 +21,7 @@ from macos_apps_mcp.contracts import (
     Pointer,
     Recurrence,
     ReminderData,
+    read_result,
 )
 from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
@@ -33,6 +34,11 @@ class _FakeSource:
     def get_pointers(self, query: str) -> list[Pointer]:
         self.queries.append(query)
         return [Pointer(id="P-1", summary="s", deeplink="d")]
+
+    def inbox_search(self, query: str) -> dict:
+        # the mail read in its bounded-read envelope (#156), exactly as MailAdapter
+        # wraps its own get_pointers
+        return read_result(self.get_pointers(query), cap=25)
 
     def get_lists(self) -> list[Pointer]:
         self.enumerated += 1
@@ -108,23 +114,38 @@ def test_mail_tool_dispatches(monkeypatch):
     monkeypatch.setattr(srv, "_mail", fake)
     out = srv.mail("invoice")
     assert fake.queries == ["invoice"]
-    assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    # #156: a mail read answers the envelope; one hit is under the cap, so no
+    # `truncated` claim either way.
+    assert out == {"results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]}
 
 
 def test_mail_needs_response_dispatches(monkeypatch):
     class _F:
         def get_needs_response(self):
-            return [
-                Pointer(
-                    id="<m@x>", summary="s", deeplink="message://m", reason="flagged"
-                )
-            ]
+            return read_result(
+                [
+                    Pointer(
+                        id="<m@x>",
+                        summary="s",
+                        deeplink="message://m",
+                        reason="flagged",
+                    )
+                ],
+                cap=25,
+            )
 
     monkeypatch.setattr(srv, "_mail", _F())
     out = srv.mail_needs_response()
-    assert out == [
-        {"id": "<m@x>", "summary": "s", "deeplink": "message://m", "reason": "flagged"}
-    ]
+    assert out == {
+        "results": [
+            {
+                "id": "<m@x>",
+                "summary": "s",
+                "deeplink": "message://m",
+                "reason": "flagged",
+            }
+        ]
+    }
 
 
 def test_mail_awaiting_reply_dispatches(monkeypatch):
@@ -133,18 +154,22 @@ def test_mail_awaiting_reply_dispatches(monkeypatch):
     class _F:
         def get_awaiting_reply(self, days=3):
             seen["days"] = days
-            return [
-                Pointer(
-                    id="<s@x>",
-                    summary="s",
-                    deeplink="message://s",
-                    reason="awaiting-reply",
-                )
-            ]
+            return read_result(
+                [
+                    Pointer(
+                        id="<s@x>",
+                        summary="s",
+                        deeplink="message://s",
+                        reason="awaiting-reply",
+                    )
+                ],
+                cap=25,
+            )
 
     monkeypatch.setattr(srv, "_mail", _F())
     out = srv.mail_awaiting_reply(7)
-    assert seen["days"] == 7 and out[0]["reason"] == "awaiting-reply"
+    assert seen["days"] == 7
+    assert out["results"][0]["reason"] == "awaiting-reply"
 
 
 def test_notes_tool_dispatches(monkeypatch):
@@ -691,6 +716,9 @@ class _DeniedSource:
 
     def get_pointers(self, query: str) -> list[Pointer]:
         raise AutomationDenied("grant Automation access, then restart macos-apps-mcp")
+
+    def inbox_search(self, query: str) -> dict:
+        return read_result(self.get_pointers(query), cap=25)
 
 
 class _EmptySource:

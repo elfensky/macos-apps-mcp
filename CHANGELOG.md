@@ -6,7 +6,46 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **A Mail id resolves on its own** (#155). `mail_body(id)` and
+  `mail_attachments(message_id=…)` no longer need the mailbox: the id resolves through the
+  Envelope Index to the same ranked copy every other read cites. This is what a vault note
+  storing only `[📧](message://…)` — the correct pointers-not-payload thing to store — needs to
+  still work months later, and what keeps a citation alive after 0.9.2's `move_mail` invalidates
+  whatever folder token it once had. An explicit `mailbox` remains the (cheaper, Automation-only)
+  disambiguator; id-only resolution reads sqlite, so it needs Full Disk Access.
+
+- **One addressing module** (`adapters/mail_addressing.py`, #155). "What addresses a message"
+  lived in ~10 places — seven inline `<>`-strips plus `_norm_mid` plus `thread()`'s re-bracketing
+  for ids, four cooperating helpers for mailboxes, three for accounts. They are now one module
+  with two sanctioned id conversions (`bare_id`/`stored_id`) and one entry point,
+  `resolve(id, folder=None, account=None) -> ResolvedMessage`, which answers with exactly one
+  target or raises. Every 0.9.2+ destructive write needs that rule and inherits it instead of
+  building an eleventh copy.
+
 ### Changed
+
+- **BREAKING — every bounded Mail read answers `{results, truncated?, plane?, coverage?}`**
+  (#156), not a bare list. `mail`, `mail_search`, `mail_thread`, `mail_needs_response`,
+  `mail_awaiting_reply`, `mail_attachments` and `drafts` all changed shape; the pointer rows
+  inside `results` are unchanged. `MAX_MAILS = 25` is a hard CEILING, not a default — on a 36k
+  store no search could ever return more than 25, and the bare list read as a complete answer, so
+  *"find every invoice from the accountant in 2025"* returned 25 and looked exhaustive.
+  `truncated` marks a result that came back at its cap; `plane` marks a `mail_search` that fell
+  back to the AppleScript scan, which reaches the INBOX ONLY while being shaped identically to a
+  whole-store result; `coverage` explains an empty `body=` answer (most local messages are
+  headers-only until their bodies are downloaded and indexed). Each is emitted only when set —
+  absence is meaningful because one `contracts.read_result` serves every read.
+
+- **BREAKING — `mail_attachments`'s `mailbox` is now optional**, and either it or the new
+  `message_id` is required. Passing neither raises instead of erroring deep inside AppleScript.
+
+- **An unresolvable Mail mailbox NAME now raises** (#156). `mail_search(mailbox="Sent Itmes")`
+  answered `[]`, making a typo, a wrong-account guess and a genuinely empty mailbox
+  indistinguishable. A name is something a model typed from memory, so it gets a followable error
+  naming `mail_overview`; a `folder` URL that no longer resolves still answers empty — it was a
+  real handle when a read issued it, and going stale is not a caller error.
 
 - **Repo conformance sweep.** Added `dependabot.yml` (pip + github-actions, minor/patch
   grouped), a version-bump gate workflow (advisory, PR-triggered), and `.python-version` (3.14).

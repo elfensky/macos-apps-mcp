@@ -1308,7 +1308,9 @@ def test_list_attachments_finds_draft_attachment(created):
     os.close(fd)
     try:
         run_osascript(make, subj, path)
-        recs = MailAdapter().list_attachments("drafts", "macos-apps-mcp-test: attach")
+        recs = MailAdapter().list_attachments("drafts", "macos-apps-mcp-test: attach")[
+            "results"
+        ]
         names = [a["name"] for r in recs for a in r["attachments"]]
         assert any(path.split("/")[-1] in n or n.endswith(".txt") for n in names)
     finally:
@@ -1369,24 +1371,31 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
 def test_mail_needs_response_shape():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
-    ptrs = MailAdapter().get_needs_response()
+    ptrs = MailAdapter().get_needs_response()["results"]
     assert isinstance(ptrs, list) and len(ptrs) <= 25
     for p in ptrs:
-        assert p.id and p.reason in {"flagged", "unread-direct", "unanswered-direct"}
-        assert p.deeplink.startswith("message://")
+        assert p["id"] and p["reason"] in {
+            "flagged",
+            "unread-direct",
+            "unanswered-direct",
+        }
+        assert p["deeplink"].startswith("message://")
+        # #155: the triage entry point's ids must reach mail_body unaided
+        assert p["folder"] == "inbox"
 
 
 def test_mail_awaiting_reply_shape():
     from macos_apps_mcp.adapters.mail import MailAdapter
 
-    ptrs = MailAdapter().get_awaiting_reply(days=3)
+    ptrs = MailAdapter().get_awaiting_reply(days=3)["results"]
     assert isinstance(ptrs, list) and len(ptrs) <= 25
     for p in ptrs:
         assert (
-            p.id
-            and p.reason == "awaiting-reply"
-            and p.deeplink.startswith("message://")
+            p["id"]
+            and p["reason"] == "awaiting-reply"
+            and p["deeplink"].startswith("message://")
         )
+        assert p["folder"] == "sent"
 
 
 def test_mail_awaiting_reply_rejects_bad_days():

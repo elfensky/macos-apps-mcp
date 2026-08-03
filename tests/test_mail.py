@@ -6,14 +6,13 @@ from contextlib import nullcontext
 
 import pytest
 
-from macos_apps_mcp.adapters import mail
+from macos_apps_mcp.adapters import mail, mail_addressing
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
     _deeplink,
     _parse_search_results,
     _summary,
-    _validate_mailbox,
 )
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.text import RS, US
@@ -106,17 +105,17 @@ def test_get_pointers_bounds_host_side(monkeypatch):
 
 
 def test_validate_mailbox_returns_canonical_lowercase():
-    assert _validate_mailbox("  SENT ") == "sent"
+    assert mail_addressing.validate_mailbox("  SENT ") == "sent"
 
 
 def test_validate_mailbox_unknown_raises():
     with pytest.raises(ValueError, match="unknown mailbox"):
-        _validate_mailbox("archive")
+        mail_addressing.validate_mailbox("archive")
 
 
 def test_validate_mailbox_covers_the_core_five():
     for canonical in ("inbox", "sent", "drafts", "trash", "junk"):
-        assert _validate_mailbox(canonical) == canonical
+        assert mail_addressing.validate_mailbox(canonical) == canonical
 
 
 # --- sender search (#61) -------------------------------------------------------------
@@ -342,11 +341,14 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments("drafts", "Logo")
-    # query, cap, and the (account, path) mailbox pair travel via argv — no localized
-    # candidates (the unified `drafts mailbox` accessor is locale-independent), and an
-    # empty account id is what selects that unified branch in the shared resolver
-    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "", "drafts")
-    assert len(out) == mail.MAX_MAILS
+    # query, cap, the (account, path) mailbox pair and the (empty) message-id travel via
+    # argv — no localized candidates (the unified `drafts mailbox` accessor is
+    # locale-independent), and an empty account id is what selects that unified branch
+    # in the shared resolver
+    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "", "drafts", "")
+    assert len(out["results"]) == mail.MAX_MAILS
+    # #156: at the cap and NOT complete — the caller must be able to tell.
+    assert out["truncated"] is True
 
 
 def test_list_attachments_empty_query_lists_all(monkeypatch):
@@ -361,10 +363,12 @@ def test_list_attachments_empty_query_lists_all(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments("inbox")
-    assert [r["summary"] for r in out] == ["First", "Second", "Third"]
+    assert [r["summary"] for r in out["results"]] == ["First", "Second", "Third"]
     # #155: the mailbox the caller passed is echoed back, so each row round-trips on its
     # own into mail_body / a future save-attachment tool.
-    assert {r["folder"] for r in out} == {"inbox"}
+    assert {r["folder"] for r in out["results"]} == {"inbox"}
+    # under the cap: no truncation claim either way
+    assert "truncated" not in out
 
 
 def test_list_attachments_unknown_mailbox_raises():
@@ -661,28 +665,29 @@ def test_list_drafts_parses_framed_records(monkeypatch):
         f"<c@d.com>{US}Lunch?{US}pal@example.org{RS}"
     )
     monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
-    out = mail.MailAdapter().list_drafts()
-    assert [p.id for p in out] == ["<a@b.com>", "<c@d.com>"]
-    assert out[0].summary == "Q3 numbers — to boss@corp.com"
-    assert out[0].deeplink.startswith("message://")
+    out = mail.MailAdapter().list_drafts()["results"]
+    assert [p["id"] for p in out] == ["<a@b.com>", "<c@d.com>"]
+    assert out[0]["summary"] == "Q3 numbers — to boss@corp.com"
+    assert out[0]["deeplink"].startswith("message://")
 
 
 def test_list_drafts_skips_records_without_message_id(monkeypatch):
     # a draft with no Message-ID has no stable citation — never emit a garbage id.
     raw = f"missing value{US}No id{US}x@y.com{RS}<ok@z>{US}Fine{US}a@b.com{RS}"
     monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
-    assert [p.id for p in mail.MailAdapter().list_drafts()] == ["<ok@z>"]
+    assert [p["id"] for p in mail.MailAdapter().list_drafts()["results"]] == ["<ok@z>"]
 
 
 def test_list_drafts_empty_mailbox(monkeypatch):
     monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
-    assert mail.MailAdapter().list_drafts() == []
+    assert mail.MailAdapter().list_drafts() == {"results": []}
 
 
 def test_list_drafts_summary_without_recipient(monkeypatch):
     raw = f"<a@b>{US}Just a subject{US}{RS}"
     monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
-    assert mail.MailAdapter().list_drafts()[0].summary == "Just a subject"
+    out = mail.MailAdapter().list_drafts()["results"]
+    assert out[0]["summary"] == "Just a subject"
 
 
 def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
@@ -1238,27 +1243,27 @@ _UUID_2 = "66666666-7777-8888-9999-000000000000"
 # _ACCOUNT_MAP_CACHE is a process-wide global: set it via monkeypatch (restored at
 # teardown), never by plain assignment, or one test's cache silently satisfies the next.
 def test_account_map_parses_osascript_pairs(monkeypatch):
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(
-        m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle"
+        ma, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle"
     )
-    assert m._account_map() == {_UUID_1: "Personal", _UUID_2: "Google"}
+    assert ma.account_map() == {_UUID_1: "Personal", _UUID_2: "Google"}
 
 
 def test_account_map_empty_when_mail_unreachable(monkeypatch):
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
 
     def boom(*a):
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(m, "run_osascript", boom)
+    monkeypatch.setattr(ma, "run_osascript", boom)
     # a cosmetic label must never fail the call that wanted counts
-    assert m._account_map() == {}
+    assert ma.account_map() == {}
 
 
 def test_account_map_empty_success_is_leashed_not_cached_forever(monkeypatch):
@@ -1268,23 +1273,23 @@ def test_account_map_empty_success_is_leashed_not_cached_forever(monkeypatch):
     mail_overview showed raw UUIDs and mail_search(account=name) raised for the
     daemon's whole life. An empty success is indistinguishable from that transient,
     so it gets the same TTL leash a failure does."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
     now = [1_000.0]
-    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
     calls = []
 
     def warming_up(*a):
         calls.append(a)
         return "" if len(calls) == 1 else f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(m, "run_osascript", warming_up)
-    assert m._account_map() == {}
-    now[0] += m._ACCOUNT_MAP_FAILURE_TTL - 1  # inside the TTL: no re-spawn
-    assert m._account_map() == {}
+    monkeypatch.setattr(ma, "run_osascript", warming_up)
+    assert ma.account_map() == {}
+    now[0] += ma._ACCOUNT_MAP_FAILURE_TTL - 1  # inside the TTL: no re-spawn
+    assert ma.account_map() == {}
     assert len(calls) == 1
     now[0] += 1  # TTL elapsed: one more attempt, and the real names come back
-    assert m._account_map() == {_UUID_1: "Personal"}
+    assert ma.account_map() == {_UUID_1: "Personal"}
     assert len(calls) == 2
 
 
@@ -1293,35 +1298,35 @@ def test_resolve_account_duplicate_display_names_raise_ambiguous(monkeypatch):
     the docstring's own rule ('a confident wrong answer is worse than a typed
     error') applied to the unresolvable case but not the ambiguous one. #55's
     AmbiguousTarget names the candidate UUIDs so the caller can re-issue."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import AmbiguousTarget
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Work", _UUID_2: "work"})
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Work", _UUID_2: "work"})
     with pytest.raises(AmbiguousTarget, match=_UUID_1):
-        m._resolve_account("Work")
+        ma.resolve_account("Work")
 
 
 def test_account_map_caches_the_failure_too(monkeypatch):
     """Automation denied is cached like a success — for a bit (see
     _ACCOUNT_MAP_FAILURE_TTL): within that window, a second call must not re-spawn
     osascript, whose script waits `with timeout of 120 seconds`."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_FAILURE_AT", None)
     now = [1_000.0]
-    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
     calls = []
 
     def boom(*a):
         calls.append(a)
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(m, "run_osascript", boom)
-    assert m._account_map() == {}
-    now[0] += m._ACCOUNT_MAP_FAILURE_TTL - 1  # still inside the TTL
-    assert m._account_map() == {}
+    monkeypatch.setattr(ma, "run_osascript", boom)
+    assert ma.account_map() == {}
+    now[0] += ma._ACCOUNT_MAP_FAILURE_TTL - 1  # still inside the TTL
+    assert ma.account_map() == {}
     assert len(calls) == 1
 
 
@@ -1332,13 +1337,13 @@ def test_account_map_failure_expires_and_retries(monkeypatch):
     UUIDs and mail_search(account=...) kept raising even after the user fixed the
     underlying problem, cured only by restarting the daemon. Past the TTL, one more
     attempt is allowed — and if Mail is reachable by then, the real names come back."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_FAILURE_AT", None)
     now = [1_000.0]
-    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
     calls = []
 
     def flaky(*a):
@@ -1347,32 +1352,32 @@ def test_account_map_failure_expires_and_retries(monkeypatch):
             raise NativeError("Automation denied")
         return f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(m, "run_osascript", flaky)
-    assert m._account_map() == {}
-    now[0] += m._ACCOUNT_MAP_FAILURE_TTL  # TTL fully elapsed
-    assert m._account_map() == {_UUID_1: "Personal"}
+    monkeypatch.setattr(ma, "run_osascript", flaky)
+    assert ma.account_map() == {}
+    now[0] += ma._ACCOUNT_MAP_FAILURE_TTL  # TTL fully elapsed
+    assert ma.account_map() == {_UUID_1: "Personal"}
     assert len(calls) == 2
 
 
 def test_account_map_success_survives_past_the_failure_ttl(monkeypatch):
     """The TTL is a FAILURE-only leash — a real success must stay cached forever, the
     same as before this change, or the "success is stable" half of the fix is a lie."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_FAILURE_AT", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_FAILURE_AT", None)
     now = [1_000.0]
-    monkeypatch.setattr(m.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
     calls = []
 
     def ok(*a):
         calls.append(a)
         return f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(m, "run_osascript", ok)
-    assert m._account_map() == {_UUID_1: "Personal"}
-    now[0] += m._ACCOUNT_MAP_FAILURE_TTL * 100  # far past any failure TTL
-    assert m._account_map() == {_UUID_1: "Personal"}
+    monkeypatch.setattr(ma, "run_osascript", ok)
+    assert ma.account_map() == {_UUID_1: "Personal"}
+    now[0] += ma._ACCOUNT_MAP_FAILURE_TTL * 100  # far past any failure TTL
+    assert ma.account_map() == {_UUID_1: "Personal"}
     assert len(calls) == 1
 
 
@@ -1384,16 +1389,16 @@ def test_account_map_leak_repro_a_real_failure_leaks_timestamp(monkeypatch):
     genuine (unpatched) time.monotonic() reading that nothing in THIS test undoes.
     Must run immediately before part B below; pytest's default file-order execution
     (no randomization plugin in this repo) makes that ordering reliable."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
 
     def boom(*a):
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(m, "run_osascript", boom)
-    assert m._account_map() == {}
+    monkeypatch.setattr(ma, "run_osascript", boom)
+    assert ma.account_map() == {}
     # _ACCOUNT_MAP_FAILURE_AT now holds a real time.monotonic() reading, left in place
     # on purpose — part B checks whether that survives into the next test.
 
@@ -1408,52 +1413,52 @@ def test_account_map_leak_repro_b_stale_failure_must_not_wipe_a_later_cache(
     leaked by part A aged out on its own, `_account_map()` wiped THIS test's cache,
     and fell through to run_osascript — which here is treated as a hard failure,
     because in production that call spawns osascript against real Mail.app."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
-    future = m.time.monotonic() + m._ACCOUNT_MAP_FAILURE_TTL + 10
-    monkeypatch.setattr(m.time, "monotonic", lambda: future)
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {"some-uuid": "Personal"})
+    future = ma.time.monotonic() + ma._ACCOUNT_MAP_FAILURE_TTL + 10
+    monkeypatch.setattr(ma.time, "monotonic", lambda: future)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"some-uuid": "Personal"})
     monkeypatch.setattr(
-        m,
+        ma,
         "run_osascript",
         lambda *a: pytest.fail("stale failure timestamp wiped a live cache"),
     )
-    assert m._account_map() == {"some-uuid": "Personal"}
+    assert ma.account_map() == {"some-uuid": "Personal"}
 
 
 def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(m, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
-    assert m._resolve_account("Personal") == _UUID_1
-    assert m._resolve_account(_UUID_1) == _UUID_1
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
+    assert ma.resolve_account("Personal") == _UUID_1
+    assert ma.resolve_account(_UUID_1) == _UUID_1
 
 
 def test_resolve_account_uuid_never_contacts_mail(monkeypatch):
     """The UUID path is what lets mail_search/mail_overview keep their "reads the index
     at rest" promise — resolving a NAME runs osascript, which launches Mail."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(
-        m, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
+        ma, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
     )
-    assert m._resolve_account(_UUID_1.upper()) == _UUID_1.upper()
+    assert ma.resolve_account(_UUID_1.upper()) == _UUID_1.upper()
 
 
 def test_resolve_account_unknown_name_raises(monkeypatch):
     """Returning the name unchanged degraded into a substring match over the whole
     mailbox url — account="Business" then matched any account's Business* FOLDER and
     reported it as though the account filter had worked."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
     with pytest.raises(NativeError, match="unknown Mail account"):
-        m._resolve_account("Nonexistent")
+        ma.resolve_account("Nonexistent")
     with pytest.raises(NativeError, match="Personal"):  # names what DOES exist
-        m._resolve_account("Nonexistent")
+        ma.resolve_account("Nonexistent")
 
 
 def test_resolve_account_unknown_name_error_does_not_misdirect_to_overview(
@@ -1463,12 +1468,12 @@ def test_resolve_account_unknown_name_error_does_not_misdirect_to_overview(
     reports" — exactly the value mail_overview stopped reporting once it started
     showing the "On My Mac" friendly name for the local store. The message must point
     at something a caller can actually follow instead."""
-    import macos_apps_mcp.adapters.mail as m
+    import macos_apps_mcp.adapters.mail_addressing as ma
     from macos_apps_mcp.errors import NativeError
 
-    monkeypatch.setattr(m, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {_UUID_1: "Personal"})
     with pytest.raises(NativeError) as exc:
-        m._resolve_account("Nonexistent")
+        ma.resolve_account("Nonexistent")
     assert "mail_overview reports" not in str(exc.value)
 
 
@@ -1502,51 +1507,54 @@ _SPAM_URL = f"imap://{_GMAIL_UUID}/%5BGmail%5D/Spam"
 def test_mailbox_args_decodes_the_url_into_account_and_path():
     # device-verified: `mailbox "[Gmail]/Spam" of account …` resolves; the ENCODED
     # spelling ("%5BGmail%5D/Spam") does not — AppleScript wants the decoded path.
-    assert mail._mailbox_args(_SPAM_URL) == (_GMAIL_UUID, "[Gmail]/Spam")
+    assert mail_addressing.mailbox_args(_SPAM_URL) == (_GMAIL_UUID, "[Gmail]/Spam")
 
 
 def test_mailbox_args_decodes_spaces_and_leaves_literal_ampersands():
     # live sample: Mail encodes the space but NOT the "&" (Social%20&%20SEO), which is
     # exactly why the url can't be reproduced with quote() and must be round-tripped.
     url = f"imap://{_GMAIL_UUID}/Social%20&%20SEO"
-    assert mail._mailbox_args(url) == (_GMAIL_UUID, "Social & SEO")
+    assert mail_addressing.mailbox_args(url) == (_GMAIL_UUID, "Social & SEO")
 
 
 def test_mailbox_args_maps_the_local_store_to_the_account_less_sentinel():
     # On My Mac mailboxes hang off the application, not an account — Mail's `every
     # account` never lists that store, so its UUID would never resolve.
     url = "local://A2025935-B0B2-4A77-9003-68EF6E541361/Outbox"
-    assert mail._mailbox_args(url) == ("local", "Outbox")
+    assert mail_addressing.mailbox_args(url) == ("local", "Outbox")
 
 
 def test_mailbox_args_still_accepts_the_five_special_names():
     # the alias layer: mail_attachments' existing vocabulary keeps working, and an
     # empty account id selects Mail's unified accessors in the handler.
     for canonical in ("inbox", "sent", "drafts", "trash", "junk"):
-        assert mail._mailbox_args(f"  {canonical.upper()} ") == ("", canonical)
+        assert mail_addressing.mailbox_args(f"  {canonical.upper()} ") == (
+            "",
+            canonical,
+        )
 
 
 def test_mailbox_args_rejects_an_empty_mailbox():
     with pytest.raises(ValueError, match="mailbox"):
-        mail._mailbox_args("   ")
+        mail_addressing.mailbox_args("   ")
 
 
 def test_mailbox_args_rejects_a_bare_name_and_says_where_to_get_one():
     # a human-readable folder name is exactly the thing that must NOT be accepted —
     # the error has to point at the `folder` field of a search result.
     with pytest.raises(ValueError) as exc:
-        mail._mailbox_args("Leasing")
+        mail_addressing.mailbox_args("Leasing")
     assert "folder" in str(exc.value)
 
 
 def test_mailbox_args_rejects_a_url_with_no_path():
     with pytest.raises(ValueError, match="names no mailbox"):
-        mail._mailbox_args(f"imap://{_GMAIL_UUID}/")
+        mail_addressing.mailbox_args(f"imap://{_GMAIL_UUID}/")
 
 
 def test_mailbox_args_rejects_a_url_with_no_account():
     with pytest.raises(ValueError, match="no account"):
-        mail._mailbox_args("imap:///Leasing")
+        mail_addressing.mailbox_args("imap:///Leasing")
 
 
 _MAILBOX_SCOPED_SCRIPTS = (
@@ -1577,7 +1585,7 @@ def test_mailbox_resolver_is_the_only_place_a_mailbox_accessor_is_named():
     # the alias layer can't drift apart across seven scripts the way the scope did.
     for name in _MAILBOX_SCOPED_SCRIPTS:
         script = getattr(mail, name)
-        body = script.replace(mail._MAILBOX_REF, "")
+        body = script.replace(mail_addressing.MAILBOX_REF, "")
         assert "sent mailbox" not in body
         assert "junk mailbox" not in body
 
@@ -1595,9 +1603,10 @@ def test_get_body_passes_the_mailbox_through_argv(monkeypatch):
     assert seen["call"][1] == ("abc@host", _GMAIL_UUID, "[Gmail]/Spam")
 
 
-def test_get_body_rejects_a_missing_mailbox():
-    with pytest.raises(ValueError, match="mailbox"):
-        mail.MailAdapter().get_body("<abc@host>", "")
+def test_get_body_rejects_an_empty_id():
+    # #155 made `mailbox` optional — an empty ID is what is left to reject.
+    with pytest.raises(ValueError, match="message id"):
+        mail.MailAdapter().get_body("  ", "inbox")
 
 
 def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
@@ -1697,8 +1706,8 @@ def test_list_attachments_reaches_a_user_folder(monkeypatch):
 
     monkeypatch.setattr(mail, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments(f"imap://{_GMAIL_UUID}/Backup")
-    assert out[0]["attachments"][0]["name"] == "deal.pdf"
-    assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup")
+    assert out["results"][0]["attachments"][0]["name"] == "deal.pdf"
+    assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup", "")
 
 
 # --- the addressing triple: id + folder + account (#155) ------------------------------

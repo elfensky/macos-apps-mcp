@@ -25,18 +25,19 @@ MARKER = "macos-apps-mcp integration"
 
 def test_list_drafts_returns_pointers():
     out = MailAdapter().list_drafts()
-    assert isinstance(out, list)
-    for p in out:
-        assert p.id and p.deeplink.startswith("message://")
+    assert isinstance(out["results"], list)
+    for p in out["results"]:
+        assert p["id"] and p["deeplink"].startswith("message://")
+        assert p["folder"] == "drafts"  # #155: the round-trip token, on every read
 
 
 def test_dry_run_send_leaves_no_draft_behind():
     # The regression this guards: constructing an outgoing message can strand an
     # autosaved copy in Drafts. A dry run must construct nothing.
-    before = {p.id for p in MailAdapter().list_drafts()}
+    before = {p["id"] for p in MailAdapter().list_drafts()["results"]}
     out = MailAdapter().send(SELF_ADDRESS, f"{MARKER} dry", "body")
     assert out["dry_run"] is True
-    assert {p.id for p in MailAdapter().list_drafts()} == before
+    assert {p["id"] for p in MailAdapter().list_drafts()["results"]} == before
 
 
 @pytest.mark.skipif(
@@ -74,7 +75,7 @@ def test_send_to_self_and_delete_draft_round_trip():
     )
 
     # a real send must not leave a draft behind either
-    assert not [p for p in adapter.list_drafts() if subject in p.summary]
+    assert not [p for p in adapter.list_drafts()["results"] if subject in p["summary"]]
 
 
 # --- #135: the rollback tells the truth, and outbox_pending measures the real queue ---

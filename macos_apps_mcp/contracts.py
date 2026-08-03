@@ -100,6 +100,51 @@ def deletion_result(ident: str, preview: Pointer | None) -> dict:
     return {"deleted": ident}
 
 
+def read_result(
+    results,
+    *,
+    cap: int | None = None,
+    plane: str | None = None,
+    coverage: str | None = None,
+) -> dict:
+    """The ONE wire shape for a BOUNDED read (#156): ``{results, truncated?, plane?,
+    coverage?}``. Lives here next to ``deletion_result`` for the same reason — "what
+    does a successful call MEAN" is one contracts fact with one test, not ten tool-level
+    behaviours that drift.
+
+    The defect it closes: a read that succeeds while under-answering, with nothing in
+    the payload to say so. For a caller whose job is to tell a human what they missed, a
+    false negative that reads as authoritative is the worst available failure mode —
+    worse than an error, which at least prompts a retry.
+
+    Every optional field is **emitted only when set**, like ``Pointer.folder``, and the
+    absences are meaningful because every bounded read uses this one helper:
+
+    - ``truncated``  present (True) when the read came back exactly AT its cap, so there
+      may be more. Absent means the answer is complete. Deliberately conservative: a set
+      that happens to be exactly ``cap`` long is reported as possibly-truncated rather
+      than possibly-lying.
+    - ``plane``  present only when a read did NOT use its documented plane — today only
+      ``mail_search``'s AppleScript inbox fallback, which is shaped identically to a
+      whole-store result but scanned one mailbox. Absent means the documented plane.
+    - ``coverage``  present when an empty/short answer is explained by an index that
+      does not cover the whole store, so "no matches" is not mistaken for "nothing
+      exists".
+
+    Pointers are serialized through ``as_dict`` here, so a tool stays a one-line
+    delegation and the adapter keeps deciding what it actually answered.
+    """
+    rows = [r.as_dict() if isinstance(r, Pointer) else r for r in results]
+    out: dict = {"results": rows}
+    if cap is not None and len(rows) >= cap:
+        out["truncated"] = True
+    if plane is not None:
+        out["plane"] = plane
+    if coverage is not None:
+        out["coverage"] = coverage
+    return out
+
+
 def parse_optional(label: str, value: str | None) -> datetime | None:
     """Optional ISO datetime tool-arg → naive local; empty/absent → None. A bad value
     fails at the tool boundary, labeled with the failing param (C5a — lives here with

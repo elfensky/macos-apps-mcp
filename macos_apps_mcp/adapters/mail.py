@@ -24,17 +24,30 @@ nothing) is the only way to leave nothing.
 Mail's AppleScript is slow on large mailboxes, so reads are capped and the osascript
 timeout bounds a pathological search. User input goes via argv / a tempfile — not
 interpolated.
+
+Three modules, one adapter (#155). ``mail_index`` is the read-at-rest sqlite plane,
+``mail_addressing`` is the ONE home for "which message/mailbox/account does this token
+mean?" — the two id forms, the mailbox resolvers plus their AppleScript handler, the
+account map, and ``resolve(id, folder=None, account=None) -> ResolvedMessage``, which
+answers with exactly one target or raises. This file keeps the AppleScript, the
+parsing, and the policy. A new mail capability adds a script + a method HERE and calls
+``mail_addressing`` to name its target: #159's recoverable destructive plane and #78's
+``move_mail`` both need the exactly-one-target rule, and they inherit it instead of
+building an eleventh copy of the addressing concept (there were ten before this).
+
+Every bounded read answers ``contracts.read_result`` — ``{results, truncated?, plane?,
+coverage?}`` (#156) — so "the call succeeded" and "the answer is complete" stop being
+the same statement.
 """
 
 from __future__ import annotations
 
 import email
 import re
-import time
 from urllib.parse import unquote
 
-from ..contracts import Pointer, deletion_result
-from ..errors import AmbiguousTarget, NativeError
+from ..contracts import Pointer, deletion_result, read_result
+from ..errors import NativeError
 from ..runtime import body_file, log, run_osascript
 from ..text import (
     READ_BODY,
@@ -54,7 +67,8 @@ from ..text import (
     sanitize_line,
     split_framed,
 )
-from . import mail_index
+from . import mail_addressing, mail_index
+from .mail_addressing import bare_id, stored_id
 from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
 MAX_MAILS = 25
@@ -62,288 +76,6 @@ MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
-
-# Canonical system-mailbox names a mailbox-scoped operation accepts. Mailbox
-# resolution uses Mail's UNIFIED, locale-independent accessors (`inbox`/`sent
-# mailbox`/…, see _ATTACHMENTS), so only the canonical name matters — the
-# per-locale name tables from #61 died with the unified-accessor migration.
-_SYSTEM_MAILBOXES = frozenset({"inbox", "sent", "drafts", "trash", "junk"})
-
-
-def _validate_mailbox(mailbox: str) -> str:
-    """Canonical lowercase system-mailbox name (inbox/sent/drafts/trash/junk), for the
-    unified accessors in the scripts. Raises on an unknown name so a typo fails loudly
-    rather than resolving to the wrong mailbox."""
-    canon = mailbox.strip().lower()
-    if canon not in _SYSTEM_MAILBOXES:
-        raise ValueError(
-            f"unknown mailbox {mailbox!r} — pass the `folder` value from a mail_search "
-            "result back VERBATIM (an imap:// url; it is an opaque token, not a name), "
-            f"or one of {sorted(_SYSTEM_MAILBOXES)}. Do not retry with a folder name."
-        )
-    return canon
-
-
-def _mailbox_args(mailbox: str) -> tuple[str, str]:
-    """``(account-id, mailbox path)`` argv pair for the shared ``mailboxFor`` handler —
-    the INVERSE of ``_resolve_mailbox`` (#146).
-
-    ``mailbox`` is a search result's ``folder`` value passed back verbatim: the raw
-    percent-encoded mailboxes.url (``imap://<account-uuid>/%5BGmail%5D/Spam``). It is an
-    opaque ROUND-TRIP TOKEN, deliberately not a human-readable name — requiring a name
-    would hand #144's encoding mismatch (``%5BGmail%5D`` vs ``[Gmail]``) back to the
-    caller, and the url's account segment also makes same-named folders under two
-    accounts, and the same Message-ID living in several mailboxes, unambiguous by
-    construction.
-
-    Device-verified 2026-07-31: ``mailbox "[Gmail]/Spam" of account …`` resolves and the
-    encoded spelling does not — so the path is DECODED here, exactly as
-    ``_resolve_mailbox`` decodes before matching. The On My Mac store gets the
-    ``"local"`` sentinel instead of its UUID: Mail's ``every account`` never lists it
-    (see ``overview()``), so those mailboxes hang off the application itself. A UUID can
-    never collide with that sentinel.
-
-    The five special names (inbox/sent/drafts/trash/junk) are still accepted as an alias
-    layer — an empty account id selects Mail's unified accessors — so ``mailbox`` reads
-    the same everywhere and mail_attachments' existing vocabulary keeps working.
-    """
-    value = mailbox.strip()
-    if not value:
-        raise ValueError(
-            "this call needs a mailbox — pass the `folder` value from the mail_search "
-            "result that produced this message id, verbatim"
-        )
-    scheme, sep, rest = value.partition("://")
-    if not sep:
-        return "", _validate_mailbox(value)
-    account, _, path = rest.partition("/")
-    if not account:
-        raise ValueError(f"mailbox url {mailbox!r} names no account")
-    path = unquote(path)
-    if not path:
-        raise ValueError(f"mailbox url {mailbox!r} names no mailbox")
-    return ("local" if scheme.lower() == "local" else account), path
-
-
-# Account UUID -> display name. The UUID is what mailboxes.url embeds; the name is
-# what a human reads. Device-verified: AppleScript `id of account` returns exactly
-# the UUID in mailboxes.url. There is NO at-rest source — MailData has no accounts
-# plist, and ~/Library/Accounts/Accounts4.sqlite omits some accounts' description
-# entirely (iCloud is blank on this Mac), so it would cost an FDA grant, a
-# fingerprint and a fallback for a cosmetic label. Cached per process: accounts
-# change about never. with timeout (#56): bound the Apple Events so an orphaned
-# osascript can't pin Mail.
-_ACCOUNT_MAP_CACHE: dict[str, str] | None = None
-
-# monotonic() timestamp of the most recently cached FAILURE-OR-EMPTY result, or None
-# when the cache is unpopulated or holds a non-empty success. An exit-0 run that
-# returned no account records is leashed exactly like a failure: Mail still launching
-# at login can answer with an empty list, and a genuine zero-account Mac merely
-# re-probes once per TTL — while caching that empty forever reproduced the 872767d
-# symptom through the success branch. Compared with time.monotonic(), never wall-clock
-# (must not break when the clock changes — NTP sync, sleep/wake, DST).
-_ACCOUNT_MAP_FAILURE_AT: float | None = None
-
-# This adapter ships inside a launchd agent running daemon.serve() — a process that can
-# live for DAYS. The daemon can start at login before Mail has finished launching, or
-# while an Automation (TCC) prompt is still unanswered on screen; both can flip to
-# "working" long after that first failed lookup, without the daemon ever restarting.
-# Caching a failure forever (as the success cache does, correctly, below) would leave
-# mail_overview showing raw UUIDs and mail_search(account=...) raising for the rest of
-# the daemon's life, cured only by a restart. So a failure gets a short leash instead:
-# remember it for this long, then allow exactly one more attempt.
-_ACCOUNT_MAP_FAILURE_TTL = 60.0  # seconds
-
-_ACCOUNTS = (
-    STRIP_FRAMING
-    + """
-
-on run argv
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Mail"
-    repeat with acct in every account
-      set out to out & (id of acct) & us & (name of acct) & rs
-    end repeat
-  end tell
-  end timeout
-  return out
-end run
-"""
-)
-
-
-def _account_map() -> dict[str, str]:
-    """UUID -> account display name, cached. ``{}`` when Mail is unreachable — this is a
-    label lookup, and it must never fail a call whose real payload came from sqlite.
-
-    The FAILURE is cached too, not just the success: on a machine where Automation is
-    denied, an uncached failure re-spawns osascript on EVERY call, and Python kills
-    each spawn only at ``runtime._OSASCRIPT_TIMEOUT`` (30s) — a 30-second stall per
-    call on tools advertised as fast. But a failure is cached only for
-    ``_ACCOUNT_MAP_FAILURE_TTL`` seconds (see its comment): unlike the account list,
-    whether Mail is running and whether Automation is granted can both change while
-    this long-lived daemon keeps running, so a failure gets one more attempt after
-    the TTL instead of being final
-    for the process's whole lifetime. A non-empty success is still cached forever; an
-    EMPTY success gets the same leash as a failure — Mail launching at login can
-    return exit 0 with no records yet, and that transient cached forever is the same
-    raw-UUIDs-until-restart bug the failure TTL exists to prevent.
-    """
-    global _ACCOUNT_MAP_CACHE, _ACCOUNT_MAP_FAILURE_AT
-    if (
-        _ACCOUNT_MAP_FAILURE_AT is not None
-        and time.monotonic() - _ACCOUNT_MAP_FAILURE_AT >= _ACCOUNT_MAP_FAILURE_TTL
-    ):
-        # TTL elapsed: allow exactly one more attempt.
-        _ACCOUNT_MAP_CACHE = None
-        _ACCOUNT_MAP_FAILURE_AT = None
-    if _ACCOUNT_MAP_CACHE is None:
-        try:
-            raw = run_osascript(_ACCOUNTS)
-        except (NativeError, OSError):
-            # Every osascript failure mode is one of these two and all mean the same
-            # thing — no names available, never "the call failed". run_osascript raises
-            # NativeError subclasses (AutomationDenied / AppNotRunning / NativeTimeout /
-            # generic) on any script or exit failure, and Popen raises OSError when the
-            # osascript binary itself is missing. Deliberately NOT a bare except: a bug
-            # in the parsing below must surface, not be swallowed as "Mail unreachable".
-            _ACCOUNT_MAP_CACHE = {}
-            _ACCOUNT_MAP_FAILURE_AT = time.monotonic()
-            return _ACCOUNT_MAP_CACHE
-        out = {}
-        for rec in raw.split(RS):
-            if US in rec:
-                uuid, name = rec.split(US, 1)
-                if uuid.strip():
-                    out[uuid.strip()] = name.strip()
-        _ACCOUNT_MAP_CACHE = out
-        _ACCOUNT_MAP_FAILURE_AT = None if out else time.monotonic()
-    return _ACCOUNT_MAP_CACHE
-
-
-# mailboxes.url embeds the account as a plain RFC-4122 UUID (8-4-4-4-12 hex).
-_ACCOUNT_UUID_RE = re.compile(
-    r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.IGNORECASE
-)
-
-# What overview() prints for the local:// store (see MailAdapter.overview's docstring).
-# A single constant so the two can't drift apart again — the whole point of N1 was that
-# mail_overview started reporting this name while mail_search still rejected it.
-ON_MY_MAC = "On My Mac"
-
-# _resolve_account's accepted local-store spellings, matched case-insensitively:
-# ON_MY_MAC itself (what overview() actually prints) plus "local" as a shorter alias.
-_LOCAL_ACCOUNT_ALIASES = frozenset({ON_MY_MAC.casefold(), "local"})
-
-
-def _local_account_id() -> str | None:
-    """The account segment mailboxes.url embeds for the On My Mac store — the exact
-    value build_header_query's ``account`` clause anchors on for a ``local://``
-    mailbox. Read fresh from the Envelope Index (like overview()'s own read) rather
-    than guessed or hard-coded: the id is device-specific and AppleScript never lists
-    this store as an account, so there is no other source for it. None when there is
-    no Envelope Index yet, or the index has no ``local://`` mailbox at all.
-    """
-    url = mail_index.query_local_account_url()
-    if not url:
-        return None
-    # <scheme>://<UUID>/<path> — the UUID segment is what the account clause anchors
-    # on. URL-shape parsing is Mail domain knowledge, so it stays here, not in the
-    # store accessor.
-    _, _, rest = url.partition("://")
-    uuid, _, _ = rest.partition("/")
-    return uuid or None
-
-
-def _resolve_mailbox(name: str, account: str | None = None) -> list[str]:
-    """Raw mailboxes.url values whose DECODED path contains ``name`` (#144).
-
-    The one mailbox vocabulary: ``mail_overview`` reports the decoded name
-    ("Junk E-mail"), the url stores the encoded one ("Junk%20E-mail"), and matching
-    happened against the encoded side — so feeding overview's own output back into
-    a search returned 0 hits for every name that encodes. Match decoded-vs-decoded:
-    the NEEDLE is unquoted too, so the encoded spelling models already learned
-    keeps resolving. Case-insensitive substring — today's semantics, kept on
-    purpose (a pure bug fix, not a stricter matcher). Decoding cannot happen in SQL
-    (no urldecode, and Mail's encoding is not reproducible by ``quote()``), which
-    is why this is an adapter helper feeding exact urls to the query, not a LIKE.
-
-    ``account`` (name or UUID) restricts to that account's mailboxes. Reads take
-    every match; the 0.9.1 write tools reuse this and demand exactly one.
-    """
-    account_uuid = _resolve_account(account).casefold() if account else None
-    needle = unquote(name).casefold()
-    out = []
-    for url in mail_index.query_mailbox_urls():
-        _, _, rest = url.partition("://")
-        uuid, _, path = rest.partition("/")
-        if account_uuid and uuid.casefold() != account_uuid:
-            continue
-        if needle in unquote(path).casefold():
-            out.append(url)
-    return out
-
-
-def _resolve_account(value: str) -> str:
-    """A Mail account display name -> the UUID that mailboxes.url embeds.
-
-    A value that already IS a UUID is returned untouched WITHOUT contacting Mail. That
-    is what keeps the promise the read tools document: the name lookup runs osascript,
-    which LAUNCHES Mail if it isn't running, so a tool that claims "no Mail launch"
-    must have a path that doesn't take it — and the UUID path is that path.
-
-    ``"On My Mac"`` (case-insensitive, ``"local"`` also accepted) resolves the local
-    store the same way: read from the Envelope Index, never osascript — Mail's `every
-    account` never lists it (see overview()'s docstring), so there is nothing for
-    osascript to tell us anyway.
-
-    An unresolvable name RAISES. Returning it unchanged handed a display name to a url
-    match, where it degraded into a substring match over the whole mailbox path:
-    ``account="Business"`` then matched any account's ``…/Business Docs`` folder and
-    reported it as though the account filter had worked. A confident wrong answer is
-    worse than a typed error naming the accounts that do exist.
-    """
-    value = value.strip()
-    if _ACCOUNT_UUID_RE.match(value):
-        return value
-    if value.casefold() in _LOCAL_ACCOUNT_ALIASES:
-        local_id = _local_account_id()
-        if local_id:
-            return local_id
-        raise NativeError(
-            "no Mail data found (~/Library/Mail/V*/MailData/Envelope Index) or no "
-            "On My Mac store in it. Open Mail once to create it. Do not retry."
-        )
-    names = _account_map()
-    matches = [
-        uuid for uuid, name in names.items() if name.casefold() == value.casefold()
-    ]
-    if len(matches) > 1:
-        # Same rule as the unresolvable case below: never a confident wrong answer.
-        # First-match-wins picked whichever account Mail happened to list first.
-        raise AmbiguousTarget(
-            f"{len(matches)} Mail accounts are named {value!r} — macos-apps-mcp "
-            "never auto-picks an ambiguous target. Pass one of these account UUIDs "
-            f"instead: {', '.join(matches)} (or rename the accounts in Mail so the "
-            "names are unique)."
-        )
-    if matches:
-        return matches[0]
-    known = (
-        f"known accounts: {sorted(names.values())}"
-        if names
-        else "Mail could not be reached to list account names, so only an account "
-        'UUID or "On My Mac" works right now'
-    )
-    raise NativeError(
-        f"unknown Mail account {value!r} — {known}. Pass an account name exactly as "
-        'Mail shows it (or "On My Mac" for the local store), or an account UUID. '
-        "Do not retry."
-    )
-
 
 # US/RS framing contract (#68): separators, the shared stripFraming AppleScript
 # handler, and the split_framed splitter all live in text.py — the protocol's single
@@ -391,55 +123,6 @@ end run"""
 )
 
 
-# The ONE mailbox resolver (#146): every id-addressed script composes this handler and
-# calls `my mailboxFor(acct, path)` instead of naming a mailbox itself. Both arguments
-# come from _mailbox_args via argv (no interpolation).
-#
-# It exists as a shared handler precisely because the bug it fixes was SEVEN copies of
-# `messages of inbox` drifting apart from the read plane: #62 scoped the body path to
-# the inbox when the reads were inbox-only too, then #70/#75 widened search to every
-# mailbox and nobody re-read the six copies of the old premise. One resolver, one place
-# to widen.
-#
-# It carries its OWN `with timeout` (#56): AppleScript's timeout is lexical, so the
-# caller's wrapper does not cover a handler body called from inside it.
-#
-# Device-verified 2026-07-31, all branches: "" -> the unified accessors (inbox 27 msgs,
-# drafts 15); "local" -> `mailbox "Outbox"` off the application (the On My Mac store,
-# which `every account` never lists); a UUID -> `mailbox "[Gmail]/Spam" of account …`
-# (80 msgs), with the path DECODED — the encoded "%5BGmail%5D/Spam" does not resolve.
-# Both miss paths raise loudly rather than falling back to some other mailbox: an
-# unknown folder gives "Can't get mailbox "Nope" of account …", an unknown account
-# "Can't get account 1 whose id = …". The reference returned survives the handler's tell
-# boundary and is usable in the caller's own tell block (verified against a real filed
-# message).
-_MAILBOX_REF = """on mailboxFor(acctId, mbPath)
-  with timeout of 120 seconds
-  tell application "Mail"
-    if acctId is "" then
-      if mbPath is "inbox" then
-        return inbox
-      else if mbPath is "sent" then
-        return sent mailbox
-      else if mbPath is "drafts" then
-        return drafts mailbox
-      else if mbPath is "trash" then
-        return trash mailbox
-      else if mbPath is "junk" then
-        return junk mailbox
-      else
-        error "unknown system mailbox " & mbPath
-      end if
-    else if acctId is "local" then
-      return mailbox mbPath
-    else
-      return mailbox mbPath of (first account whose id is acctId)
-    end if
-  end tell
-  end timeout
-end mailboxFor"""
-
-
 # mail_body: hydrate ONE message's plaintext by its RFC822 message-id (the citation from
 # a read), in the mailbox the citation came from. NOT inbox-scoped (#146): the original
 # rationale — "the inbox is the same source the reads cite" — was true at #62 and was
@@ -448,7 +131,7 @@ end mailboxFor"""
 # now whatever mailbox the caller names, and an id absent THERE still raises loudly (the
 # guard's real intent). id and mailbox via argv (no injection).
 _BODY = (
-    _MAILBOX_REF
+    mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -719,7 +402,7 @@ _REPLY_ALL = (
     + "\n\n"
     + _ROLLBACK
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -765,7 +448,7 @@ end run"""
 _FORWARD = (
     _ROLLBACK
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -888,7 +571,7 @@ def _with_outbox_pending(result: dict) -> dict:
 _REPLY_ALL_RECIPIENTS = (
     STRIP_FRAMING
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -927,7 +610,7 @@ end run"""
 _ORIGINAL = (
     STRIP_FRAMING
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -963,7 +646,7 @@ _REPLY = (
     + "\n\n"
     + _ROLLBACK
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
@@ -1011,7 +694,13 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 # case still can't pick the wrong (often empty) same-named mailbox on a multi-account
 # Mac; a url names its account outright, so neither can that one. An empty query lists
 # ALL messages in the mailbox (bounded by maxN) rather than none — `contains ""` is
-# false, so that case is branched explicitly. Fields framed per the US/RS contract:
+# false, so that case is branched explicitly. A non-empty `mid` (#155/#81) addresses ONE
+# message by RFC822 message-id instead, the same `whose message id is` predicate _BODY
+# uses; it wins over `q` because an id already names exactly one message. Caveat from
+# the facts doc: `whose` is unreliable on the Drafts mailbox — but an unsaved draft has
+# no message-id to pass in the first place, so the id branch is not the Drafts path (an
+# empty `mid` + empty `q` still lists the whole mailbox, which is).
+# Fields framed per the US/RS contract:
 # per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
 # subject and each attachment name pass through the shared STRIP_FRAMING handler
 # before being joined, so a message that happens to contain those control chars can't
@@ -1020,20 +709,23 @@ def _build_quote(sender: str, date_str: str, original_body: str) -> str:
 _ATTACHMENTS = (
     STRIP_FRAMING
     + "\n\n"
-    + _MAILBOX_REF
+    + mail_addressing.MAILBOX_REF
     + """
 
 on run argv
   set q to item 1 of argv
   set maxN to (item 2 of argv) as integer
   set mb to my mailboxFor(item 3 of argv, item 4 of argv)
+  set mid to item 5 of argv
   set us to character id 31
   set rs to character id 30
   set out to ""
   set c to 0
   with timeout of 120 seconds
   tell application "Mail"
-    if q is "" then
+    if mid is not "" then
+      set msgs to (messages of mb whose message id is mid)
+    else if q is "" then
       set msgs to messages of mb
     else
       set msgs to (messages of mb whose subject contains q)
@@ -1302,9 +994,11 @@ def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Po
 
 
 def _norm_mid(mid: str) -> str:
-    """Normalize a Message-ID for comparison: strip angle brackets + surrounding space,
-    lowercase."""
-    return mid.strip().lstrip("<").rstrip(">").strip().lower()
+    """A Message-ID as a COMPARISON key: the bare id, lowercased. Not a third id form
+    (``mail_addressing`` owns the only two) — nothing is ever addressed with this, it
+    only answers "are these two the same message?" across headers that disagree on
+    case."""
+    return bare_id(mid).lower()
 
 
 def _referenced_ids(header_blobs: list[str]) -> set[str]:
@@ -1450,7 +1144,11 @@ def _split_addrs(value) -> list[str]:
 
 class MailAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
-        """query: a substring to match against the inbox subject OR sender (#61)."""
+        """query: a substring to match against the inbox subject OR sender (#61).
+
+        The ``PointerSource`` contract, so it stays a bare list — every adapter
+        implements this one shape. ``inbox_search`` is the tool-facing wrapper that
+        adds #156's bound signal."""
         q = query.strip()
         if not q:
             raise ValueError("mail read needs a search substring (got an empty query)")
@@ -1459,18 +1157,28 @@ class MailAdapter:
             :MAX_MAILS
         ]
 
-    def get_body(self, message_id: str, mailbox: str) -> str:
+    def inbox_search(self, query: str) -> dict:
+        """``get_pointers`` in the bounded-read envelope (#156) — the legacy `mail`
+        tool's read. Separate from ``get_pointers`` only because that name is the
+        cross-adapter ``PointerSource`` Protocol and must keep its list shape."""
+        return read_result(self.get_pointers(query), cap=MAX_MAILS)
+
+    def get_body(self, message_id: str, mailbox: str = "") -> str:
         """Plaintext body of one message by its RFC822 message-id, budgeted (#52):
         control-stripped, truncated with a marker past BODY_MAX, and OutputOverflow past
         the hard cap (a pasted dump → open it in Mail). Accepts a bracketed or bare id.
 
-        ``mailbox`` is required (#146) and is the ``folder`` value from the search
-        result that produced the id, passed back VERBATIM — see ``_mailbox_args``. Any
-        mailbox in any account is reachable; an id absent from THAT mailbox raises."""
-        mid = message_id.strip().lstrip("<").rstrip(">")
-        if not mid:
-            raise ValueError("mail_body needs a message id")
-        body = run_osascript(_BODY, mid, *_mailbox_args(mailbox))
+        ``mailbox`` is OPTIONAL (#155). Given, it is the ``folder`` value from the
+        search result that produced the id, passed back VERBATIM — the cheapest path,
+        Automation only, no index read. Omitted, the id resolves ON ITS OWN through
+        ``mail_addressing.resolve`` (the Envelope Index, so Full Disk Access), which is
+        what lets a vault note that stored only the citation — the correct
+        pointers-not-payload thing to store — still reach the message after #78's
+        ``move_mail`` invalidated whatever folder token it once had. An id absent from
+        an explicitly named mailbox still raises."""
+        target = mail_addressing.resolve(message_id, folder=mailbox or None)
+        mid = target.id
+        body = run_osascript(_BODY, mid, *target.mailbox_args)
         # defense in depth: the _BODY script already errors on a missing-value content,
         # but a Mail version that returns the coerced literal instead of erroring must
         # not surface it as the body (#62 review).
@@ -1510,12 +1218,17 @@ class MailAdapter:
             "delete_draft().",
         }
 
-    def list_drafts(self) -> list[Pointer]:
-        """List the Drafts mailbox as pointers (id + "subject — to recipient"). A read
-        — never mutates. Bounded to MAX_MAILS. Unlike the inbox reads this is NOT
-        scoped to one account: `drafts mailbox` is Mail's unified, locale-independent
-        accessor."""
+    def _draft_pointers(self) -> list[Pointer]:
+        """The Drafts read as bare Pointers — what ``snapshot`` needs. ``list_drafts``
+        is the same read in the bounded-read envelope."""
         return _parse_draft_records(run_osascript(_DRAFTS, str(MAX_MAILS)))
+
+    def list_drafts(self) -> dict:
+        """List the Drafts mailbox as pointers (id + "subject — to recipient"). A read
+        — never mutates. Bounded to MAX_MAILS (#156: `truncated` says when that bound
+        bit). Unlike the inbox reads this is NOT scoped to one account: `drafts mailbox`
+        is Mail's unified, locale-independent accessor."""
+        return read_result(self._draft_pointers(), cap=MAX_MAILS)
 
     def snapshot(self, ident: str) -> Pointer | None:
         """Current Pointer for one draft, or None if the id no longer resolves — the
@@ -1523,7 +1236,7 @@ class MailAdapter:
         the Snapshotter Protocol. Compares bracket-normalized (`_norm_mid`, M1 review):
         accepts a bracketed or bare ``ident`` against a bracketed or bare stored id."""
         mid = _norm_mid(ident)
-        for p in self.list_drafts():
+        for p in self._draft_pointers():
             if _norm_mid(p.id) == mid:
                 return p
         return None
@@ -1538,7 +1251,7 @@ class MailAdapter:
         ``{"deleted": True, "id": mid}``, the one odd envelope out). Raises if the id
         resolves to no draft, so a stale id fails loudly instead of silently deleting
         nothing."""
-        mid = ident.strip().lstrip("<").rstrip(">")
+        mid = bare_id(ident)
         if not mid:
             raise ValueError(
                 "delete_draft needs a draft id (the message-id from drafts)"
@@ -1646,12 +1359,12 @@ class MailAdapter:
         in Mail's Outbox for minutes). Check ``outbox_pending``: non-zero means
         something is still queued and delivery is not confirmed.
         """
-        mid = message_id.strip().lstrip("<").rstrip(">")
+        mid = bare_id(message_id)
         if not mid:
             raise ValueError("reply_all needs the original message's id")
         if not body.strip():
             raise ValueError("reply_all needs a non-empty body")
-        mb = _mailbox_args(mailbox)
+        mb = mail_addressing.mailbox_args(mailbox)
         if dry_run:
             recipients = _parse_reply_all_recipients(
                 run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb)
@@ -1708,13 +1421,13 @@ class MailAdapter:
         that it was delivered (device-verified: an accepted send can sit undelivered
         in Mail's Outbox for minutes). Check ``outbox_pending``: non-zero means
         something is still queued and delivery is not confirmed."""
-        mid = message_id.strip().lstrip("<").rstrip(">")
+        mid = bare_id(message_id)
         if not mid:
             raise ValueError("forward needs the original message's id")
         to_list = _split_addrs(to)
         if not to_list:
             raise ValueError("forward needs at least one recipient address (to)")
-        mb = _mailbox_args(mailbox)
+        mb = mail_addressing.mailbox_args(mailbox)
         if dry_run:
             return {
                 "dry_run": True,
@@ -1743,12 +1456,12 @@ class MailAdapter:
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
         produced ``message_id``, verbatim. It scopes BOTH native calls — the quote read
         and the draft build — so a filed original can't reply with an empty quote."""
-        mid = message_id.strip().lstrip("<").rstrip(">")
+        mid = bare_id(message_id)
         if not mid:
             raise ValueError("reply needs the original message's id")
         if not reply_body.strip():
             raise ValueError("reply needs a non-empty reply_body")
-        mb = _mailbox_args(mailbox)
+        mb = mail_addressing.mailbox_args(mailbox)
         body = reply_body
         if include_quote:
             raw = run_osascript(_ORIGINAL, mid, *mb)
@@ -1773,8 +1486,12 @@ class MailAdapter:
             "where it gets a stable message-id (see drafts())",
         }
 
-    def list_attachments(self, mailbox: str, query: str = "") -> list[dict]:
-        """List attachments of messages in `mailbox` whose subject contains `query`.
+    def list_attachments(
+        self, mailbox: str = "", query: str = "", message_id: str = ""
+    ) -> dict:
+        """List attachments of messages in `mailbox` whose subject contains `query`, or
+        of the ONE message `message_id` names.
+
         `mailbox` is a search result's `folder` value passed back verbatim, or one of
         the canonical inbox/sent/drafts/trash/junk (#146 — #45 shipped those five
         only, so a filed message's attachments were as unreachable as its body). Works
@@ -1783,32 +1500,52 @@ class MailAdapter:
         mailbox`/`junk mailbox`/`inbox`), which are locale-independent, and a url names
         its own account. query is optional: an empty/omitted query lists ALL
         messages in the mailbox (bounded by MAX_MAILS) — this deliberately differs from
-        `get_pointers`, which rejects an empty query. Returns up to MAX_MAILS records:
-        [{"summary", "attachments": [{"name","size","downloaded"}]}]. A read — never
-        mutates."""
-        raw = run_osascript(
-            _ATTACHMENTS, query.strip(), str(MAX_MAILS), *_mailbox_args(mailbox)
-        )
+        `get_pointers`, which rejects an empty query.
+
+        `message_id` (#155/#81) addresses ONE message instead of scanning: with no
+        `mailbox` it resolves through ``mail_addressing.resolve``, so an id alone
+        reaches its attachments. Scanning a whole mailbox to find one message was never
+        a real option here — the scan stops at MAX_MAILS records, so the message a
+        caller actually meant is usually past the cap. `query` is ignored when it is
+        set: the id already names exactly one message.
+
+        Returns the bounded-read envelope over records
+        [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}].
+        A read — never mutates."""
+        if not mailbox and not message_id:
+            raise ValueError(
+                "mail_attachments needs a mailbox (the `folder` value from a read) "
+                "or a message_id"
+            )
+        if message_id:
+            target = mail_addressing.resolve(message_id, folder=mailbox or None)
+            folder, mb, mid = target.folder, target.mailbox_args, target.id
+        else:
+            folder, mb, mid = mailbox, mail_addressing.mailbox_args(mailbox), ""
+        raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), *mb, mid)
         recs = _parse_attachments(raw)[:MAX_MAILS]
-        # #155: hand back the mailbox the caller passed, VERBATIM. It is already the
+        # #155: hand back the mailbox this actually read, VERBATIM. It is already the
         # round-trip token every id-taking tool wants, and echoing it means a row from
         # here is complete on its own — id + deeplink + folder — instead of only being
         # usable by a caller who still remembers what it asked for.
         for r in recs:
-            r["folder"] = mailbox
-        return recs
+            r["folder"] = folder
+        # An id names one message, so the cap cannot have hidden anything.
+        return read_result(recs, cap=None if mid else MAX_MAILS)
 
-    def get_needs_response(self) -> list[Pointer]:
+    def get_needs_response(self) -> dict:
         """Inbox messages that likely need the user's response, ranked with a reason
         (flagged / unread-direct / unanswered-direct). Heuristic over headers/
-        properties — no body scan; direct-addressed + not-yet-replied. Bounded."""
+        properties — no body scan; direct-addressed + not-yet-replied. Bounded to
+        MAX_MAILS, and #156's `truncated` says when that bound bit."""
         records = _parse_triage_records(run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN)))
         my = _parse_my_addrs(run_osascript(_MY_ADDRESSES))
-        return _classify_needs_response(records, my)
+        return read_result(_classify_needs_response(records, my), cap=MAX_MAILS)
 
-    def get_awaiting_reply(self, days: int = 3) -> list[Pointer]:
+    def get_awaiting_reply(self, days: int = 3) -> dict:
         """Sent messages older than `days` with no reply, ranked oldest-first (reason
-        'awaiting-reply'). Real In-Reply-To/References threading. Bounded."""
+        'awaiting-reply'). Real In-Reply-To/References threading. Bounded to
+        MAX_MAILS."""
         if not 1 <= days <= 365:
             raise ValueError("days must be between 1 and 365")
         sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
@@ -1818,13 +1555,15 @@ class MailAdapter:
         # cutoff, no send can qualify, so skip the inbox scan entirely.
         window = max((r["secs_ago"] for r in sent), default=0)
         if window < days * 86400:
-            return []
+            return read_result([])
         blobs = [
             b
             for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(RS)
             if b.strip()
         ]
-        return _classify_awaiting_reply(sent, _referenced_ids(blobs), days)
+        return read_result(
+            _classify_awaiting_reply(sent, _referenced_ids(blobs), days), cap=MAX_MAILS
+        )
 
     def search(
         self,
@@ -1841,19 +1580,26 @@ class MailAdapter:
         account=None,
         body=None,
         limit=MAX_MAILS,
-    ) -> list[Pointer]:
+    ) -> dict:
         """Indexed search over ALL mailboxes via Mail's Envelope Index (read-at-rest).
         All filters optional, ANDed. Falls back to the AppleScript inbox search on
         missing FDA / schema drift. `body` matches against the best-effort FTS body
         sidecar (built by `index_bodies`); the FTS hits are intersected with the header
         query via message-ids. If the sidecar has no matches (absent, empty, or no hit
-        for this query) this returns [] rather than raising — a body search is opt-in
-        and its absence isn't an error condition.
+        for this query) this answers empty rather than raising — a body search is opt-in
+        and its absence isn't an error condition — but it reports `coverage` so that
+        empty is not read as "nothing exists" (#156 case 4).
 
         At least one filter is required (an unfiltered search would walk the whole
         store); "" and None are both absent for the text filters, while since/until
         are compared ``is not None`` — epoch 0 is a real filter (#70 review M3).
-        This is the adapter's domain rule (C5c), not tool-layer decoration."""
+        This is the adapter's domain rule (C5c), not tool-layer decoration.
+
+        Answers the bounded-read envelope (#156): `truncated` when the answer came back
+        at `limit` — 25 is a hard ceiling, so "find every invoice from 2025" would
+        otherwise return 25 and read as complete — and `plane` when the AppleScript
+        fallback ran, since that scans the INBOX only while being shaped identically to
+        a whole-store result."""
         subject, from_, to, mailbox, body, account = (
             v or None for v in (subject, from_, to, mailbox, body, account)
         )
@@ -1872,7 +1618,7 @@ class MailAdapter:
         # SQLite reads a negative LIMIT as unlimited, so a one-sided min() let
         # limit=-1 (reachable straight from the MCP schema) return the whole store.
         limit = max(1, min(limit, MAX_MAILS))
-        account = _resolve_account(account) if account else None
+        account = mail_addressing.resolve_account(account) if account else None
 
         mailbox_urls = None
         if mailbox:
@@ -1881,9 +1627,22 @@ class MailAdapter:
             # substring filter gave — and it must not fall through to an
             # unfiltered query. Resolution itself raises on a missing store,
             # preserving the raise-before-anything ordering.
-            mailbox_urls = _resolve_mailbox(mailbox, account=account)
+            mailbox_urls = mail_addressing.resolve_mailbox(mailbox, account=account)
             if not mailbox_urls:
-                return []
+                # #156 case 2: a NAME resolving to nothing is a typo or a wrong-account
+                # guess — a followable error, not a 0-hit read that reads as "that
+                # mailbox is empty". A URL is different: it was a real handle when a
+                # read issued it, so one that no longer resolves went stale (#78's
+                # move_mail does exactly that) and stays the honest empty answer.
+                if mail_addressing.is_mailbox_url(mailbox):
+                    return read_result([], cap=limit)
+                raise ValueError(
+                    f"no mailbox matches {mailbox!r}"
+                    + (f" in account {account!r}" if account else "")
+                    + " — mail_overview lists every mailbox with the exact name to "
+                    "use, or pass a `folder` url from a read result verbatim. Do not "
+                    "retry with a guessed name."
+                )
 
         message_ids = None
         if body:
@@ -1903,7 +1662,10 @@ class MailAdapter:
                     "build/refresh the body index)",
                     body,
                 )
-                return []
+                # #156 case 4: an empty body= answer is usually about the INDEX, not
+                # the mailbox — most local messages are headers-only until #119 runs.
+                # Say so in the payload, not just in a log the caller never sees.
+                return read_result([], coverage=mail_index.body_coverage())
 
         # Fallback: the AppleScript inbox scan can express a subject/sender substring
         # — NOTHING else. It is offered only when no other filter is set: falling
@@ -1926,11 +1688,17 @@ class MailAdapter:
             or bool(account)
             or bool(body)
         )
-        fallback = (
-            (lambda: self.get_pointers(needle)[:limit])
-            if (needle and not dropped)
-            else None
-        )
+        # #156 case 3: the caller must be able to tell an inbox-only scan from a
+        # whole-store one. The flag is set INSIDE the callable rather than inferred
+        # afterwards because only query_search knows whether it ever reached sqlite.
+        used_fallback = False
+
+        def _run_fallback() -> list[Pointer]:
+            nonlocal used_fallback
+            used_fallback = True
+            return self.get_pointers(needle)[:limit]
+
+        fallback = _run_fallback if (needle and not dropped) else None
         result = mail_index.query_search(
             subject=subject,
             from_=from_,
@@ -1952,13 +1720,18 @@ class MailAdapter:
                 body,
                 len(message_ids),
             )
-        return result
+        return read_result(
+            result,
+            cap=limit,
+            plane="applescript-inbox" if used_fallback else None,
+        )
 
-    def thread(self, message_id: str, limit: int = MAX_THREAD) -> list[Pointer]:
+    def thread(self, message_id: str, limit: int = MAX_THREAD) -> dict:
         """Every message in the conversation containing ``message_id``, deduped and
         oldest-first — including the ones YOU sent, which is what makes it a transcript.
         Bodies stay behind ``mail_body``: a thread is Pointers, so quoted-text
-        duplication never arises. Unknown id -> [] (a no-match read, not an error).
+        duplication never arises. Unknown id -> empty (a no-match read, not an error);
+        `truncated` marks a thread that hit `limit`, where the OLDEST were dropped.
 
         No AppleScript fallback: AppleScript cannot express "fetch this conversation",
         so on schema drift this raises the typed error rather than inventing a
@@ -1968,12 +1741,12 @@ class MailAdapter:
         # let limit=-1 return every message in the store.
         limit = max(1, min(limit, MAX_THREAD))
         # The index stores Message-IDs WITH angle brackets; AppleScript's `message id`
-        # reports them BARE (which is why every id-taking method strips <>). Normalize
-        # to the stored form so a Pointer.id from either plane threads — without this,
-        # every id the AppleScript tools emit matched zero rows, indistinguishable
-        # from a genuine miss.
-        bare = message_id.strip().lstrip("<").rstrip(">").strip()
-        return mail_index.query_thread(f"<{bare}>", limit)
+        # reports them BARE — `stored_id` is the one sanctioned conversion. Without it
+        # every id the AppleScript tools emit matched zero rows, indistinguishable from
+        # a genuine miss.
+        return read_result(
+            mail_index.query_thread(stored_id(message_id), limit), cap=limit
+        )
 
     def overview(self) -> list[dict]:
         """Per-mailbox {account, mailbox, total, unread}, unread-first.
@@ -2003,16 +1776,21 @@ class MailAdapter:
         back through substring matching.
         """
         rows = mail_index.query_overview_rows()
-        names = _account_map()
+        names = mail_addressing.account_map()
         out = []
         for r in rows:
             url = r["mailbox_url"]
             # <scheme>://<UUID>/<percent-encoded path> — scheme is imap:// or local://
             scheme, _, rest = url.partition("://")
-            uuid, _, box = rest.partition("/")
+            uuid = mail_index.account_of(url) or ""
+            _, _, box = rest.partition("/")
             # local:// is the On My Mac store; Mail never reports it as an account, so
             # its UUID would otherwise be shown raw forever (see the docstring).
-            account = ON_MY_MAC if scheme == "local" else names.get(uuid, uuid)
+            account = (
+                mail_addressing.ON_MY_MAC
+                if scheme == "local"
+                else names.get(uuid, uuid)
+            )
             out.append(
                 {
                     "account": account,
