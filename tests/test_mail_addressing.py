@@ -233,3 +233,35 @@ def test_read_result_passes_plain_dict_rows_through():
 def test_read_result_carries_plane_and_coverage_when_given():
     out = read_result([], plane="applescript-inbox", coverage="1 of 2")
     assert out == {"results": [], "plane": "applescript-inbox", "coverage": "1 of 2"}
+
+
+def test_resolve_mailbox_matches_a_round_trip_url_exactly(monkeypatch):
+    # Every mail read returns `folder` as a url and documents it as the token to pass
+    # back verbatim — but a url is never a substring of a bare mailbox PATH, so
+    # mail_search(mailbox=<that folder>) matched zero rows and read as "empty mailbox".
+    a, b = "AAAA-1", "BBBB-2"
+    urls = [f"imap://{a}/INBOX", f"imap://{b}/INBOX", f"imap://{a}/Archive"]
+    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+    assert ma.resolve_mailbox(f"imap://{a}/INBOX") == [f"imap://{a}/INBOX"]
+
+
+def test_resolve_mailbox_url_match_survives_a_percent_encoding_difference(monkeypatch):
+    # create_mailbox synthesises `.../Social & SEO`; Mail re-spells it
+    # `Social%20&%20SEO` once it syncs. Not byte-equal, one mailbox — both resolve.
+    stored = "imap://AAAA-1/Social%20&%20SEO"
+    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: [stored])
+    assert ma.resolve_mailbox("imap://AAAA-1/Social & SEO") == [stored]
+    assert ma.resolve_mailbox(stored) == [stored]
+
+
+def test_resolve_mailbox_url_does_not_match_the_same_path_elsewhere(monkeypatch):
+    # the account segment is half the address — a url must not resolve across accounts
+    urls = ["imap://AAAA-1/INBOX", "imap://BBBB-2/INBOX"]
+    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+    assert ma.resolve_mailbox("imap://CCCC-3/INBOX") == []
+
+
+def test_resolve_mailbox_still_substring_matches_a_plain_name(monkeypatch):
+    urls = ["imap://AAAA-1/Junk%20E-mail", "imap://AAAA-1/INBOX"]
+    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+    assert ma.resolve_mailbox("junk") == ["imap://AAAA-1/Junk%20E-mail"]

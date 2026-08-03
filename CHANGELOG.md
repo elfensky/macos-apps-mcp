@@ -8,6 +8,47 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **A recoverable destructive plane for Mail** (`adapters/mail_recover.py`, #159). Every
+  destructive mail write now goes **backup → log → act**, in that order, through one module
+  instead of re-deriving the same four invariants per call site. Before an Apple Event is sent,
+  each target's RFC822 bytes are copied out of its `.emlx` as a plain, importable `.eml` under
+  `state_dir()/backup/mail/<receipt>/`, and the full per-target plan — message-id, source
+  mailbox, account, backup path, fidelity — is appended to the existing audit JSONL
+  **un-truncated** (the `AuditMiddleware` path caps every string at 200 chars, which could never
+  carry a batch). A receipt comes back with the batch; `mail_undo(receipt)` replays it. The batch
+  cap is 25 and is deliberately **not** overridable. Backups are stamped `full` | `partial` |
+  `absent`, because 62.5% of local messages on a real Mac are headers-only — so a *permanent*
+  delete (0.9.3) will refuse a non-full target without `allow_lossy`, while a move never needs
+  the gate. `tests/test_tool_annotations.py` fails if a new destructive mail write is neither
+  declared recoverable nor exempted with a stated reason.
+
+- **`move_mail` — move, file and archive messages** (#78), the plane's first consumer.
+  `dry_run=True` by default, and the preview reads Mail through AppleScript rather than sqlite
+  (the index lags — measured mid-move on a real store), so it reports per id whether it is really
+  `present` in the source. Both mailboxes are required and are address tokens: a message id alone
+  does not locate a message. Archiving is a move into a mailbox named Archive, not a separate
+  tool. **Cross-account moves leave exactly one copy** — device-verified across two accounts and
+  re-checked after sync — and each message is verified present in the destination *and* gone from
+  the source afterwards, so a per-id `status` reports what happened instead of assuming success.
+
+- **`mail_undo(receipt)`** (#159). Undoes a recoverable operation by moving every message back to
+  the exact mailbox it came from, recorded per message before the original ran. It is itself
+  backed up, logged and verified, and returns its own receipt — so an undo can be undone.
+
+- **`create_mailbox(name, account)`** (#78). Nested paths work and missing parents are created.
+  The returned `folder` address is **synthesised**, not read back: `make new mailbox` answers
+  `missing value`, the `mailbox` class has no url property, and the Envelope Index does not know
+  the mailbox exists until Mail syncs — all three possible sources are blind. It works
+  immediately because a mailbox path is percent-decoded before use; a `%` in the name is rejected
+  rather than silently mis-decoded. There is no delete counterpart: `delete <mailbox>` is not
+  scriptable (-10000 in every form), so removing one is a Mail.app action.
+
+- **`update_mail_status`** (#79) — mark read/unread and flag/unflag with an optional colour
+  (a name, not a magic integer), batched and grouped by the mailbox each id actually lives in.
+  Deliberately **not** on the recoverable plane: it changes two booleans, destroys nothing, and
+  re-issuing it with the opposite value is the undo — so `dry_run` defaults to `False` here.
+  Each message is re-read after the write, so `results` reports what actually persisted.
+
 - **A Mail id resolves on its own** (#155). `mail_body(id)` and
   `mail_attachments(message_id=…)` no longer need the mailbox: the id resolves through the
   Envelope Index to the same ranked copy every other read cites. This is what a vault note
@@ -55,6 +96,14 @@ surface may still shift between minor versions.
   under `[Unreleased]`.
 
 ### Fixed
+
+- **`mail_search(mailbox=…)` now accepts the `folder` token every read hands back.** A live
+  round-trip URL matched zero rows and read as an empty mailbox: mailbox resolution
+  substring-matched the decoded mailbox *path*, and a URL is never a substring of a bare path.
+  So doing exactly what every read's docstring says — "pass the `folder` value back verbatim" —
+  silently returned nothing. A URL is now matched exactly (account segment + decoded path, so a
+  synthesised `…/Social & SEO` and Mail's own `…/Social%20&%20SEO` both resolve); a plain name
+  still substring-matches. Found by an integration fixture following the documented round trip.
 
 - **Mail's body/reply/forward/attachment tools reach any mailbox, not just the inbox**
   (#146). `mail_search` reads every mailbox via the Envelope Index, but six tools were

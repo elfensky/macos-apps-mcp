@@ -25,15 +25,26 @@ Mail's AppleScript is slow on large mailboxes, so reads are capped and the osasc
 timeout bounds a pathological search. User input goes via argv / a tempfile — not
 interpolated.
 
-Three modules, one adapter (#155). ``mail_index`` is the read-at-rest sqlite plane,
-``mail_addressing`` is the ONE home for "which message/mailbox/account does this token
-mean?" — the two id forms, the mailbox resolvers plus their AppleScript handler, the
-account map, and ``resolve(id, folder=None, account=None) -> ResolvedMessage``, which
-answers with exactly one target or raises. This file keeps the AppleScript, the
-parsing, and the policy. A new mail capability adds a script + a method HERE and calls
-``mail_addressing`` to name its target: #159's recoverable destructive plane and #78's
-``move_mail`` both need the exactly-one-target rule, and they inherit it instead of
-building an eleventh copy of the addressing concept (there were ten before this).
+Four modules, one adapter. ``mail_index`` is the read-at-rest sqlite plane;
+``mail_addressing`` (#155) is the ONE home for "which message/mailbox/account does this
+token mean?" — the two id forms, the mailbox resolvers plus their AppleScript handler,
+the account map, and ``resolve(id, folder=None, account=None) -> ResolvedMessage``,
+which answers with exactly one target or raises; ``mail_recover`` (#159) is the
+recoverable destructive plane — **backup → log → act** — which owns the batch cap, the
+per-target action log and undo for every write that mutates stored mail. This file
+keeps the AppleScript, the parsing, and the policy.
+
+So a new mail capability adds a script + a method HERE, calls ``mail_addressing`` to
+name its target, and — if it is destructive — hands its script to
+``mail_recover.recoverable`` as the ``act`` callable rather than running it itself.
+``move_mail`` (#78) is the worked example and the plane's first consumer;
+``tests/test_tool_annotations.py`` fails if a new destructive mail write is neither
+declared recoverable nor exempted with a reason, the same registration-guard pattern
+``_send_tool`` uses.
+
+Everything under "organize" MUTATES stored mail, and every claim it makes is VERIFIED
+by re-reading rather than inferred from a verb returning cleanly — the discipline #135
+forced when a bare ``delete`` reported success having removed nothing.
 
 Every bounded read answers ``contracts.read_result`` — ``{results, truncated?, plane?,
 coverage?}`` (#156) — so "the call succeeded" and "the answer is complete" stop being
@@ -44,6 +55,7 @@ from __future__ import annotations
 
 import email
 import re
+from dataclasses import replace
 from urllib.parse import unquote
 
 from ..contracts import Pointer, deletion_result, read_result
@@ -67,7 +79,7 @@ from ..text import (
     sanitize_line,
     split_framed,
 )
-from . import mail_addressing, mail_index
+from . import mail_addressing, mail_index, mail_recover
 from .mail_addressing import bare_id, stored_id
 from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
@@ -760,6 +772,291 @@ on run argv
   return out
 end run"""
 )
+
+
+# --- organize: mailboxes, moves, status (#78/#79) ------------------------------------
+# Everything below MUTATES stored mail. The destructive half (`_MOVE`) never runs on its
+# own — it is the `act` callable #159's recoverable plane invokes after it has copied
+# each target's bytes to disk and logged the plan. See mail_recover.
+
+# create_mailbox (#78). Device-verified 2026-08-03, every branch:
+#
+# - `make new mailbox with properties {name:"a/b"}` AUTO-CREATES the missing parent —
+#   both at application level (the On My Mac store) and via `at end of mailboxes of
+#   <account>`. So nesting needs no per-level loop.
+# - It returns `missing value`. There is nothing to read the new mailbox's address back
+#   from — and the `mailbox` class has no `url` property at all (Mail.sdef) while the
+#   Envelope Index will not know the mailbox exists until Mail syncs. That is why the
+#   caller synthesises the address instead of asking; see MailAdapter.create_mailbox.
+# - `make new mailbox at <account> …` (the bare `at acct` form) raises a coercion error
+#   AND CREATES THE MAILBOX ANYWAY — a trap that leaves a folder behind while reporting
+#   failure. Only the `at end of mailboxes of <account>` form is used here.
+# - So the create is verified by ADDRESS: resolve the path through the shared
+#   `mailboxFor` and read its name. Same discipline as every other write in this file —
+#   a Mail verb that returns cleanly having done nothing is the recurring bug (#135).
+_CREATE_MAILBOX = (
+    mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set acctId to item 1 of argv
+  set mbName to item 2 of argv
+  with timeout of 120 seconds
+  tell application "Mail"
+    if acctId is "local" then
+      make new mailbox with properties {name:mbName}
+    else
+      make new mailbox at end of mailboxes of ¬
+        (first account whose id is acctId) with properties {name:mbName}
+    end if
+  end tell
+  end timeout
+  set mb to my mailboxFor(acctId, mbName)
+  with timeout of 120 seconds
+  tell application "Mail"
+    return name of mb
+  end tell
+  end timeout
+end run"""
+)
+
+# move_mail's dry-run preview (#78). Reads STORED messages through AppleScript rather
+# than sqlite ON PURPOSE: the Envelope Index lags Mail, and a preview reporting 25 ids
+# present when they are not is worse than no preview at all. A read of stored messages
+# strands nothing — the same justification #129's reply-all preview stands on, and the
+# reason this is not a violation of "a dry run makes no native call" (that rule exists
+# to stop CONSTRUCTING an outgoing message, which can strand an autosaved draft).
+_PRESENT = (
+    STRIP_FRAMING
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set mb to my mailboxFor(item 1 of argv, item 2 of argv)
+  set us to character id 31
+  set rs to character id 30
+  set AppleScript's text item delimiters to us
+  set ids to text items of (item 3 of argv)
+  set AppleScript's text item delimiters to ""
+  set out to ""
+  with timeout of 300 seconds
+  tell application "Mail"
+    repeat with rawId in ids
+      set mid to rawId as text
+      if mid is not "" then
+        set outcome to "missing"
+        try
+          if (count of (messages of mb whose message id is mid)) > 0 then
+            set outcome to "present"
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+        set out to out & mid & us & (my stripFraming(outcome)) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
+# _MOVE (#78) — the first DESTRUCTIVE mail write, and the shape the rest of 0.9.2/0.9.3
+# copies. Device-verified 2026-08-03, and two of the three answers contradict what the
+# dictionary reads like:
+#
+# 1. `move {a, b, c} to mb` — an AppleScript LIST of specifiers — raises -1700 ("Can't
+#    make {…} into type specifier") and moves NOTHING. The `list="yes"` direct parameter
+#    that makes a batch look like one Apple Event is inside a COMMENTED-OUT block of
+#    Mail.sdef; the live definition is a singular `type="specifier"`. `whose message id
+#    is in {…}` fails the same way. So a batch is N events in ONE script, not one event
+#    — which is exactly why the cap is 25 and why the timeout is raised below.
+#    The failure was atomic (0 of 3 moved), so nothing half-applied.
+# 2. `move <one ref> to dst` and `move (messages of src whose message id is "…") to dst`
+#    both work. The `whose` form is used here so the reference is re-evaluated per
+#    iteration — moving a message OUT of the source collection is the same mutation
+#    class that invalidates a forward-iterated reference (-1728, facts doc §6).
+# 3. A CROSS-ACCOUNT move is a true move: source 0, destination 1, stable across sync
+#    (re-checked after 45s and against the Envelope Index). Mail.app's own UI *drag*
+#    copies — that is where #140/#153's duplicates came from — but the `move` verb does
+#    not, so there is no copy → verify → delete-source dance to perform here.
+#
+# It VERIFIES rather than asserting: a 0-match `whose` makes `move` a silent no-op, so
+# each id is checked present-in-source first, then absent-from-source AND
+# present-in-destination after. `moved: 25` is never assumed (#135). Both mailboxes and
+# the US-joined id list arrive via argv; nothing is interpolated.
+_MOVE = (
+    STRIP_FRAMING
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set src to my mailboxFor(item 1 of argv, item 2 of argv)
+  set dst to my mailboxFor(item 3 of argv, item 4 of argv)
+  set us to character id 31
+  set rs to character id 30
+  set AppleScript's text item delimiters to us
+  set ids to text items of (item 5 of argv)
+  set AppleScript's text item delimiters to ""
+  set out to ""
+  with timeout of 600 seconds
+  tell application "Mail"
+    repeat with rawId in ids
+      set mid to rawId as text
+      if mid is not "" then
+        set outcome to "unknown"
+        try
+          if (count of (messages of src whose message id is mid)) is 0 then
+            set outcome to "not-in-source"
+          else
+            move (messages of src whose message id is mid) to dst
+            if (count of (messages of dst whose message id is mid)) is 0 then
+              set outcome to "ERROR move returned cleanly but the message is " & ¬
+                "not in the destination"
+            else if (count of (messages of src whose message id is mid)) > 0 then
+              set outcome to "ERROR the message is in BOTH mailboxes — the " & ¬
+                "source copy survived, so this was a COPY, not a move"
+            else
+              set outcome to "ok"
+            end if
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+        set out to out & mid & us & (my stripFraming(outcome)) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
+# A batch of up to MAX_MAILS moves is N Apple Events against a possibly-remote IMAP
+# store, plus two verifying counts each — genuinely not a 30-second job, so this one
+# script gets a raised host-side timeout (the AppleScript-level `with timeout` above is
+# the second line of defense, never the first).
+_MOVE_TIMEOUT = 300.0
+
+# update_mail_status (#79): read/unread and flag/unflag+colour on stored messages.
+# Purely reversible and destroys nothing, so it does NOT ride #159's recoverable plane —
+# there is no byte to preserve and no undo to synthesize; re-issuing the tool with the
+# opposite value IS the undo. It still verifies, for the same reason everything here
+# does. "" means "leave this property alone" — the tri-state has to survive argv, which
+# carries only text.
+# `flag index` (Mail.sdef: integer, read/write) is the colour; `flagged status` is the
+# on/off. Setting a colour implies flagged, or the index would be set on a message that
+# shows no flag at all.
+_SET_STATUS = (
+    STRIP_FRAMING
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set mb to my mailboxFor(item 1 of argv, item 2 of argv)
+  set wantRead to item 3 of argv
+  set wantFlag to item 4 of argv
+  set wantColor to item 5 of argv
+  set us to character id 31
+  set rs to character id 30
+  set AppleScript's text item delimiters to us
+  set ids to text items of (item 6 of argv)
+  set AppleScript's text item delimiters to ""
+  set out to ""
+  with timeout of 300 seconds
+  tell application "Mail"
+    repeat with rawId in ids
+      set mid to rawId as text
+      if mid is not "" then
+        set outcome to "unknown"
+        try
+          set matches to (messages of mb whose message id is mid)
+          if (count of matches) is 0 then
+            set outcome to "not-found"
+          else
+            set m to item 1 of matches
+            if wantRead is not "" then set read status of m to (wantRead is "1")
+            if wantFlag is not "" then set flagged status of m to (wantFlag is "1")
+            if wantColor is not "" then
+              set flagged status of m to true
+              set flag index of m to (wantColor as integer)
+            end if
+            set outcome to "ok"
+            if wantRead is not "" and (read status of m) is not (wantRead is "1") then ¬
+              set outcome to "ERROR read status did not persist"
+            if wantFlag is not "" and ¬
+              (flagged status of m) is not (wantFlag is "1") then ¬
+              set outcome to "ERROR flagged status did not persist"
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+        set out to out & mid & us & (my stripFraming(outcome)) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
+
+def _tri(value: bool | None) -> str:
+    """A tri-state boolean as the scripts read it off argv: ``""`` leaves the property
+    alone, ``"1"``/``"0"`` set it. argv carries only text, so the absent case needs a
+    spelling of its own — ``"0"`` would silently mark everything unread."""
+    return "" if value is None else ("1" if value else "0")
+
+
+def _parse_statuses(raw: str) -> dict[str, str]:
+    """Parse the ``id US status RS`` payload every per-target script here emits into
+    ``{id: status}``. Malformed/partial trailing records are skipped — the same
+    defensive rule as every other parser in this file. Ids are compared in the bare
+    form the scripts echo back, which is the form they were sent in."""
+    out: dict[str, str] = {}
+    for fields in split_framed(raw):
+        if len(fields) < 2:
+            continue
+        out[bare_id(fields[0])] = fields[1].strip()
+    return out
+
+
+def _split_ids(value) -> list[str]:
+    """Normalize an ids argument to bare Message-IDs. Accepts a comma-separated string
+    (what a model usually produces) or a list; blanks are dropped, duplicates collapse
+    (acting on the same message twice would double-count the receipt).
+
+    Every entry goes through ``sanitize_line`` for the reason ``_split_addrs``
+    documents: callers US-join the result and the scripts re-split on US, so an id
+    carrying a literal U+001F would be ONE target in the preview and TWO on the wire.
+    """
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else str(value).split(",")
+    out: list[str] = []
+    for a in items:
+        mid = bare_id(sanitize_line(a))
+        if mid and mid not in out:
+            out.append(mid)
+    return out
+
+
+# Mail's `flag index` values, in Mail's own menu order. Exposed as NAMES because an
+# integer flag colour is exactly the kind of magic number a caller gets wrong silently;
+# an unknown name raises instead.
+FLAG_COLORS = {
+    "red": 0,
+    "orange": 1,
+    "yellow": 2,
+    "green": 3,
+    "blue": 4,
+    "purple": 5,
+    "grey": 6,
+    "gray": 6,
+}
 
 
 def _parse_attachments(raw: str) -> list[dict]:
@@ -1533,6 +1830,261 @@ class MailAdapter:
         # An id names one message, so the cap cannot have hidden anything.
         return read_result(recs, cap=None if mid else MAX_MAILS)
 
+    # --- organize (#78/#79) ----------------------------------------------------------
+
+    def create_mailbox(self, name: str, account: str) -> dict:
+        """Create a mailbox (folder) under one account; ``name`` may contain ``/`` to
+        nest. Additive — it creates a container, it never touches a message.
+
+        ``account`` takes a display name, a UUID, or "On My Mac", through the same
+        ``resolve_account`` every read speaks, so this shares ``mail_search``'s
+        vocabulary. It is REQUIRED: a folder has to land somewhere specific, and
+        picking an account for the caller is the auto-pick the disambiguation rule
+        forbids.
+
+        The returned ``folder`` is SYNTHESISED, not read back. Three sources could
+        answer "what is this mailbox's address?" and none of them can: the ``mailbox``
+        class has no url property (Mail.sdef), ``make new mailbox`` returns ``missing
+        value`` (device-verified 2026-08-03), and the Envelope Index will not know the
+        mailbox exists until Mail syncs. So this composes ``<scheme>://<uuid>/<name>``,
+        which works IMMEDIATELY because ``mailbox_args`` DECODES a path before use — a
+        plain name passes through untouched. Two accepted consequences:
+
+        - A name containing a literal ``%`` would mis-decode, so ``%`` is REJECTED with
+          a typed error. Silent corruption is the only alternative.
+        - The synthesised token is not byte-identical to the one Mail eventually stores
+          (Mail encodes a space as ``%20``). Both DECODE to the same mailbox, so both
+          work, and ``mail_overview`` reports the canonical one after the sync. Nothing
+          in this project compares mailbox tokens by string equality.
+
+        There is deliberately no ``dry_run``: creating a folder adds nothing to undo.
+        There is also no delete — device-verified 2026-08-03, ``delete <mailbox>``
+        raises -10000 in every form, so removing a mailbox is a Mail.app UI action.
+        """
+        mb = name.strip().strip("/")
+        if not mb:
+            raise ValueError("create_mailbox needs a mailbox name")
+        if "%" in mb:
+            raise ValueError(
+                f"mailbox name {name!r} contains '%', which cannot be addressed: a "
+                "mailbox path is percent-DECODED before use, so a literal '%' would "
+                "silently resolve to a different mailbox. Rename it without '%'."
+            )
+        if "//" in mb:
+            raise ValueError(
+                f"mailbox name {name!r} has an empty path segment — use single '/' "
+                "separators to nest (e.g. 'Projects/2026')."
+            )
+        uuid = mail_addressing.resolve_account(account)
+        # mailboxFor's "local" sentinel, not a UUID: Mail's `every account` never lists
+        # the On My Mac store, so its mailboxes hang off the application itself (#146).
+        local = mail_addressing.local_account_id()
+        acct_arg = "local" if local and uuid == local else uuid
+        scheme = "local" if acct_arg == "local" else "imap"
+        leaf = run_osascript(_CREATE_MAILBOX, acct_arg, mb).strip()
+        if not leaf or leaf == _MISSING_VALUE:
+            raise NativeError(
+                f"Mail reported no mailbox at {mb!r} after creating it — the create "
+                "did not take. Check Mail for a partially created folder before "
+                "retrying."
+            )
+        return {
+            "created": True,
+            "mailbox": mb,
+            "account": uuid,
+            "folder": f"{scheme}://{uuid}/{mb}",
+            "note": "pass `folder` back verbatim to move_mail/mail_search. Mail will "
+            "report its own equivalent spelling of this token in mail_overview once "
+            "the account syncs; both address the same mailbox.",
+        }
+
+    def move_mail(
+        self,
+        ids,
+        from_mailbox: str,
+        to_mailbox: str,
+        dry_run: bool = True,
+    ) -> dict:
+        """Move messages between mailboxes — the first DESTRUCTIVE mail write, and the
+        first consumer of #159's recoverable plane.
+
+        TWO mailboxes are required, not one: #146 established that a message id alone
+        does not locate a message, so the source is part of the address. Both are
+        address tokens — a ``folder`` value from a read passed back VERBATIM, or one of
+        the five canonical names.
+
+        Batch-capped at 25 and ``dry_run=True`` by DEFAULT (unlike ``delete_draft``): a
+        move is reversible in principle, but reversing 200 misfiled messages by hand is
+        not a real remedy. ``mail_undo`` is the real one, and it exists because every
+        target's source mailbox and preserved bytes are recorded before anything moves.
+
+        Archiving is not a separate tool — it is a move into a mailbox named Archive.
+
+        Cross-account moves are ordinary moves here. Device-verified 2026-08-03: the
+        `move` verb leaves exactly ONE copy across accounts, source gone, stable after
+        sync — Mail.app's own UI *drag* is what copies, and what produced the ~3.9k
+        duplicates #153 cleans up. This still verifies both sides per message, so a
+        server that behaved otherwise would be reported (``status`` says "in BOTH
+        mailboxes"), never silently duplicated.
+        """
+        mids = _split_ids(ids)
+        # The cap and the empty-batch refusal come from the plane, and BEFORE any
+        # native call — that is the whole point of enforcing them in one place.
+        mail_recover.check_batch(mids)
+        src = mail_addressing.mailbox_args(from_mailbox)
+        dst = mail_addressing.mailbox_args(to_mailbox)
+        if src == dst:
+            raise ValueError(
+                "from_mailbox and to_mailbox address the same mailbox — nothing to "
+                "move. Do not retry with the same pair."
+            )
+        targets = [
+            mail_recover.Target(
+                id=mid,
+                folder=from_mailbox,
+                account=mail_index.account_of(from_mailbox),
+            )
+            for mid in mids
+        ]
+        if dry_run:
+            present = _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+            targets = [replace(t, status=present.get(t.id, "missing")) for t in targets]
+            return mail_recover.preview("move", targets, destination=to_mailbox)
+
+        def act(located):
+            return _parse_statuses(
+                run_osascript(
+                    _MOVE,
+                    *src,
+                    *dst,
+                    US.join(t.id for t in located),
+                    timeout=_MOVE_TIMEOUT,
+                )
+            )
+
+        return mail_recover.recoverable("move", targets, act, destination=to_mailbox)
+
+    def undo(self, receipt_id: str, dry_run: bool = True) -> dict:
+        """Replay one recoverable-plane receipt in reverse (#159).
+
+        A move undoes as a move BACK: the receipt records where every message came
+        from, so this is a lookup plus an ordinary ``move_mail`` — which means the undo
+        is itself backed up, logged, verified and undoable, with no second code path to
+        keep in step. A receipt with no destination (a permanent delete) cannot be
+        replayed at all; ``undo_plan`` raises and names the preserved bytes instead.
+
+        ponytail: every receipt today comes from ``move_mail``, which takes ONE source
+        mailbox, so a receipt has exactly one source and the undo is one move. Group by
+        ``Target.folder`` here if an op ever gathers targets from several mailboxes.
+        """
+        rec, targets = mail_recover.undo_plan(receipt_id)
+        folders = {t.folder for t in targets}
+        if len(folders) != 1:
+            raise NativeError(
+                f"receipt {receipt_id!r} spans {len(folders)} source mailboxes, which "
+                "this undo cannot replay as one move. Restore them by hand from "
+                f"{rec.get('backup_dir')}. Do not retry."
+            )
+        return self.move_mail(
+            [t.id for t in targets],
+            rec["destination"],
+            folders.pop(),
+            dry_run=dry_run,
+        )
+
+    def update_status(
+        self,
+        ids,
+        mailbox: str = "",
+        read: bool | None = None,
+        flagged: bool | None = None,
+        flag_color: str = "",
+        dry_run: bool = False,
+    ) -> dict:
+        """Mark messages read/unread and flag/unflag them, optionally with a colour
+        (#79). Batch-capped like every id-addressed write here.
+
+        Deliberately NOT on #159's recoverable plane: this changes two booleans and an
+        integer on a stored message. Nothing is destroyed, there are no bytes to
+        preserve, and re-issuing this tool with the opposite value IS the undo — a
+        backup directory per flag flip would be ceremony, not safety. ``dry_run``
+        therefore defaults to FALSE, matching ``delete_draft`` rather than
+        ``move_mail``.
+
+        ``mailbox`` is optional and is the disambiguator: given, it is trusted verbatim
+        for every id (one Apple Event batch). Omitted, each id resolves ON ITS OWN
+        through ``mail_addressing.resolve`` — which reads the Envelope Index, so it
+        needs Full Disk Access — and the batch is grouped by the mailbox each id
+        actually lives in.
+
+        At least one of ``read``/``flagged``/``flag_color`` must be given; a call that
+        changes nothing is a caller bug, not a no-op success.
+        """
+        mids = _split_ids(ids)
+        mail_recover.check_batch(mids)
+        color = (flag_color or "").strip().lower()
+        if color and color not in FLAG_COLORS:
+            raise ValueError(
+                f"unknown flag colour {flag_color!r} — one of "
+                f"{sorted(set(FLAG_COLORS))}"
+            )
+        if read is None and flagged is None and not color:
+            raise ValueError(
+                "update_mail_status needs at least one of read, flagged or flag_color"
+            )
+        # Group by the mailbox each id actually lives in: one script per mailbox, so a
+        # batch spanning two folders is still two Apple Event runs, not 25.
+        groups: dict[tuple[str, str], list[str]] = {}
+        homes: dict[str, str] = {}
+        for mid in mids:
+            target = mail_addressing.resolve(mid, folder=mailbox or None)
+            groups.setdefault(target.mailbox_args, []).append(target.id)
+            # the ROUND-TRIP token, not mailbox_args' decoded path: what a preview row
+            # reports has to be what the caller can hand back to the next call
+            homes[target.id] = target.folder
+        want = {
+            "read": read,
+            "flagged": True if color and flagged is None else flagged,
+            "flag_color": color or None,
+        }
+        if dry_run:
+            return {
+                "dry_run": True,
+                "op": "status",
+                "count": len(mids),
+                "would_set": {k: v for k, v in want.items() if v is not None},
+                "would_affect": [{"id": mid, "folder": homes[mid]} for mid in mids],
+            }
+        statuses: dict[str, str] = {}
+        for mb, group in groups.items():
+            statuses.update(
+                _parse_statuses(
+                    run_osascript(
+                        _SET_STATUS,
+                        *mb,
+                        _tri(read),
+                        _tri(want["flagged"]),
+                        str(FLAG_COLORS[color]) if color else "",
+                        US.join(group),
+                    )
+                )
+            )
+        results = {mid: statuses.get(mid, "unknown") for mid in mids}
+        ok = [m for m, s in results.items() if s == "ok"]
+        out = {
+            "op": "status",
+            "count": len(mids),
+            "succeeded": len(ok),
+            "set": {k: v for k, v in want.items() if v is not None},
+            "results": results,
+        }
+        if len(ok) != len(mids):
+            out["note"] = (
+                f"{len(mids) - len(ok)} of {len(mids)} messages were NOT updated — see "
+                "`results`. Tell the user; do not retry the whole batch blindly."
+            )
+        return out
+
     def get_needs_response(self) -> dict:
         """Inbox messages that likely need the user's response, ranked with a reason
         (flagged / unread-direct / unanswered-direct). Heuristic over headers/
@@ -1649,7 +2201,7 @@ class MailAdapter:
             # The missing-store raise must come BEFORE the FTS sidecar is consulted:
             # body= with no Envelope Index is the followable error, not a silent []
             # (the sidecar alone cannot answer a search honestly).
-            mail_index._require_index_path()
+            mail_index.require_index_path()
             # ponytail: body= caps at `limit` FTS rows BEFORE header filters apply, so
             # a narrow header filter over many body hits can under-return; acceptable
             # for the best-effort body layer — widen limit or add ORDER BY if it bites.
