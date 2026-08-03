@@ -79,6 +79,23 @@ Verified 2026-07-31 (#146), probing every branch against real accounts.
 | **On My Mac mailboxes hang off the APPLICATION, not an account** — `mailbox "Outbox"` inside `tell application "Mail"`. | `every account` never lists that store, so its `local://` uuid would never resolve through the account path. It needs its own branch. |
 | A mailbox reference **returned from a handler survives the `tell` boundary** and is usable in the caller's own `tell` block. | Verified against a real filed message: `set mb to my mailboxFor(…)` outside, `messages of mb whose message id is mid` inside. This is what lets one shared resolver serve every id-addressed script. |
 
+## 5b. Creating, moving and deleting mailboxes
+
+Verified 2026-08-03 (#78/#159), probing every branch against real accounts. **Three of
+these contradict what `Mail.sdef` reads like** — the dictionary is not the device.
+
+| Fact | Detail |
+|---|---|
+| **`move {a, b, c} to mb` — an AppleScript LIST — raises -1700 and moves NOTHING.** | `Can't make {…} into type specifier`. The `list="yes"` direct parameter that makes a batch look like one Apple Event is inside a **commented-out block** of `Mail.sdef`; the live definition is a singular `type="specifier"`. `whose message id is in {…}` fails identically. So a batch is **N events in one script**, never one event — which is what the 25 cap and the raised host-side timeout exist for. The failure was atomic: 0 of 3 moved. |
+| `move <one ref> to dst` and `move (messages of src whose message id is "…") to dst` both work. | The `whose` form re-evaluates per iteration, so it is immune to the moved-out-of-the-collection reference rot in §6. |
+| **A cross-account `move` is a TRUE move: source 0, destination 1, stable after 45s and in the Envelope Index.** | Mail.app's own UI **drag** copies — that is where #140/#153's ~3.9k duplicates came from — but the `move` verb does not. So there is no copy → verify → delete-source dance to build. Verify anyway: `move` on a 0-match `whose` is a silent no-op. |
+| `make new mailbox with properties {name:"a/b"}` **auto-creates the missing parent**, at application level and via `at end of mailboxes of <account>`. | So nesting needs no per-level loop. |
+| It returns **`missing value`** — there is nothing to read the new mailbox's address back from. | Combined with "the `mailbox` class has no url property" and "the Envelope Index does not know it exists until Mail syncs", all three possible sources are blind. The address must be **synthesised** (`<scheme>://<uuid>/<name>`), which works because the path is percent-DECODED before use. |
+| **`make new mailbox at <account> …` (the bare `at acct` form) raises a coercion error AND CREATES THE MAILBOX ANYWAY.** | Reports failure, leaves a folder behind. Only the `at end of mailboxes of <account>` form is safe. |
+| `mailboxes of <account>` omits container-only parents. | Creating `a/b` over IMAP makes `a` a `\Noselect` folder; `mailboxes of acct` then lists `b` (with `container` → `a`) and never `a`. Refines §5's "returns flat": it is **leaves plus selectable top-level**, not everything. |
+| **`delete <mailbox>` is NOT scriptable — -10000 (`AppleEvent handler failed`) in every form**, by name, by `first mailbox whose name is …`, on a local or an account mailbox. | So `create_mailbox` has no scripted undo; removing a mailbox is a Mail.app UI action. Do not build a delete_mailbox tool against this. |
+| Opening a backup `.eml` whose Message-ID is **still in the store** is a silent no-op — no window, no error. | Mail dedupes by Message-ID. So "the backup won't open" reads as a corrupt-file failure when the file is perfect. Verify a backup by rewriting its Message-ID first; with a fresh id both a full and a `.partial`-derived `.eml` open normally. |
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
@@ -91,6 +108,11 @@ Verified 2026-07-31 (#146), probing every branch against real accounts.
 
 ## 7. AppleScript language traps
 
+- **`st` is a reserved word** — the ordinal suffix, as in "1st". `set st to "x"` fails with
+  *"Expected expression but found “st”"* (-2741) at a character offset that points at the
+  assignment and explains nothing. Caught 2026-08-03 by running `move_mail` for the first time,
+  after a green 1,024-test suite had passed the script; a scratch variable named `st` in three
+  new scripts was the whole bug. Add it to the list below and use `outcome`.
 - **`after`, `before`, `at`, and `me` are reserved words.** Using them as variable names breaks
   scripts in ways whose error messages point somewhere else entirely — `set mE to …` fails with
   *"Can't set me to …"* (-10003), naming a line you never wrote, and `repeat with at in (mail

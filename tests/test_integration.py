@@ -7,6 +7,7 @@ title prefix and remove everything they create in teardown.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
@@ -1454,3 +1455,144 @@ def test_audit_records_update_with_before(tmp_path, monkeypatch):
         # the update moved the event's start, so its occurrence-suffixed id changed;
         # delete by the stable base id (calendarItemIdentifier survives the edit).
         a.delete_event(created.id.split("|")[0])
+
+
+# --- 0.9.2: the recoverable plane + the organize writes (#159/#78/#79) --------------
+# These MOVE REAL MAIL. Each test moves messages into a scratch mailbox and puts them
+# back through the same `mail_undo` a user would call — so a failure leaves the mail
+# where the undo left it, and the assertions say which. Per CLAUDE.md, the unit suite
+# proves nothing here: `move {a,b,c} to mb` looked correct in the dictionary, passed
+# review, and raises -1700 on device.
+
+
+def _mail_adapter():
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    return MailAdapter()
+
+
+@pytest.fixture
+def scratch_mailbox():
+    """A mailbox to move test mail into. Created on the FIRST account mail_overview
+    reports, so this is not wired to one developer's account list.
+
+    NOT removed in teardown: `delete <mailbox>` is not scriptable (-10000 in every form,
+    device-verified 2026-08-03), so a scratch mailbox is a permanent artefact of running
+    this test. It is created once and reused — the name is stable on purpose.
+    """
+    m = _mail_adapter()
+    rows = [r for r in m.overview() if r["folder"].startswith("imap://")]
+    if not rows:
+        pytest.skip("no IMAP account in Mail on this Mac")
+    account = rows[0]["account_id"]
+    name = "macos-apps-mcp-test"
+    folder = f"imap://{account}/{name}"
+    # already there from an earlier run is the NORMAL case — the stable name is the
+    # point, since the mailbox cannot be removed afterwards
+    with contextlib.suppress(Exception):
+        m.create_mailbox(name, account)
+    return folder
+
+
+@pytest.fixture
+def inbox_messages():
+    """Up to two real INBOX message ids plus the mailbox token they live in."""
+    m = _mail_adapter()
+    rows = [r for r in m.overview() if r["folder"].endswith("/INBOX") and r["total"]]
+    if not rows:
+        pytest.skip("no non-empty INBOX in Mail on this Mac")
+    folder = rows[0]["folder"]
+    hits = m.search(mailbox=folder, limit=2)["results"]
+    if not hits:
+        pytest.skip("no messages resolvable in the INBOX")
+    return folder, [h["id"] for h in hits]
+
+
+def test_move_mail_dry_run_reads_mail_and_moves_nothing(
+    scratch_mailbox, inbox_messages
+):
+    m = _mail_adapter()
+    folder, ids = inbox_messages
+    out = m.move_mail(ids, folder, scratch_mailbox)
+    assert out["dry_run"] is True
+    # the preview reads through AppleScript, so it reports real presence, not index lag
+    assert [t["status"] for t in out["would_affect"]] == ["present"] * len(ids)
+    assert not m.search(mailbox=scratch_mailbox, limit=5)["results"]
+
+
+def test_move_then_undo_returns_every_message_to_its_source(
+    scratch_mailbox, inbox_messages
+):
+    m = _mail_adapter()
+    folder, ids = inbox_messages
+    moved = m.move_mail(ids, folder, scratch_mailbox, dry_run=False)
+    try:
+        # verified, not assumed: each id must be in the destination AND gone from source
+        assert [t["status"] for t in moved["targets"]] == ["ok"] * len(ids)
+        assert moved["succeeded"] == len(ids)
+        # the bytes were preserved BEFORE the move, as importable plain .eml
+        import email
+        from pathlib import Path
+
+        for t in moved["targets"]:
+            raw = Path(t["backup"]).read_bytes()
+            assert email.message_from_bytes(raw).get("Message-ID")
+            assert t["fidelity"] in ("full", "partial")
+    finally:
+        back = m.undo(moved["receipt"], dry_run=False)
+    assert [t["status"] for t in back["targets"]] == ["ok"] * len(ids)
+    assert back["receipt"] != moved["receipt"]  # an undo is itself undoable
+    restored = {h["id"] for h in m.search(mailbox=folder, limit=25)["results"]}
+    assert {i.strip("<>") for i in ids} <= {r.strip("<>") for r in restored}
+
+
+def test_cross_account_move_leaves_exactly_one_copy(inbox_messages):
+    # #78's headline: Mail.app's UI drag copies across accounts (that is where #140/#153
+    # came from). The `move` VERB does not — but this is the assertion that proves it.
+    m = _mail_adapter()
+    folder, ids = inbox_messages
+    source_account = folder.split("://", 1)[1].split("/", 1)[0]
+    others = [
+        r
+        for r in m.overview()
+        if r["folder"].endswith("/Archive") and r["account_id"] != source_account
+    ]
+    if not others:
+        pytest.skip("no second account with an Archive mailbox on this Mac")
+    destination = others[0]["folder"]
+    moved = m.move_mail(ids[:1], folder, destination, dry_run=False)
+    try:
+        assert moved["targets"][0]["status"] == "ok"
+        # "ok" IS the one-copy assertion: the script reports ERROR ... in BOTH mailboxes
+        # if the source row survived, which is exactly the duplicate a drag would make
+        time.sleep(20)  # let the accounts sync before re-checking
+        assert (
+            m.move_mail(ids[:1], folder, destination)["would_affect"][0]["status"]
+            == "missing"
+        )
+    finally:
+        m.undo(moved["receipt"], dry_run=False)
+
+
+def test_update_mail_status_persists_and_reverses(inbox_messages):
+    m = _mail_adapter()
+    folder, ids = inbox_messages
+    target = ids[:1]
+    before = {
+        h["id"] for h in m.search(mailbox=folder, flagged=True, limit=25)["results"]
+    }
+    was_flagged = target[0] in before
+    out = m.update_status(target, mailbox=folder, flagged=True, flag_color="purple")
+    try:
+        # the script re-reads each message after writing, so "ok" means it PERSISTED
+        assert out["results"][target[0].strip("<>")] == "ok"
+        assert out["set"] == {"flagged": True, "flag_color": "purple"}
+    finally:
+        m.update_status(target, mailbox=folder, flagged=was_flagged)
+
+
+def test_create_mailbox_synthesised_address_actually_addresses_it(scratch_mailbox):
+    # The address is composed, never read back (make new mailbox returns `missing
+    # value`). This is the test that the composition is USABLE, not merely well-shaped.
+    m = _mail_adapter()
+    assert m.list_attachments(mailbox=scratch_mailbox)["results"] == []

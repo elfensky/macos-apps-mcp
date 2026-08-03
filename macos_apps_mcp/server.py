@@ -592,6 +592,96 @@ def delete_draft(id: str, dry_run: bool = False) -> dict:
     return _mail.delete_draft(id, dry_run=dry_run)
 
 
+@_additive_tool
+def create_mailbox(name: str, account: str) -> dict:
+    """Create a Mail mailbox (folder) under one account. `name` may contain "/" to nest
+    ("Projects/2026") — missing parents are created for you. `account` is a display name
+    ("Personal"), an account UUID, or "On My Mac", and is REQUIRED: a folder has to land
+    somewhere specific.
+
+    Returns {created, mailbox, account, folder, note}. `folder` is the address token to
+    pass back verbatim to `move_mail`/`mail_search`; it works immediately, and
+    `mail_overview` will report Mail's own equivalent spelling of it once the account
+    syncs — both address the same mailbox. A "%" in the name is rejected (it cannot be
+    addressed unambiguously). There is no delete counterpart: removing a mailbox is not
+    scriptable, so do it in Mail. Additive (creates a folder; touches no message); needs
+    Automation access for Mail, plus Full Disk Access to resolve "On My Mac"."""
+    return _mail.create_mailbox(name, account)
+
+
+@_write_tool
+def move_mail(
+    ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
+) -> dict:
+    """Move messages between Mail mailboxes — archive, file, or refile. DESTRUCTIVE but
+    recoverable: every message's bytes are copied to a backup directory and its source
+    mailbox is logged BEFORE anything moves, so `mail_undo` puts the batch back.
+
+    `dry_run` DEFAULTS TO TRUE — the preview reads Mail and reports, per id, whether it
+    is actually `present` in from_mailbox. Pass `dry_run=False` to move.
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call and
+    the cap is not overridable. BOTH mailboxes are required and are address tokens: the
+    `folder` value from the read that produced the ids, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token, not a name to retype), or one of the canonical
+    "inbox"/"sent"/"drafts"/"trash"/"junk". To archive, move into a mailbox named
+    Archive — there is no separate archive tool.
+    Cross-account moves are supported and leave exactly ONE copy; each message is
+    verified present in the destination and gone from the source afterwards, so a
+    per-id `status` reports what really happened rather than assuming success.
+    Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
+    keep `receipt` to undo the batch. Needs Automation access for Mail,
+    plus Full Disk Access to locate each message's file for the backup."""
+    return _mail.move_mail(ids, from_mailbox, to_mailbox, dry_run=dry_run)
+
+
+@_write_tool
+def mail_undo(receipt: str, dry_run: bool = True) -> dict:
+    """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
+    result, or from `audit`). A move is undone by moving the messages back to the exact
+    mailbox each came from — recorded per message before the original ran.
+
+    `dry_run` DEFAULTS TO TRUE: preview which messages would be restored, then pass
+    `dry_run=False`. The undo is itself backed up, logged and verified, and returns its
+    own receipt — so an undo can be undone. A receipt for an operation with no
+    destination mailbox cannot be replayed; the error names the directory holding the
+    preserved message bytes for manual re-import. Destructive (it moves mail); needs
+    Automation access for Mail and Full Disk Access."""
+    return _mail.undo(receipt, dry_run=dry_run)
+
+
+@_write_tool
+def update_mail_status(
+    ids: str,
+    mailbox: str = "",
+    read: bool | None = None,
+    flagged: bool | None = None,
+    flag_color: str = "",
+    dry_run: bool = False,
+) -> dict:
+    """Mark Mail messages read/unread and flag/unflag them, optionally with a colour.
+
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call.
+    `mailbox` is OPTIONAL and is the disambiguator: pass the `folder` value from the
+    SAME read back VERBATIM (an opaque `imap://<uuid>/<path>` token) and the whole batch
+    is addressed directly; omit it and each id is resolved through Mail's index (Full
+    Disk Access), which also lets one call span several mailboxes.
+    At least one of `read`, `flagged` or `flag_color` is required. `flag_color` is a
+    name — red/orange/yellow/green/blue/purple/grey — and setting one implies flagged.
+    `dry_run` defaults to FALSE: this changes two booleans, destroys nothing, and
+    re-issuing it with the opposite value is the undo — so it does not use the backup
+    plane that `move_mail` does. Each message is re-read after the write, so the per-id
+    `results` report what actually persisted. Destructive (it modifies stored messages);
+    needs Automation access for Mail."""
+    return _mail.update_status(
+        ids,
+        mailbox=mailbox,
+        read=read,
+        flagged=flagged,
+        flag_color=flag_color,
+        dry_run=dry_run,
+    )
+
+
 @_send_tool("mail")
 def send_mail(
     to: str,

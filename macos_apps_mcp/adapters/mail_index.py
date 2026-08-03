@@ -323,6 +323,34 @@ SELECT message_id_header, subject, mailbox_url, date_received FROM (
     return sql, [message_id, limit]
 
 
+def build_message_location_query(stored_ids):
+    """Build (sql, params) for "where does each of these Message-IDs physically live?"
+    — ``(message_id, rowid, mailbox_url)`` per ROW, deliberately NOT deduped (#159).
+
+    The one query the recoverable plane needs and no other read wants. Every other read
+    here collapses a Message-ID to its best-ranked copy, because a citation names one
+    message; a BACKUP names one file, and the file is keyed by ``messages.ROWID`` —
+    device-verified 2026-08-03: a message's ``.emlx`` is named by its ROWID, and across
+    36,417 files on a real Mac no two rows shared one. So the plane needs every row, and
+    picks the one whose mailbox matches the target it is about to act on.
+
+    ``stored_ids`` are BRACKETED (``mail_addressing.stored_id``) — the form the index
+    stores. Deleted rows are excluded: a row Mail has already tombstoned has no file
+    worth preserving.
+    """
+    placeholders = ",".join("?" for _ in stored_ids)
+    sql = f"""
+SELECT gd.message_id_header AS message_id,
+       m.ROWID              AS rowid,
+       mb.url               AS mailbox_url
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0 AND gd.message_id_header IN ({placeholders})
+"""
+    return sql, list(stored_ids)
+
+
 def build_local_account_query():
     """Build (sql, params) that finds the account segment mailboxes.url embeds for the
     On My Mac store — the value ``build_header_query``'s ``account`` clause anchors on
@@ -386,8 +414,13 @@ _NO_MAIL_DATA = (
 )
 
 
-def _require_index_path() -> Path:
+def require_index_path() -> Path:
     """``envelope_index_path()`` or the one followable missing-store error.
+
+    PUBLIC (#161): ``mail.search`` has to raise this before consulting the FTS sidecar
+    — body= with no Envelope Index is a followable error, not a silent empty — so the
+    call was reaching through the underscore into another module's private seam. It is
+    part of this module's interface, not an accident of it; the name now says so.
 
     Late-binds the path lookup deliberately: tests monkeypatch
     ``envelope_index_path`` as a module attribute, and that seam must keep
@@ -407,7 +440,7 @@ def _pointer_rows(sql, params, *, fallback=None) -> list[Pointer]:
     to silently scan the inbox). ``immutable=False`` always: the Envelope Index is
     a live WAL store, and ``immutable=1`` would freeze pre-WAL data and silently
     drop recent mail (see runtime's warning)."""
-    path = _require_index_path()
+    path = require_index_path()
 
     def read(conn):
         conn.row_factory = sqlite3.Row
@@ -467,7 +500,7 @@ def query_mailbox_urls() -> list[str]:
     """Every mailboxes.url, raw/encoded — the resolver's input. Raises on a missing
     store: a mailbox filter against no store is the followable error, same as the
     other raising reads."""
-    path = _require_index_path()
+    path = require_index_path()
 
     def read(conn):
         return [r[0] for r in conn.execute("SELECT url FROM mailboxes")]
@@ -487,8 +520,28 @@ def query_overview_rows() -> list[dict]:
     account names. Decoding and naming are adapter concerns (naming can launch
     Mail, which this module never does); the ``_rows`` suffix is the warning that
     this is not the Pointer shape."""
-    path = _require_index_path()
+    path = require_index_path()
     sql, params = build_overview_query()
+
+    def read(conn):
+        conn.row_factory = sqlite3.Row
+        return [dict(r) for r in conn.execute(sql, params)]
+
+    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+
+
+def query_message_locations(stored_ids) -> list[dict]:
+    """Every ``{message_id, rowid, mailbox_url}`` row for these BRACKETED Message-IDs
+    (#159) — the plane's "which file backs this message?" read. Not deduped and not
+    Pointer-shaped (the ``_rows``-style warning that this is raw): a Message-ID has one
+    citation but several files, and the plane wants the file in the mailbox it is about
+    to act on. ``[]`` for an empty id list — no query, no store requirement, because
+    nothing was asked."""
+    ids = list(stored_ids)
+    if not ids:
+        return []
+    path = require_index_path()
+    sql, params = build_message_location_query(ids)
 
     def read(conn):
         conn.row_factory = sqlite3.Row
@@ -552,22 +605,34 @@ def _body_text(msg) -> str:
     return ""
 
 
+def emlx_payload(raw: bytes) -> bytes:
+    """The RFC822 bytes inside an ``.emlx`` — ``b""`` when the framing is malformed.
+
+    The ONE home for Mail's on-disk message framing: a first line holding a byte count,
+    then exactly that many bytes of message, then Mail's own trailing plist. Two callers
+    need it for opposite reasons — ``parse_emlx`` wants the text inside, and #159's
+    backup wants those same bytes written out verbatim as a plain ``.eml`` — so the
+    format fact is stated once here rather than re-derived on each side.
+    """
+    nl = raw.find(b"\n")
+    if nl == -1:
+        return b""
+    try:
+        length = int(raw[:nl].strip())
+    except ValueError:
+        return b""
+    if length < 0:
+        return b""
+    return raw[nl + 1 : nl + 1 + length]
+
+
 def parse_emlx(raw: bytes) -> tuple[str, str] | None:
     """(message_id, body_text) from an .emlx byte string.
 
     Returns None if malformed, header-less, or no extractable text.
     Strips the length-prefix line and trailing plist.
     """
-    nl = raw.find(b"\n")
-    if nl == -1:
-        return None
-    try:
-        length = int(raw[:nl].strip())
-    except ValueError:
-        return None
-    if length < 0:
-        return None
-    rfc822 = raw[nl + 1 : nl + 1 + length]
+    rfc822 = emlx_payload(raw)
     if not rfc822:
         return None
     try:
@@ -767,7 +832,7 @@ def body_coverage() -> str:
         ).fetchone()[0]
 
     total = read_via_sqlite(
-        _require_index_path(), HEADER_FINGERPRINT, read, immutable=False
+        require_index_path(), HEADER_FINGERPRINT, read, immutable=False
     )
     return (
         f"{indexed} of {total} messages have a searchable body — body= can only match "

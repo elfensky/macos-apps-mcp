@@ -145,10 +145,25 @@ def resolve_mailbox(name: str, account: str | None = None) -> list[str]:
     (no urldecode, and Mail's encoding is not reproducible by ``quote()``), which
     is why this is an adapter helper feeding exact urls to the query, not a LIKE.
 
+    A ``name`` that is itself a round-trip URL is matched EXACTLY instead (account
+    segment + decoded path), not as a substring. Every mail read hands back ``folder``
+    as such a url and documents it as the token to pass back verbatim — but a url is
+    never a substring of a bare mailbox PATH, so feeding a read's own output straight
+    into ``mail_search(mailbox=…)`` matched zero rows and looked exactly like an empty
+    mailbox (found 2026-08-03 by an integration fixture doing precisely what the
+    docstrings tell a caller to do). Decoded on both sides for #144's reason, and
+    because ``create_mailbox`` synthesises a token Mail later re-spells with ``%20``:
+    the two are not byte-equal and must still name one mailbox.
+
     ``account`` (name or UUID) restricts to that account's mailboxes. Reads take
     every match; the 0.9.2 write tools reuse this and demand exactly one.
     """
     account_uuid = resolve_account(account).casefold() if account else None
+    want_uuid = want_path = None
+    if is_mailbox_url(name):
+        _, _, rest = name.strip().partition("://")
+        want_uuid, _, raw_path = rest.partition("/")
+        want_uuid, want_path = want_uuid.casefold(), unquote(raw_path).casefold()
     needle = unquote(name).casefold()
     out = []
     for url in mail_index.query_mailbox_urls():
@@ -156,7 +171,11 @@ def resolve_mailbox(name: str, account: str | None = None) -> list[str]:
         uuid, _, path = rest.partition("/")
         if account_uuid and uuid.casefold() != account_uuid:
             continue
-        if needle in unquote(path).casefold():
+        decoded = unquote(path).casefold()
+        if want_uuid is not None:
+            if uuid.casefold() == want_uuid and decoded == want_path:
+                out.append(url)
+        elif needle in decoded:
             out.append(url)
     return out
 

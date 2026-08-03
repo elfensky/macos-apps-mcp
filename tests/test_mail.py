@@ -15,6 +15,7 @@ from macos_apps_mcp.adapters.mail import (
     _summary,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import RS, US
 
 
@@ -1786,3 +1787,259 @@ def test_pointer_omits_account_when_unset():
     # key is honest; emitting a guessed or empty one is what would send a reply from
     # the wrong address.
     assert "account" not in Pointer(id="1", summary="s", deeplink="d").as_dict()
+
+
+# --- organize: create_mailbox / move_mail / undo / status (#78/#79) ------------------
+
+_ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
+_INBOX = f"imap://{_ACCT}/INBOX"
+_ARCHIVE = f"imap://{_ACCT}/Archive"
+
+
+def _statuses(pairs) -> str:
+    return "".join(f"{mid}{US}{st}{RS}" for mid, st in pairs)
+
+
+@pytest.fixture
+def no_backup(monkeypatch):
+    """Neutralize the plane's disk half — these tests are about the adapter's scripts
+    and envelopes, not about #159's preservation (tests/test_mail_recover.py owns that).
+    """
+    monkeypatch.setattr(mail.mail_index, "mail_root", lambda: None)
+    monkeypatch.setattr(mail.mail_index, "query_message_locations", lambda ids: [])
+
+
+def test_split_ids_dedupes_and_strips_framing_bytes():
+    # a US inside an id would be ONE target in the preview and TWO on the wire, since
+    # every script here re-splits the joined list on US
+    assert mail._split_ids(f"<a@x>, a@x , b{US}@x, ") == ["a@x", "b@x"]
+
+
+def test_parse_statuses_skips_partial_records():
+    raw = _statuses([("a@x", "ok"), ("b@x", "not-in-source")]) + "trailing"
+    assert mail._parse_statuses(raw) == {"a@x": "ok", "b@x": "not-in-source"}
+
+
+def test_tri_state_distinguishes_absent_from_false():
+    # argv carries only text, so "leave it alone" needs a spelling of its own —
+    # collapsing it to "0" would silently mark a whole batch unread
+    assert (mail._tri(None), mail._tri(True), mail._tri(False)) == ("", "1", "0")
+
+
+# --- create_mailbox ------------------------------------------------------------------
+
+
+def test_create_mailbox_synthesises_an_address_that_round_trips(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: _ACCT)
+    monkeypatch.setattr(mail_addressing, "local_account_id", lambda: None)
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "2026")
+    out = MailAdapter().create_mailbox("Projects/2026", "Personal")
+    assert out["folder"] == f"imap://{_ACCT}/Projects/2026"
+    # the whole point: the synthesised token is usable by the id-taking tools at once,
+    # because mailbox_args DECODES a path and a plain name passes through untouched
+    assert mail_addressing.mailbox_args(out["folder"]) == (_ACCT, "Projects/2026")
+
+
+def test_create_mailbox_rejects_a_percent_in_the_name(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: _ACCT)
+    with pytest.raises(ValueError, match="%"):
+        MailAdapter().create_mailbox("50% off", "Personal")
+
+
+def test_create_mailbox_raises_when_the_verify_finds_nothing(monkeypatch):
+    # `make new mailbox` returns `missing value`, so the create is verified by ADDRESS;
+    # a blank answer means the folder is not there and must not report success
+    monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: _ACCT)
+    monkeypatch.setattr(mail_addressing, "local_account_id", lambda: None)
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    with pytest.raises(mail.NativeError):
+        MailAdapter().create_mailbox("Nope", "Personal")
+
+
+def test_create_mailbox_uses_the_local_sentinel_for_on_my_mac(monkeypatch):
+    local = "BBBBBBBB-1111-2222-3333-444444444444"
+    seen = []
+    monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: local)
+    monkeypatch.setattr(mail_addressing, "local_account_id", lambda: local)
+    monkeypatch.setattr(mail, "run_osascript", lambda *a: seen.append(a) or "Scratch")
+    out = MailAdapter().create_mailbox("Scratch", "On My Mac")
+    # Mail's `every account` never lists the local store, so its mailboxes hang off the
+    # application — mailboxFor takes the "local" sentinel, never a UUID
+    assert seen[0][1] == "local"
+    assert out["folder"] == f"local://{local}/Scratch"
+
+
+# --- move_mail -----------------------------------------------------------------------
+
+
+def test_move_mail_dry_run_reports_per_id_presence_and_moves_nothing(
+    monkeypatch, no_backup
+):
+    calls = []
+
+    def fake(script, *args, **kw):
+        calls.append(script)
+        return _statuses([("a@x", "present"), ("b@x", "missing")])
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = MailAdapter().move_mail("a@x,b@x", _INBOX, _ARCHIVE)
+    assert calls == [mail._PRESENT]  # the READ, never the move
+    assert mail.mail_recover.is_preview(out)
+    assert [t["status"] for t in out["would_affect"]] == ["present", "missing"]
+    assert out["destination"] == _ARCHIVE
+
+
+def test_move_mail_caps_the_batch_before_any_native_call(monkeypatch, no_backup):
+    def boom(*a, **kw):
+        raise AssertionError("the cap must be enforced before Mail is touched")
+
+    monkeypatch.setattr(mail, "run_osascript", boom)
+    with pytest.raises(BatchTooLarge):
+        MailAdapter().move_mail(
+            ",".join(f"m{i}@x" for i in range(26)), _INBOX, _ARCHIVE
+        )
+
+
+def test_move_mail_refuses_a_move_onto_itself(monkeypatch, no_backup):
+    monkeypatch.setattr(mail, "run_osascript", lambda *a, **kw: "")
+    with pytest.raises(ValueError, match="same mailbox"):
+        MailAdapter().move_mail("a@x", _INBOX, _INBOX)
+
+
+def test_move_mail_reports_what_the_verify_found_not_what_it_hoped(
+    monkeypatch, no_backup
+):
+    monkeypatch.setattr(
+        mail,
+        "run_osascript",
+        lambda *a, **kw: _statuses(
+            [("a@x", "ok"), ("b@x", "not-in-source"), ("c@x", "ERROR boom")]
+        ),
+    )
+    out = MailAdapter().move_mail("a@x,b@x,c@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert out["succeeded"] == 1
+    assert [t["status"] for t in out["targets"]] == [
+        "ok",
+        "not-in-source",
+        "ERROR boom",
+    ]
+    assert "were NOT affected" in out["note"]
+    assert out["undo"].startswith("mail_undo(")
+
+
+def test_move_mail_gets_a_raised_timeout(monkeypatch, no_backup):
+    # 25 moves against a remote IMAP store, each with two verifying counts, is not a
+    # 30-second job — the host-side default would kill a legitimate batch
+    seen = {}
+    monkeypatch.setattr(
+        mail,
+        "run_osascript",
+        lambda *a, **kw: seen.update(kw) or _statuses([("a@x", "ok")]),
+    )
+    MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert seen["timeout"] == mail._MOVE_TIMEOUT
+
+
+# --- mail_undo -----------------------------------------------------------------------
+
+
+def test_undo_moves_the_batch_back_to_each_messages_source(monkeypatch, no_backup):
+    monkeypatch.setattr(
+        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
+    )
+    adapter = MailAdapter()
+    moved = adapter.move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+
+    seen = []
+
+    def fake(script, *args, **kw):
+        seen.append(args)
+        return _statuses([("a@x", "ok")])
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = adapter.undo(moved["receipt"], dry_run=False)
+    # source and destination swapped: argv is (srcAcct, srcPath, dstAcct, dstPath, ids)
+    assert seen[0][:4] == (_ACCT, "Archive", _ACCT, "INBOX")
+    # the undo is itself a plane operation, so it has its own receipt and can be undone
+    assert out["receipt"] != moved["receipt"]
+
+
+def test_undo_of_an_unknown_receipt_raises(no_backup):
+    with pytest.raises(mail.NativeError):
+        MailAdapter().undo("19990101-000000-000-move")
+
+
+# --- update_mail_status --------------------------------------------------------------
+
+
+def test_update_status_needs_something_to_change(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "resolve", lambda mid, **kw: None)
+    with pytest.raises(ValueError, match="at least one"):
+        MailAdapter().update_status("a@x", mailbox=_INBOX)
+
+
+def test_update_status_rejects_an_unknown_flag_colour():
+    with pytest.raises(ValueError, match="unknown flag colour"):
+        MailAdapter().update_status("a@x", mailbox=_INBOX, flag_color="chartreuse")
+
+
+def test_update_status_sends_the_tri_state_and_colour_index(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        mail,
+        "run_osascript",
+        lambda *a, **kw: seen.append(a) or _statuses([("a@x", "ok")]),
+    )
+    out = MailAdapter().update_status("a@x", mailbox=_INBOX, flag_color="blue")
+    # argv is (acct, path, read, flagged, colour, ids) after the script itself:
+    # read untouched (""), flagged implied by the colour, blue = flag index 4
+    assert seen[0][1:] == (_ACCT, "INBOX", "", "1", "4", "a@x")
+    assert out["set"] == {"flagged": True, "flag_color": "blue"}
+    assert out["results"] == {"a@x": "ok"}
+
+
+def test_update_status_groups_a_batch_by_the_mailbox_each_id_lives_in(monkeypatch):
+    homes = {"a@x": _INBOX, "b@x": _ARCHIVE, "c@x": _INBOX}
+    monkeypatch.setattr(
+        mail_addressing,
+        "resolve",
+        lambda mid, folder=None, account=None: mail_addressing.ResolvedMessage(
+            mid, homes[mid], _ACCT
+        ),
+    )
+    seen = []
+
+    def fake(script, *args, **kw):
+        seen.append(args[1])
+        return _statuses([(m, "ok") for m in args[5].split(US)])
+
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    out = MailAdapter().update_status("a@x,b@x,c@x", read=True)
+    # two mailboxes -> two Apple Event runs, not three and not one wrong one
+    assert seen == ["INBOX", "Archive"]
+    assert out["succeeded"] == 3
+
+
+def test_update_status_reports_a_message_it_could_not_find(monkeypatch):
+    monkeypatch.setattr(
+        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "not-found")])
+    )
+    out = MailAdapter().update_status("a@x", mailbox=_INBOX, read=True)
+    assert out["succeeded"] == 0
+    assert "were NOT updated" in out["note"]
+
+
+# --- #161: the one untested degradation branch ---------------------------------------
+
+
+def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch):
+    # The send already happened. Raising here would report a COMPLETED send as a failed
+    # call, and a model that retries that "failure" sends the mail twice.
+    def boom():
+        raise mail.NativeError("Mail is not responding")
+
+    monkeypatch.setattr(mail, "_outbox_pending", boom)
+    out = mail._with_outbox_pending({"sent": True})
+    assert out["outbox_pending"] is None  # unknown, never a fake clean queue of 0
+    assert "NOT confirmed" in out["note"]
+    assert "Do NOT retry" in out["note"]
