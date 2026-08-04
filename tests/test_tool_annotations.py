@@ -43,6 +43,7 @@ _DESTRUCTIVE_TOOLS = frozenset(
         "update_note",
         "delete_draft",
         "move_mail",
+        "trash_mail",
         "mail_undo",
         "update_mail_status",
         "send_mail",
@@ -93,7 +94,11 @@ _PERMISSION = {
     "create_mailbox": ("Automation", "Full Disk Access"),
     # the move is Automation; locating each message's .emlx for the #159 backup is FDA.
     "move_mail": ("Automation", "Full Disk Access"),
+    # the delete is Automation; the #159 backup + the account's Trash url are FDA.
+    "trash_mail": ("Automation", "Full Disk Access"),
     "mail_undo": ("Automation", "Full Disk Access"),
+    # pure sqlite over the Envelope Index — never launches Mail.
+    "mail_duplicates": "Full Disk Access",
     "update_mail_status": "Automation",
     "send_mail": "Automation",
     "reply_all": "Automation",
@@ -199,6 +204,7 @@ def test_every_write_tool_is_audit_classified():
         "mail_reply",
         "create_mailbox",
         "move_mail",
+        "trash_mail",
         "mail_undo",
         "update_mail_status",
         "safari_open",
@@ -227,7 +233,7 @@ def test_every_write_tool_is_audit_classified():
 _PLANE_EXEMPT = frozenset(
     {"delete_draft", "update_mail_status", "send_mail", "reply_all", "forward_mail"}
 )
-_RECOVERABLE_MAIL_TOOLS = frozenset({"move_mail", "mail_undo"})
+_RECOVERABLE_MAIL_TOOLS = frozenset({"move_mail", "trash_mail", "mail_undo"})
 
 
 def _mail_tools() -> set[str]:

@@ -14,6 +14,7 @@ _ROLES = (
     "install-agent",
     "uninstall-agent",
     "allow-send",
+    "dedupe-mail",
 )
 
 
@@ -49,6 +50,13 @@ def main() -> None:
         from . import deploy
 
         deploy.allow_send(args[1:])
+    elif role == "dedupe-mail":
+        # CLI-only by design (#140): thousands of ~0.1s deletes against a 30s-capped
+        # serialized worker is a job a human starts, not a tool call. The MCP surface
+        # gets the read-only `mail_duplicates()` report instead.
+        from . import dedupe
+
+        dedupe.dedupe_mail(args[1:])
     else:
         print(f"unknown role {role!r}; one of: {', '.join(_ROLES)}", file=sys.stderr)
         raise SystemExit(2)

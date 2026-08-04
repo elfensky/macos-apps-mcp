@@ -96,6 +96,22 @@ these contradict what `Mail.sdef` reads like** — the dictionary is not the dev
 | **`delete <mailbox>` is NOT scriptable — -10000 (`AppleEvent handler failed`) in every form**, by name, by `first mailbox whose name is …`, on a local or an account mailbox. | So `create_mailbox` has no scripted undo; removing a mailbox is a Mail.app UI action. Do not build a delete_mailbox tool against this. |
 | Opening a backup `.eml` whose Message-ID is **still in the store** is a silent no-op — no window, no error. | Mail dedupes by Message-ID. So "the backup won't open" reads as a corrupt-file failure when the file is perfect. Verify a backup by rewriting its Message-ID first; with a fresh id both a full and a `.partial`-derived `.eml` open normally. |
 
+## 5c. Deleting a message — and why there is no permanent delete
+
+Verified 2026-08-05 (#80), against real messages in `Personal/macos-apps-mcp-test`. **Four of
+these contradict `Mail.sdef`**, and together they cut a scoped feature: a targeted permanent
+delete cannot be built.
+
+| Fact | Detail |
+|---|---|
+| `delete <message>` in an ordinary mailbox is a **MOVE TO THAT ACCOUNT'S TRASH**, and the message stays addressable there. | Source 1→0, Trash 0→1, and `messages of trash mailbox whose message id is …` finds it afterwards. This — not any erase verb — is what `trash_mail` is built on. |
+| **`delete` is ASYNCHRONOUS on the source side.** At t0 the source still counts the message; it clears by t3. The Trash side is populated immediately. | Measured t0/t3/t10 in one script: `t0 src=1 trash=1`, `t3 src=0 trash=1`. So a delete must be verified by **present-in-Trash** (immediate and reliable), never by absent-from-source at t0 — the opposite of `move`, which verifies synchronously on both sides. Verifying a delete the way `move_mail` verifies a move reports a clean failure on a delete that worked. |
+| **`delete` on a message ALREADY IN TRASH is a silent no-op.** | Both `delete (first message of mb whose …)` and the collection form `delete (messages of mb whose …)` return cleanly and remove nothing; the message is still in Trash 5s later. Re-verified on a freshly restarted, healthy Mail after the first run overlapped a crash window. **Trash is terminal for AppleScript.** |
+| **`set deleted status of <message> to true` raises -609 (`Connection is invalid`)** — on a healthy Mail, in a mailbox whose store is open, where READING the same property on the same message succeeds. | `Mail.sdef` line 577 declares `deleted status` with no `access="r"`, i.e. writable. It is not. The read/write asymmetry is the tell: `read deleted status=false` then `write ERROR -609` in consecutive statements. |
+| `Mail.sdef` has **no `erase` and no `expunge` command** at all. The full verb list is GetURL, bounce, check for new mail, delete, duplicate, extract address/name from, forward, import Mail mailbox, mailto, move, perform mail action with messages, redirect, reply, send, synchronize. | With `delete`-in-Trash a no-op, `deleted status` unwritable and no erase verb, **there is no scriptable targeted permanent delete.** Emptying Trash stays a human act in Mail.app — which is also why `empty_trash` was cut from #80. Do not build a permanent-delete tool against this; prove it changed before trying again. |
+| **`trash mailbox of <account>` raises -1728 for EVERY account**, although `Mail.sdef` declares it on the account class (line 406) exactly like `drafts mailbox`/`sent mailbox`/`junk mailbox`. | Only the APPLICATION-level `trash mailbox` works, and it is the unified **"All Trash"** across accounts. So an account's own Trash cannot be read from Mail; get it from the Envelope Index (`mailboxes.url`), whose per-account spellings differ — `…/Trash` (IMAP), `…/Deleted%20Messages` (iCloud), `…/%5BGmail%5D/Trash` (Gmail). |
+| **`move` OUT of the unified `trash mailbox` accessor does the move and then CRASHES Mail** — and the caller hangs, host-side timeout and all. | The messages did land in the destination (verified in the index afterwards), then Mail died with the §10 assertion and the `run_osascript` call never returned — an MCP client aborted it at **1800s**, far past `_MOVE_TIMEOUT=300`. A dead Mail mid-Apple-Event does not surface as a timeout. So an undo must move back **from the message's own account Trash url**, read out of the index, never from the unified accessor. Counting through the unified accessor is fine; moving through it is not. |
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
@@ -131,6 +147,37 @@ these contradict what `Mail.sdef` reads like** — the dictionary is not the dev
 - Never leave a polling loop pointed at Mail. One orphaned `until … osascript … sleep 4` loop was
   found still hammering Mail after a force quit. Bounded waits only, or let launchd own the cadence
   — one probe per invocation, never `while true`.
+
+## 8b. Walking every mailbox crashes Mail
+
+Verified 2026-08-05 (#80), 19 crashes in one probing session. A script shaped like
+
+```applescript
+repeat with a in accounts
+  repeat with mb in (mailboxes of a)
+    count of (messages of mb whose message id is mid)   -- "where does this message live?"
+```
+
+forces Mail to open a message **store** per mailbox, and on a store it cannot open it aborts:
+`+[MFLibrary defaultLibrary]` → `NSAssertionHandler` → `objc_exception_throw` → `abort()`,
+**SIGABRT on the `MFMailbox.storeCreationQueue`** (`-[MFIMAPAccount storeForMailbox:]` →
+`-[MFLibraryStore initWithMailbox:readOnly:]`). Wrapping each count in `try` does not help — the
+abort is on Mail's own queue, not in the Apple Event.
+
+Two consequences, both bought the hard way:
+
+- **Mail then CRASH-LOOPS.** Once it has aborted, every later store access re-aborts: reading
+  `name of every account` still works while `count of messages of inbox` raises -609, and
+  `first account whose id is …` raises -10000. It reads exactly like broken permissions or a
+  corrupt index — the Envelope Index passed `PRAGMA integrity_check` throughout. Only a **full
+  quit + relaunch** clears it; relaunching into the same state does not.
+- **This is why "sqlite locates, AppleScript acts" is a rule and not a preference.** Answering
+  "which mailboxes hold this Message-ID?" is an Envelope Index query
+  (`query_message_locations`), and it costs one read with no Mail launch. The AppleScript
+  spelling of the same question is what took Mail down.
+
+Corollary for probes: address the **specific** mailboxes an operation touches, by account id and
+path through `mailboxFor`. Never enumerate `mailboxes of <account>` to find something.
 
 ## 9. When Mail freezes
 

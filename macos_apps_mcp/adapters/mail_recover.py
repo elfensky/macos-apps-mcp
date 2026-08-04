@@ -40,6 +40,7 @@ bytes for manual re-import.
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -58,12 +59,23 @@ from . import mail_addressing, mail_index
 MAX_TARGETS = 25
 
 # The ops this plane knows. A whitelist, so a typo can't mint a receipt that
-# ``mail_undo`` will later fail to interpret. 0.9.3 adds "trash" and "delete".
-OPS = frozenset({"move"})
+# ``mail_undo`` will later fail to interpret. 0.9.3 adds "trash" (#80) and "dedupe"
+# (#140/#153).
+OPS = frozenset({"move", "trash", "dedupe"})
 
-# Ops that destroy the last copy — the only ones the lossy gate applies to. Empty until
-# #80 lands `delete`; named here so the rule is written down where it is enforced,
-# rather than discovered again when the first permanent delete is built.
+# Ops that destroy the last copy — the only ones the lossy gate applies to.
+#
+# STILL EMPTY, and now for a device reason rather than a sequencing one: 0.9.3 probed
+# for a targeted permanent delete and proved there is none (facts doc §5c). Mail's
+# `delete` on a message already in Trash is a silent no-op, `deleted status` raises -609
+# on write although Mail.sdef declares it writable, and the dictionary carries no erase
+# or expunge verb at all. Emptying Trash is a Mail.app UI act, so nothing this project
+# can call destroys a last copy.
+#
+# The gate below (and ``allow_lossy``) is kept rather than deleted: it is the enforced
+# statement of the rule for whoever finds an erase verb on a later macOS — add the op
+# here and the refusal is already written and tested. Do not build a permanent delete
+# against today's Mail; prove §5c changed first.
 PERMANENT_OPS = frozenset()
 
 # Backup fidelity. `unknown` is the DEFAULT and is not the same claim as `absent`: a
@@ -333,7 +345,15 @@ def recoverable(
     """
     _check_op(op)
     items = check_batch(targets)
-    located = locate(items)
+    # Locating exists to serve exactly two consumers — the file backup, and the lossy
+    # gate on a PERMANENT op. With neither in play it is pure cost, and not a small one:
+    # `_rowid_paths` rglobs a 36k-file tree (~2s) per call, and the dedupe CLI (#140)
+    # drives thousands of messages through here 25 at a time with backup=False. Skipping
+    # it leaves every target stamped `unknown` fidelity, which is the honest answer —
+    # nobody looked — and is exactly what that stamp is for.
+    located = (
+        locate(items) if backup or op in PERMANENT_OPS else [replace(t) for t in items]
+    )
     if op in PERMANENT_OPS and not allow_lossy:
         lossy = [t for t in located if t.fidelity != _FULL]
         if lossy:
@@ -474,6 +494,79 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
             f"receipt {receipt_id!r} recorded no messages to restore. Do not retry."
         )
     return rec, targets
+
+
+# --- storage visibility (#163) -------------------------------------------------------
+# Retention is KEEP FOREVER, and there is deliberately no pruning code anywhere in this
+# module. Batches are capped at 25 messages, so growth is MB-scale, and an auto-expiry
+# would mean the safety layer silently destroying its own safety net — the one failure
+# this plane cannot be allowed to have. The accepted trade-off is that "deleted" mail
+# lingers on disk until a human sweeps it, so what ships instead of pruning is
+# VISIBILITY: a doctor() line, and an advisory past a size threshold.
+
+# Past this, mail writes carry a one-line advisory. Env-overridable because "too big"
+# is a judgement about someone else's disk, not a constant we get to pick for them.
+_DEFAULT_BACKUP_LIMIT = 1024**3  # 1 GiB
+
+
+def backup_limit() -> int:
+    """The advisory threshold in bytes (``MACOS_APPS_BACKUP_LIMIT``). A non-numeric or
+    negative value falls back to the default rather than raising: this is a nicety on
+    the side of a mail write, and it must never be the reason one fails."""
+    raw = os.environ.get("MACOS_APPS_BACKUP_LIMIT", "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        return int(raw)
+    return _DEFAULT_BACKUP_LIMIT
+
+
+def backup_usage() -> dict:
+    """``{bytes, receipts, oldest, path}`` for the backup tree — what doctor() reports.
+
+    Cheap by construction (one walk of a directory holding at most 25 small ``.eml``
+    per receipt) and NEVER raises: an unreadable or absent tree answers zeroes, because
+    this rides in every doctor() report and a storage read must not be able to fail a
+    diagnostic. ``oldest`` is read from the receipt id, which is a sortable timestamp by
+    design — no stat call, and it survives a copy that rewrote mtimes.
+    """
+    root = state_dir() / "backup" / "mail"
+    out = {"path": str(root), "bytes": 0, "receipts": 0, "oldest": None}
+    try:
+        receipts = sorted(d.name for d in root.iterdir() if d.is_dir())
+    except OSError:
+        return out
+    total = 0
+    for name in receipts:
+        try:
+            for f in (root / name).iterdir():
+                if f.is_file():
+                    total += f.stat().st_size
+        except OSError:
+            continue
+    out["bytes"] = total
+    out["receipts"] = len(receipts)
+    # "20260805-001122-123456-000-move" -> the date half is enough to act on.
+    out["oldest"] = receipts[0][:8] if receipts else None
+    return out
+
+
+def backup_advisory() -> str | None:
+    """The one-line notice a mail write carries once the tree passes ``backup_limit()``,
+    or None. Cleanup is a HUMAN act — this names the directory and says to delete it,
+    rather than offering to do it: a tool that can erase the backups is a tool that can
+    erase the only copy of something it deleted earlier."""
+    usage = backup_usage()
+    limit = backup_limit()
+    if usage["bytes"] < limit:
+        return None
+    gb = usage["bytes"] / 1024**3
+    return (
+        f"Mail backup storage is {gb:.1f} GB across {usage['receipts']} receipts "
+        f"(oldest {usage['oldest']}), past the {limit / 1024**3:.1f} GB advisory "
+        f"threshold. These are undo copies kept forever on purpose; nothing prunes "
+        f"them. Tell the user they can delete old ones with `rm -r {usage['path']}` "
+        "(this destroys the ability to undo those operations). Do not delete them "
+        "yourself."
+    )
 
 
 def purge_backup(receipt_id: str) -> int:
