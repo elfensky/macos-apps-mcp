@@ -351,6 +351,172 @@ WHERE m.deleted = 0 AND gd.message_id_header IN ({placeholders})
     return sql, list(stored_ids)
 
 
+# --- duplicates (#140/#153) ----------------------------------------------------------
+# The dedup KEY, shared by every query below and identical to build_overview_query's:
+# a message with no RFC822 Message-ID keys on its own ROWID, so 26 header-less rows on
+# this store stay 26 distinct messages instead of collapsing into one (#142). That makes
+# them structurally un-deduplicable, which is correct — AppleScript addresses a message
+# BY Message-ID, so a row without one cannot be targeted at all. The report and the CLI
+# therefore agree by construction: what cannot be counted as redundant cannot be
+# deleted.
+_DUP_KEY = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
+
+# Rows a dedupe may consider: present, and addressable by Message-ID. Deleted rows are
+# already tombstoned and header-less rows have no handle.
+_DUP_WHERE = """m.deleted = 0
+  AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''"""
+
+
+def build_duplicate_summary_query():
+    """Build (sql, params) for the per-mailbox SAME-MAILBOX redundancy table (#140) —
+    ``(mailbox_url, total, distinct_, redundant)``, worst first, mailboxes with no
+    redundancy omitted.
+
+    This is the table the issue asks a dry run to reproduce, and it is deliberately the
+    same arithmetic ``build_overview_query`` uses for its counts — ``total`` here is the
+    RAW row count and ``distinct_`` is what ``mail_overview`` reports, so the two tools
+    can be read side by side and their difference IS ``redundant``. Measured on this
+    store 2026-08-05: 9,879 redundant rows, matching the issue's re-measurement.
+    """
+    sql = f"""
+SELECT mb.url                     AS mailbox_url,
+       COUNT(*)                   AS total,
+       COUNT(DISTINCT {_DUP_KEY}) AS distinct_,
+       COUNT(*) - COUNT(DISTINCT {_DUP_KEY}) AS redundant
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0
+GROUP BY mb.ROWID
+HAVING redundant > 0
+ORDER BY redundant DESC, mailbox_url ASC
+"""
+    return sql, []
+
+
+def build_duplicate_offenders_query(limit: int):
+    """Build (sql, params) for the worst individual duplicate SETS — one row per
+    ``(mailbox, Message-ID)`` that has more than one copy, most copies first. The
+    "which messages are actually doing this?" half of the report, next to the
+    per-mailbox totals."""
+    sql = f"""
+SELECT mb.url                AS mailbox_url,
+       gd.message_id_header  AS message_id,
+       s.subject             AS subject,
+       COUNT(*)              AS copies
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+LEFT JOIN subjects s ON s.ROWID = m.subject
+WHERE {_DUP_WHERE}
+GROUP BY mb.ROWID, gd.message_id_header
+HAVING copies > 1
+ORDER BY copies DESC, mailbox_url ASC
+LIMIT ?
+"""
+    return sql, [limit]
+
+
+def build_duplicate_rows_query(mailbox_url: str):
+    """Build (sql, params) for one mailbox's duplicate sets, every row (#140) —
+    ``(message_id, rowid, size, date_sent, subject)`` ordered by set then ROWID, so the
+    CLI's winner (LOWEST ROWID) is simply the first row of each group.
+
+    ``size`` and ``date_sent`` ride along because the CLI refuses to delete on a
+    matching Message-ID alone: a loser must be byte-identical to the winner on both,
+    or it is left alone and reported. A Message-ID is a claim about identity; two rows
+    of different sizes are not the same bytes whatever the header says.
+    """
+    sql = f"""
+SELECT gd.message_id_header AS message_id,
+       m.ROWID              AS rowid,
+       m.size               AS size,
+       m.date_sent          AS date_sent,
+       s.subject            AS subject
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+LEFT JOIN subjects s ON s.ROWID = m.subject
+WHERE {_DUP_WHERE} AND mb.url = ?
+  AND gd.message_id_header IN (
+      SELECT gd2.message_id_header
+      FROM messages m2
+      JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
+      WHERE m2.mailbox = mb.ROWID AND m2.deleted = 0
+        AND gd2.message_id_header IS NOT NULL AND gd2.message_id_header <> ''
+      GROUP BY gd2.message_id_header
+      HAVING COUNT(*) > 1)
+ORDER BY gd.message_id_header ASC, m.ROWID ASC
+"""
+    return sql, [mailbox_url]
+
+
+def build_cross_account_summary_query():
+    """Build (sql, params) for CROSS-ACCOUNT redundancy (#153) — one row per account
+    pair-free summary: ``(account, copies)`` counting rows whose Message-ID also exists
+    under a DIFFERENT account.
+
+    Deliberately not a "which account should win" ranking. #153 settled that the winner
+    is a human decision (``--keep-account``) and that no heuristic ever picks it, so
+    this reports the size of the problem per account and stops there.
+    """
+    sql = """
+SELECT substr(mb.url, instr(mb.url, '://') + 3,
+              instr(substr(mb.url, instr(mb.url, '://') + 3), '/') - 1) AS account,
+       COUNT(*) AS copies
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0
+  AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
+  AND gd.message_id_header IN (
+      SELECT gd2.message_id_header
+      FROM messages m2
+      JOIN mailboxes mb2 ON mb2.ROWID = m2.mailbox
+      JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
+      WHERE m2.deleted = 0
+        AND gd2.message_id_header IS NOT NULL AND gd2.message_id_header <> ''
+      GROUP BY gd2.message_id_header
+      HAVING COUNT(DISTINCT substr(mb2.url, 1,
+             instr(mb2.url, '://') + 2 +
+             instr(substr(mb2.url, instr(mb2.url, '://') + 3), '/'))) > 1)
+GROUP BY account
+ORDER BY copies DESC
+"""
+    return sql, []
+
+
+# The mailbox names a "Trash" is spelled with, per account type — device-verified
+# 2026-08-05 on four accounts: IMAP `Trash`, iCloud `Deleted%20Messages`, Gmail
+# `%5BGmail%5D/Trash`. Urls are percent-ENCODED here (this is the raw mailboxes.url), so
+# the literal `%` needs ESCAPE or LIKE reads it as a wildcard — the same trap
+# `_MAILBOX_RANK` documents, and the reason these are anchored to the FINAL segment.
+_TRASH_SUFFIXES = (r"%/Trash", r"%/Deleted\%20Messages", r"%/Bin")
+
+
+def build_trash_query(account: str):
+    """Build (sql, params) for "which mailbox is this account's Trash?" (#80).
+
+    Needed because Mail will not answer it. ``Mail.sdef`` declares ``trash mailbox`` on
+    the ACCOUNT class next to ``drafts mailbox``/``sent mailbox``, but device-verified
+    2026-08-05 it raises **-1728 for every account**; only the application-level
+    ``trash mailbox`` resolves, and that is the UNIFIED "All Trash". The unified
+    accessor is not a substitute: a `move` OUT of it moved the messages and then crashed
+    Mail (facts doc §5c), so `trash_mail`'s undo has to name the account's own Trash.
+
+    Ordered so the shortest url wins — a nested user folder like `Trash/2019` would
+    match `%/Trash`'s sibling patterns on some stores, and the account's real Trash is
+    always the shallowest of them.
+    """
+    clauses = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in _TRASH_SUFFIXES)
+    sql = f"""
+SELECT url FROM mailboxes
+WHERE url LIKE ? ESCAPE '\\' AND ({clauses})
+ORDER BY length(url) ASC LIMIT 1
+"""
+    return sql, [f"%://{like_escape(account)}/%", *_TRASH_SUFFIXES]
+
+
 def build_local_account_query():
     """Build (sql, params) that finds the account segment mailboxes.url embeds for the
     On My Mac store — the value ``build_header_query``'s ``account`` clause anchors on
@@ -548,6 +714,47 @@ def query_message_locations(stored_ids) -> list[dict]:
         return [dict(r) for r in conn.execute(sql, params)]
 
     return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+
+
+def _dict_rows(sql, params) -> list[dict]:
+    """Run a raw (non-Pointer) read against the Envelope Index. The `_rows`-style
+    warning applies: these are raw columns, not the citation shape."""
+    path = require_index_path()
+
+    def read(conn):
+        conn.row_factory = sqlite3.Row
+        return [dict(r) for r in conn.execute(sql, params)]
+
+    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+
+
+def query_duplicate_summary() -> list[dict]:
+    """Per-mailbox same-mailbox redundancy (#140), worst first."""
+    return _dict_rows(*build_duplicate_summary_query())
+
+
+def query_duplicate_offenders(limit: int) -> list[dict]:
+    """The worst individual duplicate sets (#140), most copies first."""
+    return _dict_rows(*build_duplicate_offenders_query(limit))
+
+
+def query_duplicate_rows(mailbox_url: str) -> list[dict]:
+    """Every row of every duplicate set in ONE mailbox (#140), set then ROWID order."""
+    return _dict_rows(*build_duplicate_rows_query(mailbox_url))
+
+
+def query_cross_account_summary() -> list[dict]:
+    """Per-account cross-account redundancy (#153)."""
+    return _dict_rows(*build_cross_account_summary_query())
+
+
+def query_trash_url(account: str) -> str | None:
+    """The mailboxes.url of ``account``'s own Trash, or None when the index knows of
+    none (#80). None is a real answer — a freshly added account may have no Trash row
+    yet — and the caller must say so rather than falling back to the unified accessor,
+    which crashes Mail on a move out of it (facts doc §5c)."""
+    rows = _dict_rows(*build_trash_query(account))
+    return rows[0]["url"] if rows else None
 
 
 def query_local_account_url() -> str | None:

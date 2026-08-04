@@ -940,6 +940,207 @@ end run"""
 # the second line of defense, never the first).
 _MOVE_TIMEOUT = 300.0
 
+# _TRASH (#80) — soft delete. Device-verified 2026-08-05, and the verification differs
+# from _MOVE's in a way that matters:
+#
+# 1. `delete <message>` in an ordinary mailbox is a MOVE TO THAT ACCOUNT'S TRASH. It is
+#    not an erase, and the message stays addressable in Trash afterwards. There is no
+#    permanent delete to reach for: `delete` on a message already in Trash is a silent
+#    no-op, `deleted status` raises -609 on write, and Mail.sdef has no erase verb
+#    (facts doc §5c). Emptying Trash is a Mail.app UI act.
+# 2. **`delete` is ASYNCHRONOUS on the source side.** Measured t0/t3/t10: the source
+#    still counts the message immediately after the verb returns and only clears by t3,
+#    while Trash is populated at once. So this must NOT copy _MOVE's "gone from source"
+#    assertion — that reports a clean failure on a delete that worked. The reliable
+#    signal is the DESTINATION, and it is checked as an INCREASE (before vs after), not
+#    as presence: a message whose duplicate already sat in Trash would otherwise read as
+#    "ok" no matter what the delete did.
+# 3. The Trash mailbox is passed IN, resolved from the Envelope Index by the caller —
+#    `trash mailbox of <account>` raises -1728 for every account despite Mail.sdef
+#    declaring it, and the application-level unified accessor must not be used here: a
+#    `move` out of it moved the mail and then crashed Mail (§5c).
+_TRASH = (
+    STRIP_FRAMING
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set src to my mailboxFor(item 1 of argv, item 2 of argv)
+  set tb to my mailboxFor(item 3 of argv, item 4 of argv)
+  set us to character id 31
+  set rs to character id 30
+  set AppleScript's text item delimiters to us
+  set ids to text items of (item 5 of argv)
+  set AppleScript's text item delimiters to ""
+  set out to ""
+  with timeout of 600 seconds
+  tell application "Mail"
+    repeat with rawId in ids
+      set mid to rawId as text
+      if mid is not "" then
+        set outcome to "unknown"
+        try
+          if (count of (messages of src whose message id is mid)) is 0 then
+            set outcome to "not-in-source"
+          else
+            set beforeTrash to (count of (messages of tb whose message id is mid))
+            delete (messages of src whose message id is mid)
+            set landed to false
+            repeat 12 times
+              if (count of (messages of tb whose message id is mid)) > beforeTrash then
+                set landed to true
+                exit repeat
+              end if
+              delay 0.5
+            end repeat
+            if landed then
+              set outcome to "ok"
+            else if (count of (messages of src whose message id is mid)) is 0 then
+              set outcome to "ok"
+            else
+              set outcome to "ERROR delete returned cleanly but the message is " & ¬
+                "still in the source and never reached Trash"
+            end if
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+        set out to out & mid & us & (my stripFraming(outcome)) & rs
+      end if
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
+# Same reasoning as _MOVE_TIMEOUT: N Apple Events against a possibly-remote IMAP store,
+# two verifying counts each, not a 30-second job.
+_TRASH_TIMEOUT = 300.0
+
+# Dedupe gets its own, longer ceiling. Measured 2026-08-05 against a real IMAP account:
+# the deletes are SERVER-bound, not CPU-bound (Mail idles at ~3% while they run), and a
+# 25-set batch can be several copies per set. 300s is right for `trash_mail`, which runs
+# on the daemon's single serialized worker where a long hold starves every other tool —
+# but the dedupe CLI is its OWN process, so nothing is starved by waiting, and a batch
+# cut short by the host timeout is strictly worse: the plan record is written, the
+# deletes are half-applied, and the receipt never gets its outcome record.
+_DEDUPE_TIMEOUT = 900.0
+
+# _DEDUPE (#140) — collapse N same-mailbox copies of one Message-ID down to 1.
+#
+# It cannot be spelled as "delete the losers", because AppleScript has no way to name
+# one of them. sqlite identifies a specific row by `messages.ROWID`; Mail's scripting
+# layer only understands `messages of mb whose message id is X`, which matches ALL the
+# copies at once — so `delete` on that collection (what `_TRASH` does, correctly, for a
+# single-copy target) would take the survivor with them. There is no ROWID in the
+# dictionary and no other per-copy handle.
+#
+# So the winner is not CHOSEN here, it is what is LEFT: the collection is captured once,
+# then items n..2 are deleted in REVERSE index order (the §6 rule — forward iteration
+# invalidates the reference with -1728) and item 1 survives. That is why the caller
+# refuses to run unless every copy in the set is byte-identical on size AND date_sent:
+# with identical bytes the survivor's identity is immaterial, which is exactly what
+# makes an unaddressable winner acceptable. #140's "keep the lowest ROWID" is a sqlite
+# statement; it has no AppleScript spelling, and acting through sqlite is forbidden.
+#
+# Verification is a SECOND PASS over the whole batch, not a check after each delete, and
+# it asserts the thing actually wanted: **exactly one copy survives in the source**. Two
+# reasons, both measured 2026-08-05:
+#
+# - `delete` is asynchronous on BOTH sides (§5c), so an immediate per-message check
+#   reports a false failure on a delete that worked — and a false failure is not
+#   cosmetic, it drops the message from the receipt's undo plan. Waiting per message
+#   instead made a 25-set batch take minutes, because nearly every message spent the
+#   full ceiling; by the second pass the earlier deletes have long since settled and the
+#   common case waits not at all.
+# - "one survivor" catches OVER-deletion (0 left) as well as under-deletion, which the
+#   Trash-growth count this replaced could not distinguish.
+_DEDUPE = (
+    STRIP_FRAMING
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set src to my mailboxFor(item 1 of argv, item 2 of argv)
+  set tb to my mailboxFor(item 3 of argv, item 4 of argv)
+  set us to character id 31
+  set rs to character id 30
+  set AppleScript's text item delimiters to us
+  set ids to text items of (item 5 of argv)
+  set AppleScript's text item delimiters to ""
+  set out to ""
+  set acted to {}
+  with timeout of 600 seconds
+  tell application "Mail"
+    -- FIRST PASS: delete. Verification is a SECOND pass below, deliberately — `delete`
+    -- is asynchronous on both sides (§5c), so checking each message right after its own
+    -- delete either reports a false failure or burns a per-message wait.
+    repeat with rawId in ids
+      set mid to rawId as text
+      if mid is not "" then
+        set outcome to "unknown"
+        set wanted to 0
+        try
+          set matches to (messages of src whose message id is mid)
+          set n to (count of matches)
+          if n < 2 then
+            set outcome to "not-duplicated"
+          else
+            set wanted to n - 1
+            repeat with i from n to 2 by -1
+              delete (item i of matches)
+            end repeat
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+        set acted to acted & {{mid, outcome, wanted}}
+      end if
+    end repeat
+    -- SECOND PASS: verify only now. Every delete above has had the whole rest of the
+    -- batch to settle, so the common case needs no wait at all — where a per-message
+    -- wait inside the first loop spent its full ceiling on nearly every message and
+    -- made a 25-set batch take minutes.
+    repeat with rec in acted
+      set mid to item 1 of rec
+      set outcome to item 2 of rec
+      set wanted to item 3 of rec
+      if outcome is "unknown" then
+        try
+          set survivors to (count of (messages of src whose message id is mid))
+          if survivors is 1 then
+            set outcome to "ok " & wanted
+          else
+            set landed to false
+            repeat 12 times
+              if (count of (messages of src whose message id is mid)) is 1 then
+                set landed to true
+                exit repeat
+              end if
+              delay 0.5
+            end repeat
+            if landed then
+              set outcome to "ok " & wanted
+            else
+              set outcome to "ERROR expected 1 copy to survive but " & ¬
+                (count of (messages of src whose message id is mid)) & " remain"
+            end if
+          end if
+        on error errMsg
+          set outcome to "ERROR " & errMsg
+        end try
+      end if
+      set out to out & mid & us & (my stripFraming(outcome)) & rs
+    end repeat
+  end tell
+  end timeout
+  return out
+end run"""
+)
+
 # update_mail_status (#79): read/unread and flag/unflag+colour on stored messages.
 # Purely reversible and destroys nothing, so it does NOT ride #159's recoverable plane —
 # there is no byte to preserve and no undo to synthesize; re-issuing the tool with the
@@ -1963,6 +2164,174 @@ class MailAdapter:
             )
 
         return mail_recover.recoverable("move", targets, act, destination=to_mailbox)
+
+    def trash_mail(self, ids, mailbox: str, dry_run: bool = True) -> dict:
+        """Move messages to Trash — soft delete (#80), on #159's recoverable plane.
+
+        SOFT is the only delete there is. Device-verified 2026-08-05: Mail's ``delete``
+        verb moves a message to its account's Trash and nothing in Mail's scripting
+        dictionary erases it from there — ``delete`` on a message already in Trash is a
+        silent no-op, ``deleted status`` is unwritable (-609), and there is no erase or
+        expunge command. So this tool cannot destroy mail, and there is no permanent
+        counterpart to gate; emptying Trash is a human act in Mail.app. See the facts
+        doc §5c before trying to build one.
+
+        Rides the plane exactly like ``move_mail``, which is the point of the plane —
+        every target's bytes are copied out and its source mailbox logged BEFORE the
+        first Apple Event, so ``mail_undo`` replays it as a move back OUT of Trash. The
+        backup is kept even though the server copy survives a soft delete: Trash is a
+        30-day-ish staging area, not a guarantee, and the receipt is what makes the
+        operation reconstructible after Mail's own expiry.
+
+        ``mailbox`` is required and is one address token for the whole batch — the same
+        rule ``move_mail`` follows, and it is what makes the destination knowable: the
+        account owns the Trash, so one source mailbox means one Trash mailbox and one
+        replayable receipt.
+        """
+        mids = _split_ids(ids)
+        mail_recover.check_batch(mids)
+        src = mail_addressing.mailbox_args(mailbox)
+        account = mail_index.account_of(mailbox)
+        if account is None:
+            raise ValueError(
+                f"trash_mail needs a mailbox that names its account — {mailbox!r} is a "
+                "unified accessor, and Mail files a deleted message in the OWNING "
+                "account's Trash, which a unified name cannot identify. Pass the "
+                "`folder` url from the read that produced these ids."
+            )
+        trash = mail_index.query_trash_url(account)
+        if trash is None:
+            raise NativeError(
+                f"no Trash mailbox found for account {account} in Mail's index, so a "
+                "soft delete could not be verified or undone. Open Mail and confirm "
+                "account is set up, then retry. Do not retry unchanged."
+            )
+        if src == mail_addressing.mailbox_args(trash):
+            raise ValueError(
+                "these messages are already in Trash. Mail cannot delete them any "
+                "further from a script — emptying Trash is a Mail.app action. Do not "
+                "retry."
+            )
+        targets = [
+            mail_recover.Target(id=mid, folder=mailbox, account=account) for mid in mids
+        ]
+        if dry_run:
+            present = _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+            targets = [replace(t, status=present.get(t.id, "missing")) for t in targets]
+            return mail_recover.preview("trash", targets, destination=trash)
+
+        dst = mail_addressing.mailbox_args(trash)
+
+        def act(located):
+            return _parse_statuses(
+                run_osascript(
+                    _TRASH,
+                    *src,
+                    *dst,
+                    US.join(t.id for t in located),
+                    timeout=_TRASH_TIMEOUT,
+                )
+            )
+
+        return mail_recover.recoverable("trash", targets, act, destination=trash)
+
+    def duplicates(self, limit: int = MAX_MAILS) -> dict:
+        """Where the redundant copies are (#140/#153) — READ-ONLY, sqlite only.
+
+        Diagnoses; it cannot clean anything up. The cleanup is
+        ``macos-apps-mcp dedupe-mail``, a CLI command, because the scale does not fit
+        the MCP surface: ~9.9k redundant rows at roughly a tenth of a second per
+        AppleScript delete against a 30-second-capped, single serialized worker is
+        hours of work a human starts, not a model-mediated round trip (the #119 shape).
+
+        Two halves, because they answer different questions: ``mailboxes`` is the
+        per-mailbox table (total rows vs distinct messages), and ``worst`` names the
+        individual messages doing the most damage. ``cross_account`` counts rows whose
+        Message-ID also lives under a different account — reported per account and
+        never ranked, since #153 settled that which account wins is a human decision.
+
+        Header-less messages are excluded from every count: a message with no RFC822
+        Message-ID keys on its own ROWID and can never be a duplicate of anything,
+        which is also true operationally — AppleScript addresses a message BY
+        Message-ID, so a row without one cannot be targeted at all.
+        """
+        mailboxes = mail_index.query_duplicate_summary()
+        worst = mail_index.query_duplicate_offenders(limit)
+        for row in worst:
+            row["subject"] = clean_summary(row.get("subject") or "") or "(no subject)"
+            row["id"] = bare_id(str(row.get("message_id") or ""))
+            row.pop("message_id", None)
+        redundant = sum(r["redundant"] for r in mailboxes)
+        return {
+            "redundant": redundant,
+            "mailboxes": mailboxes,
+            "worst": worst,
+            "cross_account": mail_index.query_cross_account_summary(),
+            "note": (
+                f"{redundant} redundant same-mailbox rows. This tool only reports — "
+                "run `macos-apps-mcp dedupe-mail` in a terminal to clean up (it "
+                "previews by "
+                "default; --execute acts). Counts come from Mail's index at rest and "
+                "may lag Mail by a few minutes."
+            ),
+        }
+
+    def dedupe_batch(self, ids, mailbox: str, dry_run: bool = True) -> dict:
+        """Collapse each named Message-ID's same-mailbox copies down to one (#140).
+
+        The engine behind the ``dedupe-mail`` CLI, and NOT an MCP tool — the model must
+        not be able to start thousands of deletes. Each id must already be known
+        (by the caller, from sqlite) to have several byte-identical copies in
+        ``mailbox``; this deletes all but one of each.
+
+        Rides the recoverable plane in LOG-ONLY mode (``backup=False``): both dedupe
+        issues require byte-identity before a copy is touched, so the surviving copy IS
+        the backup and writing per-loser files would be pure cost at this scale. The
+        un-truncated action log still records every id, its mailbox and its receipt,
+        which is what makes the pass auditable and undoable while Trash holds the
+        losers.
+        """
+        mids = _split_ids(ids)
+        mail_recover.check_batch(mids)
+        src = mail_addressing.mailbox_args(mailbox)
+        account = mail_index.account_of(mailbox)
+        if account is None:
+            raise ValueError(
+                f"dedupe needs a mailbox url that names its account — got {mailbox!r}"
+            )
+        trash = mail_index.query_trash_url(account)
+        if trash is None:
+            raise NativeError(
+                f"no Trash mailbox found for account {account}; cannot verify a dedupe "
+                "pass. Do not retry unchanged."
+            )
+        targets = [
+            mail_recover.Target(id=mid, folder=mailbox, account=account) for mid in mids
+        ]
+        if dry_run:
+            return mail_recover.preview("dedupe", targets, destination=trash)
+        dst = mail_addressing.mailbox_args(trash)
+
+        def act(located):
+            statuses = _parse_statuses(
+                run_osascript(
+                    _DEDUPE,
+                    *src,
+                    *dst,
+                    US.join(t.id for t in located),
+                    timeout=_DEDUPE_TIMEOUT,
+                )
+            )
+            # "ok 3" carries how many copies went to Trash; the plane's success test is
+            # the bare "ok", so normalise while keeping the count in the log line.
+            return {
+                mid: ("ok" if status.startswith("ok") else status)
+                for mid, status in statuses.items()
+            }
+
+        return mail_recover.recoverable(
+            "dedupe", targets, act, destination=trash, backup=False
+        )
 
     def undo(self, receipt_id: str, dry_run: bool = True) -> dict:
         """Replay one recoverable-plane receipt in reverse (#159).

@@ -336,6 +336,21 @@ def diagnose(request: bool = False) -> dict:
             + ") — restart the daemon to apply it."
         )
 
+    # #163: the recoverable plane keeps every backup forever (no pruning code exists, on
+    # purpose — see mail_recover), so the ONE thing that makes that safe is saying out
+    # loud how much disk it holds. Terse for the same token-budget reason as
+    # outbound_note; the advisory that fires past the threshold carries the remedy.
+    from .adapters.mail_recover import backup_usage
+
+    usage = backup_usage()
+    # The absolute path is deliberately NOT here: it is long, it rides in every report,
+    # and the advisory that fires past the threshold carries it with the rm command.
+    deployment["mail_backups"] = (
+        f"{usage['bytes'] / 1024**2:.1f} MB in {usage['receipts']} receipts"
+        + (f" (oldest {usage['oldest']})" if usage["oldest"] else "")
+        + ", kept forever in <state>/backup/mail"
+    )
+
     return {
         "version": _version(),
         "responsible_process": _responsible_process(),

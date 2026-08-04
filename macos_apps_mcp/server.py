@@ -15,6 +15,7 @@ from fastmcp.server.middleware import Middleware
 from mcp.types import TextContent
 
 from . import deploy
+from .adapters import mail_recover
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -256,19 +257,38 @@ UNTRUSTED_NOTICE = (
 _NO_NOTICE = frozenset({"ping", "now", "doctor", "usage"})
 
 
+# #163: the tools that WRITE recoverable-plane backups. The storage advisory rides these
+# and only these — it is a notice about a directory these three create, so putting it on
+# `mail_search` would be noise on a read that cannot grow it, and putting it nowhere
+# would leave a keep-forever tree with nothing ever mentioning it. Deliberately a small
+# explicit set rather than "every mail tool": the advisory should appear at the moment
+# the user is adding to the pile.
+_BACKUP_NOTICE_TOOLS = frozenset({"move_mail", "trash_mail", "mail_undo"})
+
+
 class UntrustedDataNotice(Middleware):
-    """Prepend ``UNTRUSTED_NOTICE`` to every tool result except the meta tools (#53)."""
+    """Prepend ``UNTRUSTED_NOTICE`` to every tool result except the meta tools (#53),
+    and the backup-storage advisory to the plane's writes once it is over threshold
+    (#163)."""
 
     async def on_call_tool(self, context, call_next):
         # call_next RAISES on a tool error (surfaced as ToolError by _guard), so an
         # error never reaches this prepend — the notice rides only on real payloads.
         # is_error is belt-and-suspenders for a future path that returns instead.
         result = await call_next(context)
-        if context.message.name not in _NO_NOTICE and not result.is_error:
-            result.content = [
-                TextContent(type="text", text=UNTRUSTED_NOTICE),
-                *result.content,
-            ]
+        name = context.message.name
+        if name not in _NO_NOTICE and not result.is_error:
+            notices = [TextContent(type="text", text=UNTRUSTED_NOTICE)]
+            if name in _BACKUP_NOTICE_TOOLS:
+                # Never let a storage read fail a write that already succeeded: the
+                # mail is already moved by the time this runs.
+                try:
+                    advisory = mail_recover.backup_advisory()
+                except Exception:  # noqa: BLE001 - a notice must not break a result
+                    advisory = None
+                if advisory:
+                    notices.append(TextContent(type="text", text=advisory))
+            result.content = [*notices, *result.content]
         return result
 
 
@@ -632,6 +652,52 @@ def move_mail(
     keep `receipt` to undo the batch. Needs Automation access for Mail,
     plus Full Disk Access to locate each message's file for the backup."""
     return _mail.move_mail(ids, from_mailbox, to_mailbox, dry_run=dry_run)
+
+
+@_write_tool
+def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
+    """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
+
+    Mail's scripting layer cannot permanently erase a message: `delete` moves it to the
+    owning account's Trash, and nothing in the dictionary empties Trash from a script.
+    Emptying Trash is something the user does in Mail.app. So this is always
+    recoverable, and there is no permanent-delete tool to ask for.
+
+    DESTRUCTIVE but recoverable: every message's bytes are copied to a backup directory
+    and its source mailbox logged BEFORE anything is deleted, so `mail_undo` moves the
+    batch back out of Trash. `dry_run` DEFAULTS TO TRUE — the preview reports, per id,
+    whether it is actually `present` in `mailbox`. Pass `dry_run=False` to delete.
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call and
+    the cap is not overridable. `mailbox` is REQUIRED and must be the `folder` url from
+    the read that produced the ids, passed back VERBATIM — not one of the canonical
+    names: Mail files a deleted message in its OWNING account's Trash, and a unified
+    name ("inbox") cannot say which account that is.
+    Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
+    keep `receipt` to undo the batch. Each id is verified to have ARRIVED in Trash
+    (Mail's delete clears the source asynchronously, so "gone from the source" is not
+    a signal that can be read straight after the call). Needs Automation access for
+    Mail, plus Full Disk Access to locate each message's file for the backup."""
+    return _mail.trash_mail(ids, mailbox, dry_run=dry_run)
+
+
+@_read_tool
+def mail_duplicates(limit: int = 25) -> dict:
+    """Where Mail is storing redundant copies of the same message — a REPORT, read-only.
+
+    Mail accumulates duplicate rows (a UI drag copies rather than moves, Gmail shows one
+    message under a label and All Mail, migrations leave copies on two accounts). The
+    read tools already hide them — `mail_search`/`mail_thread`/`mail_overview` report
+    result per Message-ID — so this exists to show what is still physically there.
+    Returns {redundant, mailboxes, worst, cross_account, note}: `mailboxes` is
+    {mailbox_url, total, distinct_, redundant} per mailbox worst-first, `worst` names
+    individual messages with the most copies ({mailbox_url, id, subject, copies}), and
+    `cross_account` counts rows whose Message-ID also exists under another account.
+    This tool CANNOT delete anything. Cleaning up is `macos-apps-mcp dedupe-mail`, run
+    a terminal by the user — thousands of deletes is a job a human starts, not a tool
+    call. Tell them that command rather than proposing per-message deletes.
+    Fast and read-only, straight from Mail's index at rest (so it may lag Mail by a few
+    minutes and never launches Mail). Needs Full Disk Access."""
+    return _mail.duplicates(limit)
 
 
 @_write_tool
