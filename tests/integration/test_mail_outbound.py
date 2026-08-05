@@ -133,3 +133,11 @@ def test_outbox_pending_tracks_the_real_queue_not_session_objects():
             break
         time.sleep(6)
     assert drained, "the outbox never drained — delivery is genuinely stuck"
+
+    # Sweep this test's own #133 autosave litter, for the same reason the round-trip
+    # test does: an integration suite that leaves drafts in the operator's real mailbox
+    # is one this repo stops running. Best-effort — the sweep is not what is under test.
+    adapter = MailAdapter()
+    for p in adapter.list_drafts()["results"]:
+        if f"{MARKER} outbox drain" in (p.get("subject") or ""):
+            adapter.delete_draft(p["id"])
