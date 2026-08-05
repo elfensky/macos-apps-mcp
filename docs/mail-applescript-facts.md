@@ -121,6 +121,24 @@ Python-side sanitiser is correct whatever Mail does — an attachment name arriv
 the mail, so it is treated as hostile unconditionally. See `mail_files` and
 `tests/test_mail_files.py`.
 
+### 4c. `.partial.emlx` means NO ATTACHMENTS, not "no body" (#119)
+
+Verified 2026-08-06, by classifying **all 22,748 `.partial.emlx` on this Mac** and by comparing
+on-disk bytes against what Mail returns after a full fetch. This killed #119's entire premise:
+the "63% of bodies are not local, download them" story was wrong, and the feature it specified
+would have spent hours and GB to gain 99 messages.
+
+| Fact | Detail |
+|---|---|
+| **A `.partial.emlx` carries a complete, extractable body 99.47% of the time.** Full-store census: 22,627 body_ok · 99 genuinely body-stubbed (0.44%) · 13 attachment-only with no text part · 9 with no `Message-ID` (unindexable by our citation contract, not by Mail's). | So the ~62% "coverage gap" `body_coverage()` used to report was **the indexer's own filename filter**, not missing bytes. `build_body_index` skipped `*.partial.emlx` and hid two thirds of the store from `mail_search(body=…)`. |
+| **The body in the partial is BYTE-IDENTICAL to the body after a full fetch.** Not inferred — measured: extract body from the on-disk partial, read `source` of the same message over IMAP, extract again, compare. 7 of 7 identical, including a **27 MB** message whose 2,131-char body was already complete in its 17 KB partial. | What the partial omits is the attachment parts, which sit there as empty MIME parts carrying `X-Apple-Content-Length: <n>`. That header is the tell: the *shape* of the message is local, the attachment *payload* is not. |
+| **Reading `content` does NOT fetch and does NOT fill the file.** Returned 5,795 chars in 1.0 s off a partial and the file was still `.partial.emlx` at the same size 30 s later. | #119's specified mechanism ("reading `content of message` forces Mail to fetch from IMAP; the `.emlx` then fills in") is simply false. |
+| **Reading `source` DOES fetch the whole message** — 130,092 chars off a 50 KB partial, and 27 MB in 2.9 s off a 17 KB one — but it persists **unreliably**. Controlled probe on `Legal` (10 fetched vs 10 untouched control, re-checked at 120 s): **treatment 2/10 converted `.partial`→full, control 0/10.** | So `source` is a real trigger but a ~20%-per-2-min one, and Mail *also* converts partials on its own in the background (the store-wide partial count drifts down while nothing is running). Never attribute a conversion to your own script without a control group. |
+| When a partial does fill in, the **ROWID is unchanged** — `4566.partial.emlx` → `4566.emlx`. And the size barely moves (22,477 → 22,514 bytes; one went *down*, 7,348 → 7,313). | Confirms the flip is bookkeeping plus attachment bytes, not a body arriving. It also means `indexed_files` (keyed by path) re-reads the filled-in file for free, and the `DELETE FROM bodies WHERE message_id` before insert stops it double-counting. |
+| `messages.ROWID` in the Envelope Index **is** the `<n>` in `<n>.emlx` / `<n>.partial.emlx`, and the path encodes account UUID + mailbox. | So partial-vs-full is a pure filesystem question and scoping needs no Mail launch — confirmed, and still true. |
+
+Cheap and safe by comparison: **`message id of every message of mb` is one Apple Event and O(mailbox)** — 161 ids in 0.7 s — and returns ids **without** angle brackets, while the Envelope Index stores them **with**. Normalise before joining. This is the fast way to map index-position → message without ever touching `whose` (§8b, and the ~56 s/set scan cost in `dedupe.py`).
+
 ## 5. Addressing a mailbox by name
 
 Verified 2026-07-31 (#146), probing every branch against real accounts.
