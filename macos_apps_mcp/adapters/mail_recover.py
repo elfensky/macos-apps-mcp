@@ -212,6 +212,37 @@ def locate(targets) -> list[Target]:
     return out
 
 
+def read_payloads(targets: list[Target]) -> dict[str, bytes]:
+    """``{message-id: RFC822 bytes}`` for every LOCATED target — the at-rest read
+    behind #85's export.
+
+    Public because export is not destructive and has no receipt to hang a backup off,
+    but wants exactly the bytes ``_backup`` writes: the ``.emlx`` payload with Mail's
+    length prefix and trailing plist stripped, i.e. an importable ``.eml``. Reusing
+    this is why export needs no AppleScript, launches no Mail, and cannot be told a
+    different story than the backups are.
+
+    Targets that cannot be located or read are simply ABSENT from the result — the
+    caller reports them per-id rather than failing the batch, the same rule ``locate``
+    and ``_backup`` follow (62.5% of local messages are ``.partial``)."""
+    root = mail_index.mail_root()
+    if root is None:
+        return {}
+    paths = _rowid_paths(root)
+    out: dict[str, bytes] = {}
+    for t in targets:
+        path = paths.get(t.rowid) if t.rowid is not None else None
+        if path is None:
+            continue
+        try:
+            payload = mail_index.emlx_payload(path.read_bytes())
+        except OSError:
+            continue
+        if payload:
+            out[t.id] = payload
+    return out
+
+
 def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
     """Copy each located target's RFC822 bytes out as a plain ``.eml``, before anything
     acts. Returns the targets stamped with their backup paths.

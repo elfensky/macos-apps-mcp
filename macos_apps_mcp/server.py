@@ -563,6 +563,80 @@ def mail_index_bodies(rebuild: bool = False) -> dict:
     return _mail.index_bodies(rebuild=rebuild)
 
 
+@_read_tool
+def mail_stats(days: int = 30, account: str = "") -> dict:
+    """Mail volume, read ratio and top senders over the last `days` (Full Disk Access).
+
+    Pure Envelope Index — never launches Mail. Counted per DISTINCT message, not per
+    row: the same message filed twice is one message (raw rows overcount by up to 3.6x
+    on a real store). `account` takes a raw account UUID — the `account` field every
+    mail Pointer and `mail_overview` row carries — not a display name.
+
+    Returns a compact aggregate: {window_days, since, messages, unread, read_ratio,
+    flagged, with_attachments, per_day, busiest_day, top_senders[10],
+    top_mailboxes[10], plane}. Deliberately token-bounded: top-N only, no per-day
+    series. `top_mailboxes` carries the decoded name plus `folder` (the round-trip url)
+    and the account uuid — map the uuid to a name with one `mail_overview` call.
+    Read-only."""
+    return _mail.stats(days=days, account=account)
+
+
+@_additive_tool
+def export_mail(ids: str, dest_dir: str) -> dict:
+    """Write messages out as importable .eml files (Full Disk Access).
+
+    Read AT REST — the same on-disk bytes the undo backups copy — so this never
+    launches Mail and needs no Automation. `ids` are RFC822 message-ids from a mail
+    read, comma-separated, max 25. `dest_dir` must be inside the allowed root
+    (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
+    a path outside it is REFUSED. Filenames are derived, never overwritten.
+
+    .eml is the only format — it is lossless and opens in Mail and everything else,
+    and `mail_body` already covers "give me the text".
+
+    Returns {results, written, dest_dir, plane}. A message whose bytes are not on this
+    Mac is reported per-id as `status: "absent"` rather than failing the batch (most
+    local messages are headers-only until `mail_index_bodies`/a body download runs);
+    `fidelity: "partial"` means the .eml holds a real but truncated message.
+    Additive: writes new files, never overwrites or modifies mail."""
+    return _mail.export(ids, dest_dir)
+
+
+@_additive_tool
+def save_mail_attachment(
+    message_id: str,
+    dest_dir: str,
+    name: str = "",
+    attachment_id: str = "",
+    mailbox: str = "",
+) -> dict:
+    """Save ONE attachment to disk (Automation, plus Full Disk Access to resolve a bare
+    message_id).
+
+    List them with `mail_attachments` first, then address one by `name` or — when
+    several on the same message share a name, which is ordinary — by its
+    `attachment_id` (the `id` field on the attachment row). An ambiguous name RAISES
+    and lists the ids rather than picking one.
+
+    `dest_dir` must be inside the allowed root (~/Downloads by default;
+    MACOS_APPS_FILE_ROOT moves it) and is created if needed; a path outside it is
+    REFUSED. The filename is DERIVED from the attachment's name — an attachment name
+    comes from whoever sent the mail, so it is treated as hostile — and an existing
+    file is never overwritten. Writes are capped at 25 MiB.
+
+    `mailbox` is optional: the `folder` value from the read that produced `message_id`,
+    verbatim. Omitted, the id resolves on its own through the index.
+
+    Saving an attachment Mail has not downloaded makes Mail FETCH the message first, so
+    this can take much longer than a read; if the account is offline the file lands
+    empty, and it is then removed and reported as a failure rather than left behind.
+    Returns {saved, name, original_name, bytes, reported_size, was_downloaded, id,
+    folder}. Additive: writes a new file, never modifies mail."""
+    return _mail.save_attachment(
+        message_id, dest_dir, name=name, attachment_id=attachment_id, mailbox=mailbox
+    )
+
+
 @_additive_tool
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
@@ -572,6 +646,12 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     `drafts()` resolves it by its stable message-id. If the create FAILS partway, Mail
     may still leave a stray autosaved draft behind (#133 — its autosave is
     asynchronous and cannot be suppressed); `drafts()` + `delete_draft()` clear it.
+
+    THE AUTOSAVE WINDOW: Mail stamps the Message-ID only when it autosaves the draft,
+    ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
+    `drafts()` called immediately shows nothing. That is normal. Wait for the window,
+    then `drafts()` resolves it. **Do NOT retry this call** because the draft has not
+    appeared: you get two drafts and the first one still arrives.
     Additive (creates a draft; does not send/modify/delete); needs Automation access
     for Mail."""
     return _mail.create_draft(to, subject, body)
@@ -589,16 +669,28 @@ def mail_reply(
     threading headers natively; include_quote appends the quoted original. Returns a
     locator dict — save the draft to Drafts and `drafts()` resolves it by a stable
     message-id.
+
+    THE AUTOSAVE WINDOW: that message-id is stamped only when Mail autosaves the draft,
+    ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
+    `drafts()` called immediately shows nothing; that is normal, not a failed create.
+    Wait for the window, then `drafts()` resolves it. **Do NOT retry this call**
+    because the draft has not appeared: you get two drafts and the first still arrives.
+    Note a reply draft cannot be sent with `send_mail(draft_id=…)` — rebuilding it
+    would drop the threading headers, so that call refuses and points you at
+    `reply_all(dry_run=False)` instead.
     """
     return _mail.reply(message_id, mailbox, reply_body, include_quote)
 
 
 @_read_tool
 def drafts() -> dict:
-    """List Mail drafts as pointers (id + "subject — to recipient"), newest mailbox
-    order. Returns {results, truncated?}; `truncated` means the 25 cap was reached. The
-    id is the RFC822 message-id — pass it to delete_draft. Each pointer carries
-    folder = "drafts", so it also round-trips into `mail_attachments`.
+    """List Mail drafts, newest mailbox order. Returns {results, truncated?};
+    `truncated` means the 25 cap was reached. Each record is a citable pointer (id,
+    summary, deeplink, folder = "drafts") PLUS discrete `subject` and `to` fields, so
+    picking out one specific draft is a field comparison, not substring-matching the
+    summary — which collides whenever two drafts share a subject. The id is the RFC822
+    message-id: pass it to `delete_draft`, or to `send_mail(draft_id=…)` to send a
+    draft the human has approved.
     A compose window Mail has not autosaved yet (~10-15s) is absent here — wait, do not
     retry the create. Read-only; needs Automation access for Mail."""
     return _mail.list_drafts()
@@ -750,22 +842,42 @@ def update_mail_status(
 
 @_send_tool("mail")
 def send_mail(
-    to: str,
+    to: str = "",
     subject: str = "",
     body: str = "",
     cc: str | None = None,
     bcc: str | None = None,
     html: bool = False,
     from_address: str | None = None,
+    draft_id: str = "",
     dry_run: bool = True,
 ) -> dict:
-    """SEND a new mail — this leaves your machine and cannot be recalled.
+    """SEND mail — this leaves your machine and cannot be recalled.
 
-    `dry_run` DEFAULTS TO TRUE: the first call previews the resolved envelope without
-    touching Mail. Pass `dry_run=False` to actually send. Addresses are
-    comma-separated (or a list). `from_address` picks the sending account; omitted,
-    Mail uses its default. `html=True` sends the body as HTML. Registered ONLY when
-    MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for Mail.
+    Two mutually exclusive modes; passing both RAISES rather than guessing:
+    * NEW message — `to` plus `subject`/`body`.
+    * APPROVED DRAFT — `draft_id` alone: the message-id `drafts()` reports for a draft
+      the human has already reviewed. Its own stored text is sent, so what was
+      approved and what goes out are the same text; the source draft is then removed
+      so nobody sends it a second time (`draft_removed` says whether that worked).
+      Mail cannot script-send a stored draft, so this REBUILDS it — and therefore
+      REFUSES a draft that carries attachments or that is a reply/forward, because a
+      rebuild would silently drop the attachments or the threading headers. Both
+      refusals name what to use instead (send it from Mail, or reply_all/forward_mail
+      against the original).
+
+    A draft is only addressable once Mail has AUTOSAVED it — ~10-15 seconds after
+    `create_draft`/`mail_reply` returns, asynchronously, and nothing can hurry it.
+    `drafts()` resolves the id after that window. Do NOT retry the create because the
+    draft has not shown up yet: you get two drafts and the first still arrives.
+
+    `dry_run` DEFAULTS TO TRUE: the first call previews the resolved envelope. The
+    preview shape is the same for every send tool here — {action, to, cc, bcc, from,
+    subject, source, body_chars, html}. Pass `dry_run=False` to actually send.
+    Addresses are comma-separated (or a list). `from_address` picks the sending
+    account; omitted, Mail uses its default. `html=True` sends the body as HTML.
+    Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
+    Automation access for Mail.
 
     Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
     outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
@@ -780,6 +892,7 @@ def send_mail(
         bcc=bcc,
         html=html,
         from_address=from_address,
+        draft_id=draft_id,
         dry_run=dry_run,
     )
 

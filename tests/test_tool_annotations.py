@@ -25,6 +25,8 @@ _ADDITIVE_TOOLS = frozenset(
         "mail_reply",
         "create_note",
         "create_mailbox",
+        "save_mail_attachment",
+        "export_mail",
         "music_control",
         "play_playlist",
         "set_volume",
@@ -92,6 +94,12 @@ _PERMISSION = {
     "drafts": "Automation",
     "delete_draft": "Automation",
     "create_mailbox": ("Automation", "Full Disk Access"),
+    # #85: pure sqlite over the Envelope Index — never launches Mail.
+    "mail_stats": "Full Disk Access",
+    # #85: the message bytes are read AT REST; nothing here talks to Mail.
+    "export_mail": "Full Disk Access",
+    # #81: the save is Automation; resolving a bare message_id is the index (FDA).
+    "save_mail_attachment": ("Automation", "Full Disk Access"),
     # the move is Automation; locating each message's .emlx for the #159 backup is FDA.
     "move_mail": ("Automation", "Full Disk Access"),
     # the delete is Automation; the #159 backup + the account's Trash url are FDA.
@@ -203,6 +211,8 @@ def test_every_write_tool_is_audit_classified():
         "create_draft",
         "mail_reply",
         "create_mailbox",
+        "save_mail_attachment",
+        "export_mail",
         "move_mail",
         "trash_mail",
         "mail_undo",
