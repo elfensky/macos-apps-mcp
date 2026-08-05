@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from macos_apps_mcp.adapters import mail as mail_module
+from macos_apps_mcp.adapters import mail_outgoing  # #160: the send plane lives here
 from macos_apps_mcp.adapters.mail import MailAdapter
 
 pytestmark = pytest.mark.integration
@@ -68,13 +68,25 @@ def test_send_to_self_and_delete_draft_round_trip():
     pending = out["outbox_pending"]
     while pending > 0 and time.monotonic() < deadline:
         time.sleep(1)
-        pending = mail_module._outbox_pending()
+        pending = mail_outgoing._outbox_pending()
     assert pending == 0, (
         f"message still queued in Mail's Outbox after 30s ({pending} pending) — "
         "`send` returning does not mean the message was delivered"
     )
 
-    # a real send must not leave a draft behind either
+    # What the send leaves in Drafts is NOT an assertion this test may make. Mail
+    # autosaves any outgoing message ~10-15s after creation, asynchronously and
+    # unsuppressably (#133, facts.md §3), and 0.9.4 measured it as INTERMITTENT — of
+    # four real sends in one session only one littered (§3c). So "a real send must not
+    # leave a draft behind" was a coin flip dressed as an invariant: it passed whenever
+    # the autosave happened not to fire, or whenever this line beat the window, which is
+    # the exact timing trap §2 exists to warn about.
+    #
+    # The real contract, and what the tool docstrings promise, is that whatever lands is
+    # SWEEPABLE. Assert that instead — and leave the mailbox clean either way.
+    leftovers = [p for p in adapter.list_drafts()["results"] if subject in p["summary"]]
+    for p in leftovers:
+        assert adapter.delete_draft(p["id"])["deleted"]
     assert not [p for p in adapter.list_drafts()["results"] if subject in p["summary"]]
 
 
@@ -88,7 +100,7 @@ def test_rollback_verifies_a_real_delete():
     from macos_apps_mcp.runtime import run_osascript
 
     probe = (
-        mail_module._ROLLBACK
+        mail_outgoing.ROLLBACK
         + """
 
 on run argv
@@ -109,14 +121,14 @@ def test_outbox_pending_tracks_the_real_queue_not_session_objects():
     """A real send to self must move outbox_pending 0 -> non-zero -> 0. The counter this
     shipped with (`count of outgoing messages`) counts script-session objects including
     already-delivered ones, so it would read non-zero here forever and never drain."""
-    assert mail_module._outbox_pending() == 0, "start from a clean outbox"
+    assert mail_outgoing._outbox_pending() == 0, "start from a clean outbox"
     out = MailAdapter().send(
         SELF_ADDRESS, f"{MARKER} outbox drain", "drain probe", dry_run=False
     )
     assert out["sent"] is True
     drained = False
     for _ in range(20):  # bounded: never leave a loop pointed at Mail
-        if mail_module._outbox_pending() == 0:
+        if mail_outgoing._outbox_pending() == 0:
             drained = True
             break
         time.sleep(6)
