@@ -6,7 +6,7 @@ from contextlib import nullcontext
 
 import pytest
 
-from macos_apps_mcp.adapters import mail, mail_addressing
+from macos_apps_mcp.adapters import mail, mail_addressing, mail_outgoing
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
@@ -17,6 +17,31 @@ from macos_apps_mcp.adapters.mail import (
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import RS, US
+
+
+def _patch_run(monkeypatch, fake):
+    """Fake the AppleScript boundary in BOTH mail modules.
+
+    #160 moved the outbound scripts into ``mail_outgoing``, which runs them from its
+    own module global — so a test that only patched ``mail.run_osascript`` would let a
+    send tool spawn osascript against real Mail. Patch both, always."""
+    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(mail_outgoing, "run_osascript", fake)
+
+
+def _patch_body_file(monkeypatch, fake):
+    """Same split for the tempfile seam — ``mail_outgoing`` writes the send bodies."""
+    monkeypatch.setattr(mail, "body_file", fake)
+    monkeypatch.setattr(mail_outgoing, "body_file", fake)
+
+
+def _script(name):
+    """Resolve a script constant by name across the adapter's modules — the send
+    scripts live in ``mail_outgoing`` since #160, the draft ones still in ``mail``."""
+    for mod in (mail, mail_outgoing):
+        if hasattr(mod, name):
+            return getattr(mod, name)
+    raise AssertionError(f"no script constant named {name}")
 
 
 def test_summary_subject_and_sender():
@@ -305,15 +330,17 @@ def test_parse_attachments_groups_by_message():
 
     us, rs = "\x1f", "\x1e"
     raw = (
-        f"<a@x>{us}Logo files{us}LOGO.zip{us}1200000{us}true"
-        f"{us}spec.pdf{us}0{us}false{rs}"
+        f"<a@x>{us}Logo files{us}LOGO.zip{us}1200000{us}true{us}1.2"
+        f"{us}spec.pdf{us}0{us}false{us}1.4{rs}"
         f"{us}No attach subject{rs}"
     )
     out = _parse_attachments(raw)
     assert out[0]["summary"] == "Logo files"
+    # #81: each attachment carries its own id (a MIME part path) — the NAME is not
+    # unique on a real message, so the id is what save_mail_attachment addresses.
     assert out[0]["attachments"] == [
-        {"name": "LOGO.zip", "size": 1200000, "downloaded": True},
-        {"name": "spec.pdf", "size": 0, "downloaded": False},
+        {"name": "LOGO.zip", "size": 1200000, "downloaded": True, "id": "1.2"},
+        {"name": "spec.pdf", "size": 0, "downloaded": False, "id": "1.4"},
     ]
     assert out[1]["summary"] == "No attach subject"
     assert out[1]["attachments"] == []
@@ -340,7 +367,7 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
         )
         return records
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().list_attachments("drafts", "Logo")
     # query, cap, the (account, path) mailbox pair and the (empty) message-id travel via
     # argv — no localized candidates (the unified `drafts mailbox` accessor is
@@ -362,7 +389,7 @@ def test_list_attachments_empty_query_lists_all(monkeypatch):
             "<3@x>\x1fThird\x1e"
         )
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().list_attachments("inbox")
     assert [r["summary"] for r in out["results"]] == ["First", "Second", "Third"]
     # #155: the mailbox the caller passed is echoed back, so each row round-trips on its
@@ -383,7 +410,13 @@ def test_list_attachments_unknown_mailbox_raises():
 
 # --- reply (#42/#46) ------------------------------------------------------------------
 
-from macos_apps_mcp.adapters.mail import _ORIGINAL, _REPLY, _build_quote  # noqa: E402
+from macos_apps_mcp.adapters.mail import _REPLY  # noqa: E402
+from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
+    _ORIGINAL,
+)
+from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
+    build_quote as _build_quote,
+)
 
 
 def _is_reply_script(script: str) -> bool:
@@ -413,7 +446,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
         # _ORIGINAL: sender, date, then a body over the hard cap
         return f"Jane <j@x.com>\x1f2026-07-01\x1f{huge}"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "thanks", include_quote=True)
     assert out["created"] is True
 
@@ -515,7 +548,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
         # sender carries a stray control char the AppleScript strip doesn't remove
         return "Jane\x07 <j@x.com>\x1f2026-07-01\x1foriginal body"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     header_line = next(
         line for line in bodies[0].splitlines() if line.startswith("On ")
@@ -540,7 +573,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
             bodies.append(f.read())
         return ""
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
@@ -568,7 +601,7 @@ def test_reply_without_quote_omits_original(monkeypatch):
         # _ORIGINAL must NOT be called when include_quote=False
         raise AssertionError("_ORIGINAL should not run when include_quote=False")
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     mail.MailAdapter().reply("<abc@x>", "inbox", "just this", include_quote=False)
     assert bodies and bodies[0] == "just this"
     assert ">" not in bodies[0]
@@ -589,7 +622,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
             return ""
         return "missing value"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert bodies[0] == "my reply"  # no quote appended
@@ -606,7 +639,7 @@ def test_reply_cleans_up_tempfile(monkeypatch):
             return ""
         return ""
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     mail.MailAdapter().reply("<abc@x>", "inbox", "body", include_quote=False)
     assert paths and not os.path.exists(paths[0])
 
@@ -665,7 +698,7 @@ def test_list_drafts_parses_framed_records(monkeypatch):
         f"<a@b.com>{US}Q3 numbers{US}boss@corp.com{RS}"
         f"<c@d.com>{US}Lunch?{US}pal@example.org{RS}"
     )
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    _patch_run(monkeypatch, lambda *a: raw)
     out = mail.MailAdapter().list_drafts()["results"]
     assert [p["id"] for p in out] == ["<a@b.com>", "<c@d.com>"]
     assert out[0]["summary"] == "Q3 numbers — to boss@corp.com"
@@ -675,31 +708,31 @@ def test_list_drafts_parses_framed_records(monkeypatch):
 def test_list_drafts_skips_records_without_message_id(monkeypatch):
     # a draft with no Message-ID has no stable citation — never emit a garbage id.
     raw = f"missing value{US}No id{US}x@y.com{RS}<ok@z>{US}Fine{US}a@b.com{RS}"
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    _patch_run(monkeypatch, lambda *a: raw)
     assert [p["id"] for p in mail.MailAdapter().list_drafts()["results"]] == ["<ok@z>"]
 
 
 def test_list_drafts_empty_mailbox(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    _patch_run(monkeypatch, lambda *a: "")
     assert mail.MailAdapter().list_drafts() == {"results": []}
 
 
 def test_list_drafts_summary_without_recipient(monkeypatch):
     raw = f"<a@b>{US}Just a subject{US}{RS}"
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    _patch_run(monkeypatch, lambda *a: raw)
     out = mail.MailAdapter().list_drafts()["results"]
     assert out[0]["summary"] == "Just a subject"
 
 
 def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
     raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    _patch_run(monkeypatch, lambda *a: raw)
     p = mail.MailAdapter().snapshot("<a@b>")
     assert p.summary == "Q3 numbers — to boss@corp.com"
 
 
 def test_snapshot_returns_none_for_unknown_id(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    _patch_run(monkeypatch, lambda *a: "")
     assert mail.MailAdapter().snapshot("<nope@nowhere>") is None
 
 
@@ -711,7 +744,7 @@ def test_delete_draft_dry_run_makes_no_native_call(monkeypatch):
         calls.append(script)
         return raw
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)
     assert out["dry_run"] is True
     assert out["would_delete"]["id"] == "<a@b>"
@@ -720,7 +753,7 @@ def test_delete_draft_dry_run_makes_no_native_call(monkeypatch):
 
 
 def test_delete_draft_dry_run_unknown_id_raises(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    _patch_run(monkeypatch, lambda *a: "")
     with pytest.raises(ValueError, match="no draft"):
         mail.MailAdapter().delete_draft("<nope@nowhere>", dry_run=True)
 
@@ -732,7 +765,7 @@ def test_delete_draft_deletes_by_message_id(monkeypatch):
         seen[script] = argv
         return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().delete_draft("a@b")
     assert out == {"deleted": "a@b"}  # C5d: the ONE deletion envelope
     assert seen[mail._DELETE_DRAFT] == ("a@b",)
@@ -756,7 +789,7 @@ def test_delete_draft_accepts_bracketed_id(monkeypatch):
         seen[script] = argv
         return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().delete_draft("<a@b>")
     assert out == {"deleted": "a@b"}  # C5d envelope; id bare like the wire
     assert seen[mail._DELETE_DRAFT] == ("a@b",)  # bare on the wire, not "<a@b>"
@@ -766,7 +799,7 @@ def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkey
     # snapshot() must match regardless of whether the caller's id or the stored
     # Pointer.id is bracketed (M1 review) — the dry-run path depends on this.
     raw = f"a@b{US}Q3 numbers{US}boss@corp.com{RS}"  # stored id is BARE
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: raw)
+    _patch_run(monkeypatch, lambda *a: raw)
     out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)  # caller id bracketed
     assert out["dry_run"] is True
     assert out["would_delete"]["id"] == "a@b"
@@ -776,10 +809,10 @@ def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkey
 
 
 def test_split_addrs_accepts_string_and_list():
-    assert mail._split_addrs("a@b.com, c@d.com") == ["a@b.com", "c@d.com"]
-    assert mail._split_addrs(["a@b.com", " c@d.com "]) == ["a@b.com", "c@d.com"]
-    assert mail._split_addrs(None) == []
-    assert mail._split_addrs(" , ") == []
+    assert mail_outgoing.split_addrs("a@b.com, c@d.com") == ["a@b.com", "c@d.com"]
+    assert mail_outgoing.split_addrs(["a@b.com", " c@d.com "]) == ["a@b.com", "c@d.com"]
+    assert mail_outgoing.split_addrs(None) == []
+    assert mail_outgoing.split_addrs(" , ") == []
 
 
 def test_split_addrs_strips_unit_separator_injection():
@@ -790,7 +823,7 @@ def test_split_addrs_strips_unit_separator_injection():
     # Written as an explicit \u001f escape (never a literal control glyph in source),
     # and asserted on the actual bytes of the result.
     injected = "alice@corp.com\u001fexfil@evil.tld"
-    out = mail._split_addrs(injected)
+    out = mail_outgoing.split_addrs(injected)
     assert out == ["alice@corp.comexfil@evil.tld"]  # ONE entry — the US byte is gone
     assert "\u001f" not in out[0]
     # the wire-level invariant this exists to protect: joining the result and
@@ -811,7 +844,7 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
         # a real send now makes TWO calls: _SEND, then the outbox truth-check
         # (_OUTBOX_COUNT). Dispatch on script identity so the outbox call (whose
         # argv is empty) can't clobber the _SEND argv this test cares about.
-        if script is mail._SEND:
+        if script is mail_outgoing._SEND:
             seen["argv"] = argv
             return "sent"
         return "0"
@@ -821,7 +854,7 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
     # patching up front means a regression in that early return fails loudly here
     # instead of firing a real osascript send into Mail.app under a plain
     # `uv run pytest`.
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
 
     injected_to = "alice@corp.com\u001fexfil@evil.tld"
     preview = mail.MailAdapter().send(injected_to, "Hi", "body")
@@ -844,18 +877,23 @@ def test_send_dry_run_touches_nothing(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("dry run must not call osascript")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    _patch_run(monkeypatch, boom)
     out = mail.MailAdapter().send(
         "a@b.com", "Hi", "body text", cc="c@d.com", from_address="me@corp.com"
     )
+    # #160: ONE would_send shape across every send tool — fixed keys, so a caller
+    # writes one dry-run handler. `action`/`source` replaced the per-tool
+    # reply_to/forwarding/reply_all spellings.
     assert out == {
         "dry_run": True,
         "would_send": {
+            "action": "send",
             "to": ["a@b.com"],
             "cc": ["c@d.com"],
             "bcc": [],
             "from": "me@corp.com",
             "subject": "Hi",
+            "source": "",
             "body_chars": 9,
             "html": False,
         },
@@ -863,7 +901,7 @@ def test_send_dry_run_touches_nothing(monkeypatch):
 
 
 def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    _patch_run(monkeypatch, lambda *a: "")
     out = mail.MailAdapter().send("a@b.com", "Hi", "x")
     # Mail's default sender is NOT predictable from account order (device-verified), so
     # never report a computed guess.
@@ -877,13 +915,13 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
         # a real send now dispatches TWO scripts: _SEND, then _OUTBOX_COUNT (#134's
         # outbox truth-check) — recorded separately so asserting the _SEND argv can't
         # be clobbered by the outbox call's (empty) argv.
-        if script is mail._SEND:
+        if script is mail_outgoing._SEND:
             seen["send_script"], seen["send_argv"] = script, argv
             return "sent"
         seen["outbox_script"] = script
         return "3"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().send(
         "a@b.com,e@f.com",
         "Hi",
@@ -903,16 +941,18 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
     assert to_j == f"a@b.com{US}e@f.com"
     assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
-    assert seen["outbox_script"] is mail._OUTBOX_COUNT  # the truth-check ran too
+    # the truth-check ran too
+    assert seen["outbox_script"] is mail_outgoing._OUTBOX_COUNT
 
 
 def test_send_reads_body_through_shared_handler():
     # Bug 1 (device-verified): a subject-only send leaves the body tempfile EMPTY,
     # which crashes a bare `read … as «class utf8»` with -39. _SEND must compose the
     # shared readBody handler instead.
-    assert "on readBody(p)" in mail._SEND
-    assert "my readBody(item 2 of argv)" in mail._SEND
-    assert mail._SEND.count("read (POSIX file") == 1  # only inside the handler itself
+    assert "on readBody(p)" in mail_outgoing._SEND
+    assert "my readBody(item 2 of argv)" in mail_outgoing._SEND
+    # only inside the handler itself
+    assert mail_outgoing._SEND.count("read (POSIX file") == 1
 
 
 # --- outbox_pending truth-check (#134) -------------------------------------------
@@ -923,15 +963,15 @@ def test_outbox_count_script_counts_the_outgoing_messages():
     # test_outbox_count_reads_the_real_queue_not_session_objects for why that is
     # `messages of outbox` and not `outgoing messages`) and be bounded like every other
     # template in this file.
-    assert "count of (messages of outbox)" in mail._OUTBOX_COUNT
-    assert "with timeout of 120 seconds" in mail._OUTBOX_COUNT
+    assert "count of (messages of outbox)" in mail_outgoing._OUTBOX_COUNT
+    assert "with timeout of 120 seconds" in mail_outgoing._OUTBOX_COUNT
 
 
 def test_outbox_pending_runs_the_count_script(monkeypatch):
     seen = []
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: seen.append(a) or "4")
-    assert mail._outbox_pending() == 4
-    assert seen == [(mail._OUTBOX_COUNT,)]  # no argv — the script needs none
+    _patch_run(monkeypatch, lambda *a: seen.append(a) or "4")
+    assert mail_outgoing._outbox_pending() == 4
+    assert seen == [(mail_outgoing._OUTBOX_COUNT,)]  # no argv — the script needs none
 
 
 def test_with_outbox_pending_failure_degrades_to_unknown_not_error(monkeypatch):
@@ -945,8 +985,8 @@ def test_with_outbox_pending_failure_degrades_to_unknown_not_error(monkeypatch):
     def boom(*a):
         raise NativeError("timeout counting outbox")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
-    out = mail._with_outbox_pending({"sent": True})
+    _patch_run(monkeypatch, boom)
+    out = mail_outgoing.with_outbox_pending({"sent": True})
     assert out["sent"] is True
     assert out["outbox_pending"] is None  # unknown, never a fake clean 0
     assert "not confirmed" in out["note"].lower()
@@ -958,26 +998,26 @@ def test_send_still_reports_sent_when_outbox_count_fails(monkeypatch):
     from macos_apps_mcp.errors import NativeError
 
     def fake(script, *argv):
-        if script is mail._SEND:
+        if script is mail_outgoing._SEND:
             return "sent"
         raise NativeError("timeout counting outbox")
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().send("a@b.com", "Hi", "body", dry_run=False)
     assert out["sent"] is True
     assert out["outbox_pending"] is None
 
 
 def test_with_outbox_pending_zero_omits_note(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "0")
-    out = mail._with_outbox_pending({"sent": True})
+    _patch_run(monkeypatch, lambda *a: "0")
+    out = mail_outgoing.with_outbox_pending({"sent": True})
     assert out == {"sent": True, "outbox_pending": 0}
     assert "note" not in out
 
 
 def test_with_outbox_pending_nonzero_adds_actionable_note(monkeypatch):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "2")
-    out = mail._with_outbox_pending({"sent": True})
+    _patch_run(monkeypatch, lambda *a: "2")
+    out = mail_outgoing.with_outbox_pending({"sent": True})
     assert out["outbox_pending"] == 2
     # worded so a model relaying it to a human states delivery is NOT confirmed and
     # points at where to check.
@@ -1003,27 +1043,35 @@ def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
 
     def fake(script, *argv):
         seen.append(script)
-        if script is mail._REPLY_ALL_RECIPIENTS:
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             return (
                 f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
                 f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+                f"subject{US}Quarterly numbers{RS}"
             )
         raise AssertionError(f"dry run must not call {script!r} (the send script)")
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good")
+    # #160: the SAME would_send keys `send` and `forward` report — the original's
+    # sender/subject fill the from/subject slots, and `source` names the message being
+    # replied to (what `reply_to`/`reply_all: True` used to say in a bespoke shape).
     assert out == {
         "dry_run": True,
         "would_send": {
+            "action": "reply_all",
             "to": ["alice@corp.com", "bob@corp.com"],
             "cc": ["carol@corp.com"],
-            "reply_to": "<orig@x>",
-            "reply_all": True,
+            "bcc": [],
+            "from": "orig-sender@corp.com",
+            "subject": "Quarterly numbers",
+            "source": "<orig@x>",
             "body_chars": 11,
-            "include_quote": True,
+            "html": False,
         },
     }
-    assert seen == [mail._REPLY_ALL_RECIPIENTS]  # exactly one call — the read, only
+    # exactly one call — the read, only
+    assert seen == [mail_outgoing._REPLY_ALL_RECIPIENTS]
 
 
 def test_reply_all_sends_with_quote(monkeypatch):
@@ -1032,11 +1080,19 @@ def test_reply_all_sends_with_quote(monkeypatch):
 
     def fake(script, *argv):
         seen[script] = argv
-        if script is mail._ORIGINAL:
+        if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            # #160: the envelope is resolved for the REAL send too, so the result
+            # reports who it actually reached rather than echoing the caller.
+            return (
+                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
+                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+                f"subject{US}Quarterly numbers{RS}"
+            )
         # #134: reply_all now also runs the outbox truth-check (_OUTBOX_COUNT)
         # after _REPLY_ALL — return a real count for it, "sent" for _REPLY_ALL.
-        if script is mail._OUTBOX_COUNT:
+        if script is mail_outgoing._OUTBOX_COUNT:
             return "0"
         return "sent"
 
@@ -1044,31 +1100,36 @@ def test_reply_all_sends_with_quote(monkeypatch):
         bodies["text"] = text
         return nullcontext("/tmp/fake-body")
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail, "body_file", fake_body_file)
+    _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, fake_body_file)
     out = mail.MailAdapter().reply_all(
         "<orig@x>", "inbox", "Sounds good", dry_run=False
     )
     assert out == {
         "sent": True,
-        "reply_to": "<orig@x>",
-        "reply_all": True,
+        "action": "reply_all",
+        "to": ["alice@corp.com", "bob@corp.com"],
+        "cc": ["carol@corp.com"],
+        "bcc": [],
+        "from": "orig-sender@corp.com",
+        "subject": "Quarterly numbers",
+        "source": "<orig@x>",
         "outbox_pending": 0,
     }
     assert "note" not in out  # zero pending: no caveat needed
     assert bodies["text"].startswith("Sounds good")
     assert "> Original text" in bodies["text"]
-    assert seen[mail._REPLY_ALL] == ("orig@x", "/tmp/fake-body", "", "inbox")
-    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
+    assert seen[mail_outgoing._REPLY_ALL] == ("orig@x", "/tmp/fake-body", "", "inbox")
+    assert seen[mail_outgoing._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def test_reply_all_reads_body_through_shared_handler():
     # Bug 1: same -39-on-empty-file hazard — _REPLY_ALL must compose the shared
     # readBody handler rather than reading the tempfile directly.
-    assert "on readBody(p)" in mail._REPLY_ALL
-    assert "my readBody(item 2 of argv)" in mail._REPLY_ALL
+    assert "on readBody(p)" in mail_outgoing._REPLY_ALL
+    assert "my readBody(item 2 of argv)" in mail_outgoing._REPLY_ALL
     # only inside the handler itself
-    assert mail._REPLY_ALL.count("read (POSIX file") == 1
+    assert mail_outgoing._REPLY_ALL.count("read (POSIX file") == 1
 
 
 def test_reply_all_rejects_empty_body():
@@ -1080,12 +1141,22 @@ def test_forward_dry_run_reports_recipients(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("dry run must not call osascript")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    _patch_run(monkeypatch, boom)
     out = mail.MailAdapter().forward("<orig@x>", "inbox", "a@b.com, c@d.com")
     assert out["dry_run"] is True
+    # #160: the same fixed keys the other send tools report. `subject` stays empty —
+    # Mail composes the "Fwd: …" subject itself at send time, and reading the original
+    # just to guess at it would make this preview launch Mail for nothing.
     assert out["would_send"] == {
+        "action": "forward",
         "to": ["a@b.com", "c@d.com"],
-        "forwarding": "<orig@x>",
+        "cc": [],
+        "bcc": [],
+        "from": "(Mail default account)",
+        "subject": "",
+        "source": "<orig@x>",
+        "body_chars": 0,
+        "html": False,
     }
 
 
@@ -1098,19 +1169,20 @@ def test_forward_sends_via_argv(monkeypatch):
         seen[script] = argv
         # #134: forward now also runs the outbox truth-check (_OUTBOX_COUNT) after
         # _FORWARD — it must return a real count, not the opaque "sent" _FORWARD uses.
-        if script is mail._OUTBOX_COUNT:
+        if script is mail_outgoing._OUTBOX_COUNT:
             return "2"
         return "sent"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().forward("<orig@x>", "inbox", "a@b.com", dry_run=False)
     assert out["sent"] is True
     assert out["to"] == ["a@b.com"]
-    assert out["forwarding"] == "<orig@x>"
+    assert out["action"] == "forward"
+    assert out["source"] == "<orig@x>"  # #160: `source`, not the old `forwarding` key
     assert out["outbox_pending"] == 2
     assert "Outbox" in out["note"]  # non-zero pending: caveat included
-    assert seen[mail._FORWARD] == ("orig@x", "a@b.com", "", "inbox")
-    assert seen[mail._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
+    assert seen[mail_outgoing._FORWARD] == ("orig@x", "a@b.com", "", "inbox")
+    assert seen[mail_outgoing._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def test_forward_rejects_missing_recipient():
@@ -1123,7 +1195,7 @@ def test_forward_script_never_touches_content():
     # (the original is permanently unreadable via AppleScript) and destructive
     # (writing it at all strips every attachment — a real 7-attachment forward was
     # delivered with 0 once `content` was touched). _FORWARD must never set it.
-    assert "set content of" not in mail._FORWARD
+    assert "set content of" not in mail_outgoing._FORWARD
 
 
 # --- #135: never delete after send; verify the pre-send rollback ------------------
@@ -1142,7 +1214,7 @@ def test_send_scripts_never_delete_after_the_send_verb(name):
     # rollback therefore cannot succeed; it can only report a cleanup that never
     # happened. So `send` must sit outside the rollback `try` entirely. This is the test
     # that fails if anyone re-nests it.
-    script = getattr(mail, name)
+    script = _script(name)
     verb = re.search(r"^\s*send \w+\s*$", script, re.M)
     assert verb, f"{name} has no `send <msg>` verb to anchor on"
     assert "delete" not in script[verb.start() :], (
@@ -1154,7 +1226,7 @@ def test_send_scripts_never_delete_after_the_send_verb(name):
 def test_rollback_goes_through_the_verifying_handler(name):
     # a bare `delete` reports success whether or not it removed anything, so every
     # rollback path composes the handler and calls it instead.
-    script = getattr(mail, name)
+    script = _script(name)
     assert "on rollback(msg)" in script, f"{name} lacks the rollback handler"
     assert "my rollback(" in script, f"{name} never calls the rollback handler"
 
@@ -1163,7 +1235,7 @@ def test_rollback_goes_through_the_verifying_handler(name):
 def test_rollback_is_the_only_delete_in_a_rollback_script(name):
     # the handler owns the delete; a stray `delete` elsewhere would be an unverified
     # rollback sneaking back in.
-    assert getattr(mail, name).count("delete ") == 1
+    assert _script(name).count("delete ") == 1
 
 
 def test_rollback_handler_trusts_only_1728_as_proof_of_deletion():
@@ -1171,9 +1243,10 @@ def test_rollback_handler_trusts_only_1728_as_proof_of_deletion():
     # and reading a property off it raises -1728. Any OTHER error (a timeout, say)
     # leaves the outcome unknown — and unknown must never be reported as a clean
     # rollback, or we hand the caller the reassuring lie this issue is made of.
-    assert "delete msg" in mail._ROLLBACK
-    assert "-1728" in mail._ROLLBACK
-    assert "return false" in mail._ROLLBACK  # still readable => the delete did not take
+    assert "delete msg" in mail_outgoing.ROLLBACK
+    assert "-1728" in mail_outgoing.ROLLBACK
+    # still readable => the delete did not take
+    assert "return false" in mail_outgoing.ROLLBACK
 
 
 @pytest.mark.parametrize("name", _ROLLING_BACK_SCRIPTS)
@@ -1184,7 +1257,7 @@ def test_unverified_rollback_warns_about_the_leftover(name):
     # texts live in the shared preamble, so assert the CALL SITE: a script that sends
     # leaves an outbox leftover, one that only drafts leaves a Drafts leftover. Checking
     # for the words themselves would pass vacuously on every script.
-    script = getattr(mail, name)
+    script = _script(name)
     expected = (
         "my outgoingLeftover()" if name in _SENDING_SCRIPTS else "my draftLeftover()"
     )
@@ -1201,8 +1274,8 @@ def test_outbox_count_reads_the_real_queue_not_session_objects():
     # a permanent non-zero after the session's first send, so the "delivery is NOT
     # confirmed" note fires on every later send forever and trains the caller to ignore
     # the one signal that matters.
-    assert "messages of outbox" in mail._OUTBOX_COUNT
-    assert "count of outgoing messages" not in mail._OUTBOX_COUNT
+    assert "messages of outbox" in mail_outgoing._OUTBOX_COUNT
+    assert "count of outgoing messages" not in mail_outgoing._OUTBOX_COUNT
 
 
 # --- #133: the autosave limit is documented, not silently claimed away ---------------
@@ -1575,7 +1648,7 @@ def test_mailbox_scoped_scripts_resolve_the_mailbox_instead_of_hard_coding_inbox
     must take its mailbox from argv through the ONE shared resolver — not name `inbox`
     itself. This is the assertion whose absence let the #62 inbox scope survive #70/#75
     widening search to every mailbox."""
-    script = getattr(mail, name)
+    script = _script(name)
     assert script.count("on mailboxFor(") == 1  # composes the shared resolver, once
     assert "my mailboxFor(" in script  # ...and actually calls it
     assert "messages of inbox" not in script  # #146: no hard-coded inbox scope
@@ -1585,7 +1658,7 @@ def test_mailbox_resolver_is_the_only_place_a_mailbox_accessor_is_named():
     # the unified accessors (`sent mailbox`/`drafts mailbox`/…) live in one handler, so
     # the alias layer can't drift apart across seven scripts the way the scope did.
     for name in _MAILBOX_SCOPED_SCRIPTS:
-        script = getattr(mail, name)
+        script = _script(name)
         body = script.replace(mail_addressing.MAILBOX_REF, "")
         assert "sent mailbox" not in body
         assert "junk mailbox" not in body
@@ -1598,7 +1671,7 @@ def test_get_body_passes_the_mailbox_through_argv(monkeypatch):
         seen["call"] = (script, a)
         return "Filed body"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().get_body("<abc@host>", _SPAM_URL)
     assert out == "Filed body"
     assert seen["call"][1] == ("abc@host", _GMAIL_UUID, "[Gmail]/Spam")
@@ -1618,14 +1691,22 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
 
     def fake(script, *argv):
         seen[script] = argv
-        if script is mail._ORIGINAL:
+        if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            # #160: the envelope is resolved for the REAL send too, so the result
+            # reports who it actually reached rather than echoing the caller.
+            return (
+                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
+                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+                f"subject{US}Quarterly numbers{RS}"
+            )
         return ""
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail, "body_file", lambda text: nullcontext("/tmp/fake-body"))
+    _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
     mail.MailAdapter().reply("<orig@x>", _SPAM_URL, "Sounds good")
-    assert seen[mail._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+    assert seen[mail_outgoing._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
     assert seen[mail._REPLY] == (
         "orig@x",
         "/tmp/fake-body",
@@ -1636,11 +1717,11 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
 
 def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
     def fake(script, *argv):
-        assert script is mail._REPLY_ALL_RECIPIENTS
+        assert script is mail_outgoing._REPLY_ALL_RECIPIENTS
         assert argv == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
         return f"to{US}alice@corp.com{RS}sender{US}orig@corp.com{RS}"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "Sounds good")
     assert out["would_send"]["to"] == ["alice@corp.com"]
 
@@ -1650,17 +1731,25 @@ def test_reply_all_send_passes_the_mailbox(monkeypatch):
 
     def fake(script, *argv):
         seen[script] = argv
-        if script is mail._ORIGINAL:
+        if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
-        if script is mail._OUTBOX_COUNT:
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            # #160: the envelope is resolved for the REAL send too, so the result
+            # reports who it actually reached rather than echoing the caller.
+            return (
+                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
+                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+                f"subject{US}Quarterly numbers{RS}"
+            )
+        if script is mail_outgoing._OUTBOX_COUNT:
             return "0"
         return "sent"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail, "body_file", lambda text: nullcontext("/tmp/fake-body"))
+    _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
     mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "ok", dry_run=False)
-    assert seen[mail._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
-    assert seen[mail._REPLY_ALL] == (
+    assert seen[mail_outgoing._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+    assert seen[mail_outgoing._REPLY_ALL] == (
         "orig@x",
         "/tmp/fake-body",
         _GMAIL_UUID,
@@ -1673,11 +1762,11 @@ def test_forward_passes_the_mailbox(monkeypatch):
 
     def fake(script, *argv):
         seen[script] = argv
-        return "0" if script is mail._OUTBOX_COUNT else "sent"
+        return "0" if script is mail_outgoing._OUTBOX_COUNT else "sent"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     mail.MailAdapter().forward("<orig@x>", _SPAM_URL, "a@b.com", dry_run=False)
-    assert seen[mail._FORWARD] == (
+    assert seen[mail_outgoing._FORWARD] == (
         "orig@x",
         "a@b.com",
         _GMAIL_UUID,
@@ -1691,7 +1780,7 @@ def test_forward_dry_run_still_makes_no_native_call(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("dry run must not call osascript")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    _patch_run(monkeypatch, boom)
     out = mail.MailAdapter().forward("<orig@x>", _SPAM_URL, "a@b.com")
     assert out["dry_run"] is True
 
@@ -1703,9 +1792,9 @@ def test_list_attachments_reaches_a_user_folder(monkeypatch):
 
     def fake(script, *args):
         seen["args"] = args
-        return "<c@x>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
+        return "<c@x>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1f1.2\x1e"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().list_attachments(f"imap://{_GMAIL_UUID}/Backup")
     assert out["results"][0]["attachments"][0]["name"] == "deal.pdf"
     assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup", "")
@@ -1722,7 +1811,7 @@ def test_applescript_path_pointers_carry_their_canonical_folder(monkeypatch):
     from macos_apps_mcp.adapters.mail import _parse_draft_records
 
     assert _parse_search_results(f"<a@x>{US}Subject{US}her@x{RS}")[0].folder == "inbox"
-    assert _parse_draft_records(f"<d@x>{US}Draft{US}to@x{RS}")[0].folder == "drafts"
+    assert _parse_draft_records(f"<d@x>{US}Draft{US}to@x{RS}")[0]["folder"] == "drafts"
 
 
 def test_needs_response_and_awaiting_reply_carry_a_folder(monkeypatch):
@@ -1832,7 +1921,7 @@ def test_tri_state_distinguishes_absent_from_false():
 def test_create_mailbox_synthesises_an_address_that_round_trips(monkeypatch):
     monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: _ACCT)
     monkeypatch.setattr(mail_addressing, "local_account_id", lambda: None)
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "2026")
+    _patch_run(monkeypatch, lambda *a: "2026")
     out = MailAdapter().create_mailbox("Projects/2026", "Personal")
     assert out["folder"] == f"imap://{_ACCT}/Projects/2026"
     # the whole point: the synthesised token is usable by the id-taking tools at once,
@@ -1851,7 +1940,7 @@ def test_create_mailbox_raises_when_the_verify_finds_nothing(monkeypatch):
     # a blank answer means the folder is not there and must not report success
     monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: _ACCT)
     monkeypatch.setattr(mail_addressing, "local_account_id", lambda: None)
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: "")
+    _patch_run(monkeypatch, lambda *a: "")
     with pytest.raises(mail.NativeError):
         MailAdapter().create_mailbox("Nope", "Personal")
 
@@ -1861,7 +1950,7 @@ def test_create_mailbox_uses_the_local_sentinel_for_on_my_mac(monkeypatch):
     seen = []
     monkeypatch.setattr(mail_addressing, "resolve_account", lambda v: local)
     monkeypatch.setattr(mail_addressing, "local_account_id", lambda: local)
-    monkeypatch.setattr(mail, "run_osascript", lambda *a: seen.append(a) or "Scratch")
+    _patch_run(monkeypatch, lambda *a: seen.append(a) or "Scratch")
     out = MailAdapter().create_mailbox("Scratch", "On My Mac")
     # Mail's `every account` never lists the local store, so its mailboxes hang off the
     # application — mailboxFor takes the "local" sentinel, never a UUID
@@ -1881,7 +1970,7 @@ def test_move_mail_dry_run_reports_per_id_presence_and_moves_nothing(
         calls.append(script)
         return _statuses([("a@x", "present"), ("b@x", "missing")])
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = MailAdapter().move_mail("a@x,b@x", _INBOX, _ARCHIVE)
     assert calls == [mail._PRESENT]  # the READ, never the move
     assert mail.mail_recover.is_preview(out)
@@ -1893,7 +1982,7 @@ def test_move_mail_caps_the_batch_before_any_native_call(monkeypatch, no_backup)
     def boom(*a, **kw):
         raise AssertionError("the cap must be enforced before Mail is touched")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    _patch_run(monkeypatch, boom)
     with pytest.raises(BatchTooLarge):
         MailAdapter().move_mail(
             ",".join(f"m{i}@x" for i in range(26)), _INBOX, _ARCHIVE
@@ -1901,7 +1990,7 @@ def test_move_mail_caps_the_batch_before_any_native_call(monkeypatch, no_backup)
 
 
 def test_move_mail_refuses_a_move_onto_itself(monkeypatch, no_backup):
-    monkeypatch.setattr(mail, "run_osascript", lambda *a, **kw: "")
+    _patch_run(monkeypatch, lambda *a, **kw: "")
     with pytest.raises(ValueError, match="same mailbox"):
         MailAdapter().move_mail("a@x", _INBOX, _INBOX)
 
@@ -1956,7 +2045,7 @@ def test_undo_moves_the_batch_back_to_each_messages_source(monkeypatch, no_backu
         seen.append(args)
         return _statuses([("a@x", "ok")])
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = adapter.undo(moved["receipt"], dry_run=False)
     # source and destination swapped: argv is (srcAcct, srcPath, dstAcct, dstPath, ids)
     assert seen[0][:4] == (_ACCT, "Archive", _ACCT, "INBOX")
@@ -2013,7 +2102,7 @@ def test_update_status_groups_a_batch_by_the_mailbox_each_id_lives_in(monkeypatc
         seen.append(args[1])
         return _statuses([(m, "ok") for m in args[5].split(US)])
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    _patch_run(monkeypatch, fake)
     out = MailAdapter().update_status("a@x,b@x,c@x", read=True)
     # two mailboxes -> two Apple Event runs, not three and not one wrong one
     assert seen == ["INBOX", "Archive"]
@@ -2038,8 +2127,8 @@ def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch)
     def boom():
         raise mail.NativeError("Mail is not responding")
 
-    monkeypatch.setattr(mail, "_outbox_pending", boom)
-    out = mail._with_outbox_pending({"sent": True})
+    monkeypatch.setattr(mail_outgoing, "_outbox_pending", boom)
+    out = mail_outgoing.with_outbox_pending({"sent": True})
     assert out["outbox_pending"] is None  # unknown, never a fake clean queue of 0
     assert "NOT confirmed" in out["note"]
     assert "Do NOT retry" in out["note"]

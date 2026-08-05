@@ -51,6 +51,36 @@ must be run as raw `osascript` from a shell, not through the runtime.
 | `send` returning means Mail **ACCEPTED** the message, not that it was delivered. An accepted send can sit in the Outbox for minutes. | 2026-07-25 |
 | A message stuck in the Outbox clears when Mail is **quit and reopened** — the stranded entry is in-memory, not on disk. | #135, 2026-07-26 |
 
+## 3b. You cannot script-send a stored draft
+
+Verified 2026-08-05 (#157), against a real draft in the Drafts mailbox. This killed the
+obvious implementation and shaped the one that shipped.
+
+| Fact | Detail |
+|---|---|
+| **`send <message in the Drafts mailbox>` raises -1708** — *"message id 41611 of mailbox \"Drafts\" of account id … doesn't understand the “send” message"*. | `Mail.sdef` declares `send` with a `direct-parameter type="outgoing message"` and means it; a stored draft is a `message`. This is the rare case where the dictionary is honest. |
+| **`open <draft>` DOES open a real compose window — and AppleScript never sees it.** `count of outgoing messages` stays 0 before and after, while `name of every window` shows the compose window plainly. | So there is no object to hand to `send`. A window Mail opens itself is not a scripting object; the compose window `make new outgoing message` creates IS one. That asymmetry is the whole reason the `open`-then-send route is dead. |
+| Everything a rebuild needs IS readable off a stored draft: `subject`, `content` (unlike an outgoing message, whose content is permanently unreadable — §4), `sender` as `"Name <addr>"`, `to`/`cc`/`bcc recipients`, `count of mail attachments`, and `all headers`. | So the only mechanic left is **rebuild from the draft's own stored bytes and send that**, which is what `send_mail(draft_id=…)` does. `set sender of msg to "Andrei Lavrenov <andrei@lav.ren>"` — the display form Mail itself reports — is accepted. |
+| A rebuild silently loses **attachments** and **In-Reply-To/References**. | `make new outgoing message` carries no attachments and cannot set headers (§6), so a reply draft would arrive detached from its thread. Both are detectable before sending (`mail attachments` count, `all headers contains "In-Reply-To:"`), so `send_mail(draft_id=…)` **refuses** those two cases instead of degrading them. |
+
+## 3c. The autosave litter is real but NOT universal
+
+Measured 2026-08-05 across four real sends through the outbound plane, counting the
+Drafts mailbox before and 45–60 s after each (well past the ~10–15 s autosave window):
+
+| Send | Drafts delta |
+|---|---|
+| `send_mail(draft_id=…)` — `_SEND` with plain `content` | **-1** (its source draft removed; no copy left) |
+| `reply_all` — Mail's native `reply` verb | **0** |
+| `forward` — Mail's native `forward` verb | **0** |
+| `send_mail(html=True)` — `_SEND` writing `html content` | **+1** |
+
+So #133's "a successful send litters too" is **not** something to count on in either
+direction — it happened on one of four. Nothing here changes the posture: a dry run
+still constructs nothing (that is the only guarantee), and `drafts()` + `delete_draft()`
+are still the sweep. Do not "optimise away" the sweep on the strength of three clean
+runs.
+
 ## 4. Content and attachments
 
 - **`content` of an outgoing/forwarded message is permanently unreadable** (empty at 0s/1s/4s). Mail
@@ -60,11 +90,36 @@ must be run as raw `osascript` from a shell, not through the runtime.
   body. This is why `forward_mail` carries no covering-note parameter — there is no way to add one
   without destroying the thing being forwarded.
 - `html content` is **write-only** on an outgoing message, and is not a property of a stored message
-  at all.
+  at all. **It also WORKS**, despite `Mail.sdef` declaring it `hidden="yes"` with the description
+  *"Does nothing at all (deprecated)"* — verified 2026-08-05 by a real `send_mail(html=True)` to
+  `andrei@lav.ren`: the HTML body arrived and rendered. So the dictionary lies in the *pessimistic*
+  direction too, and a "the sdef says it's a no-op, let's rip it out" cleanup would have broken a
+  working feature. Prove it either way before acting on that file.
 - `to recipients` / `cc recipients` / `sender` **are** readable on a stored inbox message.
 - Never `read` a body file directly — `read … as «class utf8»` raises **-39** on a zero-byte file, so
   a subject-only send crashes the script. Use the shared `READ_BODY` handler in `text.py` (empty
   body → empty text).
+
+### 4b. Saving an attachment (#81)
+
+Verified 2026-08-05 against real messages. `mail attachment` is entirely read-only in
+`Mail.sdef` but declares `<responds-to command="save">` — and unlike most of that file, **this one
+is true**. Three of the four things probing found are not in the dictionary at all.
+
+| Fact | Detail |
+|---|---|
+| `save <mail attachment> in (path as POSIX file)` **works**, writing to the exact path given (it is a FILE, not a target directory). The saved bytes are the real thing — a 192,250-byte PDF opened as *"PDF document, version 1.5, 2 pages"*. | It does **not** need the message open, or a window, or Mail in the foreground. |
+| **It OVERWRITES SILENTLY.** A 0-byte placeholder at the destination came back holding the full 192 KB, with no error. | So "never overwrite" cannot be enforced in AppleScript — `mail_files.target_path` refuses in Python, before the Apple Event. |
+| **Saving a NOT-downloaded attachment makes Mail FETCH the whole message**, synchronously. It does not fail and it does not write an empty file. | All seven attachments on one `.partial` message flipped to `downloaded=true` in the same call. So this is a network operation, not a read — hence `_SAVE_TIMEOUT = 300`, not the 30 s default. |
+| **`file size` on a not-yet-downloaded attachment is the ENCODED estimate, not the byte count.** The same attachment reported 14,509 before the fetch and 8,755 after. | A size cap therefore over-refuses by roughly 4/3 on undownloaded attachments. That is the safe direction, and it is why the written file is `stat`ed afterwards rather than trusted. |
+| A missing destination DIRECTORY raises **-10000** and writes nothing. | `mail_files.resolve_dest` creates it first, inside the allowlisted root. |
+| `id of <mail attachment>` is a **MIME part path** — `"2"`, `"1.12"`, `"1.14"` — unique within its message and derived from the message's own structure. | The NAME is not unique (`image001.jpg`…`image005.png` on one real message), so the id is what addresses an attachment when a name is ambiguous. |
+
+Not provable on device, so handled defensively regardless: whether Mail's `name` can carry `/`,
+`..`, a NUL or a bidi override. Crafting such an attachment needs hand-rolled MIME, and the
+Python-side sanitiser is correct whatever Mail does — an attachment name arrives from whoever sent
+the mail, so it is treated as hostile unconditionally. See `mail_files` and
+`tests/test_mail_files.py`.
 
 ## 5. Addressing a mailbox by name
 

@@ -319,7 +319,13 @@ def test_dedupe_is_cli_only_and_never_an_mcp_tool():
 
 
 def test_every_applescript_constant_actually_compiles():
-    """osacompile every script this module builds.
+    """osacompile every script the mail adapter builds — in EVERY module of it.
+
+    Scans each mail module for uppercase string constants that look like a script, so
+    a new script is covered the moment it is named (keep the `on run argv` convention).
+    ``mail_outgoing`` joined the list with #160, which moved the four send scripts out
+    of ``mail.py``; a derived test that only knew one module would have silently
+    stopped compiling them.
 
     0.9.2 shipped a `move_mail` that could not compile — a scratch variable named `st`,
     which is an AppleScript reserved word (the "1st" ordinal) — past three code reviews
@@ -335,15 +341,21 @@ def test_every_applescript_constant_actually_compiles():
 
     if not shutil.which("osacompile"):
         pytest.skip("osacompile is macOS-only")
+    from macos_apps_mcp.adapters import mail_addressing, mail_outgoing
+
+    modules = (mail_mod, mail_outgoing, mail_addressing)
     scripts = {
-        name: getattr(mail_mod, name)
-        for name in dir(mail_mod)
+        f"{mod.__name__.rsplit('.', 1)[-1]}.{name}": getattr(mod, name)
+        for mod in modules
+        for name in dir(mod)
         if name.isupper()
-        and isinstance(getattr(mail_mod, name), str)
-        # every script in this module opens with a handler or `on run`
-        and ("on run argv" in getattr(mail_mod, name))
+        and isinstance(getattr(mod, name), str)
+        # every script in these modules opens with a handler or `on run`
+        and ("on run argv" in getattr(mod, name))
     }
     assert scripts, "no AppleScript constants found — did the naming change?"
+    # the send plane moved to mail_outgoing (#160) — prove the net still reaches it
+    assert any(k.startswith("mail_outgoing.") for k in scripts)
     failures = {}
     for name, source in scripts.items():
         proc = subprocess.run(

@@ -178,12 +178,13 @@ _IMAGE_EXTS = (
     "ico",
 )
 
-_HAS_DOCUMENT = (
-    " AND EXISTS (SELECT 1 FROM attachments at WHERE at.message = m.ROWID"
+_HAS_DOCUMENT_EXPR = (
+    "EXISTS (SELECT 1 FROM attachments at WHERE at.message = m.ROWID"
     " AND (at.name IS NULL OR NOT ("
     + " OR ".join(f"lower(at.name) LIKE '%.{e}'" for e in _IMAGE_EXTS)
     + ")))"
 )
+_HAS_DOCUMENT = " AND " + _HAS_DOCUMENT_EXPR
 
 
 def like_escape(value: str) -> str:
@@ -530,6 +531,63 @@ def build_local_account_query():
     return "SELECT url FROM mailboxes WHERE url LIKE 'local://%' LIMIT 1", []
 
 
+def build_stats_query(since: int, account: str | None = None):
+    """Build (sql, params) for #85: one narrow row per DISTINCT message in the window.
+
+    Deduped, like every other count here. Raw rows overcount by up to 3.6x on this Mac
+    (Travel: 4,423 rows, 1,252 distinct), so statistics computed over rows would be
+    wrong by exactly the margin ``mail_overview`` was fixed for — same
+    ``COALESCE(NULLIF(message_id_header,''), 'rowid:'||ROWID)`` key, so the two reads
+    cannot disagree.
+
+    Rows, not aggregates: the window is bounded by ``since``, the row is six narrow
+    columns, and the totals/top-N are a ``Counter`` pass in Python. One SQL statement
+    beats four near-identical GROUP BYs, and the caller keeps the freedom to add a
+    breakdown without a new query.
+
+    The per-message FLAGS are aggregated over the whole duplicate group, not read off
+    whichever row won the dedup: unread iff EVERY copy is unread (``MIN``), flagged or
+    carrying-a-document iff ANY copy is (``MAX``). That is exactly what
+    ``build_overview_query`` counts, and it is not a detail — device-verified
+    2026-08-05 on a 30-day window, taking the winning row's own ``read`` reported 449
+    unread where ``mail_overview``'s rule reports 451. Two tools reading one store must
+    not disagree about it. The sender/mailbox columns still come from the winning row,
+    because those are properties of a copy and there is nothing to aggregate.
+
+    ponytail: no LIMIT — a "last 3650 days" call materialises the whole store (~36k
+    six-column rows, a few MB). Add a cap if a caller ever asks for that AND it bites;
+    a bounded window is the normal use and the honest one.
+    """
+    key = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
+    inner = f"""
+SELECT lower(COALESCE(a.address, ''))            AS sender,
+       mb.url                                    AS mailbox_url,
+       MIN(m.read) OVER (PARTITION BY {key})     AS is_read,
+       MAX(m.flagged) OVER (PARTITION BY {key})  AS flagged,
+       MAX(CASE WHEN {_HAS_DOCUMENT_EXPR} THEN 1 ELSE 0 END)
+           OVER (PARTITION BY {key})             AS has_document,
+       m.date_received                           AS date_received,
+       ROW_NUMBER() OVER (PARTITION BY {key}
+                          ORDER BY m.date_received DESC, m.ROWID) AS rn
+FROM messages m
+LEFT JOIN addresses a ON a.ROWID = m.sender
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0 AND m.date_received >= ?
+"""
+    params: list = [since]
+    if account:
+        # anchored to the ACCOUNT SEGMENT of the url, exactly as build_header_query
+        # does — an unanchored match also catches any mailbox whose PATH contains it.
+        inner += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
+        params.append(like_escape(account))
+    sql = (
+        "SELECT sender, mailbox_url, is_read, flagged, has_document, date_received"
+        f" FROM ({inner}) WHERE rn = 1"
+    )
+    return sql, params
+
+
 def build_overview_query():
     """Build (sql, params) for per-mailbox totals and unread counts.
 
@@ -726,6 +784,12 @@ def _dict_rows(sql, params) -> list[dict]:
         return [dict(r) for r in conn.execute(sql, params)]
 
     return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+
+
+def query_stats_rows(since: int, account: str | None = None) -> list[dict]:
+    """One deduped row per message in the window (#85). Pure sqlite — never launches
+    Mail; the aggregation is the caller's Counter pass."""
+    return _dict_rows(*build_stats_query(since, account))
 
 
 def query_duplicate_summary() -> list[dict]:

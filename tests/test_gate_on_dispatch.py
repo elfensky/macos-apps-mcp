@@ -55,7 +55,7 @@ def test_gate_on_registers_the_three_send_tools():
 def test_send_mail_forwards_every_argument_to_the_adapter(monkeypatch):
     calls = {}
 
-    def record(to, subject, body, *, cc, bcc, html, from_address, dry_run):
+    def record(to, subject, body, *, cc, bcc, html, from_address, draft_id, dry_run):
         calls.update(
             to=to,
             subject=subject,
@@ -64,6 +64,7 @@ def test_send_mail_forwards_every_argument_to_the_adapter(monkeypatch):
             bcc=bcc,
             html=html,
             from_address=from_address,
+            draft_id=draft_id,
             dry_run=dry_run,
         )
         return {"sent": True}
@@ -87,6 +88,7 @@ def test_send_mail_forwards_every_argument_to_the_adapter(monkeypatch):
         "bcc": "bcc@example.com",
         "html": True,
         "from_address": "from@example.com",
+        "draft_id": "",
         "dry_run": False,
     }
 
