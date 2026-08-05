@@ -217,7 +217,7 @@ def test_index_bodies_builds_coverage(tmp_path, monkeypatch):
     assert out["skipped"] == 1
     assert out["total_emlx"] == 4
     assert out["capped"] is False
-    assert out["coverage"] == "3/4 downloaded .emlx indexed"
+    assert out["coverage"] == "3/4 .emlx on disk indexed"
 
 
 def test_search_clamps_limit_to_max_mails(tmp_path, monkeypatch):
@@ -1114,6 +1114,11 @@ def test_body_coverage_counts_the_sidecar_against_distinct_message_ids(
     fts = tmp_path / "fts.sqlite"
     conn = mail_index._fts_connect(fts)
     conn.execute("INSERT INTO bodies (message_id, body) VALUES ('<abc@ex.com>', 'hi')")
+    # A body for a message no longer in the store — Mail deleted it, and re-indexing
+    # never drops the row. It must NOT be counted: the two sides are intersected, not
+    # divided. Counting rows made the real store report "22840 of 22379" once #119 let
+    # partials be indexed and the sidecar overshot the live message count.
+    conn.execute("INSERT INTO bodies (message_id, body) VALUES ('<gone@ex.com>', 'x')")
     conn.commit()
     conn.close()
     monkeypatch.setattr(mail_index, "fts_path", lambda: fts)
@@ -1121,3 +1126,4 @@ def test_body_coverage_counts_the_sidecar_against_distinct_message_ids(
     # denominator = distinct, non-deleted Message-IDs — the same set search dedups to
     # (the fixture's NULL-header row and every duplicate copy collapse out of it)
     assert text.startswith("1 of 9 messages")
+    assert "(11.1%)" in text

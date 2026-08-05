@@ -2549,8 +2549,8 @@ class MailAdapter:
         Each file is named ``<sanitized-subject-or-id>.eml`` under ``dest_dir`` — inside
         the allowlisted root, derived not concatenated, never overwriting (see
         ``mail_files``). A message that cannot be located is reported per-id as
-        ``absent`` rather than failing the batch: 62.5% of local messages are
-        ``.partial``, and a not-downloaded message has no bytes here to write.
+        ``absent`` rather than failing the batch: 62% of local messages are
+        ``.partial``, and a message with no local file has no bytes here to write.
         """
         mids = _split_ids(ids)
         if not mids:
@@ -2578,8 +2578,9 @@ class MailAdapter:
                     "status": "written",
                     "path": str(path),
                     "bytes": len(payload),
-                    # `partial` means Mail only ever downloaded the headers, so the
-                    # .eml is a real file with a truncated message in it. Say so.
+                    # `partial` means Mail never downloaded the ATTACHMENTS (#119) —
+                    # the body is there and complete. A real file, missing its
+                    # attachment payloads. Say so.
                     "fidelity": t.fidelity,
                 }
             )
@@ -2591,16 +2592,18 @@ class MailAdapter:
         }
 
     def index_bodies(self, rebuild: bool = False) -> dict:
-        """Opt-in build/refresh of the best-effort FTS body index over downloaded .emlx
-        (read-at-rest; skips not-yet-downloaded *.partial.emlx). Resumable, size-capped.
-        Returns counts + coverage. Never launches Mail, never writes in Mail's data."""
+        """Opt-in build/refresh of the best-effort FTS body index over EVERY .emlx on
+        disk, ``.partial`` included (read-at-rest). Resumable, size-capped. Returns
+        counts + coverage. Never launches Mail, never writes in Mail's data.
+
+        Indexing partials is #119's whole finding: a ``.partial.emlx`` is missing its
+        ATTACHMENTS, not its body — 99.47% of them hold a complete one — so the old
+        skip hid ~62% of the store from ``mail_search(body=…)``."""
         root = mail_index.mail_root()
         if root is None:
             raise NativeError("no Mail data found; open Mail once. Do not retry.")
         res = mail_index.build_body_index(
             mail_root=root, fts_db=mail_index.fts_path(), rebuild=rebuild
         )
-        res["coverage"] = (
-            f"{res['indexed']}/{res['total_emlx']} downloaded .emlx indexed"
-        )
+        res["coverage"] = f"{res['indexed']}/{res['total_emlx']} .emlx on disk indexed"
         return res

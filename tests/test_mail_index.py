@@ -173,16 +173,42 @@ def _write_emlx(path, mid, body):
     path.write_bytes(f"{len(rfc)}\n".encode() + rfc + b"<plist/>")
 
 
-def test_build_body_index_indexes_full_skips_partial(tmp_path):
+def test_build_body_index_indexes_partials_too(tmp_path):
+    """#119: a ``.partial.emlx`` is missing its ATTACHMENTS, not its body.
+
+    Device-measured 2026-08-06 over all 22,748 partials on the dev Mac: 22,627 (99.47%)
+    carry a complete body, byte-identical to what Mail returns after fetching the whole
+    message. This test used to assert the opposite — that a partial is skipped — which
+    is how ~62% of the store stayed invisible to ``mail_search(body=…)``.
+    """
     root = tmp_path / "Mail"
     msgs = root / "V10/acct/INBOX.mbox/Data/Messages"
     msgs.mkdir(parents=True)
     _write_emlx(msgs / "1.emlx", "<a@x>", "quarterly invoice total")
-    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "should be skipped")
+    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "partial carries a real body")
     fts = tmp_path / "mail_fts.sqlite"
     res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
-    assert res["indexed"] == 1 and res["total_emlx"] == 1  # partial not counted
+    assert res["indexed"] == 2 and res["total_emlx"] == 2
     assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "carries") == ["<b@x>"]
+
+
+def test_partial_that_fills_in_is_reindexed_without_duplicating(tmp_path):
+    """``1.partial.emlx`` → ``1.emlx`` is a NEW key in indexed_files, so the filled-in
+    message is re-read rather than skipped as unchanged — and the DELETE-by-message-id
+    before each insert keeps that from leaving two FTS rows for one message."""
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "7.partial.emlx", "<c@x>", "receipt enclosed")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    (msgs / "7.partial.emlx").unlink()
+    _write_emlx(msgs / "7.emlx", "<c@x>", "receipt enclosed plus the attachment text")
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1
+    assert mail_index.fts_search(fts, "receipt") == ["<c@x>"]  # one row, not two
+    assert mail_index.fts_search(fts, "attachment") == ["<c@x>"]
 
 
 def test_build_body_index_resumes(tmp_path):
