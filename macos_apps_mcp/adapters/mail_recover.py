@@ -19,12 +19,18 @@ AppleScript acts**:
   module records. It never assumes; #135 burned that lesson in when a bare ``delete``
   reported success having removed nothing.
 
-**Fidelity is bounded by download state.** Measured on this Mac: 13,642 full ``.emlx``
-against 22,733 ``.partial.emlx`` — 62.5% of local messages are headers-only, so a
-backup is often honest but LOSSY. Every target is therefore stamped ``full`` |
-``partial`` | ``absent``, and a PERMANENT delete refuses a non-full target without an
-explicit ``allow_lossy``. A move or a soft delete needs no such gate: the server copy
-survives either way.
+**Fidelity is bounded by download state.** Measured on this Mac: 13,809 full ``.emlx``
+against 22,748 ``.partial.emlx`` — 62% of local messages are ``.partial``, so a backup
+is often honest but LOSSY. Every target is therefore stamped ``full`` | ``partial`` |
+``absent``, and a PERMANENT delete refuses a non-full target without an explicit
+``allow_lossy``. A move or a soft delete needs no such gate: the server copy survives
+either way.
+
+``partial`` means **the attachments are missing, not the body** (#119, facts §4c): the
+body is complete in 99.47% of partials and byte-identical to a full fetch. So the gate
+is still right — a `.partial` backup cannot restore an attachment, and that is
+unrecoverable once the server copy is gone — but do not read the stamp as
+"headers-only". It used to say that here, and it was wrong.
 
 **The action log is the existing audit JSONL**, not a second log — but written straight
 through ``audit_write`` rather than via ``AuditMiddleware``, whose ``_audit_args``
@@ -177,8 +183,8 @@ def locate(targets) -> list[Target]:
     whatever file was actually copied.
 
     Never raises on a miss: a target we cannot locate is stamped ``absent`` and carries
-    on. Refusing the whole batch because one message was never downloaded would make
-    the common case (62.5% partial on this Mac) unusable, and ``absent`` is exactly the
+    on. Refusing the whole batch because one message has no full local copy would make
+    the common case (62% partial on this Mac) unusable, and ``absent`` is exactly the
     signal the permanent-delete gate reads.
     """
     items = list(targets)
@@ -224,7 +230,7 @@ def read_payloads(targets: list[Target]) -> dict[str, bytes]:
 
     Targets that cannot be located or read are simply ABSENT from the result — the
     caller reports them per-id rather than failing the batch, the same rule ``locate``
-    and ``_backup`` follow (62.5% of local messages are ``.partial``)."""
+    and ``_backup`` follow (62% of local messages are ``.partial``)."""
     root = mail_index.mail_root()
     if root is None:
         return {}

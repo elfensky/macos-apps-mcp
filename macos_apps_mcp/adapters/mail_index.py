@@ -927,7 +927,14 @@ def parse_emlx(raw: bytes) -> tuple[str, str] | None:
 # our own state dir — NEVER inside Mail's data — so it can be rebuilt or deleted freely
 # without touching anything Mail.app owns.
 
-_FTS_DEFAULT_MAX = 200 * 1024 * 1024  # ~200 MB
+# Raised 200 MB → 512 MB by #119. The old cap was sized for the corpus this indexer
+# could actually see — the ~13.8k full .emlx — and indexing partials as well roughly
+# TRIPLES it to ~36.5k. Measured on this Mac at ~6.3 MB per 1,000 bodies, a complete
+# store lands near 230 MB, so the old default would have stopped the run at ~90% and
+# set `capped` — technically honest, but it would cap on its first full build, which
+# reads as "the feature doesn't work". 512 MB is nothing against the 1 TB free here.
+# MACOS_APPS_MCP_FTS_MAX_BYTES still overrides; `capped` is still reported.
+_FTS_DEFAULT_MAX = 512 * 1024 * 1024  # ~512 MB
 
 
 def fts_path() -> Path:
@@ -936,7 +943,7 @@ def fts_path() -> Path:
 
 
 def fts_max_bytes() -> int:
-    """Size cap for the sidecar: env override or the ~200 MB default."""
+    """Size cap for the sidecar: env override or the ~512 MB default."""
     raw = os.environ.get("MACOS_APPS_MCP_FTS_MAX_BYTES")
     return int(raw) if raw and raw.isdigit() else _FTS_DEFAULT_MAX
 
@@ -966,9 +973,26 @@ def build_body_index(
     rebuild: bool = False,
     max_bytes: int | None = None,
 ) -> dict:
-    """Best-effort FTS body index over full .emlx (skips *.partial.emlx). Resumable
+    """Best-effort FTS body index over EVERY .emlx, ``.partial`` included. Resumable
     (skips unchanged files), size-capped (stops when fts_db exceeds max_bytes). Never
-    touches Mail's data — reads .emlx at rest, writes only fts_db."""
+    touches Mail's data — reads .emlx at rest, writes only fts_db.
+
+    **``.partial.emlx`` does NOT mean "body not downloaded"** — it means the ATTACHMENTS
+    were not downloaded. Measured 2026-08-06 over all 22,748 partials on this Mac:
+    22,627 (99.47%) carry a complete, extractable body; 99 (0.44%) are genuinely
+    body-stubbed, 13 are attachment-only messages with no text part at all, and 9 have
+    no Message-ID. Verified byte-for-byte, not inferred: for sampled partials the body
+    on disk is IDENTICAL to the body Mail returns after fetching the whole message
+    (`source`), including a 27 MB message whose 2,131-char body was already fully
+    present in its 17 KB partial. So skipping these files — which this function did
+    until #119 — hid ~62% of the store from ``mail_search(body=…)`` for no reason, and
+    the "download the bodies first" remediation it implied would have bought 99
+    messages for GB of IMAP.
+
+    A partial that later fills in is re-indexed for free: ``indexed_files`` is keyed by
+    PATH, so ``1234.partial.emlx`` → ``1234.emlx`` is a new key, and the ``DELETE FROM
+    bodies WHERE message_id`` before each insert keeps that from double-counting.
+    """
     if max_bytes is None:
         max_bytes = fts_max_bytes()
     if rebuild and fts_db.exists():
@@ -982,8 +1006,6 @@ def build_body_index(
     capped = False
     try:
         for f in sorted(mail_root.rglob("*.emlx")):
-            if f.name.endswith(".partial.emlx"):
-                continue
             total += 1
             key = str(f)
             try:
@@ -1075,39 +1097,57 @@ def body_coverage() -> str:
     """One line saying how much of the store ``body=`` can actually SEE (#156 case 4).
 
     A ``body=`` search that finds nothing is indistinguishable from a store that
-    contains nothing — and on this machine 62.5% of local messages are
-    ``.partial.emlx`` (headers only, never downloaded), so an empty answer is the
-    COMMON case, not a corner one. Two counts, both cheap and both read-at-rest: how
-    many bodies the sidecar holds, and the same distinct-Message-ID denominator every
-    search dedups to. A sidecar that is absent or unreadable counts as 0 — that is the
-    honest reading, and it is exactly the case the remediation addresses.
+    contains nothing, so every empty answer says which one it was. A sidecar that is
+    absent or unreadable counts as 0 — that is the honest reading, and it is exactly the
+    case the remediation addresses.
+
+    **The two sides are INTERSECTED, not divided.** This used to count the sidecar's
+    rows against the store's distinct-Message-ID total, which was fine only while the
+    numerator was small: once #119 let partials be indexed, the sidecar (22,840 rows)
+    OVERSHOT the live store (22,382) and the line printed "22840 of 22379", a ratio
+    above 1. The two sets are not nested — the sidecar keeps bodies for messages since
+    deleted from Mail (571 here), and re-indexing will never drop them — so the only
+    meaningful number is how many LIVE messages actually have a body indexed. Both
+    sides spell the Message-ID with its angle brackets (``.emlx`` headers and
+    ``message_global_data`` agree; it is the AppleScript ``message id`` property that
+    strips them), so the sets intersect directly with no normalising.
+
+    Costs ~1.9 s against ~16 ms for the old pair of counts, which is affordable because
+    this runs on ONE path only: a ``body=`` search that already came back empty.
     """
-    indexed = 0
+    have: set[str] = set()
     fts = fts_path()
     if fts.exists():
         conn = sqlite3.connect(f"file:{fts}?mode=ro", uri=True)
         conn.execute("PRAGMA busy_timeout=5000")  # wait out a build, don't error
         try:
-            indexed = conn.execute("SELECT count(*) FROM bodies").fetchone()[0]
+            have = {r[0] for r in conn.execute("SELECT message_id FROM bodies")}
         except sqlite3.Error:
-            indexed = 0  # no bodies table yet: never built
+            have = set()  # no bodies table yet: never built
         finally:
             conn.close()
 
     def read(conn):
-        return conn.execute(
-            "SELECT COUNT(DISTINCT gd.message_id_header) FROM messages m"
-            " JOIN message_global_data gd ON gd.ROWID = m.global_message_id"
-            " WHERE m.deleted = 0 AND gd.message_id_header IS NOT NULL"
-            " AND gd.message_id_header <> ''"
-        ).fetchone()[0]
+        return {
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT gd.message_id_header FROM messages m"
+                " JOIN message_global_data gd ON gd.ROWID = m.global_message_id"
+                " WHERE m.deleted = 0 AND gd.message_id_header IS NOT NULL"
+                " AND gd.message_id_header <> ''"
+            )
+        }
 
-    total = read_via_sqlite(
+    live = read_via_sqlite(
         require_index_path(), HEADER_FINGERPRINT, read, immutable=False
     )
+    total = len(live)
+    searchable = len(have & live)
+    pct = f" ({100 * searchable / total:.1f}%)" if total else ""
     return (
-        f"{indexed} of {total} messages have a searchable body — body= can only match "
-        "those. Run mail_index_bodies to index newly downloaded mail; a message whose "
-        "body was never downloaded (.partial.emlx) cannot be indexed at all until "
-        "download-bodies (#119) fetches it."
+        f"{searchable} of {total} messages have a searchable body{pct} — body= can "
+        "only match those. Run mail_index_bodies to close the gap; it indexes every "
+        ".emlx on disk, including .partial ones (a partial is missing its ATTACHMENTS, "
+        "not its body). A message Mail never stored a text part for stays unsearchable "
+        "— about 0.5% of this store — and no amount of re-indexing changes that."
     )

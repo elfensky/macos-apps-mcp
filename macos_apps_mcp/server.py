@@ -491,8 +491,8 @@ def mail_search(
     while a stale `folder` url just returns no results), since/until (epoch seconds on
     received date),
     unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
-    it only sees messages already downloaded AND indexed by mail_index_bodies (run that
-    first; partial coverage is normal). At least one filter required. Returns citable
+    it only sees messages already indexed by mail_index_bodies (run that first;
+    incomplete coverage is normal). At least one filter required. Returns citable
     Pointers, newest first. Falls back to AppleScript inbox search on missing Automation
     access / schema drift.
     `has_attachments` means a real DOCUMENT — inline signature/newsletter images are
@@ -509,8 +509,8 @@ def mail_search(
     Returns {results, truncated?, plane?, coverage?}. `truncated` means the answer came
     back AT `limit` (25 max) and there may be more — do NOT report such a search as
     exhaustive. `plane` = "applescript-inbox" means the sqlite index was unreachable and
-    this scanned the INBOX ONLY. `coverage` explains an empty `body=` answer: most local
-    messages are headers-only until their bodies are downloaded and indexed."""
+    this scanned the INBOX ONLY. `coverage` explains an empty `body=` answer: bodies are
+    only matchable once mail_index_bodies has indexed them."""
     return _mail.search(
         subject=subject,
         from_=from_,
@@ -560,12 +560,15 @@ def mail_overview() -> list[dict]:
 
 @_read_tool
 def mail_index_bodies(rebuild: bool = False) -> dict:
-    """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads
-    downloaded .emlx files at rest (never launches Mail, never writes in Mail's data);
-    skips not-yet-downloaded messages. Resumable and size-capped — safe to re-run; a
-    re-run continues where it left off. rebuild=True re-indexes from scratch. Returns
-    {indexed, skipped, total_emlx, capped, coverage}. Read-only; needs Automation
-    access for Mail."""
+    """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads every
+    .emlx file at rest, `.partial` ones included (never launches Mail, never writes in
+    Mail's data). Resumable and size-capped — safe to re-run; a re-run continues where
+    it left off. rebuild=True re-indexes from scratch. Returns {indexed, skipped,
+    total_emlx, capped, coverage}. Read-only; needs Automation access for Mail.
+
+    A `.partial.emlx` is missing its ATTACHMENTS, not its body, so partials are indexed
+    like any other message (#119). The residual unsearchable tail is ~0.5%: messages
+    Mail never stored a text part for."""
     return _mail.index_bodies(rebuild=rebuild)
 
 
@@ -600,10 +603,10 @@ def export_mail(ids: str, dest_dir: str) -> dict:
     .eml is the only format — it is lossless and opens in Mail and everything else,
     and `mail_body` already covers "give me the text".
 
-    Returns {results, written, dest_dir, plane}. A message whose bytes are not on this
-    Mac is reported per-id as `status: "absent"` rather than failing the batch (most
-    local messages are headers-only until `mail_index_bodies`/a body download runs);
-    `fidelity: "partial"` means the .eml holds a real but truncated message.
+    Returns {results, written, dest_dir, plane}. A message with no local file is
+    reported per-id as `status: "absent"` rather than failing the batch.
+    `fidelity: "partial"` means the .eml is missing its ATTACHMENT payloads — the body
+    is complete (#119). It is lossy for archival, not for reading.
     Additive: writes new files, never overwrites or modifies mail."""
     return _mail.export(ids, dest_dir)
 
