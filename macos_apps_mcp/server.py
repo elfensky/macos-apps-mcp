@@ -85,11 +85,17 @@ def _allow_send(adapter: str) -> bool:
     from a client config (#130), so on-disk state is the only way to opt in there. In
     stdio mode the env var is reachable and is the whole story, which also keeps the
     test suite hermetic: it never reads this machine's toggle file.
+
+    "Am I the daemon?" goes through ``deploy.is_daemon_role()``, which reads argv —
+    NOT the ``MACOS_APPS_MCP_ROLE`` env var alone. That var is set by ``daemon.serve()``
+    long after ``macos_apps_mcp/__init__.py`` has already imported this module and run
+    every registration, so reading it here meant the daemon's outbound tier could never
+    register no matter what the toggle said. See that function.
     """
     if _read_only():
         return False
     val = os.environ.get("MACOS_APPS_ALLOW_SEND", "")
-    if not val and os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon":
+    if not val and deploy.is_daemon_role():
         val = deploy.allow_send_file()
     val = val.strip().lower()
     if val in ("1", "true", "yes", "all"):

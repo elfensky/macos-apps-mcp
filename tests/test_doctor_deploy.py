@@ -166,3 +166,54 @@ def test_report_carries_the_serving_version(monkeypatch):
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     assert doc._version() == tomllib.loads(pyproject.read_text())["project"]["version"]
+
+
+def test_daemon_role_is_detected_from_argv_not_only_the_env_var(monkeypatch):
+    """#165: `daemon.serve()` sets MACOS_APPS_MCP_ROLE, but
+    `macos_apps_mcp/__init__.py` has already done `from .server import mcp` by then —
+    every tool is registered, and the outbound gate already read, several frames
+    earlier. Reading only the env var therefore meant the daemon's outbound tier could
+    NEVER register: a freshly restarted daemon whose toggle plainly said `mail`
+    reported `{"registered": [], "configured": ["mail"]}`, and doctor blamed a stale
+    restart that could not possibly fix it. argv is available at the earliest moment
+    and is what cli.main() dispatches on."""
+    from macos_apps_mcp import deploy
+
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    monkeypatch.setattr("sys.argv", ["macos_apps_mcp", "daemon"])
+    assert deploy.is_daemon_role() is True
+
+    monkeypatch.setattr("sys.argv", ["macos_apps_mcp", "shim"])
+    assert deploy.is_daemon_role() is False
+    monkeypatch.setattr("sys.argv", ["macos_apps_mcp"])
+    assert deploy.is_daemon_role() is False
+
+    # the env var still works — that is how a test or an embedder says the same thing
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert deploy.is_daemon_role() is True
+
+
+def test_the_daemon_outbound_gate_reads_the_toggle_from_argv_alone(
+    monkeypatch, tmp_path
+):
+    """The end the bug actually broke: with no env var at all, argv=daemon and a toggle
+    saying `mail`, the gate must be ON."""
+    import macos_apps_mcp.server as srv
+    from macos_apps_mcp import deploy
+
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    toggle = tmp_path / "allow_send"
+    toggle.write_text("mail")
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", toggle)
+
+    monkeypatch.setattr("sys.argv", ["macos_apps_mcp"])
+    assert srv._allow_send("mail") is False  # stdio: env var is the whole story
+    monkeypatch.setattr("sys.argv", ["macos_apps_mcp", "daemon"])
+    assert srv._allow_send("mail") is True
+    assert srv._allow_send("messages") is False  # named adapters only
+
+    # READ_ONLY still wins unconditionally
+    monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
+    assert srv._allow_send("mail") is False

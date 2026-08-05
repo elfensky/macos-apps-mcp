@@ -292,9 +292,8 @@ def diagnose(request: bool = False) -> dict:
     ob = _outbound_state()
     outbound = ob["registered"]  # what this process actually serves, not the config
     deployment = {
-        "mode": "daemon"
-        if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
-        else "stdio",
+        # argv, not the env var alone — see deploy.is_daemon_role()
+        "mode": "daemon" if deploy.is_daemon_role() else "stdio",
         "agent": agent,
         "grant_identities": ids,
         "outbound": outbound,

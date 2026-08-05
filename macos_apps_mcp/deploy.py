@@ -265,6 +265,29 @@ def install_agent(argv: list[str]) -> None:
 _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
 
 
+def is_daemon_role() -> bool:
+    """True when THIS process is the launchd daemon.
+
+    Reads **argv first**, and that is the whole point. ``daemon.serve()`` sets
+    ``MACOS_APPS_MCP_ROLE`` before its own ``from .server import mcp`` — but
+    ``macos_apps_mcp/__init__.py`` already did ``from .server import mcp`` when the
+    package was imported, several frames earlier, so by the time the env var is set
+    every tool has ALREADY been registered and the gate has already been read. The flag
+    therefore never influenced registration in the daemon, and the outbound tier could
+    not be enabled there at all: ``outbound_status()`` reported
+    ``{"registered": [], "configured": ["mail"]}`` on a freshly restarted daemon whose
+    toggle plainly said ``mail``, and ``doctor`` blamed it on a stale restart —
+    permanently, because a restart could never fix it.
+
+    ``sys.argv`` is available at the earliest possible moment and is what ``cli.main()``
+    dispatches on, so it is the honest source of truth. The env var stays supported: it
+    is how a test (or anything embedding the server) says the same thing.
+    """
+    return os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon" or sys.argv[1:2] == [
+        "daemon"
+    ]
+
+
 def allow_send_file() -> str:
     """The persisted outbound opt-in (``""`` when absent) — see server._allow_send."""
     try:
