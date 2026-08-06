@@ -21,16 +21,38 @@ whose message id is X", which matches them all), so the survivor is whichever co
 leaves — see ``mail._DEDUPE``. Identical bytes are what make an unaddressable winner
 safe, which is why a mismatched set is skipped and reported instead.
 
-Losers are moved to Trash, not erased — there is no erase (facts doc §5c) — and the pass
-is recorded through the recoverable plane's action log in LOG-ONLY mode: the surviving
-copy is the backup, so per-loser file copies would be pure cost at this scale.
+**Cross-account (#153) uses a DIFFERENT identity rule, because the same one does not
+work.** Measured over all 3,948 cross-account sets on the dev Mac (2026-08-06):
+``size + date_sent`` agrees on **1.2%** of them — 1.1% of the 3,926 Google+Personal
+sets — because copies that arrived by different paths have different bytes. Gmail
+rewrites headers in transit (``X-GM-*``, extra ``Received:``) without touching a word of
+the content, so ``date_sent`` always matches and ``size`` almost never does. Gating
+cross-account on size would decline 99% of the work it exists to do. The gate there is
+the **body**, which #119 made local: 397/397 on a 400-set sample. Message-ID stays the
+key and the body hash is only ever the confirmation — a negative control found 6 real
+hash collisions in 792 distinct messages (bulk-sender templates), so the hash is not an
+identity on its own.
+
+The two passes also differ in who survives. Same-mailbox: the winner is the LEFTOVER
+(items n..2 are deleted, item 1 remains) and byte-identity is what makes an
+unaddressable survivor safe. Cross-account: the winner is an account a HUMAN NAMED, so
+every delete is aimed at a specific non-keeper mailbox and the keeper is PROVEN still
+present in a mandatory post-pass.
+
+Losers are moved to Trash, not erased — there is no erase (facts doc §5c). The
+same-mailbox pass rides the recoverable plane in LOG-ONLY mode (the byte-identical
+survivor IS the backup). The cross-account pass goes through ``trash_mail``, which DOES
+write per-message backups — deliberately, and it is the one place these two diverge:
+cross-account copies are NOT byte-identical, so the keeper preserves the message's
+content but not the loser's exact bytes, and the cheap belt is worth having.
 """
 
 from __future__ import annotations
 
 import sys
+from urllib.parse import unquote
 
-from .adapters import mail_index
+from .adapters import mail_addressing, mail_index
 from .adapters.mail import MailAdapter
 from .adapters.mail_recover import MAX_TARGETS
 
@@ -38,10 +60,12 @@ _USAGE = """usage: macos-apps-mcp dedupe-mail [options]
 
   (no options)          preview every mailbox — prints the table, changes nothing
   --execute             actually move the redundant copies to Trash
-  --verbose             list every set skipped for not being byte-identical
-  --mailbox=<url>       restrict to one mailbox (its `folder` url from mail_overview)
+  --verbose             list every set that was skipped, and why
+  --mailbox=<url>       restrict to one mailbox (its `folder` url from mail_overview);
+                        with --cross-account this restricts the LOSER mailbox
   --cross-account       operate on copies of one message held by SEVERAL accounts
   --keep-account=<id>   required with --cross-account: the account whose copy survives
+  --limit=<n>           act on at most n sets — start small, verify, then widen
 
 Losers go to Trash — nothing is erased, and Mail cannot erase from a script. Empty the
 Trash yourself in Mail.app when you are satisfied.
@@ -55,6 +79,7 @@ def _parse(argv: list[str]) -> dict:
         "cross_account": False,
         "keep_account": None,
         "verbose": False,
+        "limit": None,
     }
     for arg in argv:
         if arg == "--execute":
@@ -67,6 +92,18 @@ def _parse(argv: list[str]) -> dict:
             opts["mailbox"] = arg.split("=", 1)[1]
         elif arg.startswith("--keep-account="):
             opts["keep_account"] = arg.split("=", 1)[1]
+        elif arg.startswith("--limit="):
+            # A destructive pass over 3.9k sets should not be anyone's FIRST run of a
+            # new command. This is what makes "start small, inspect both accounts, then
+            # widen" an option the CLI offers rather than advice in a docstring.
+            try:
+                opts["limit"] = int(arg.split("=", 1)[1])
+            except ValueError:
+                print(f"--limit needs a whole number, got {arg!r}", file=sys.stderr)
+                raise SystemExit(2) from None
+            if opts["limit"] < 1:
+                print("--limit must be at least 1", file=sys.stderr)
+                raise SystemExit(2)
         elif arg in ("-h", "--help"):
             print(_USAGE)
             raise SystemExit(0)
@@ -85,6 +122,94 @@ def _parse(argv: list[str]) -> dict:
         )
         raise SystemExit(2)
     return opts
+
+
+# The per-account spellings of Trash, from the same device survey mail_index's
+# _TRASH_SUFFIXES came from: IMAP `Trash`, iCloud `Deleted Messages`, Gmail
+# `[Gmail]/Trash`. Compared on the DECODED final segment, so `%5BGmail%5D/Trash`
+# and `Deleted%20Messages` both resolve.
+_TRASH_LEAVES = {"trash", "deleted messages", "bin"}
+
+
+def _is_trash(url: str) -> bool:
+    return unquote(url.rsplit("/", 1)[-1]).strip().lower() in _TRASH_LEAVES
+
+
+def cross_account_plan(rows: list[dict], keep_account: str, fingerprints: dict) -> dict:
+    """Turn every cross-account copy into {losers-by-mailbox, keepers, skipped}.
+
+    The three refusals here are the whole safety story of #153, and each one exists
+    because the alternative silently does the wrong thing:
+
+    1. **No copy in the keeper account → SKIP the set.** Otherwise "keep Personal" would
+       delete both copies of a message Personal never held, which is not deduplication,
+       it is deletion. This is the one that makes ``--keep-account`` mean something.
+    2. **Any copy without a body fingerprint → SKIP.** A missing fingerprint means the
+       bytes could not be read, not that they matched; treating unknown as identical is
+       how a "cleanup" eats a message that was never a duplicate.
+    3. **Fingerprints disagree → SKIP.** Same Message-ID with a different body is a
+       forwarded or edited copy, exactly the case #153 said must not be collapsed.
+
+    Note what is NOT a rule: same-mailbox copies. Two rows in ONE mailbox are #140's
+    job, and collapsing them here would double-delete. Losers are grouped BY MAILBOX
+    because that is the only unit Mail's delete can address (facts §5b/§5c).
+
+    A loser already sitting in its account's **Trash is dropped, not targeted**: facts
+    §5c, `delete` on a message already in Trash returns cleanly and removes nothing —
+    Trash is terminal for AppleScript. Targeting those would manufacture guaranteed
+    failures that look exactly like #164's dropped deletes, and the copy is already
+    where a delete would have put it. The first dry run found 6 of these.
+    """
+    by_id: dict[str, list[dict]] = {}
+    for row in rows:
+        by_id.setdefault(str(row["message_id"]), []).append(row)
+
+    losers: dict[str, list[str]] = {}
+    keepers: dict[str, str] = {}
+    skipped: list[dict] = []
+    for mid, copies in by_id.items():
+        accounts = {c["account"] for c in copies}
+        if len(accounts) < 2:
+            continue  # not cross-account; #140 owns it
+        if keep_account not in accounts:
+            skipped.append(
+                {
+                    "id": mid,
+                    "why": "no copy in the keep-account",
+                    "accounts": sorted(accounts),
+                }
+            )
+            continue
+        prints = [fingerprints.get(int(c["rowid"])) for c in copies]
+        if any(p is None for p in prints):
+            skipped.append(
+                {
+                    "id": mid,
+                    "why": "a copy has no readable body to compare",
+                    "accounts": sorted(accounts),
+                }
+            )
+            continue
+        if len(set(prints)) != 1:
+            skipped.append(
+                {
+                    "id": mid,
+                    "why": "bodies differ — not the same message",
+                    "accounts": sorted(accounts),
+                }
+            )
+            continue
+        targets = [
+            c
+            for c in copies
+            if c["account"] != keep_account and not _is_trash(c["mailbox_url"])
+        ]
+        if not targets:
+            continue  # every loser is already in Trash — nothing left to do
+        keepers[mid] = keep_account
+        for c in targets:
+            losers.setdefault(c["mailbox_url"], []).append(mid)
+    return {"losers": losers, "keepers": keepers, "skipped": skipped}
 
 
 def _sets(rows: list[dict]) -> tuple[list[str], list[dict]]:
@@ -189,21 +314,184 @@ def _run_mailbox(
     return len(safe), removed, len(skipped)
 
 
+def _run_cross_account(opts: dict) -> None:
+    """The #153 pass: collapse copies of one message held by SEVERAL accounts.
+
+    Structurally different from the same-mailbox pass above, and the difference is the
+    point. #140 deletes items n..2 of one mailbox's matches and lets item 1 survive —
+    the winner is not addressed, it is the LEFTOVER, which is only safe because the
+    copies are interchangeable. Here the winner is an account a human NAMED, so every
+    delete is aimed at a specific non-keeper mailbox and the keeper is PROVEN present
+    afterwards rather than assumed.
+
+    That last pass is what #164 bought. A dropped delete is a no-op and is always
+    reported (232 observations, zero silent), so the residual risk is "a loser stayed",
+    which a re-run fixes — not "the keeper went", which the post-pass would catch.
+    """
+    keep = opts["keep_account"]
+    adapter = MailAdapter()
+    rows = mail_index.query_cross_account_rows()
+    if not rows:
+        print("no cross-account duplicate copies found.")
+        return
+    # THE TWO PLANES DISAGREE BY CONSTRUCTION: sqlite stores `<a@b>`, AppleScript's
+    # `message id` reports `a@b`. Everything downstream of here — trash_mail's locate,
+    # the delete script, the keeper post-pass — speaks Mail's spelling, so normalise
+    # once at the boundary. Skipping this does not fail loudly: the deletes match
+    # nothing and the post-pass reports every keeper missing.
+    rows = [
+        {**r, "message_id": mail_addressing.bare_id(str(r["message_id"]))} for r in rows
+    ]
+
+    accounts = sorted({r["account"] for r in rows})
+    if keep not in accounts:
+        print(
+            f"--keep-account={keep!r} holds no cross-account copies. Accounts "
+            "that do:\n" + "\n".join(f"  {a}" for a in accounts),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    print("cross-account duplicate copies by account (#153):\n")
+    for row in mail_index.query_cross_account_summary():
+        mark = "  <- KEEPER" if row["account"] == keep else ""
+        print(f"  {row['account']}  {row['copies']:>6} copies{mark}")
+
+    # Body identity, not size+date_sent. Measured across every cross-account set on this
+    # Mac: size+date_sent agrees on 1.2% of them, the body on ~100%. Gating on size
+    # would decline 99% of the work. See mail_index.body_fingerprints.
+    print("\nreading bodies to prove identity (this walks the mail store once)...")
+    prints = mail_index.body_fingerprints([r["rowid"] for r in rows])
+    plan = cross_account_plan(rows, keep, prints)
+    losers, keepers, skipped = plan["losers"], plan["keepers"], plan["skipped"]
+
+    # --mailbox restricts the LOSER side here, the same "do one mailbox first" the
+    # same-mailbox pass uses it for. Without it there is no way to reach the small
+    # accounts at all: one Gmail mailbox holds 3,874 of the 3,890 copies, so every
+    # bounded run would be a Gmail run.
+    if opts["mailbox"]:
+        losers = {u: m for u, m in losers.items() if u == opts["mailbox"]}
+        if not losers:
+            print(
+                f"\nno cross-account losers in {opts['mailbox']!r} — pass a mailbox "
+                "url from the table above, verbatim."
+            )
+            return
+        still = {m for mids in losers.values() for m in mids}
+        keepers = {k: v for k, v in keepers.items() if k in still}
+
+    limited = 0
+    if opts["limit"] is not None and len(keepers) > opts["limit"]:
+        # Sorted, so --limit=3 twice in a row means the same three sets — a first run
+        # you can inspect and then repeat is worth more than a random sample.
+        chosen = set(sorted(keepers)[: opts["limit"]])
+        limited = len(keepers) - len(chosen)
+        keepers = {k: v for k, v in keepers.items() if k in chosen}
+        losers = {
+            url: [m for m in mids if m in chosen]
+            for url, mids in losers.items()
+            if any(m in chosen for m in mids)
+        }
+
+    total_losers = sum(len(v) for v in losers.values())
+
+    mode = "EXECUTING" if opts["execute"] else "PREVIEW (nothing will change)"
+    print(
+        f"\n{mode} — keeping {keep}\n"
+        f"  {len(keepers)} sets are safe to collapse, {total_losers} copies would "
+        f"go to Trash in {len(losers)} non-keeper mailboxes\n"
+        f"  {len(skipped)} sets LEFT ALONE\n"
+        # Never let a cap read as "that was everything" — the silent-truncation rule.
+        + (
+            f"  {limited} further eligible sets held back by --limit\n"
+            if limited
+            else ""
+        )
+    )
+    for url, mids in sorted(losers.items()):
+        print(f"  {url}   {len(mids):>5} copies")
+    if skipped:
+        why: dict[str, int] = {}
+        for s in skipped:
+            why[s["why"]] = why.get(s["why"], 0) + 1
+        print("\n  left alone, by reason:")
+        for reason, n in sorted(why.items(), key=lambda kv: -kv[1]):
+            print(f"    {n:>5}  {reason}")
+        if opts["verbose"]:
+            for s in skipped:
+                print(
+                    f"      SKIPPED {s['id']} — {s['why']} ({'+'.join(s['accounts'])})"
+                )
+
+    if not opts["execute"]:
+        print(
+            "\nRe-run with --execute to move the non-keeper copies to Trash. Losers go "
+            "to each non-keeper account's OWN Trash and are undoable by receipt until "
+            "you empty it."
+        )
+        return
+
+    removed = failed = 0
+    for url, mids in sorted(losers.items()):
+        print(f"\n  {url}")
+        for batch in _chunks(mids):
+            result = adapter.trash_mail(batch, url, dry_run=False)
+            ok = result.get("succeeded", 0)
+            removed += ok
+            failed += len(batch) - ok
+            print(
+                f"      receipt {result['receipt']}: {ok}/{len(batch)} copies trashed"
+            )
+            for t in result.get("targets", []):
+                if t.get("status") != "ok":
+                    print(f"        {t['id']}: {t['status']}")
+
+    # THE MANDATORY POST-PASS. Everything above deleted from non-keeper mailboxes; this
+    # proves the keeper's copy is still there. It is the one check that distinguishes
+    # "honoured --keep-account" from "moved the right number of messages", and #153 does
+    # not ship without it.
+    print("\nverifying every keeper copy survived...")
+    by_mailbox: dict[str, list[str]] = {}
+    keeper_rows = [
+        r for r in rows if r["account"] == keep and r["message_id"] in keepers
+    ]
+    for r in keeper_rows:
+        by_mailbox.setdefault(r["mailbox_url"], []).append(r["message_id"])
+    lost: list[str] = []
+    for url, mids in sorted(by_mailbox.items()):
+        for batch in _chunks(mids):
+            statuses = adapter.presence(batch, url)
+            for mid in batch:
+                if statuses.get(mid) != "present":
+                    lost.append(f"{mid} ({statuses.get(mid, 'unknown')}) in {url}")
+    if lost:
+        print(
+            f"\n*** {len(lost)} KEEPER COPIES ARE NOT WHERE THEY SHOULD BE ***\n"
+            + "\n".join(f"    {x}" for x in lost[:20])
+            + "\nUndo the receipts above (mail_undo) and do NOT re-run until this is "
+            "understood.",
+            file=sys.stderr,
+        )
+    else:
+        print(f"  all {len(keeper_rows)} keeper copies still present.")
+
+    print(
+        f"\ndone — {removed} non-keeper copies trashed"
+        + (
+            f", {failed} NOT affected (see statuses above; re-run is the retry)"
+            if failed
+            else ""
+        )
+        + f". {len(skipped)} sets were left alone. The removed copies are in each "
+        "account's Trash, undoable with mail_undo(<receipt>) until you empty it."
+    )
+
+
 def dedupe_mail(argv: list[str]) -> None:
     """Entry point for the ``dedupe-mail`` role."""
     opts = _parse(argv)
     if opts["cross_account"]:
-        # Honest partial: the cross-account half (#153) needs its own winner rule and
-        # its own script (the copies live in DIFFERENT mailboxes, so the "keep item 1 of
-        # this mailbox's matches" mechanic the same-mailbox pass uses does not apply).
-        # Reporting is live; the destructive half is not built yet.
-        print("cross-account duplicate copies by account (#153):\n")
-        for row in mail_index.query_cross_account_summary():
-            print(f"  {row['account']}  {row['copies']:>6} copies")
-        print(
-            "\nThe cross-account CLEANUP is not implemented yet (#153 stays open). The "
-            "same-mailbox pass below is; run `dedupe-mail` with no --cross-account."
-        )
+        _run_cross_account(opts)
         return
 
     adapter = MailAdapter()

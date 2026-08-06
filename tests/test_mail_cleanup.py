@@ -193,9 +193,11 @@ def test_dedupe_chunks_within_the_plane_cap():
     chunks = list(dedupe._chunks(items))
     assert sum(chunks, []) == items, "chunking must not drop or reorder work"
     assert all(len(c) <= mail_recover.MAX_TARGETS for c in chunks)
-    # Measured 2026-08-05 on a real IMAP account: ~56s per set (a 10-set chunk took
-    # 558s). A chunk must finish well inside _DEDUPE_TIMEOUT or it dies mid-flight,
-    # leaving a plan record with no outcome record — so keep ~2x headroom.
+    # 56s per set is the DEGRADED-Mail worst case, not the normal one — re-measured
+    # 2026-08-06 on a healthy Mail at 0.98 s/set in the same mailbox (#164). Sizing the
+    # chunk against the bad number is the point: the run that overruns the timeout is
+    # precisely the one on a sick Mail, and dying mid-flight leaves a plan record with
+    # no outcome record. Keep ~2x headroom against the worst case.
     assert dedupe._CHUNK * 56 * 2 <= mail_mod._DEDUPE_TIMEOUT
 
 
@@ -206,6 +208,149 @@ def test_cross_account_requires_an_explicit_keep_account():
     assert e.value.code == 2
     opts = dedupe._parse(["--cross-account", "--keep-account=ACCT-1"])
     assert opts["keep_account"] == "ACCT-1"
+
+
+# --- #153 cross-account plan ---------------------------------------------------------
+# Each test below is one of the three refusals. They are the whole safety story: the
+# same-mailbox pass can pick an arbitrary survivor because the copies are
+# interchangeable, and NONE of that holds across accounts.
+
+KEEP = "ACCT-KEEP"
+OTHER = "ACCT-OTHER"
+
+
+def _copy(mid, account, rowid, mailbox=None):
+    return {
+        "message_id": mid,
+        "rowid": rowid,
+        "account": account,
+        "mailbox_url": mailbox or f"imap://{account}/Archive",
+    }
+
+
+def test_cross_account_plan_deletes_only_from_non_keeper_mailboxes():
+    rows = [_copy("<a@x>", KEEP, 1), _copy("<a@x>", OTHER, 2)]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h", 2: "h"})
+    assert plan["keepers"] == {"<a@x>": KEEP}
+    # the loser is addressed by ITS OWN mailbox url — the keeper's is never a target
+    assert plan["losers"] == {f"imap://{OTHER}/Archive": ["<a@x>"]}
+    assert plan["skipped"] == []
+
+
+def test_cross_account_plan_refuses_a_set_the_keeper_does_not_hold():
+    # Without this, `--keep-account=KEEP` would delete BOTH copies of a message KEEP
+    # never had — deletion, not deduplication. This is what makes the flag mean
+    # something.
+    rows = [_copy("<b@x>", OTHER, 1), _copy("<b@x>", "ACCT-THIRD", 2)]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h", 2: "h"})
+    assert plan["losers"] == {}
+    assert plan["keepers"] == {}
+    assert plan["skipped"][0]["why"] == "no copy in the keep-account"
+
+
+def test_cross_account_plan_refuses_when_a_body_could_not_be_read():
+    # A missing fingerprint means "could not compare", never "compared equal". Treating
+    # unknown as identical is how a cleanup eats a message that was not a duplicate.
+    rows = [_copy("<c@x>", KEEP, 1), _copy("<c@x>", OTHER, 2)]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h"})  # rowid 2 unreadable
+    assert plan["losers"] == {}
+    assert plan["skipped"][0]["why"] == "a copy has no readable body to compare"
+
+
+def test_cross_account_plan_refuses_when_the_bodies_differ():
+    # Same Message-ID, different body = a forwarded or edited copy. #153 says this must
+    # never be collapsed, and it is why Message-ID alone is not the gate.
+    rows = [_copy("<d@x>", KEEP, 1), _copy("<d@x>", OTHER, 2)]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h1", 2: "h2"})
+    assert plan["losers"] == {}
+    assert plan["skipped"][0]["why"] == "bodies differ — not the same message"
+
+
+def test_cross_account_plan_leaves_same_account_copies_to_140():
+    # Two rows in ONE account are #140's job. Collapsing them here would double-delete,
+    # and a Gmail label row deleted "twice" takes the message out of every label.
+    rows = [_copy("<e@x>", KEEP, 1, "imap://ACCT-KEEP/INBOX"), _copy("<e@x>", KEEP, 2)]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h", 2: "h"})
+    assert plan["losers"] == {}
+    assert plan["keepers"] == {}
+    assert plan["skipped"] == []
+
+
+def test_cross_account_pass_speaks_mails_id_spelling_not_sqlites(monkeypatch):
+    # The index stores `<a@b>`; AppleScript's `message id` reports `a@b`. Feeding the
+    # bracketed form downstream does NOT fail loudly — the deletes match nothing and
+    # every keeper reads as missing. Caught on device, so it is pinned here.
+    rows = [
+        {
+            "message_id": "<a@x>",
+            "rowid": 1,
+            "account": KEEP,
+            "mailbox_url": f"imap://{KEEP}/Archive",
+        },
+        {
+            "message_id": "<a@x>",
+            "rowid": 2,
+            "account": OTHER,
+            "mailbox_url": f"imap://{OTHER}/Archive",
+        },
+    ]
+    monkeypatch.setattr(mail_index, "query_cross_account_rows", lambda: rows)
+    monkeypatch.setattr(mail_index, "query_cross_account_summary", lambda: [])
+    monkeypatch.setattr(mail_index, "body_fingerprints", lambda ids: {1: "h", 2: "h"})
+    seen = {}
+
+    class _Adapter:
+        def presence(self, ids, mailbox):
+            return {}
+
+    monkeypatch.setattr(dedupe, "MailAdapter", _Adapter)
+
+    def _spy(r, k, f):
+        seen["rows"] = r
+        return {"losers": {}, "keepers": {}, "skipped": []}
+
+    monkeypatch.setattr(dedupe, "cross_account_plan", _spy)
+    dedupe._run_cross_account(
+        {
+            "keep_account": KEEP,
+            "execute": False,
+            "verbose": False,
+            "limit": None,
+            "mailbox": None,
+        }
+    )
+    assert [r["message_id"] for r in seen["rows"]] == ["a@x", "a@x"], (
+        "the plan must be built from Mail's bare id spelling, not sqlite's brackets"
+    )
+
+
+def test_cross_account_plan_never_targets_a_copy_already_in_trash():
+    # facts §5c: `delete` on a message already in Trash returns cleanly and removes
+    # nothing. Targeting those manufactures guaranteed failures that read exactly like
+    # #164's dropped deletes — and the copy is already where a delete would put it.
+    rows = [
+        _copy("<g@x>", KEEP, 1),
+        _copy("<g@x>", OTHER, 2, f"imap://{OTHER}/Trash"),
+        _copy("<g@x>", "ACCT-ICLOUD", 3, "imap://ACCT-ICLOUD/Deleted%20Messages"),
+        _copy("<g@x>", "ACCT-GMAIL", 4, "imap://ACCT-GMAIL/%5BGmail%5D/Trash"),
+    ]
+    plan = dedupe.cross_account_plan(rows, KEEP, dict.fromkeys([1, 2, 3, 4], "h"))
+    assert plan["losers"] == {}, "all three spellings of Trash must be left alone"
+    assert plan["keepers"] == {}, "a set with nothing left to do is not a set to do"
+
+
+def test_cross_account_plan_keeps_every_keeper_copy_when_several_accounts_lose():
+    rows = [
+        _copy("<f@x>", KEEP, 1),
+        _copy("<f@x>", OTHER, 2),
+        _copy("<f@x>", "ACCT-THIRD", 3),
+    ]
+    plan = dedupe.cross_account_plan(rows, KEEP, {1: "h", 2: "h", 3: "h"})
+    assert sorted(plan["losers"]) == [
+        f"imap://{OTHER}/Archive",
+        "imap://ACCT-THIRD/Archive",
+    ]
+    assert sum(len(v) for v in plan["losers"].values()) == 2  # never 3
 
 
 def test_dedupe_previews_by_default():
