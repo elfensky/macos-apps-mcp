@@ -564,7 +564,13 @@ def mail_index_bodies(rebuild: bool = False) -> dict:
     .emlx file at rest, `.partial` ones included (never launches Mail, never writes in
     Mail's data). Resumable and size-capped — safe to re-run; a re-run continues where
     it left off. rebuild=True re-indexes from scratch. Returns {indexed, skipped,
-    total_emlx, capped, coverage}. Read-only; needs Automation access for Mail.
+    total_emlx, capped, indexed_this_run}. Read-only; needs Automation access for Mail.
+
+    `indexed_this_run` is THIS RUN's progress, NOT coverage: a resumable indexer's own
+    counters cannot say how much of the store is searchable (a fully-indexed store
+    re-runs as "14 newly indexed"). mail_search(body=…) is the one place that answers
+    "is body search usable?", and it does so on the path that needs it — an empty
+    result.
 
     A `.partial.emlx` is missing its ATTACHMENTS, not its body, so partials are indexed
     like any other message (#119). The residual unsearchable tail is ~0.5%: messages

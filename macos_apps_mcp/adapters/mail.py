@@ -2605,5 +2605,17 @@ class MailAdapter:
         res = mail_index.build_body_index(
             mail_root=root, fts_db=mail_index.fts_path(), rebuild=rebuild
         )
-        res["coverage"] = f"{res['indexed']}/{res['total_emlx']} .emlx on disk indexed"
+        # NOT a coverage figure, and it used to be named one (#168 review). `indexed` is
+        # THIS RUN's newly-indexed count; over `total_emlx` it reads as "14/36476 of the
+        # store is searchable" on a store that is already fully indexed — the exact
+        # opposite of the truth, on the one field a caller reads to judge the feature.
+        # A resumable indexer cannot answer "is body search usable?" from its own run
+        # counters; only the sidecar-vs-store intersection can, and `body_coverage()`
+        # already does that (~1.9s) on the one path that needs it — an empty `body=`
+        # search. So report the run honestly and name where the real answer lives.
+        res["indexed_this_run"] = (
+            f"{res['indexed']} newly indexed, {res['skipped']} already current, of "
+            f"{res['total_emlx']} .emlx on disk. This is THIS RUN's progress, not "
+            "coverage — mail_search(body=…) reports coverage when it finds nothing."
+        )
         return res

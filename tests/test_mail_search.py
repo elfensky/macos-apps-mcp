@@ -202,7 +202,7 @@ def test_index_bodies_no_mail_root_raises(monkeypatch):
         MailAdapter().index_bodies()
 
 
-def test_index_bodies_builds_coverage(tmp_path, monkeypatch):
+def test_index_bodies_reports_this_run_not_coverage(tmp_path, monkeypatch):
     from macos_apps_mcp.adapters import mail_index
 
     monkeypatch.setattr(mail_index, "mail_root", lambda: tmp_path)
@@ -217,7 +217,12 @@ def test_index_bodies_builds_coverage(tmp_path, monkeypatch):
     assert out["skipped"] == 1
     assert out["total_emlx"] == 4
     assert out["capped"] is False
-    assert out["coverage"] == "3/4 .emlx on disk indexed"
+    # #168 review: this field must NOT claim to be coverage. On a fully-indexed store a
+    # resume run reports a tiny `indexed`, and "3/4 indexed" then reads as "the store is
+    # 75% searchable" when it is 100%. mail_search owns the coverage answer.
+    assert "coverage" not in out
+    assert out["indexed_this_run"].startswith("3 newly indexed, 1 already current")
+    assert "mail_search" in out["indexed_this_run"]
 
 
 def test_search_clamps_limit_to_max_mails(tmp_path, monkeypatch):
