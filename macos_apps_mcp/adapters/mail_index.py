@@ -5,6 +5,7 @@ here; this module never launches Mail (read-at-rest)."""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 from email import message_from_bytes
@@ -487,6 +488,47 @@ ORDER BY copies DESC
     return sql, []
 
 
+def build_cross_account_rows_query():
+    """Build (sql, params) for EVERY row of every cross-account duplicate set (#153) —
+    ``(message_id, rowid, mailbox_url, account)``, one row per physical copy.
+
+    The summary above counts the problem; this one is what a cleanup acts on, and the
+    difference matters. Cross-account copies live in DIFFERENT mailboxes under DIFFERENT
+    accounts, so the caller has to address each loser's own mailbox by url — there is no
+    "keep item 1 of this mailbox's matches" to lean on the way #140 does. ``rowid`` is
+    the ``<n>`` in ``<n>.emlx``, which is how the body-identity gate reaches each copy's
+    bytes without asking Mail anything.
+
+    Deliberately NOT filtered to a keeper: which account wins is the caller's
+    (human's) decision, and a query that pre-selected losers would be making it.
+    """
+    sql = """
+SELECT gd.message_id_header AS message_id,
+       m.ROWID              AS rowid,
+       mb.url               AS mailbox_url,
+       substr(mb.url, instr(mb.url, '://') + 3,
+              instr(substr(mb.url, instr(mb.url, '://') + 3), '/') - 1) AS account
+FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN message_global_data gd ON gd.ROWID = m.global_message_id
+WHERE m.deleted = 0
+  AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
+  AND gd.message_id_header IN (
+      SELECT gd2.message_id_header
+      FROM messages m2
+      JOIN mailboxes mb2 ON mb2.ROWID = m2.mailbox
+      JOIN message_global_data gd2 ON gd2.ROWID = m2.global_message_id
+      WHERE m2.deleted = 0
+        AND gd2.message_id_header IS NOT NULL AND gd2.message_id_header <> ''
+      GROUP BY gd2.message_id_header
+      HAVING COUNT(DISTINCT substr(mb2.url, 1,
+             instr(mb2.url, '://') + 2 +
+             instr(substr(mb2.url, instr(mb2.url, '://') + 3), '/'))) > 1)
+ORDER BY message_id
+"""
+    return sql, []
+
+
 # The mailbox names a "Trash" is spelled with, per account type — device-verified
 # 2026-08-05 on four accounts: IMAP `Trash`, iCloud `Deleted%20Messages`, Gmail
 # `%5BGmail%5D/Trash`. Urls are percent-ENCODED here (this is the raw mailboxes.url), so
@@ -810,6 +852,67 @@ def query_duplicate_rows(mailbox_url: str) -> list[dict]:
 def query_cross_account_summary() -> list[dict]:
     """Per-account cross-account redundancy (#153)."""
     return _dict_rows(*build_cross_account_summary_query())
+
+
+def query_cross_account_rows() -> list[dict]:
+    """Every physical copy of every cross-account duplicate set (#153)."""
+    return _dict_rows(*build_cross_account_rows_query())
+
+
+def body_fingerprints(rowids, *, root: Path | None = None) -> dict[int, str]:
+    """``{rowid: sha256-of-normalised-body}`` for the copies that have a readable body.
+
+    **This is the identity gate #153 actually needs, and it is NOT the one #153 was
+    filed with.** That issue inherited #140's rule — same Message-ID plus identical
+    ``size`` and ``date_sent`` — which works inside one mailbox because every copy came
+    off one server. Measured across accounts on this Mac (2026-08-06, all 3,948
+    cross-account sets): ``size + date_sent`` agrees on **1.2%** of them, and just 1.1%
+    of the 3,926 Google+Personal sets. ``date_sent`` always matches (it is a header);
+    ``size`` almost never does, because Gmail rewrites headers in transit (``X-GM-*``,
+    extra ``Received:``) without altering a word of the content. Gating on it would have
+    shipped a cleanup that declines 99% of the garbage it exists to remove.
+
+    The body is the thing a human means by "the same message", and #119 made it local:
+    on a 400-set sample every copy's body was readable and **397/397 Google+Personal
+    sets matched, 100%**, while only 6 matched on size.
+
+    A hash is NOT an identity on its own and this must not be read as one — negative
+    control over 792 distinct Message-IDs found 784 distinct hashes, i.e. **6 real
+    collisions**, all bulk-sender templates (the same newsletter sent twice). So this is
+    only ever the CONFIRMATION on copies that already share a Message-ID; the id stays
+    the key. Whitespace is normalised and nothing else, because anything more aggressive
+    starts fusing messages that genuinely differ.
+
+    Missing/unreadable/body-less copies are simply ABSENT from the result — the caller
+    must treat "no fingerprint" as "cannot prove identity, do not delete", never as a
+    match.
+    """
+    base = root if root is not None else mail_root()
+    if base is None:
+        return {}
+    wanted = {int(r) for r in rowids}
+    if not wanted:
+        return {}
+    out: dict[int, str] = {}
+    for f in base.rglob("*.emlx"):
+        try:
+            rowid = int(f.name.split(".")[0])
+        except ValueError:
+            continue
+        if rowid not in wanted or rowid in out:
+            continue
+        try:
+            payload = emlx_payload(f.read_bytes())
+        except OSError:
+            continue  # Mail can expunge between rglob and read — same race as indexing
+        if not payload:
+            continue
+        text = _body_text(message_from_bytes(payload))
+        if not text.strip():
+            continue
+        norm = " ".join(text.split())
+        out[rowid] = hashlib.sha256(norm.encode("utf-8", "replace")).hexdigest()
+    return out
 
 
 def query_trash_url(account: str) -> str | None:

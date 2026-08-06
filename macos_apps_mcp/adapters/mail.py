@@ -2025,6 +2025,21 @@ class MailAdapter:
             ),
         }
 
+    def presence(self, ids, mailbox: str) -> dict:
+        """``{message_id: "present" | "missing" | "ERROR …"}`` for one mailbox (#153).
+
+        A read, through AppleScript rather than sqlite for the reason ``_PRESENT``
+        already states: the Envelope Index lags Mail, and this is used to prove a
+        KEEPER's copy is still there after deleting its siblings in other accounts.
+        An answer that lags is not a proof, and reporting a keeper safe when it is gone
+        is the exact failure #153 is built to prevent.
+        """
+        mids = _split_ids(ids)
+        if not mids:
+            return {}
+        src = mail_addressing.mailbox_args(mailbox)
+        return _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+
     def dedupe_batch(self, ids, mailbox: str, dry_run: bool = True) -> dict:
         """Collapse each named Message-ID's same-mailbox copies down to one (#140).
 

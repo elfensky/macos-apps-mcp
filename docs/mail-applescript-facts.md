@@ -187,6 +187,21 @@ delete cannot be built.
 | **`trash mailbox of <account>` raises -1728 for EVERY account**, although `Mail.sdef` declares it on the account class (line 406) exactly like `drafts mailbox`/`sent mailbox`/`junk mailbox`. | Only the APPLICATION-level `trash mailbox` works, and it is the unified **"All Trash"** across accounts. So an account's own Trash cannot be read from Mail; get it from the Envelope Index (`mailboxes.url`), whose per-account spellings differ — `…/Trash` (IMAP), `…/Deleted%20Messages` (iCloud), `…/%5BGmail%5D/Trash` (Gmail). |
 | **`move` OUT of the unified `trash mailbox` accessor does the move and then CRASHES Mail** — and the caller hangs, host-side timeout and all. | The messages did land in the destination (verified in the index afterwards), then Mail died with the §10 assertion and the `run_osascript` call never returned — an MCP client aborted it at **1800s**, far past `_MOVE_TIMEOUT=300`. A dead Mail mid-Apple-Event does not surface as a timeout. So an undo must move back **from the message's own account Trash url**, read out of the index, never from the unified accessor. Counting through the unified accessor is fine; moving through it is not. |
 
+## 5d. Cross-account copies are the SAME message with DIFFERENT bytes (#153)
+
+Verified 2026-08-06 over all 3,948 cross-account duplicate sets on this Mac, plus a
+400-set body comparison and a negative control. This killed #153's inherited identity
+rule.
+
+| Fact | Detail |
+|---|---|
+| **`size + date_sent` — #140's byte-identity gate — agrees on only 1.2% of cross-account sets.** 1.1% of the 3,926 Google+Personal ones. | `date_sent` matches essentially always (it is a header); `size` almost never does. Gmail rewrites headers in transit (`X-GM-*`, extra `Received:`) without touching a word of the content. #140's gate is right *within* one mailbox, where every copy came off one server — it does not survive the crossing. Gating #153 on it would have shipped a cleanup that declines 99% of the garbage it exists to remove. |
+| **The extracted BODY matches on ~100%** — 397/397 Google+Personal sets in a 400-set sample, every copy readable. | And it is local, thanks to #119: a `.partial.emlx` holds a complete body 99.47% of the time, so this needs no IMAP. Sets where the bodies genuinely differ are real (33 of 3,948) and are exactly the forwarded/edited copies #153 said must never be collapsed. |
+| **A body hash is NOT an identity on its own.** Negative control over 792 distinct Message-IDs: 784 distinct hashes, i.e. **6 real collisions** — all bulk-sender templates (the same newsletter sent twice). | So Message-ID stays the key and the hash is only ever the CONFIRMATION on copies that already share one. Run the control before trusting a 100%: a broken extractor returning a constant looks identical to a perfect match rate. |
+| A cross-account delete lands the loser in **its own account's Trash**, and does not perturb the keeper. Verified per message on two accounts, and **re-checked after an IMAP round and a full Mail quit+relaunch**. | Google: loser left `[Gmail]/All Mail` for `[Gmail]/Trash`, keeper untouched in Personal — so the archive-vs-trash suspicion is answered, deleting a Gmail label copy did NOT remove the message elsewhere. iCloud: loser left `Sent Messages` for `Deleted Messages`, its own spelling. |
+| A loser **already in a Trash mailbox must not be targeted at all**. | §5c: `delete` on a message already in Trash returns cleanly and removes nothing. Targeting them manufactures guaranteed failures that read exactly like #164's dropped deletes — and the copy is already where a delete would put it. The first cross-account dry run turned up 6 of these. |
+| The two planes disagree on Message-ID spelling and **the mismatch fails SILENTLY**: sqlite stores `<a@b>`, AppleScript's `message id` reports `a@b`. | Feeding index ids straight to the delete/verify scripts matched nothing and reported every keeper missing — no error, just a pass that did nothing and a verification that cried wolf. Normalise with `mail_addressing.bare_id` at the boundary. Caught on device; a green suite did not. |
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
