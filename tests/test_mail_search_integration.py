@@ -21,7 +21,7 @@ def test_subject_search_under_1s():
 def test_index_bodies_then_body_search():
     adapter = MailAdapter()
     res = adapter.index_bodies()  # opt-in build (resumable — may be a no-op if built)
-    assert res["indexed"] >= 0 and "coverage" in res
+    assert res["indexed"] >= 0 and "indexed_this_run" in res
     # a re-run indexes nothing new (resume works)
     res2 = adapter.index_bodies()
     assert res2["indexed"] == 0 or res2["skipped"] > 0
