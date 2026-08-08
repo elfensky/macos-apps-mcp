@@ -64,7 +64,11 @@ _USAGE = """usage: macos-apps-mcp dedupe-mail [options]
   --mailbox=<url>       restrict to one mailbox (its `folder` url from mail_overview);
                         with --cross-account this restricts the LOSER mailbox
   --cross-account       operate on copies of one message held by SEVERAL accounts
-  --keep-account=<id>   required with --cross-account: the account whose copy survives
+  --keep-account=<id>[,<id>...]
+                        required with --cross-account: whose copy survives. Several ids
+                        are an ORDERED PRECEDENCE — the first one holding a copy wins
+                        that set, and every other copy loses (including a lower-ranked
+                        keeper's). e.g. --keep-account=<business>,<personal>
   --limit=<n>           act on at most n sets — start small, verify, then widen
 
 Losers go to Trash — nothing is erased, and Mail cannot erase from a script. Empty the
@@ -135,13 +139,22 @@ def _is_trash(url: str) -> bool:
     return unquote(url.rsplit("/", 1)[-1]).strip().lower() in _TRASH_LEAVES
 
 
-def cross_account_plan(rows: list[dict], keep_account: str, fingerprints: dict) -> dict:
+def cross_account_plan(rows: list[dict], keep_account, fingerprints: dict) -> dict:
     """Turn every cross-account copy into {losers-by-mailbox, keepers, skipped}.
+
+    ``keep_account`` is an ORDERED PRECEDENCE — one account id, or several. The first
+    one holding a copy of a given set wins that set; every other copy loses, including
+    a copy in a lower-ranked keeper. So ``business,personal`` means "if it is in
+    Business, that is the copy to keep and Personal's goes too" (operator, 2026-08-08).
+
+    An order is still a HUMAN typing the answer, which is what #153 required — not a
+    heuristic the tool invented. What stays forbidden is the tool ranking accounts on
+    its own (by size, recency, or anything else); it only ever reads the order given.
 
     The three refusals here are the whole safety story of #153, and each one exists
     because the alternative silently does the wrong thing:
 
-    1. **No copy in the keeper account → SKIP the set.** Otherwise "keep Personal" would
+    1. **No copy in ANY keeper account → SKIP the set.** Otherwise "keep Personal" would
        delete both copies of a message Personal never held, which is not deduplication,
        it is deletion. This is the one that makes ``--keep-account`` mean something.
     2. **Any copy without a body fingerprint → SKIP.** A missing fingerprint means the
@@ -160,6 +173,10 @@ def cross_account_plan(rows: list[dict], keep_account: str, fingerprints: dict) 
     failures that look exactly like #164's dropped deletes, and the copy is already
     where a delete would have put it. The first dry run found 6 of these.
     """
+    # One id or several — a single keeper is just an order of length 1, which is why
+    # this stayed one flag instead of growing a second one.
+    order = [keep_account] if isinstance(keep_account, str) else list(keep_account)
+
     by_id: dict[str, list[dict]] = {}
     for row in rows:
         by_id.setdefault(str(row["message_id"]), []).append(row)
@@ -171,7 +188,8 @@ def cross_account_plan(rows: list[dict], keep_account: str, fingerprints: dict) 
         accounts = {c["account"] for c in copies}
         if len(accounts) < 2:
             continue  # not cross-account; #140 owns it
-        if keep_account not in accounts:
+        winner = next((a for a in order if a in accounts), None)
+        if winner is None:
             skipped.append(
                 {
                     "id": mid,
@@ -202,11 +220,11 @@ def cross_account_plan(rows: list[dict], keep_account: str, fingerprints: dict) 
         targets = [
             c
             for c in copies
-            if c["account"] != keep_account and not _is_trash(c["mailbox_url"])
+            if c["account"] != winner and not _is_trash(c["mailbox_url"])
         ]
         if not targets:
             continue  # every loser is already in Trash — nothing left to do
-        keepers[mid] = keep_account
+        keepers[mid] = winner  # the account that actually won, not the whole order
         for c in targets:
             losers.setdefault(c["mailbox_url"], []).append(mid)
     return {"losers": losers, "keepers": keepers, "skipped": skipped}
@@ -328,7 +346,9 @@ def _run_cross_account(opts: dict) -> None:
     reported (232 observations, zero silent), so the residual risk is "a loser stayed",
     which a re-run fixes — not "the keeper went", which the post-pass would catch.
     """
-    keep = opts["keep_account"]
+    # An ORDER, not one account (operator, 2026-08-08): first listed account holding a
+    # copy wins that set. `--keep-account=A` is just an order of length 1.
+    order = [a.strip() for a in str(opts["keep_account"]).split(",") if a.strip()]
     adapter = MailAdapter()
     rows = mail_index.query_cross_account_rows()
     if not rows:
@@ -344,17 +364,23 @@ def _run_cross_account(opts: dict) -> None:
     ]
 
     accounts = sorted({r["account"] for r in rows})
-    if keep not in accounts:
+    unknown = [a for a in order if a not in accounts]
+    if len(unknown) == len(order):
         print(
-            f"--keep-account={keep!r} holds no cross-account copies. Accounts "
+            "no account in --keep-account holds cross-account copies. Accounts "
             "that do:\n" + "\n".join(f"  {a}" for a in accounts),
             file=sys.stderr,
         )
         raise SystemExit(2)
+    for a in unknown:
+        # Not fatal while another rank still matches — but never silent, because a
+        # typo'd id in an order reads exactly like "that account had no duplicates".
+        print(f"note: {a} holds no cross-account copies; it can never win a set.")
 
     print("cross-account duplicate copies by account (#153):\n")
     for row in mail_index.query_cross_account_summary():
-        mark = "  <- KEEPER" if row["account"] == keep else ""
+        rank = order.index(row["account"]) + 1 if row["account"] in order else None
+        mark = f"  <- KEEPER (rank {rank})" if rank else ""
         print(f"  {row['account']}  {row['copies']:>6} copies{mark}")
 
     # Body identity, not size+date_sent. Measured across every cross-account set on this
@@ -362,7 +388,7 @@ def _run_cross_account(opts: dict) -> None:
     # would decline 99% of the work. See mail_index.body_fingerprints.
     print("\nreading bodies to prove identity (this walks the mail store once)...")
     prints = mail_index.body_fingerprints([r["rowid"] for r in rows])
-    plan = cross_account_plan(rows, keep, prints)
+    plan = cross_account_plan(rows, order, prints)
     losers, keepers, skipped = plan["losers"], plan["keepers"], plan["skipped"]
 
     # --mailbox restricts the LOSER side here, the same "do one mailbox first" the
@@ -397,7 +423,7 @@ def _run_cross_account(opts: dict) -> None:
 
     mode = "EXECUTING" if opts["execute"] else "PREVIEW (nothing will change)"
     print(
-        f"\n{mode} — keeping {keep}\n"
+        f"\n{mode} — keeping {' > '.join(order)}\n"
         f"  {len(keepers)} sets are safe to collapse, {total_losers} copies would "
         f"go to Trash in {len(losers)} non-keeper mailboxes\n"
         f"  {len(skipped)} sets LEFT ALONE\n"
@@ -452,9 +478,10 @@ def _run_cross_account(opts: dict) -> None:
     # not ship without it.
     print("\nverifying every keeper copy survived...")
     by_mailbox: dict[str, list[str]] = {}
-    keeper_rows = [
-        r for r in rows if r["account"] == keep and r["message_id"] in keepers
-    ]
+    # Per-set winner, NOT one fixed account: with an order, different sets keep
+    # different accounts, and checking a single one would verify the wrong copy — or
+    # skip the check entirely for every set the other rank won.
+    keeper_rows = [r for r in rows if keepers.get(r["message_id"]) == r["account"]]
     for r in keeper_rows:
         by_mailbox.setdefault(r["mailbox_url"], []).append(r["message_id"])
     lost: list[str] = []

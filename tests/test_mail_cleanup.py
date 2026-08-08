@@ -237,6 +237,44 @@ def test_cross_account_plan_deletes_only_from_non_keeper_mailboxes():
     assert plan["skipped"] == []
 
 
+def test_cross_account_plan_honours_the_keeper_ORDER(monkeypatch):
+    # Operator policy 2026-08-08: Business and Personal are the primary inboxes, and
+    # Business outranks Personal. "If an email is in Business, delete it elsewhere" —
+    # elsewhere INCLUDES Personal, so a lower-ranked keeper is still a loser.
+    BIZ, PERS = "ACCT-BIZ", "ACCT-PERS"
+    rows = [
+        _copy("<a@x>", BIZ, 1),
+        _copy("<a@x>", PERS, 2),
+        _copy("<a@x>", OTHER, 3),
+    ]
+    plan = dedupe.cross_account_plan(rows, [BIZ, PERS], dict.fromkeys([1, 2, 3], "h"))
+    assert plan["keepers"] == {"<a@x>": BIZ}
+    assert sorted(plan["losers"]) == [
+        f"imap://{OTHER}/Archive",
+        f"imap://{PERS}/Archive",
+    ]
+
+
+def test_cross_account_plan_falls_through_to_the_next_rank(monkeypatch):
+    # No Business copy → Personal wins, and Google still loses. This is the 3,923-set
+    # case on the dev Mac against 20 for the rank-1 case.
+    BIZ, PERS = "ACCT-BIZ", "ACCT-PERS"
+    rows = [_copy("<b@x>", PERS, 1), _copy("<b@x>", OTHER, 2)]
+    plan = dedupe.cross_account_plan(rows, [BIZ, PERS], {1: "h", 2: "h"})
+    assert plan["keepers"] == {"<b@x>": PERS}
+    assert plan["losers"] == {f"imap://{OTHER}/Archive": ["<b@x>"]}
+
+
+def test_cross_account_plan_skips_when_no_rank_holds_a_copy():
+    # Neither primary present → nothing is deleted. Without this, an order would
+    # silently degrade into "delete everything not listed".
+    BIZ, PERS = "ACCT-BIZ", "ACCT-PERS"
+    rows = [_copy("<c@x>", OTHER, 1), _copy("<c@x>", "ACCT-THIRD", 2)]
+    plan = dedupe.cross_account_plan(rows, [BIZ, PERS], {1: "h", 2: "h"})
+    assert plan["losers"] == {} and plan["keepers"] == {}
+    assert plan["skipped"][0]["why"] == "no copy in the keep-account"
+
+
 def test_cross_account_plan_refuses_a_set_the_keeper_does_not_hold():
     # Without this, `--keep-account=KEEP` would delete BOTH copies of a message KEEP
     # never had — deletion, not deduplication. This is what makes the flag mean
