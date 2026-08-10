@@ -26,6 +26,13 @@ attachments.
   tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
   `doctor._AUTOMATION_APPS` so `doctor` probes it; it must not reach into another adapter. This is
   what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
+- **The shim↔daemon hop has NO read deadline** (`daemon._uds_client_factory`, `Timeout(None,
+  connect=10.0)`). A call's duration is the daemon's business — a bulk Mail pass runs HOURS —
+  and it is a local socket with no network to time out on. Per-operation limits belong in the
+  adapter, which knows what it asked for. Never "fix" a hang by adding a timeout here: that is
+  #170, where httpx's own 5s default silently killed every destructive Mail call over ~5s. A
+  dead stream must ANSWER (`fail_loud_on_dead_stream`) — silence is what a model misreads as
+  failure, then retries a destructive call that already succeeded.
 - **Three capability tiers, all gated at registration** (a gated-off tool is *absent*, never
   registered-and-erroring): read → write (`@_write_tool`/`@_additive_tool`, skipped by
   `MACOS_APPS_READ_ONLY`) → **outbound** (`@_send_tool("<adapter>")`, registered only when
