@@ -9,6 +9,7 @@ import errno
 import os
 import socket
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -16,6 +17,8 @@ import uvicorn
 from fastmcp import Client as _Client
 from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
 from fastmcp.server import create_proxy
+from mcp.shared.message import SessionMessage
+from mcp.types import ErrorData, JSONRPCError, JSONRPCMessage, JSONRPCResponse
 
 
 class AlreadyRunning(Exception):
@@ -68,17 +71,84 @@ def bind_socket(path: Path) -> socket.socket:
     return s
 
 
+# #170: httpx defaults to Timeout(5.0) on ALL four phases, so the shim gave up reading
+# the response SSE stream 5s after the POST — device-confirmed cliff: a 4.5s tool call
+# returned, a 6s one did not. A tool call's duration is the *daemon's* business (a bulk
+# Mail pass is HOURS: a `whose` lookup is an O(mailbox) scan), and this hop is a local
+# unix socket with no network to time out on, so the read has no deadline at all. Only
+# connect keeps one — the daemon must accept promptly or say why it cannot.
+_UDS_TIMEOUT = httpx.Timeout(None, connect=10.0)
+
+
 def _uds_client_factory(path: Path):
     """httpx AsyncClient factory routing all requests over the unix socket. The URL
     host is a dummy — never resolved."""
 
     def factory(**kwargs):
         kwargs.pop("transport", None)
+        kwargs["timeout"] = _UDS_TIMEOUT
         return httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(uds=str(path)), **kwargs
         )
 
     return factory
+
+
+class _WatchedWriter:
+    """Read-stream writer that remembers whether a JSON-RPC *answer* went through it
+    (progress notifications on the same stream don't count)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.answered = False
+
+    async def send(self, item) -> None:
+        root = getattr(getattr(item, "message", None), "root", None)
+        if isinstance(root, JSONRPCResponse | JSONRPCError):
+            self.answered = True
+        await self._inner.send(item)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def fail_loud_on_dead_stream() -> None:
+    """#170, second bug: mcp's StreamableHTTPTransport catches EVERY error on a
+    request's SSE stream, logs it at DEBUG (`SSE stream ended: …`) and returns without
+    answering — so the caller waits forever on a request that will never come back,
+    indistinguishable from a hang. That is what turned a 5s timeout into a 1800s
+    client abort. Answer the dead stream with a JSON-RPC error instead: loud, and
+    pointing at the record that says whether the work actually happened."""
+    from mcp.client import streamable_http
+
+    original = streamable_http.StreamableHTTPTransport._handle_sse_response
+
+    async def _handle_sse_response(self, response, ctx, is_initialization=False):
+        watched = _WatchedWriter(ctx.read_stream_writer)
+        await original(
+            self, response, replace(ctx, read_stream_writer=watched), is_initialization
+        )
+        request_id = getattr(ctx.session_message.message.root, "id", None)
+        if watched.answered or request_id is None:  # answered, or a notification
+            return
+        await ctx.read_stream_writer.send(
+            SessionMessage(
+                JSONRPCMessage(
+                    JSONRPCError(
+                        jsonrpc="2.0",
+                        id=request_id,
+                        error=ErrorData(
+                            code=-32001,
+                            message="daemon response stream ended without a result — "
+                            "the operation may have COMPLETED; check the audit log "
+                            "before retrying anything destructive",
+                        ),
+                    )
+                )
+            )
+        )
+
+    streamable_http.StreamableHTTPTransport._handle_sse_response = _handle_sse_response
 
 
 def serve() -> None:
@@ -125,6 +195,7 @@ def run_shim() -> None:
     fork-resolved ~15-line shim). No TCC surface: this process only moves bytes."""
     path = socket_path()
     shim_check(path)
+    fail_loud_on_dead_stream()
     proxy = create_proxy(
         _Client(
             _HttpTransport(

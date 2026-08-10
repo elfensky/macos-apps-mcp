@@ -8,8 +8,10 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
-from fastmcp import Client
+import uvicorn
+from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 
 from macos_apps_mcp import daemon
@@ -115,6 +117,87 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
             assert "ok" in r1.content[0].text and "ok" in r2.content[0].text
 
     asyncio.run(go())
+
+
+def _serve(app, path):
+    """Serve `app` over a UDS the way daemon.serve() does; returns the listener."""
+    s = daemon.bind_socket(path)
+    config = uvicorn.Config(
+        app.http_app(), fd=s.fileno(), log_level="warning", ws="none"
+    )
+    threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
+    for _ in range(100):
+        if path.exists():
+            break
+        time.sleep(0.05)
+    return s
+
+
+def test_slow_tool_returns_over_the_socket(sockdir):
+    """#170: httpx's DEFAULT Timeout(5.0) applied to the response SSE stream, so a
+    tool call taking longer than 5s never came back — the daemon did the work, the
+    shim gave up reading, and the swallowed ReadTimeout (see the test below) turned
+    that into a 1800s client hang. Device-confirmed cliff: 4.5s returned, 6s did not.
+    This call MUST exceed 5s to fail on the old behaviour."""
+    app = FastMCP("slowtest")
+
+    @app.tool
+    def slow() -> dict:
+        time.sleep(6)  # > the old 5s cliff; a real bulk Mail pass runs for HOURS
+        return {"ok": True}
+
+    p = sockdir / "mcp.sock"
+    s = _serve(app, p)
+
+    async def go():
+        async with Client(
+            StreamableHttpTransport(
+                "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+            )
+        ) as c:
+            return await asyncio.wait_for(c.call_tool("slow"), timeout=60)
+
+    try:
+        assert "ok" in asyncio.run(go()).content[0].text
+    finally:
+        s.close()
+
+
+def test_dead_response_stream_errors_instead_of_hanging(sockdir):
+    """#170 second bug: mcp swallows any error on a request's SSE stream and returns
+    without answering, so the request hangs forever instead of failing. Simulated with
+    a deliberately tiny client timeout — on the old behaviour this never returns."""
+    daemon.fail_loud_on_dead_stream()
+    app = FastMCP("deadtest")
+
+    @app.tool
+    def slow() -> dict:
+        time.sleep(3)
+        return {"ok": True}
+
+    p = sockdir / "mcp.sock"
+    s = _serve(app, p)
+
+    def impatient(**kwargs):  # 0.5s read deadline → the stream dies mid-call
+        kwargs.pop("transport", None)
+        kwargs["timeout"] = httpx.Timeout(0.5)
+        return httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(uds=str(p)), **kwargs
+        )
+
+    async def go():
+        async with Client(
+            StreamableHttpTransport("http://daemon/mcp", httpx_client_factory=impatient)
+        ) as c:
+            await asyncio.wait_for(c.call_tool("slow"), timeout=30)
+
+    try:
+        with pytest.raises(Exception) as e:  # noqa: B017 — the point is *anything* loud
+            asyncio.run(go())
+        assert not isinstance(e.value, TimeoutError), "hung instead of erroring"
+        assert "ended without a result" in str(e.value)
+    finally:
+        s.close()
 
 
 def test_shim_check_absent_socket_exits_2(sockdir):
