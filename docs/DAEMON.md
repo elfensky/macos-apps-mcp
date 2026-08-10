@@ -114,6 +114,12 @@ Same snippet for Claude Desktop's `claude_desktop_config.json` and VS Code's MCP
 differs, `command`/`args` stay identical. A Terminal-spawned shim uses the same `command` +
 `args` directly on the CLI.
 
+**The shim is per-connection, so rebuilding the `.app` only half-lands.** The daemon picks up
+a new bundle the moment launchd restarts it, but a client that is *already connected* keeps
+running the shim process it spawned at connect time — old code, until it reconnects. Beyond
+"the repo is not the daemon": after a rebuild, restart the daemon **and** reconnect every
+client, or you are testing one build's daemon against another build's shim.
+
 ### 5. Outbound (send) mode under the daemon
 
 ```sh
@@ -264,7 +270,35 @@ build:
 - **Daemon dies mid-session.** Any shim connected at that moment surfaces the failure as a
   transport error to its client (not a silent hang) — launchd's `KeepAlive` restarts the daemon
   (`ThrottleInterval` 10s) automatically, and a client reconnects simply by respawning the shim
-  (a fresh `shim` invocation), which re-probes the socket from scratch.
+  (a fresh `shim` invocation), which re-probes the socket from scratch. That "not a silent hang"
+  is `daemon.fail_loud_on_dead_stream()` doing it, not the SDK — see the next two bullets.
+
+- **A tool call takes as long as it takes: there is NO read deadline on the shim↔daemon hop.**
+  `_uds_client_factory` sets `httpx.Timeout(None, connect=10.0)` on purpose. A call's duration
+  is the *daemon's* business — a bulk Mail pass runs for **hours**, because a `whose` lookup is
+  an O(mailbox) scan — and this hop is a local unix socket with no network to time out on. Only
+  connect keeps a deadline. Adapters enforce their own per-operation limits (the AppleScript
+  timeout surfaces as *"The macOS app didn't respond within 30.0s"*), which is the right layer:
+  it knows what it asked for and can say so. **Do not "fix" a hang by adding a timeout here** —
+  that is precisely [#170](https://github.com/elfensky/macos-apps-mcp/issues/170), where httpx's
+  own default `Timeout(5.0)` cut the response stream 5s after the POST while the daemon was
+  still working, and every destructive Mail call over ~5s died. The cliff moves with the value:
+  4.5s returned and 6s did not; set it to 2s and 3s died; set it to `None` and 12s returned.
+
+- **A call that never returns at all.** The MCP SDK's `StreamableHTTPTransport` catches *every*
+  error on a request's SSE stream, logs it at DEBUG (`SSE stream ended: `, empty message for a
+  read timeout) and returns **without answering** — the pending request is never resolved and
+  never errored, so the client waits to its own idle timeout (1800s in Claude Code) on work that
+  may have finished in seconds. `daemon.fail_loud_on_dead_stream()`, installed by `run_shim()`,
+  answers such a stream with a JSON-RPC error instead. If you see
+
+  > daemon response stream ended without a result — the operation may have COMPLETED; check the
+  > audit log before retrying anything destructive
+
+  take it literally: the transport died, the *operation* may well have succeeded. The `done`
+  record in `~/.local/state/macos-apps-mcp/audit.jsonl` is authoritative and is written **before**
+  the response is sent — read it before retrying, because a blind retry of a `move_mail` that
+  already ran moves a message that is no longer where the retry expects it.
 
 ## Uninstall
 
