@@ -67,9 +67,10 @@ from datetime import datetime
 from urllib.parse import unquote
 
 from ..contracts import Pointer, deletion_result, read_result
-from ..errors import BatchTooLarge, NativeError
+from ..errors import BatchTooLarge, NativeError, OutputOverflow
 from ..runtime import body_file, log, run_osascript
 from ..text import (
+    BODY_HARD_MAX,
     READ_BODY,
     RS,
     STRIP_FRAMING,
@@ -93,6 +94,10 @@ from .mail_index import _deeplink  # re-export: tests + Pointer builders use it 
 
 MAX_MAILS = 25
 MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct)
+# mail_bodies is deliberately smaller than note_bodies' 50: a mail body carries quoted
+# history, signatures and disclaimers, so 50 of them is a context dump, not a read. The
+# total budget (BODY_HARD_MAX) usually bites first anyway — this cap just fails fast.
+MAX_BODIES = 20
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
@@ -1394,6 +1399,74 @@ class MailAdapter:
             )
         return clean_body(body)
 
+    def get_bodies(self, ids: list[str]) -> dict:
+        """Plaintext bodies for up to ``MAX_BODIES`` message-ids in ONE call (#158).
+
+        Reads ``.emlx`` AT REST (``mail_index.body_texts``) — one walk of the store for
+        the whole batch, no Mail launch, no osascript, and no FTS sidecar. That is the
+        actual fix the issue was after: the old cost was N osascript round-trips, and
+        batching them would only have hidden it.
+
+        ``{"results": [{"id", "body"}], "missing": [...]}`` — an id whose copy has no
+        readable file or no text part lands in ``missing``, NEVER in ``results`` with an
+        empty body. "we could not read it" and "the author wrote nothing" are different
+        answers, and conflating them is how a model concludes a message was blank.
+
+        Budgets are the same ones ``mail_body`` uses (#52): each body truncates at
+        ``BODY_MAX`` with an explicit marker, and the batch TOTAL raises
+        ``OutputOverflow`` past ``BODY_HARD_MAX`` rather than dumping. Per body the cap
+        is soft on purpose (``hard=None``) — one pasted-dump message must truncate, not
+        fail the other nineteen; it is the total that is allowed to refuse.
+        """
+        wanted = [i for i in dict.fromkeys(ids) if i.strip()]
+        if not wanted:
+            raise ValueError("mail_bodies needs at least one message id")
+        if len(wanted) > MAX_BODIES:
+            raise BatchTooLarge(
+                f"mail_bodies takes at most {MAX_BODIES} ids at a time (got "
+                f"{len(wanted)}) — read the thread's pointers first and hydrate the "
+                "few that matter."
+            )
+        texts = self._bodies_at_rest(wanted)
+        results, total = [], 0
+        for i in wanted:
+            text = texts.get(stored_id(i))
+            if text is None:
+                continue
+            body = clean_body(text, hard=None)
+            total += len(body)
+            if total > BODY_HARD_MAX:
+                raise OutputOverflow(
+                    f"these bodies total more than {BODY_HARD_MAX} chars — ask for "
+                    f"fewer ids ({len(results)} fit so far), or read them one at a "
+                    "time with mail_body."
+                )
+            results.append({"id": i, "body": body})
+        return {
+            "results": results,
+            "missing": [i for i in wanted if stored_id(i) not in texts],
+        }
+
+    def _bodies_at_rest(self, ids: list[str]) -> dict[str, str]:
+        """``{stored (bracketed) id: body text}`` for the ids whose ``.emlx`` is
+        readable — the shared resolution behind ``get_bodies`` and thread snippets.
+
+        A Message-ID has SEVERAL rows (a Gmail label plus All Mail, a cross-account
+        copy), so every copy's rowid is offered to the one at-rest walk and the first
+        that yields text wins. Which copy answers does not matter: they are the same
+        message, which is exactly what #153's body-identity gate measured (397/397).
+        """
+        rows = mail_index.query_message_locations([stored_id(i) for i in ids])
+        if not rows:
+            return {}
+        texts = mail_index.body_texts([r["rowid"] for r in rows])
+        out: dict[str, str] = {}
+        for r in rows:
+            text = texts.get(r["rowid"])
+            if text and r["message_id"] not in out:
+                out[r["message_id"]] = text
+        return out
+
     def create_draft(self, to: str, subject: str, body: str) -> dict:
         """Create a Mail draft and OPEN it for the human to review/send — NEVER sends.
         Atomic (#44): if any step after creation fails, the script rolls the partial
@@ -2411,12 +2484,23 @@ class MailAdapter:
             plane="applescript-inbox" if used_fallback else None,
         )
 
-    def thread(self, message_id: str, limit: int = MAX_THREAD) -> dict:
+    def thread(
+        self, message_id: str, limit: int = MAX_THREAD, snippets: bool = False
+    ) -> dict:
         """Every message in the conversation containing ``message_id``, deduped and
         oldest-first — including the ones YOU sent, which is what makes it a transcript.
-        Bodies stay behind ``mail_body``: a thread is Pointers, so quoted-text
-        duplication never arises. Unknown id -> empty (a no-match read, not an error);
-        `truncated` marks a thread that hit `limit`, where the OLDEST were dropped.
+        Bodies stay behind ``mail_body``/``mail_bodies``: a thread is Pointers, so
+        quoted-text duplication never arises. Unknown id -> empty (a no-match read, not
+        an error); `truncated` marks a thread that hit `limit`, where the OLDEST were
+        dropped.
+
+        ``snippets=True`` adds a ``SUMMARY_MAX``-bounded first extract of each body,
+        read AT REST on one walk (#158) — no Mail launch, no extra call per message. It
+        answers "who spoke last, and about what" without hydrating a single body, which
+        is the read that used to cost one ``mail_body`` per message. Opt-in, not
+        default: at ``limit=100`` a snippet per pointer is itself the payload dump that
+        pointers-not-payload exists to prevent. A message whose file is unreadable
+        simply carries no ``snippet`` key — an absent extract, never an empty one.
 
         No AppleScript fallback: AppleScript cannot express "fetch this conversation",
         so on schema drift this raises the typed error rather than inventing a
@@ -2429,9 +2513,16 @@ class MailAdapter:
         # reports them BARE — `stored_id` is the one sanctioned conversion. Without it
         # every id the AppleScript tools emit matched zero rows, indistinguishable from
         # a genuine miss.
-        return read_result(
-            mail_index.query_thread(stored_id(message_id), limit), cap=limit
-        )
+        pointers = mail_index.query_thread(stored_id(message_id), limit)
+        if snippets and pointers:
+            texts = self._bodies_at_rest([p.id for p in pointers])
+            pointers = [
+                replace(p, snippet=clean_summary(texts[stored_id(p.id)]))
+                if stored_id(p.id) in texts
+                else p
+                for p in pointers
+            ]
+        return read_result(pointers, cap=limit)
 
     def overview(self) -> list[dict]:
         """Per-mailbox {account, mailbox, total, unread}, unread-first.

@@ -78,6 +78,7 @@ _PERMISSION = {
     "contacts": "Automation",
     "mail": "Automation",
     "mail_body": "Automation",
+    "mail_bodies": "Full Disk Access",
     "mail_attachments": "Automation",
     "mail_needs_response": "Automation",
     "mail_awaiting_reply": "Automation",

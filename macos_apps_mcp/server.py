@@ -420,6 +420,26 @@ def mail_body(id: str, mailbox: str = "") -> str:
 
 
 @_read_tool
+def mail_bodies(ids: list[str]) -> dict:
+    """Plaintext bodies for up to 20 message ids in ONE call — the bulk read behind
+    "catch me up on this thread". Opt-in and bounded: reading a thread stays
+    mail_search -> mail_thread -> mail_bodies, three calls total, and with
+    `mail_thread(snippets=True)` often only two.
+
+    Returns {"results": [{"id", "body"}], "missing": [ids]}. An id whose message can't
+    be read off disk is listed in `missing` — it is NEVER returned with an empty body,
+    so "unreadable" is never mistaken for "the sender wrote nothing". Each body is
+    truncated at the usual per-body budget with an explicit marker; if the batch total
+    is too large the call REFUSES (output_overflow) rather than dumping — ask for fewer
+    ids.
+
+    Reads Mail's message files at rest: fast, no Mail launch, and it sees messages that
+    arrived seconds ago (unlike the mail_search(body=) FTS index, which only knows what
+    mail_index_bodies last swept). Read-only. Needs Full Disk Access."""
+    return _mail.get_bodies(ids)
+
+
+@_read_tool
 def mail_attachments(mailbox: str = "", query: str = "", message_id: str = "") -> dict:
     """List attachments on messages in a Mail mailbox, or on ONE message (Automation).
 
@@ -528,14 +548,22 @@ def mail_search(
 
 
 @_read_tool
-def mail_thread(id: str, limit: int = 100) -> dict:
+def mail_thread(id: str, limit: int = 100, snippets: bool = False) -> dict:
     """Every message in the conversation containing `id`, oldest-first — the transcript,
     including messages YOU sent. Deduped: a message filed in several mailboxes appears
-    once. Returns {results, truncated?} of citable Pointers; use mail_body(id) for any
-    message's text. Over `limit` messages the OLDEST are dropped (and `truncated` says
-    so), since a thread is usually read to reply to it. Unknown id returns no results.
+    once. Returns {results, truncated?} of citable Pointers. Over `limit` messages the
+    OLDEST are dropped (and `truncated` says so), since a thread is usually read to
+    reply to it. Unknown id returns no results.
+
+    `snippets=True` adds a short `snippet` (first ~200 chars of the body) to each
+    pointer, read off disk in one pass — no Mail launch and no extra calls. Use it to
+    see WHO SPOKE LAST and roughly about what before deciding which messages are worth
+    hydrating; then `mail_bodies(ids)` for the few that are. A message whose body can't
+    be read carries no `snippet` key at all (absent, not empty). Leave it off for a
+    long thread you only need to enumerate.
+
     Fast, read-only, no Mail launch. Needs Full Disk Access."""
-    return _mail.thread(id, limit)
+    return _mail.thread(id, limit, snippets)
 
 
 @_read_tool
