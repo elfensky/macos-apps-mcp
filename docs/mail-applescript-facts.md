@@ -81,6 +81,28 @@ still constructs nothing (that is the only guarantee), and `drafts()` + `delete_
 are still the sweep. Do not "optimise away" the sweep on the strength of three clean
 runs.
 
+## 3d. Send Later has NO scripting surface (#84)
+
+Verified 2026-08-11. The feature is real in the app and its mailbox is real on this Mac —
+`local://A2025935-…/SendLater`, with an `Info.plist` and an entry in the Envelope Index —
+which is what makes this look reachable. It is not.
+
+| Fact | Detail |
+|---|---|
+| `Mail.sdef` contains **zero** occurrences of "send later", "deferred" or "schedul". The `outgoing message` class has **no date property at all** — its entire surface is `sender`, `subject`, `content`, `visible`, `message signature`, read-only `id`, and the two deprecated no-ops. | The only `type="date"` properties in the whole dictionary are `date received` and `date sent`, both `access="r"`, and both on `message`, not `outgoing message`. |
+| **`send` takes no date.** `<command name="send"><direct-parameter type="outgoing message"/><result type="boolean"/></command>` — one parameter, no optional arguments. | So there is no place to put a time even if one were accepted. |
+| Runtime, against a real outgoing message, all three spellings refused: `set sendLaterDate of m` → **-1700** *"Can't make sendLaterDate of outgoing message into type specifier"*; `set send date of m` → **-10006**; the raw four-char form `set «class sndL» of m` → **-10006**. | This is the case where the dictionary is HONEST. Compare `html content` (§4), which lies — but note that one is **declared** in the sdef and merely mis-described. An UNDECLARED Cocoa key has no four-char code, so AppleScript cannot build a specifier for it and no Apple Event can carry it. Declared-but-lying and undeclared are different failure classes; only the first can surprise you. |
+| The mechanic exists entirely inside the compose back-end. `strings` on Mail: `_sendLaterDate` (`T@"NSDate",&,N,V_sendLaterDate`), `deliverMessageWithSendLaterDate:completionHandler:`, `generateAndSendMessageWithSendLaterDate:sendingProgress:completionHandler:`, `appendMessageToSendLaterQueue:sendLaterDate:`, `_initializeSendLaterStore`, `_presentSendLaterDatePicker`. | The date is a **parameter of the send/deliver call**, held by a separate send-later store. It is not a property of any object AppleScript can reach. |
+| **The mailbox is a MIRROR, not the queue.** Mail's own log line: *"Appending **placeholder** message with ID:%@ to the sendLater mailbox for send later date:%@"*. | So a message you put in `SendLater` yourself has no entry in the send-later store and carries no date. The mailbox contents are a display of the schedule, not its cause. |
+| `move`ing a real draft into `SendLater` **succeeds** and then does nothing. Device-probed with a draft addressed to the operator: the move verified (source empty, destination 1), and the message simply sat there — Outbox stayed 0 and nothing was sent. | The back door is reachable and inert. It was never going to be more than that: even a mailbox that Mail *did* act on gives no channel to say **when**, and "when" is the entire feature. |
+
+**Consequence for #84.** Both branches of its sketch are closed. Native Send Later via
+AppleScript does not exist, and the fallback ("create a draft now, send it later") inherits
+§3b's two refusals — a draft carrying **attachments** and a **reply/forward** draft — because
+a scheduled send would have to go through the same rebuild `send_mail(draft_id=…)` does.
+A scheduled send that cannot carry an attachment and cannot stay in a thread is a different
+product from the one the issue imagines, and must not be shipped under that name.
+
 ## 4. Content and attachments
 
 - **`content` of an outgoing/forwarded message is permanently unreadable** (empty at 0s/1s/4s). Mail
