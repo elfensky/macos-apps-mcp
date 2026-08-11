@@ -778,8 +778,11 @@ def move_mail(
     the cap is not overridable. BOTH mailboxes are required and are address tokens: the
     `folder` value from the read that produced the ids, passed back VERBATIM (an opaque
     `imap://<uuid>/<path>` token, not a name to retype), or one of the canonical
-    "inbox"/"sent"/"drafts"/"trash"/"junk". To archive, move into a mailbox named
-    Archive — there is no separate archive tool.
+    "inbox"/"sent"/"drafts"/"trash"/"junk". A canonical name as `to_mailbox` files into
+    the SOURCE message's own account (it names Mail's cross-account accessor, not one
+    mailbox), so it is refused for an On My Mac source — that store has none of the
+    five. Pass a `folder` url from mail_overview when in doubt. To archive, move into a
+    mailbox named Archive — there is no separate archive tool.
     Cross-account moves are supported and leave exactly ONE copy; each message is
     verified present in the destination and gone from the source afterwards, so a
     per-id `status` reports what really happened rather than assuming success.

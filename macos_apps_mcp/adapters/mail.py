@@ -1949,6 +1949,27 @@ class MailAdapter:
         duplicates #153 cleans up. This still verifies both sides per message, so a
         server that behaved otherwise would be reported (``status`` says "in BOTH
         mailboxes"), never silently duplicated.
+
+        A canonical name as ``to_mailbox`` is a UNIFIED accessor ("All Drafts" — a
+        container spanning every account, with no ``account`` of its own), and Mail
+        files into the mailbox of that role belonging to the **source message's own
+        account**. Census, device-verified 2026-08-11 on one throwaway draft with every
+        leg reversed: from an imap source all five work and land in that account's
+        concrete mailbox (Drafts→inbox/sent/junk/trash, INBOX→drafts, all
+        ``succeeded: 1``). Two cases do not, and only the first is refusable here:
+
+        - **On My Mac source** — the local store has NO inbox/sent/drafts/trash/junk, so
+          there is nothing for the unified name to resolve to and all five are a
+          no-op ("not in the destination", message untouched). Refused below. This is
+          the same asymmetry that makes ``trash_mail`` refuse a ``local://`` message
+          (#80) — one store, no system mailboxes — not a second rule.
+        - **self-move** — the unified container already includes the source (e.g.
+          ``imap://X/INBOX`` → ``"inbox"``). A no-op, and the post-verify misreports it
+          as "in BOTH mailboxes … this was a COPY". Deliberately NOT refused: telling a
+          concrete url's ROLE requires a per-account five-role url map, and the
+          leaf-name shortcut that would avoid it ("Sent Messages"/"Deleted
+          Messages"/"[Gmail]/Trash") is exactly the per-locale name table #61 deleted.
+          Nothing moves and nothing is lost, so the loud wrong-worded status stands.
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any
@@ -1960,6 +1981,18 @@ class MailAdapter:
             raise ValueError(
                 "from_mailbox and to_mailbox address the same mailbox — nothing to "
                 "move. Do not retry with the same pair."
+            )
+        # An empty account id is mailbox_args' unified-accessor marker; "local" is the
+        # On My Mac sentinel. Refused HERE rather than left to the post-verify (#171):
+        # the address is one the docstring offers, so it must fail at the boundary with
+        # the fix in hand, not as a per-id verification failure after N Apple Events.
+        if not dst[0] and src[0] == "local":
+            raise ValueError(
+                f"to_mailbox {to_mailbox!r} is a unified accessor, which files into "
+                "the SOURCE message's own account — and the On My Mac store has no "
+                "inbox/sent/drafts/trash/junk, so this move cannot land anywhere. Pass "
+                "the destination's `folder` url instead (mail_overview lists them). Do "
+                "not retry with a canonical name."
             )
         targets = [
             mail_recover.Target(

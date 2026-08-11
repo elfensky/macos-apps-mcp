@@ -95,7 +95,7 @@ which is what makes this look reachable. It is not.
 | The mechanic exists entirely inside the compose back-end. `strings` on Mail: `_sendLaterDate` (`T@"NSDate",&,N,V_sendLaterDate`), `deliverMessageWithSendLaterDate:completionHandler:`, `generateAndSendMessageWithSendLaterDate:sendingProgress:completionHandler:`, `appendMessageToSendLaterQueue:sendLaterDate:`, `_initializeSendLaterStore`, `_presentSendLaterDatePicker`. | The date is a **parameter of the send/deliver call**, held by a separate send-later store. It is not a property of any object AppleScript can reach. |
 | **The mailbox is a MIRROR, not the queue.** Mail's own log line: *"Appending **placeholder** message with ID:%@ to the sendLater mailbox for send later date:%@"*. | So a message you put in `SendLater` yourself has no entry in the send-later store and carries no date. The mailbox contents are a display of the schedule, not its cause. |
 | `move`ing a real draft into `SendLater` **succeeds** and then does nothing. Device-probed with a draft addressed to the operator: the move verified (source empty, destination 1), and the message simply sat there — Outbox stayed 0 and nothing was sent. | The back door is reachable and inert — watched for 11 minutes (14:53→15:04), Outbox 0 throughout, no crash reports. It was never going to be more than that: even a mailbox that Mail *did* act on gives no channel to say **when**, and "when" is the entire feature. |
-| Moving back **out** of `SendLater` works, but only to a CONCRETE mailbox url. `move … to "drafts"` — the unified accessor — returned cleanly and moved nothing, twice; the same move to `imap://<uuid>/Drafts` succeeded first try. | Not a `SendLater` property: the unified accessor is the part that failed. `move_mail`'s post-verify caught it and reported `status: ERROR`, so it was loud rather than silent — the #135 discipline working. On My Mac has no `Trash` mailbox at all, so `trash_mail` on a `local://` message correctly refuses (#80). |
+| Moving back **out** of `SendLater` works, but only to a CONCRETE mailbox url. `move … to "drafts"` — the unified accessor — returned cleanly and moved nothing, twice; the same move to `imap://<uuid>/Drafts` succeeded first try. | Not a `SendLater` property, and — per §5e's census — not a unified-accessor property either: the **`local://` SOURCE** is what fails. `move_mail`'s post-verify caught it and reported `status: ERROR`, so it was loud rather than silent — the #135 discipline working. |
 
 **Consequence for #84.** Both branches of its sketch are closed. Native Send Later via
 AppleScript does not exist, and the fallback ("create a draft now, send it later") inherits
@@ -224,6 +224,51 @@ rule.
 | A cross-account delete lands the loser in **its own account's Trash**, and does not perturb the keeper. Verified per message on two accounts, and **re-checked after an IMAP round and a full Mail quit+relaunch**. | Google: loser left `[Gmail]/All Mail` for `[Gmail]/Trash`, keeper untouched in Personal — so the archive-vs-trash suspicion is answered, deleting a Gmail label copy did NOT remove the message elsewhere. iCloud: loser left `Sent Messages` for `Deleted Messages`, its own spelling. |
 | A loser **already in a Trash mailbox must not be targeted at all**. | §5c: `delete` on a message already in Trash returns cleanly and removes nothing. Targeting them manufactures guaranteed failures that read exactly like #164's dropped deletes — and the copy is already where a delete would put it. The first cross-account dry run turned up 6 of these. |
 | The two planes disagree on Message-ID spelling and **the mismatch fails SILENTLY**: sqlite stores `<a@b>`, AppleScript's `message id` reports `a@b`. | Feeding index ids straight to the delete/verify scripts matched nothing and reported every keeper missing — no error, just a pass that did nothing and a verification that cried wolf. Normalise with `mail_addressing.bare_id` at the boundary. Caught on device; a green suite did not. |
+
+## 5e. A unified accessor AS A MOVE DESTINATION — the census (#171)
+
+Verified 2026-08-11 on one throwaway draft, every leg reversed and re-located through the
+Envelope Index. #171 was filed as "a unified accessor cannot be a move destination". **That
+premise is wrong.** Four of the five worked on the first try; the reported failure was the
+`local://` SOURCE, not the destination.
+
+The one line that explains all of it: **a unified accessor is a `container` with no
+`account`** — `account of drafts mailbox` raises *"Can't get account of drafts mailbox"*,
+where a concrete mailbox answers with its account. So `move … to <unified>` has no store of
+its own to file into and uses the **source message's own account's** mailbox of that role.
+
+| Source | `to_mailbox` | Result |
+|---|---|---|
+| `imap://B88…/Drafts` | `inbox` | **ok** → `imap://B88…/INBOX` |
+| `imap://B88…/Drafts` | `sent` | **ok** → `imap://B88…/Sent%20Messages` |
+| `imap://B88…/Drafts` | `junk` | **ok** → `imap://B88…/Junk` |
+| `imap://B88…/Drafts` | `trash` | **ok** → `imap://B88…/Deleted%20Messages` (no crash — §10's crash is moving **out** of the unified trash, not into it) |
+| `imap://B88…/INBOX` | `drafts` | **ok** → `imap://B88…/Drafts` |
+| `imap://B88…/Drafts` | `drafts` | no-op — *"the message is in BOTH mailboxes … this was a COPY, not a move"* |
+| `imap://B88…/INBOX` | `inbox` | no-op — same status |
+| `local://A20…/171Probe` | all five | no-op — *"move returned cleanly but the message is not in the destination"*, message untouched |
+
+Two failure classes, and they need different handling:
+
+- **`local://` source.** The On My Mac store has **no** inbox/sent/drafts/trash/junk, so the
+  unified name resolves to nothing for it. Same root cause as #80's `trash_mail` refusal for
+  a local message — one store, no system mailboxes. `move_mail` now **refuses this at the
+  boundary**, before any Apple Event.
+- **Self-move** (the unified container already includes the source). A genuine no-op that the
+  post-verify misreports as a COPY. Deliberately not refused: recognising a concrete url's
+  ROLE needs a per-account five-role url map, and the leaf-name shortcut that would avoid it
+  (`Sent Messages` / `Deleted Messages` / `[Gmail]/Trash`) is the per-locale name table #61
+  deleted. Nothing moves, nothing is lost, the status is loud — it just uses the wrong words.
+
+Also learned on this pass, both about `outgoing message`, both §6-class:
+
+- **`delete <outgoing message>` must iterate in REVERSE by index.** Forward iteration over
+  `every outgoing message` invalidates the reference after the first delete — *"Can't get
+  item 2 of every outgoing message"*, exactly §6's mailbox trap on a different class.
+- **`close <compose window> saving no` reports success and leaves the window open.** It ran
+  clean for three windows and all three stayed. Deleting the underlying `outgoing message`
+  discards the content; the empty window shell is a ⌘W for the human. So a probe that opens
+  compose windows cannot fully sweep its own litter from a script.
 
 ## 6. Addressing and iteration
 
