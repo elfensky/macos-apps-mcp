@@ -82,7 +82,9 @@ _PERMISSION = {
     "mail_attachments": "Automation",
     "mail_needs_response": "Automation",
     "mail_awaiting_reply": "Automation",
-    "mail_index_bodies": "Automation",
+    # #161a: it reads .emlx at rest and never launches Mail — FDA, not Automation. It
+    # stays read-tier although it writes the FTS sidecar; see the comment on the tool.
+    "mail_index_bodies": "Full Disk Access",
     "mail_thread": "Full Disk Access",
     # counts are sqlite (FDA), account NAMES go through osascript — which launches
     # Mail — so this tool genuinely needs both and must say both.

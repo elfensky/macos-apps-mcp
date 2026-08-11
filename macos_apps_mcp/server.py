@@ -586,13 +586,22 @@ def mail_overview() -> list[dict]:
     return _mail.overview()
 
 
+# READ TIER ON PURPOSE (#161a) — do not "fix" this to _write_tool/_additive_tool because
+# it writes a sqlite file. `readOnlyHint` is a claim about the USER'S data, and the only
+# thing this writes is OUR FTS sidecar in OUR state dir; it never launches Mail and
+# never touches Mail's store. Demoting it would also make it SKIPPED under
+# MACOS_APPS_READ_ONLY, which is the actual regression: that flag is a safe-deploy guard
+# against mutating the user's data, and it would instead freeze body search at whatever
+# the sidecar last held — degrading the READ surface the flag exists to protect.
 @_read_tool
 def mail_index_bodies(rebuild: bool = False) -> dict:
     """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads every
     .emlx file at rest, `.partial` ones included (never launches Mail, never writes in
     Mail's data). Resumable and size-capped — safe to re-run; a re-run continues where
     it left off. rebuild=True re-indexes from scratch. Returns {indexed, skipped,
-    total_emlx, capped, indexed_this_run}. Read-only; needs Automation access for Mail.
+    total_emlx, capped, indexed_this_run}. Read-only for Mail; the one thing it writes
+    is this server's own FTS sidecar. Needs Full Disk Access (it reads .emlx at rest),
+    NOT Automation.
 
     `indexed_this_run` is THIS RUN's progress, NOT coverage: a resumable indexer's own
     counters cannot say how much of the store is searchable (a fully-indexed store
