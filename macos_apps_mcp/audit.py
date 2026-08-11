@@ -252,6 +252,17 @@ class AuditMiddleware(Middleware):
         source = self._snapshot_sources.get(tool)
         if source is not None and args.get("id"):
             before = await anyio.to_thread.run_sync(_safe_snapshot, source, args["id"])
+        # The snapshot above is a SECOND native read on top of whatever the write does
+        # (delete_draft: one `_DRAFTS` spawn here, one `_DELETE_DRAFT` spawn in the
+        # adapter — two, not the three #161 estimated; dry-run is also two). #161 asked
+        # whether the write should hand its own before-state over so this could be
+        # skipped. MEASURED 2026-08-11 on the real Drafts mailbox: 638/652/653 ms, and
+        # it is bounded — `_DRAFTS` stops at 25 records, so it is osascript spawn cost,
+        # not O(mailbox). Not worth it: ~0.65s on a human-paced tool against reshaping
+        # the seam EVERY adapter's audit trail runs through, plus teaching one script to
+        # rebuild the exact Pointer this produces or the record silently changes shape.
+        # before-state is what makes mail_undo and the audit log trustworthy; it does
+        # not get cheapened for a spawn. Revisit only if a batch write lands here.
         result = await call_next(context)
         if tool in self._write_tools and not result.is_error:
             try:
