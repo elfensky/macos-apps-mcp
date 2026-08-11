@@ -1995,6 +1995,32 @@ def test_move_mail_refuses_a_move_onto_itself(monkeypatch, no_backup):
         MailAdapter().move_mail("a@x", _INBOX, _INBOX)
 
 
+def test_move_mail_refuses_a_unified_destination_from_on_my_mac(monkeypatch, no_backup):
+    # #171, device-verified: a canonical name files into the SOURCE's own account, and
+    # On My Mac has none of the five — so all five are a no-op from a local:// source.
+    # It must fail at the boundary with the fix in hand, never as a post-hoc verify.
+    def boom(*a, **kw):
+        raise AssertionError("must refuse before Mail is touched")
+
+    _patch_run(monkeypatch, boom)
+    for dest in ("inbox", "sent", "drafts", "trash", "junk"):
+        with pytest.raises(ValueError, match="On My Mac"):
+            MailAdapter().move_mail("a@x", "local://LOCAL-UUID/Notes", dest)
+
+
+def test_move_mail_allows_a_unified_destination_from_an_imap_source(
+    monkeypatch, no_backup
+):
+    # The other half of the same census: from an imap source every unified destination
+    # WORKS (it resolves to that account's concrete mailbox), so the #171 refusal must
+    # not widen into "a unified accessor can never be a destination".
+    monkeypatch.setattr(
+        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
+    )
+    out = MailAdapter().move_mail("a@x", _INBOX, "drafts", dry_run=False)
+    assert out["succeeded"] == 1
+
+
 def test_move_mail_reports_what_the_verify_found_not_what_it_hoped(
     monkeypatch, no_backup
 ):
