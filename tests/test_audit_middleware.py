@@ -75,6 +75,33 @@ def test_update_captures_before(monkeypatch):
     assert records[0]["target_id"] == "E-1|9"
 
 
+def test_before_state_is_captured_for_every_id_addressed_write(monkeypatch):
+    # #161b's guard rail. The seam was measured (~0.65s per snapshot) and deliberately
+    # left alone; this pins WHY, so an optimizer who skips the snapshot to save a spawn
+    # breaks a test instead of quietly shipping an audit log that cannot answer "what
+    # was it before?" — the one thing mail_undo and the audit trail rest on.
+    calls = []
+    fake = SimpleNamespace(
+        snapshot=lambda ident: (
+            calls.append(ident)
+            or Pointer(id=ident, summary="was", deeplink="d", folder="drafts")
+        )
+    )
+    records = _capture(monkeypatch)
+    _run(
+        _mw({"update_event": fake}),
+        _ctx("update_event", {"id": "E-1", "title": "x"}),
+        _Result({"id": "E-1", "summary": "now", "deeplink": "d"}),
+    )
+    assert calls == ["E-1"], "the write's before-state must be snapshotted, once"
+    assert records[0]["before"] == {
+        "id": "E-1",
+        "summary": "was",
+        "deeplink": "d",
+        "folder": "drafts",
+    }
+
+
 def test_tool_error_writes_no_record(monkeypatch):
     records = _capture(monkeypatch)
     _run(_mw(), _ctx("create_event", {}), _Result(None, is_error=True))
