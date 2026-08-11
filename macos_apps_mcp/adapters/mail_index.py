@@ -859,6 +859,52 @@ def query_cross_account_rows() -> list[dict]:
     return _dict_rows(*build_cross_account_rows_query())
 
 
+def body_texts(rowids, *, root: Path | None = None) -> dict[int, str]:
+    """``{rowid: body text}`` read from ``.emlx`` AT REST — no Mail, no sidecar (#158).
+
+    The one place bodies are read off disk. Two callers want it for different reasons:
+    ``body_fingerprints`` hashes the text to prove two copies are the same message, and
+    ``mail_bodies``/thread snippets hand the text to the model.
+
+    **Why at rest and not the FTS sidecar** (device-probed 2026-08-11): the sidecar
+    covered **0 of the 30 newest** messages on this Mac while the ``.emlx`` files
+    covered **30/30**. The sidecar is keyed to the last ``mail_index_bodies`` run, so it
+    is a cold archive — precisely missing the message you are about to reply to. At rest
+    is fresh, because Mail writes the file as the message arrives.
+
+    Cost is one walk of the store regardless of how many rowids are asked for — 36,748
+    files in 0.90s here — so callers should ask for a whole batch at once, never per id.
+
+    A rowid whose file is absent, malformed, or carries no text part is simply ABSENT
+    from the result. The caller must report that as MISSING, never as an empty body:
+    "we could not read it" and "the author wrote nothing" are different answers.
+    """
+    base = root if root is not None else mail_root()
+    if base is None:
+        return {}
+    wanted = {int(r) for r in rowids}
+    if not wanted:
+        return {}
+    out: dict[int, str] = {}
+    for f in base.rglob("*.emlx"):
+        try:
+            rowid = int(f.name.split(".")[0])
+        except ValueError:
+            continue
+        if rowid not in wanted or rowid in out:
+            continue
+        try:
+            payload = emlx_payload(f.read_bytes())
+        except OSError:
+            continue  # Mail can expunge between rglob and read — same race as indexing
+        if not payload:
+            continue
+        text = _body_text(message_from_bytes(payload))
+        if text.strip():
+            out[rowid] = text
+    return out
+
+
 def body_fingerprints(rowids, *, root: Path | None = None) -> dict[int, str]:
     """``{rowid: sha256-of-normalised-body}`` for the copies that have a readable body.
 
@@ -887,32 +933,12 @@ def body_fingerprints(rowids, *, root: Path | None = None) -> dict[int, str]:
     must treat "no fingerprint" as "cannot prove identity, do not delete", never as a
     match.
     """
-    base = root if root is not None else mail_root()
-    if base is None:
-        return {}
-    wanted = {int(r) for r in rowids}
-    if not wanted:
-        return {}
-    out: dict[int, str] = {}
-    for f in base.rglob("*.emlx"):
-        try:
-            rowid = int(f.name.split(".")[0])
-        except ValueError:
-            continue
-        if rowid not in wanted or rowid in out:
-            continue
-        try:
-            payload = emlx_payload(f.read_bytes())
-        except OSError:
-            continue  # Mail can expunge between rglob and read — same race as indexing
-        if not payload:
-            continue
-        text = _body_text(message_from_bytes(payload))
-        if not text.strip():
-            continue
-        norm = " ".join(text.split())
-        out[rowid] = hashlib.sha256(norm.encode("utf-8", "replace")).hexdigest()
-    return out
+    return {
+        rowid: hashlib.sha256(
+            " ".join(text.split()).encode("utf-8", "replace")
+        ).hexdigest()
+        for rowid, text in body_texts(rowids, root=root).items()
+    }
 
 
 def query_trash_url(account: str) -> str | None:

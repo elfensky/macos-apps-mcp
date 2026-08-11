@@ -220,6 +220,10 @@ class Pointer:
     # on the reads that go through Mail's unified cross-account accessors: there the
     # account genuinely is unknown. ``mail_overview`` maps it to a display name.
     account: str | None = None
+    # mail_thread(snippets=True) only: a bounded first-extract of the body, read at rest
+    # (#158). It stays optional and opt-in because a snippet on every pointer of a
+    # 100-message thread is the payload dump "pointers, not payload" exists to prevent.
+    snippet: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         """The wire shape: required fields always; optional fields only when set.
@@ -231,6 +235,8 @@ class Pointer:
             d["reason"] = self.reason
         if self.account is not None:
             d["account"] = self.account
+        if self.snippet is not None:
+            d["snippet"] = self.snippet
         return d
 
 

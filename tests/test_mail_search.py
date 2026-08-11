@@ -1132,3 +1132,94 @@ def test_body_coverage_counts_the_sidecar_against_distinct_message_ids(
     # (the fixture's NULL-header row and every duplicate copy collapse out of it)
     assert text.startswith("1 of 9 messages")
     assert "(11.1%)" in text
+
+
+# --- #158 bulk body read: at-rest source, missing contract, budgets -------------------
+
+
+def _fake_store(root, rows):
+    """A Mail store whose ``.emlx`` files are named by the fixture's messages.ROWID —
+    the naming device-verified in #159 and the only thing that maps an index row to a
+    file on disk."""
+    msgs = root / "V10/acct/INBOX.mbox/Data/Messages"
+    msgs.mkdir(parents=True)
+    for rowid, body in rows.items():
+        rfc = f"Message-ID: <x{rowid}@ex.com>\r\nContent-Type: text/plain\r\n\r\n{body}"
+        raw = rfc.encode()
+        (msgs / f"{rowid}.emlx").write_bytes(
+            f"{len(raw)}\n".encode() + raw + b"<plist/>"
+        )
+
+
+def _at_rest(tmp_path, monkeypatch, rows):
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    root = tmp_path / "Mail"
+    _fake_store(root, rows)
+    monkeypatch.setattr(mail_index, "mail_root", lambda: root)
+    return MailAdapter()
+
+
+def test_bodies_reads_at_rest_and_never_calls_mail(tmp_path, monkeypatch):
+    # The whole point of #158: the body comes off disk, so a message that arrived
+    # since the last mail_index_bodies sweep still reads. Any osascript here is a bug.
+    monkeypatch.setattr(
+        "macos_apps_mcp.adapters.mail.run_osascript",
+        lambda *a, **k: pytest.fail("mail_bodies must not touch Mail"),
+    )
+    a = _at_rest(tmp_path, monkeypatch, {10: "the invoice is attached"})
+    out = a.get_bodies(["<abc@ex.com>"])
+    assert out["results"] == [{"id": "<abc@ex.com>", "body": "the invoice is attached"}]
+    assert out["missing"] == []
+
+
+def test_bodies_report_an_unreadable_message_as_missing_not_empty(
+    tmp_path, monkeypatch
+):
+    # "we could not read it" and "the sender wrote nothing" must never collapse into
+    # the same answer — an empty body here is what makes a model reply to a blank.
+    a = _at_rest(tmp_path, monkeypatch, {10: "present"})
+    out = a.get_bodies(["<abc@ex.com>", "<reply@ex.com>"])
+    assert [r["id"] for r in out["results"]] == ["<abc@ex.com>"]
+    assert out["missing"] == ["<reply@ex.com>"]
+    assert all(r["body"] for r in out["results"])
+
+
+def test_bodies_pick_whichever_copy_has_a_readable_file(tmp_path, monkeypatch):
+    # <abc@ex.com> is filed in INBOX (rowid 10) and Archive (rowid 11). Only the
+    # Archive copy has a file here; the id must still resolve — they are one message.
+    a = _at_rest(tmp_path, monkeypatch, {11: "same message, other mailbox"})
+    out = a.get_bodies(["<abc@ex.com>"])
+    assert out["results"][0]["body"] == "same message, other mailbox"
+
+
+def test_bodies_refuse_an_oversized_total_rather_than_dumping(tmp_path, monkeypatch):
+    from macos_apps_mcp.errors import OutputOverflow
+    from macos_apps_mcp.text import BODY_MAX
+
+    # Two bodies that each truncate to BODY_MAX still total past the hard cap once the
+    # cap is lowered to their sum minus one — the batch refuses instead of dumping.
+    a = _at_rest(tmp_path, monkeypatch, {10: "a" * 9000, 12: "b" * 9000})
+    monkeypatch.setattr("macos_apps_mcp.adapters.mail.BODY_HARD_MAX", BODY_MAX + 10)
+    with pytest.raises(OutputOverflow):
+        a.get_bodies(["<abc@ex.com>", "<reply@ex.com>"])
+
+
+def test_bodies_reject_a_batch_past_the_cap(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MAX_BODIES
+    from macos_apps_mcp.errors import BatchTooLarge
+
+    a = _at_rest(tmp_path, monkeypatch, {10: "x"})
+    with pytest.raises(BatchTooLarge):
+        a.get_bodies([f"<{i}@ex.com>" for i in range(MAX_BODIES + 1)])
+
+
+def test_thread_snippets_are_opt_in_and_absent_when_unreadable(tmp_path, monkeypatch):
+    a = _at_rest(tmp_path, monkeypatch, {10: "hi Jane — numbers below.\nline two"})
+    assert "snippet" not in a.thread("<abc@ex.com>")["results"][0]
+    out = a.thread("<abc@ex.com>", snippets=True)["results"]
+    # the snippet is one line (the body's newline collapses), bounded, and control-free
+    assert out[0]["snippet"] == "hi Jane — numbers below. line two"
+    # <reply@ex.com> (rowid 12) has no file — no snippet KEY at all, not an empty one
+    assert "snippet" not in out[1]
