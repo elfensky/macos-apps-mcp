@@ -1204,8 +1204,18 @@ def test_note_body_decoder_matches_applescript_real_store():
             ).strip()
             # normalize line endings before comparing: the raw decoder emits CRLF, the
             # AppleScript plaintext LF — the shipped path (clean_body) folds CRLF→LF, so
-            # the difference is immaterial and not a decoder defect.
-            dec = decoded.replace("\r\n", "\n").replace("\r", "\n").strip()
+            # the difference is immaterial and not a decoder defect. Same for U+2028/9
+            # (#162, device-diagnosed 2026-08-06): Notes stores intra-paragraph breaks
+            # as U+2028, AppleScript's plaintext renders them \n, and clean_body's
+            # _LINE_BREAKS folds both separators — the decoder faithfully keeping
+            # what the store holds is correct; only this raw comparison ever sees it.
+            dec = (
+                decoded.replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .replace("\u2028", "\n")
+                .replace("\u2029", "\n")
+                .strip()
+            )
             assert dec == as_body or dec.startswith(as_body), (
                 f"decoder != AppleScript plaintext for {p.id}"
             )
