@@ -162,6 +162,19 @@ would have spent hours and GB to gain 99 messages.
 
 Cheap and safe by comparison: **`message id of every message of mb` is one Apple Event and O(mailbox)** — 161 ids in 0.7 s — and returns ids **without** angle brackets, while the Envelope Index stores them **with**. Normalise before joining. This is the fast way to map index-position → message without ever touching `whose` (§8b, and the ~56 s/set scan cost in `dedupe.py`).
 
+**The trigger question is CLOSED: nothing scriptable converts a `.partial.emlx` to a full `.emlx`** (#167, measured 2026-08-13 — the third and last candidate probed with a control group, so nobody re-probes this a fourth time):
+
+| Candidate | Converts `.partial`→full? |
+|---|---|
+| `content` | Not a trigger at all (above). |
+| `source` | 2/10 vs 0/10 control at 120 s (above) — indistinguishable from Mail's own background drift. |
+| `save <mail attachment>` | **0/10 vs 0/10 control** — at 30/60/120 s, at ~15 min, and after a full Mail quit+relaunch. And this is the strongest possible candidate: all 10 saves succeeded, the fetches were real (16–20 s of network each where the payload wasn't yet local), and the bytes written to the destination were the genuine attachment (an 832-byte `BEGIN:VCALENDAR`, byte-complete). Mail even REWRITES the `.partial.emlx` during the save (mtime moves) — and leaves the name and the `X-Apple-Content-Length` stubs exactly as they were. |
+
+Two store facts the probe surfaced, both refining "the attachment *payload* is not local" above:
+
+- **`save` materialises the payload as a SIDECAR, not in the `.emlx`**: the fetched bytes land in `Attachments/<rowid>/<part-id>/<name>` next to the message file, and the `.partial.emlx` keeps its stubs forever. So `save` is a reliable per-attachment fetch **for the caller** — 10/10, with the sidecar as a local cache making repeats instant (0.3 s vs 16–20 s) — but it never upgrades the store file.
+- **`.partial` does NOT mean the payload is absent**: 8 of 10 untouched control partials already had complete payload sidecars (weeks old — Mail parks earlier fetches there and still never converts the `.emlx`). So "is this message's content fully local?" is a question about `Attachments/<rowid>/`, not about the `.partial` suffix — and `downloaded of <attachment>` reading `true` tells you about the sidecar, not the `.emlx`. An export that stamps `fidelity` by filename alone is CONSERVATIVE (it may call a fully-recoverable message partial), which is the safe direction — but the sidecar is where a future lossless export would look.
+
 ## 5. Addressing a mailbox by name
 
 Verified 2026-07-31 (#146), probing every branch against real accounts.
