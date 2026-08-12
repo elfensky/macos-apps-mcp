@@ -446,6 +446,13 @@ def test_contacts_create_find_delete():
     from macos_apps_mcp.contracts import ContactData
     from macos_apps_mcp.runtime import run_osascript
 
+    # Contacts.app can wedge into a state where even AppleScript `launch` raises -600
+    # ("Application isn't running") while `open -a` heals it — device-observed
+    # 2026-08-13 (#162): failed in 0.18s cold, passed in 8.4s once launched. The
+    # adapter can't self-heal (its only channel IS the one that raises), so the suite
+    # ensures the process exists rather than failing on app health it never claimed
+    # to test.
+    subprocess.run(["open", "-a", "Contacts", "-j", "-g"], check=False)
     a = ContactsAdapter()
     p = a.create_contact(
         ContactData(
