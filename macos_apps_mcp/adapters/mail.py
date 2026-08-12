@@ -622,6 +622,20 @@ end run"""
 # each id is checked present-in-source first, then absent-from-source AND
 # present-in-destination after. `moved: 25` is never assumed (#135). Both mailboxes and
 # the US-joined id list arrive via argv; nothing is interpolated.
+#
+# The still-in-source branch RE-CHECKS once after a bounded 2s wait before it reports,
+# and what it reports is the OBSERVATION, not an inference (#174). That branch has two
+# device-verified ways to fire on a move that did nothing wrong: a self-move (a unified
+# destination whose container already includes the source — a genuine no-op, facts §5e)
+# and, once on 2026-08-11 under a full-suite run, a cross-account move that a re-locate
+# immediately after proved was a clean TRUE move. The old text ("so this was a COPY,
+# not a move") sent callers hunting for a duplicate that did not exist. Measured
+# 2026-08-13 before choosing the 2s window: 17/17 cross-account moves (quiet AND under
+# a read-load that tripled verb latency to ~3.7s) read source=0 in the SAME script
+# statement after the verb — unlike `delete`, which measurably lags (§5c t0/t3). So
+# the source side of `move` is synchronous on this device and the re-check is a cheap
+# guard on the accusing path only, never a poll on the happy path. A real copy still
+# reads present in both after 2s and still gets a loud ERROR.
 _MOVE = (
     STRIP_FRAMING
     + "\n\n"
@@ -651,11 +665,21 @@ on run argv
             if (count of (messages of dst whose message id is mid)) is 0 then
               set outcome to "ERROR move returned cleanly but the message is " & ¬
                 "not in the destination"
-            else if (count of (messages of src whose message id is mid)) > 0 then
-              set outcome to "ERROR the message is in BOTH mailboxes — the " & ¬
-                "source copy survived, so this was a COPY, not a move"
             else
-              set outcome to "ok"
+              set srcLeft to (count of (messages of src whose message id is mid))
+              if srcLeft > 0 then
+                delay 2
+                set srcLeft to (count of (messages of src whose message id is mid))
+              end if
+              if srcLeft is 0 then
+                set outcome to "ok"
+              else
+                set outcome to "ERROR the message reads present in BOTH " & ¬
+                  "mailboxes after a 2s re-check — either the source copy " & ¬
+                  "survived, or the destination resolves to the source itself " & ¬
+                  "(a self-move, which changes nothing). Nothing was deleted; " & ¬
+                  "re-locate the message before acting on either reading"
+              end if
             end if
           end if
         on error errMsg
@@ -1947,8 +1971,8 @@ class MailAdapter:
         `move` verb leaves exactly ONE copy across accounts, source gone, stable after
         sync — Mail.app's own UI *drag* is what copies, and what produced the ~3.9k
         duplicates #153 cleans up. This still verifies both sides per message, so a
-        server that behaved otherwise would be reported (``status`` says "in BOTH
-        mailboxes"), never silently duplicated.
+        server that behaved otherwise would be reported (``status`` says the message
+        reads present in BOTH mailboxes), never silently duplicated.
 
         A canonical name as ``to_mailbox`` is a UNIFIED accessor ("All Drafts" — a
         container spanning every account, with no ``account`` of its own), and Mail
@@ -1964,12 +1988,13 @@ class MailAdapter:
           the same asymmetry that makes ``trash_mail`` refuse a ``local://`` message
           (#80) — one store, no system mailboxes — not a second rule.
         - **self-move** — the unified container already includes the source (e.g.
-          ``imap://X/INBOX`` → ``"inbox"``). A no-op, and the post-verify misreports it
-          as "in BOTH mailboxes … this was a COPY". Deliberately NOT refused: telling a
-          concrete url's ROLE requires a per-account five-role url map, and the
-          leaf-name shortcut that would avoid it ("Sent Messages"/"Deleted
-          Messages"/"[Gmail]/Trash") is exactly the per-locale name table #61 deleted.
-          Nothing moves and nothing is lost, so the loud wrong-worded status stands.
+          ``imap://X/INBOX`` → ``"inbox"``). A no-op the post-verify reports as
+          present-in-both (after a bounded re-check, naming self-move as one of the two
+          readings — #174). Deliberately NOT refused: telling a concrete url's ROLE
+          requires a per-account five-role url map, and the leaf-name shortcut that
+          would avoid it ("Sent Messages"/"Deleted Messages"/"[Gmail]/Trash") is
+          exactly the per-locale name table #61 deleted. Nothing moves and nothing is
+          lost, and the status is loud and factual.
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any

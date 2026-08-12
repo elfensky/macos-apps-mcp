@@ -2042,6 +2042,23 @@ def test_move_mail_reports_what_the_verify_found_not_what_it_hoped(
     assert out["undo"].startswith("mail_undo(")
 
 
+def test_move_script_rechecks_before_reporting_both_and_states_the_observation():
+    # #174: the still-in-source branch has two device-verified ways to fire on a move
+    # that did nothing wrong — a self-move no-op (facts §5e) and one 2026-08-11
+    # full-suite run where a re-locate immediately after proved the move was clean. So
+    # the branch re-checks once after a bounded wait before reporting, and what
+    # survives states what was SEEN (present in both, naming self-move as a reading),
+    # never the old "this was a COPY" inference that sent callers hunting a duplicate
+    # that did not exist. The happy path stays poll-free: measured 2026-08-13,
+    # 17/17 cross-account moves read source=0 in the statement after the verb.
+    both_branch = mail._MOVE.split("srcLeft")[1:]
+    assert both_branch, "the re-check branch is gone from _MOVE"
+    assert "delay 2" in mail._MOVE  # bounded, single — never a poll (facts §8)
+    assert "was a COPY" not in mail._MOVE  # the unsupported inference
+    assert "self-move" in mail._MOVE  # the §5e reading, named
+    assert "Nothing was deleted" in mail._MOVE  # a destructive-sounding lie, retired
+
+
 def test_move_mail_gets_a_raised_timeout(monkeypatch, no_backup):
     # 25 moves against a remote IMAP store, each with two verifying counts, is not a
     # 30-second job — the host-side default would kill a legitimate batch

@@ -1563,8 +1563,9 @@ def test_cross_account_move_leaves_exactly_one_copy(inbox_messages):
     moved = m.move_mail(ids[:1], folder, destination, dry_run=False)
     try:
         assert moved["targets"][0]["status"] == "ok"
-        # "ok" IS the one-copy assertion: the script reports ERROR ... in BOTH mailboxes
-        # if the source row survived, which is exactly the duplicate a drag would make
+        # "ok" IS the one-copy assertion: the script reports ERROR ... present in BOTH
+        # mailboxes (after #174's bounded re-check) if the source row survived, which
+        # is exactly the duplicate a drag would make
         time.sleep(20)  # let the accounts sync before re-checking
         assert (
             m.move_mail(ids[:1], folder, destination)["would_affect"][0]["status"]
