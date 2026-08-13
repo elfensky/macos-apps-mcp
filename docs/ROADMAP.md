@@ -91,7 +91,9 @@ were filed, each re-verified in-code before filing:
   per-module (`_patch_run`'s docstring records the #160 incident where a missed patch dialed real
   Mail). Adapters call `runtime.` qualified; tests patch once. Precondition for #178.
 - [#177](https://github.com/elfensky/macos-apps-mcp/issues/177) **one `.emlx` walk per destructive
-  op** — rider on 0.9.9, see that row.
+  op** — filed as a 0.9.9 rider; floating since #167's trigger gate failed and 0.9.9 died
+  (2026-08-13, same day). The finding survives independently — see the floating line. Natural
+  attachment: the #175 cut, both being small mail-plumbing.
 - [#178](https://github.com/elfensky/macos-apps-mcp/issues/178) **split mail.py where it cleaves** —
   triage/drafts/attachments (~610 lines, zero coupling verified by grep) move out along #160's
   pattern; `search` and the recoverable writes stay, deliberately — deep is not the smell.
