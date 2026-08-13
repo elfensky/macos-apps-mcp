@@ -81,6 +81,26 @@ still constructs nothing (that is the only guarantee), and `drafts()` + `delete_
 are still the sweep. Do not "optimise away" the sweep on the strength of three clean
 runs.
 
+**Mail has a state where `delete <outgoing message>` silently no-ops on WINDOWLESS
+messages only** (2026-08-13, found chasing #162's rollback failure). The same
+`make new outgoing message {visible:false}` → `delete` → re-read probe returned
+`-1728` (deleted, correct) 5/5 in one run and `subject readable, count growing 1→2→3`
+(silent no-op) hours later on the same code — and in that state the discriminator is
+sharp: `{visible:true}` deletes fine (-1728 immediately), `{visible:false}` survives
+regardless of a 1 s or 3 s delay, `set visible … to true` after creation does not
+rescue it, and the no-op **persists across graceful quits AND a force-quit** (unlike
+#164's dropped deletes, which a restart cleared). The zombies accumulate as windowless
+session objects, don't autosave to Drafts, and vanish on the next Mail restart — so
+the litter self-clears, but a `ROLLBACK` running in that state returns `false` and the
+outbound tools correctly emit their leftover WARNING instead of claiming a clean
+rollback. `test_rollback_verifies_a_real_delete` fails exactly while Mail is in this
+state and is telling the truth when it does; restart Mail and re-run before reading it
+as a code regression, and if it survives a REBOOT, that is new information worth
+filing. Everything scripted was also ~2× slower in the same state (0.58 s per
+sent-record read; the awaiting-reply scans ran 37–58 s against their 30 s default
+timeout), so a `NativeTimeout` from a bounded scan is the same symptom, not a second
+bug.
+
 ## 3d. Send Later has NO scripting surface (#84)
 
 Verified 2026-08-11. The feature is real in the app and its mailbox is real on this Mac —
