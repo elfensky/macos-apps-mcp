@@ -378,3 +378,30 @@ only evidence.
 
 **Run `~/mail-watchdog/capture.sh` BEFORE force-quitting.** It samples Mail's main-thread stack,
 which names the blocking call.
+
+## 9b. A wedged event queue: -1712 forever from an IDLE Mail (#183)
+
+Observed once, 2026-08-13, during a cockpit session against a same-day Yahoo account (~5k
+messages): five `mail_body` reads (explicit `imap://` folder tokens) raced the user renaming the
+target folder in Mail's UI (`ADVOCAT` → `АДВОКАТ`, an IMAP rename + resync). Every Apple Event
+from then on — including a bare `count accounts` from a fresh `osascript` — timed out (-1712)
+for 37+ minutes while Mail sat in state S at ~1% CPU. The sqlite plane never blinked.
+
+Three facts bought:
+
+- **Concurrency is not required.** The five reads were SERIALIZED — every `run_osascript`
+  dispatches through `runtime`'s single `max_workers=1` worker, so the osascript processes ran
+  one after another (each timing out at its own 30 s cap). One in-flight event racing the
+  rename is enough; #183's proposed per-app mutex already exists and did not prevent the wedge.
+- **A UI quit is not a restart.** The user quit and reopened Mail; AppleScript stayed dead —
+  `ps` still showed the 37-minute-old process. Only `killall Mail && open -a Mail` recovered
+  it (responsive in seconds). Remediation must verify the PID actually changed.
+- **The wedge and the benign resync share -1712 and nothing else.** Post-restart account
+  resync also refuses Apple Events, but that process is ACTIVE and recovers on its own; the
+  wedge is idle (state S, ~1% CPU) and permanent. CPU + process state is the distinguisher a
+  classifier can read.
+
+Single observation, and the watchdog was NOT run before the force-quit (§9 — the stack that
+would have named the blocking call is lost), so "the rename did it" is a hypothesis without a
+control, not a verified mechanism. What IS verified: the signature, the recovery, and the
+serialization.
