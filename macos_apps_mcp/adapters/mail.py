@@ -64,7 +64,6 @@ import time
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime
-from urllib.parse import unquote
 
 from ..contracts import Pointer, deletion_result, read_result
 from ..errors import BatchTooLarge, NativeError, OutputOverflow
@@ -88,7 +87,14 @@ from ..text import (
     sanitize_line,
     split_framed,
 )
-from . import mail_addressing, mail_files, mail_index, mail_outgoing, mail_recover
+from . import (
+    mail_addressing,
+    mail_files,
+    mail_index,
+    mail_outgoing,
+    mail_recover,
+    mailbox_url,
+)
 from .mail_addressing import bare_id, stored_id
 from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
@@ -1939,7 +1945,7 @@ class MailAdapter:
             "created": True,
             "mailbox": mb,
             "account": uuid,
-            "folder": f"{scheme}://{uuid}/{mb}",
+            "folder": mailbox_url.make(scheme, uuid, mb),
             "note": "pass `folder` back verbatim to move_mail/mail_search. Mail will "
             "report its own equivalent spelling of this token in mail_overview once "
             "the account syncs; both address the same mailbox.",
@@ -2614,10 +2620,7 @@ class MailAdapter:
         out = []
         for r in rows:
             url = r["mailbox_url"]
-            # <scheme>://<UUID>/<percent-encoded path> — scheme is imap:// or local://
-            scheme, _, rest = url.partition("://")
-            uuid = mail_index.account_of(url) or ""
-            _, _, box = rest.partition("/")
+            scheme, uuid, box = mailbox_url.parse(url) or ("", "", "")
             # local:// is the On My Mac store; Mail never reports it as an account, so
             # its UUID would otherwise be shown raw forever (see the docstring).
             account = (
@@ -2629,7 +2632,7 @@ class MailAdapter:
                 {
                     "account": account,
                     "account_id": uuid,
-                    "mailbox": unquote(box),
+                    "mailbox": box,
                     "folder": url,
                     "total": r["total"],
                     "unread": r["unread"],
@@ -2689,8 +2692,8 @@ class MailAdapter:
             ],
             "top_mailboxes": [
                 {
-                    "mailbox": unquote(url.partition("://")[2].partition("/")[2]),
-                    "account": mail_index.account_of(url) or "",
+                    "mailbox": mailbox_url.path(url),
+                    "account": mailbox_url.account(url) or "",
                     "folder": url,
                     "messages": n,
                 }

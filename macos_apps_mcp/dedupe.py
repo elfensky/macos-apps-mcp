@@ -50,9 +50,8 @@ content but not the loser's exact bytes, and the cheap belt is worth having.
 from __future__ import annotations
 
 import sys
-from urllib.parse import unquote
 
-from .adapters import mail_addressing, mail_index
+from .adapters import mail_addressing, mail_index, mailbox_url
 from .adapters.mail import MailAdapter
 from .adapters.mail_recover import MAX_TARGETS
 
@@ -128,15 +127,10 @@ def _parse(argv: list[str]) -> dict:
     return opts
 
 
-# The per-account spellings of Trash, from the same device survey mail_index's
-# _TRASH_SUFFIXES came from: IMAP `Trash`, iCloud `Deleted Messages`, Gmail
-# `[Gmail]/Trash`. Compared on the DECODED final segment, so `%5BGmail%5D/Trash`
-# and `Deleted%20Messages` both resolve.
-_TRASH_LEAVES = {"trash", "deleted messages", "bin"}
-
-
-def _is_trash(url: str) -> bool:
-    return unquote(url.rsplit("/", 1)[-1]).strip().lower() in _TRASH_LEAVES
+# "Is this a Trash?" — the shared vocabulary in mailbox_url (#175), the same table
+# behind mail_index's _TRASH_SUFFIXES and _MAILBOX_RANK, so the three can't drift
+# again (they had: this list knew `Bin`, the rank didn't).
+_is_trash = mailbox_url.is_trash
 
 
 def cross_account_plan(rows: list[dict], keep_account, fingerprints: dict) -> dict:
@@ -301,7 +295,7 @@ def _run_mailbox(
     rows = mail_index.query_duplicate_rows(url)
     safe, skipped = _sets(rows)
     redundant = len(rows) - len({str(r["message_id"]) for r in rows})
-    name = url.rsplit("/", 1)[-1]
+    name = mailbox_url.leaf(url)
     print(
         f"  {name:<28} {len(safe):>5} sets, {redundant:>5} redundant copies"
         + (f", {len(skipped)} sets skipped (not byte-identical)" if skipped else "")

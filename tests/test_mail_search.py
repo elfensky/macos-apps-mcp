@@ -463,6 +463,38 @@ def test_rank_still_demotes_gmail_all_mail(tmp_path, monkeypatch):
     assert out[0]["folder"] == f"imap://{ACCT_B}/Travel"
 
 
+def _add_bin_trash_messages(db):
+    """A copy whose NEWER row lives in a `Bin`-spelling trash (#175's Bin gap):
+    _MAILBOX_RANK knew Trash/Deleted Messages but not Bin, so a Bin copy ranked as a
+    FILED copy and, being newer, beat the real filed copy for keeper and citation."""
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        f"""
+        INSERT INTO mailboxes VALUES (9,'imap://{ACCT_B}/Bin');
+        INSERT INTO subjects VALUES (12,'Binned');
+        INSERT INTO message_global_data VALUES (15,'<binned@ex.com>');
+        -- newer copy in Bin, older in Travel (a real filed folder)
+        INSERT INTO messages VALUES (80,12,1,15,9,1700006000,1700006000,1,0,0,60);
+        INSERT INTO messages VALUES (81,12,1,15,3,1700005900,1700005900,1,0,0,60);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_rank_demotes_a_bin_spelling_trash(tmp_path, monkeypatch):
+    # #175: `Bin` was in dedupe's trash vocabulary and build_trash_query's, but NOT in
+    # _MAILBOX_RANK — the drift this cut exists to end. A Bin copy must lose the
+    # citation to a filed copy, exactly like Trash and Deleted Messages.
+    db = tmp_path / "Envelope Index"
+    _fake_envelope(db)
+    _add_bin_trash_messages(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = MailAdapter().search(subject="Binned")["results"]
+    assert [p["id"] for p in out] == ["<binned@ex.com>"]
+    assert out[0]["folder"] == f"imap://{ACCT_B}/Travel"
+
+
 def test_search_mailbox_accepts_the_decoded_name_overview_reports(
     tmp_path, monkeypatch
 ):

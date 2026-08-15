@@ -102,6 +102,10 @@ class Target:
                  several mailboxes.
     ``account``  owning account uuid, or None for a unified accessor.
     ``rowid``    ``messages.ROWID`` — the ``.emlx`` filename. None when unlocated.
+    ``path``     the located ``.emlx`` path itself (#177) — stamped by ``locate`` so
+                 ``_backup``/``read_payloads`` don't re-walk the ~36k-file store to
+                 re-find it. In-memory only: ``as_dict`` never records it, so receipts
+                 are unchanged.
     ``fidelity`` ``unknown`` (nobody has looked — a dry run) or, once ``locate`` has
                  run, ``full`` | ``partial`` | ``absent``: how much of the message the
                  backup could actually preserve.
@@ -113,6 +117,7 @@ class Target:
     folder: str
     account: str | None = None
     rowid: int | None = None
+    path: str | None = None
     fidelity: str = _UNKNOWN
     backup: str | None = None
     status: str = "planned"
@@ -161,9 +166,11 @@ def _rowid_paths(root: Path) -> dict[int, Path]:
     rows shared a ROWID — so a flat dict is a complete, unambiguous index. Same walk
     ``build_body_index`` already does.
 
-    ponytail: one full-tree rglob (~2s on a 36k-message store) per destructive call,
-    for a batch capped at 25. Scope the glob to the target's ``<acct-uuid>/<name>.mbox``
-    subtree if that ever bites — the mailbox url already carries both halves.
+    ponytail: one full-tree rglob (~2s on a 36k-message store) per destructive call —
+    ``locate`` is the ONLY caller now (#177: ``_backup``/``read_payloads`` reuse the
+    paths it stamps on each Target). Scope the glob to the target's
+    ``<acct-uuid>/<name>.mbox`` subtree if even one walk ever bites — the mailbox url
+    already carries both halves.
     """
     out: dict[int, Path] = {}
     for f in root.rglob("*.emlx"):
@@ -214,7 +221,14 @@ def locate(targets) -> list[Target]:
             if path is None
             else (_PARTIAL if path.name.endswith(".partial.emlx") else _FULL)
         )
-        out.append(replace(t, rowid=int(row["rowid"]), fidelity=fidelity))
+        out.append(
+            replace(
+                t,
+                rowid=int(row["rowid"]),
+                path=str(path) if path is not None else None,
+                fidelity=fidelity,
+            )
+        )
     return out
 
 
@@ -230,18 +244,17 @@ def read_payloads(targets: list[Target]) -> dict[str, bytes]:
 
     Targets that cannot be located or read are simply ABSENT from the result — the
     caller reports them per-id rather than failing the batch, the same rule ``locate``
-    and ``_backup`` follow (62% of local messages are ``.partial``)."""
-    root = mail_index.mail_root()
-    if root is None:
-        return {}
-    paths = _rowid_paths(root)
+    and ``_backup`` follow (62% of local messages are ``.partial``).
+
+    Reads the ``path`` ``locate`` stamped (#177) — no store walk of its own, so the
+    caller must pass ``locate``'s output, which is the only thing that ever made
+    ``rowid`` non-None anyway."""
     out: dict[str, bytes] = {}
     for t in targets:
-        path = paths.get(t.rowid) if t.rowid is not None else None
-        if path is None:
+        if not t.path:
             continue
         try:
-            payload = mail_index.emlx_payload(path.read_bytes())
+            payload = mail_index.emlx_payload(Path(t.path).read_bytes())
         except OSError:
             continue
         if payload:
@@ -261,19 +274,18 @@ def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
     op's own safety does not depend on the copy (a move leaves the message intact), and
     a batch that refuses to run because one file was expunged mid-flight is worse than
     one that runs and says which target it could not preserve.
+
+    Uses the ``path`` ``locate`` stamped (#177): the store used to be rglob'd a second
+    time here to re-find the very files ``locate`` had just found — ~2 s of duplicate
+    disk I/O per destructive op on a 36k-file store.
     """
-    root = mail_index.mail_root()
-    if root is None:
-        return targets
-    paths = _rowid_paths(root)
     out = []
     for t in targets:
-        path = paths.get(t.rowid) if t.rowid is not None else None
-        if path is None:
+        if not t.path:
             out.append(replace(t, fidelity=_ABSENT))
             continue
         try:
-            payload = mail_index.emlx_payload(path.read_bytes())
+            payload = mail_index.emlx_payload(Path(t.path).read_bytes())
             if not payload:
                 out.append(replace(t, fidelity=_ABSENT))
                 continue
