@@ -26,7 +26,7 @@ import EventKit as EK
 
 from . import deploy
 from .errors import PRIVACY_PANE, NativeError
-from .runtime import request_access_each, run_native, run_osascript
+from .runtime import app_process_info, request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
@@ -132,6 +132,19 @@ def _eventkit_surfaces(request: bool) -> list[dict]:
     return out
 
 
+def _process_line(app: str) -> str:
+    """The app's pid + uptime, so "did the force-quit actually restart it?" is
+    answerable from a doctor report (#183 — a UI quit left a 37-minute-old wedged
+    Mail process alive). ps-only, no Apple Event, no TCC."""
+    info = app_process_info(app)
+    if info is None:
+        return "not running"
+    return (
+        f"pid {info['pid']}, up {info['etime']}, state {info['state']}, "
+        f"{info['cpu']:.1f}% CPU"
+    )
+
+
 def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
@@ -147,14 +160,15 @@ def _automation_surfaces(request: bool) -> list[dict]:
                     "(a never-authorized app may show a one-time dialog).",
                 )
             )
-            continue
-        try:
-            run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
-            out.append(_surface(name, "automation", True, "ok"))
-        except NativeError as e:
-            # #47 already fingerprinted it (automation_denied / app_not_running / …);
-            # str(e) is the agent-directed remediation. Report, don't raise.
-            out.append(_surface(name, "automation", False, e.kind, str(e)))
+        else:
+            try:
+                run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
+                out.append(_surface(name, "automation", True, "ok"))
+            except NativeError as e:
+                # #47 already fingerprinted it (automation_denied / app_not_running /
+                # …); str(e) is the agent-directed remediation. Report, don't raise.
+                out.append(_surface(name, "automation", False, e.kind, str(e)))
+        out[-1]["process"] = _process_line(app)
     return out
 
 

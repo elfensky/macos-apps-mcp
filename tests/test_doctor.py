@@ -83,6 +83,26 @@ def test_automation_unprobed_when_request_false(monkeypatch):
     assert all("request=True" in s["remediation"] for s in surfaces)
 
 
+def test_automation_surfaces_carry_process_line(monkeypatch):
+    # #183: pid + uptime answer "did the force-quit actually restart Mail?" — a UI
+    # quit once left a 37-minute-old wedged process alive. Reported even unprobed
+    # (request=False): a ps read is not an Apple Event and needs no TCC.
+    monkeypatch.setattr(doc, "run_osascript", _boom_osascript)
+    monkeypatch.setattr(
+        doc,
+        "app_process_info",
+        lambda app: (
+            {"pid": 838, "state": "S", "cpu": 0.9, "etime": "37:12"}
+            if app == "Mail"
+            else None
+        ),
+    )
+    surfaces = doc._automation_surfaces(request=False)
+    by_name = {s["surface"]: s for s in surfaces}
+    assert by_name["mail"]["process"] == "pid 838, up 37:12, state S, 0.9% CPU"
+    assert by_name["notes"]["process"] == "not running"
+
+
 def test_automation_probe_ok(monkeypatch):
     monkeypatch.setattr(doc, "run_osascript", lambda *a, **k: "AppName")
     surfaces = doc._automation_surfaces(request=True)
@@ -238,8 +258,15 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_osascript", denied_automation)
     monkeypatch.setattr(doc.shutil, "which", lambda _: None)
     monkeypatch.setattr(doc, "open", denied_open, raising=False)
+    # deterministic worst case for the #183 process lines: every automation app
+    # running (a live pgrep would make this test's length machine-dependent).
+    monkeypatch.setattr(
+        doc,
+        "app_process_info",
+        lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
+    )
     report = doc.diagnose(request=True)
-    assert len(json.dumps(report, ensure_ascii=False)) < 6000
+    assert len(json.dumps(report, ensure_ascii=False)) < 7000
 
 
 def test_probe_carries_applescript_side_timeout():
