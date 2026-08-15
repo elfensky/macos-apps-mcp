@@ -37,7 +37,7 @@ from urllib.parse import unquote
 from ..errors import AmbiguousTarget, NativeError
 from ..runtime import run_osascript
 from ..text import RS, STRIP_FRAMING, US
-from . import mail_index
+from . import mail_index, mailbox_url
 
 # --- id forms ------------------------------------------------------------------------
 
@@ -110,13 +110,12 @@ def mailbox_args(mailbox: str) -> tuple[str, str]:
             "this call needs a mailbox — pass the `folder` value from the mail_search "
             "result that produced this message id, verbatim"
         )
-    scheme, sep, rest = value.partition("://")
-    if not sep:
+    parsed = mailbox_url.parse(value)
+    if parsed is None:
         return "", validate_mailbox(value)
-    account, _, path = rest.partition("/")
+    scheme, account, path = parsed
     if not account:
         raise ValueError(f"mailbox url {mailbox!r} names no account")
-    path = unquote(path)
     if not path:
         raise ValueError(f"mailbox url {mailbox!r} names no mailbox")
     return ("local" if scheme.lower() == "local" else account), path
@@ -161,17 +160,15 @@ def resolve_mailbox(name: str, account: str | None = None) -> list[str]:
     account_uuid = resolve_account(account).casefold() if account else None
     want_uuid = want_path = None
     if is_mailbox_url(name):
-        _, _, rest = name.strip().partition("://")
-        want_uuid, _, raw_path = rest.partition("/")
-        want_uuid, want_path = want_uuid.casefold(), unquote(raw_path).casefold()
+        _, uuid, decoded_path = mailbox_url.parse(name)
+        want_uuid, want_path = uuid.casefold(), decoded_path.casefold()
     needle = unquote(name).casefold()
     out = []
     for url in mail_index.query_mailbox_urls():
-        _, _, rest = url.partition("://")
-        uuid, _, path = rest.partition("/")
+        _, uuid, decoded_path = mailbox_url.parse(url) or ("", "", "")
         if account_uuid and uuid.casefold() != account_uuid:
             continue
-        decoded = unquote(path).casefold()
+        decoded = decoded_path.casefold()
         if want_uuid is not None:
             if uuid.casefold() == want_uuid and decoded == want_path:
                 out.append(url)

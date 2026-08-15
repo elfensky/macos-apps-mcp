@@ -110,6 +110,36 @@ def test_locate_stamps_an_unknown_message_absent_instead_of_raising(store):
     assert (t.rowid, t.fidelity) == (None, "absent")
 
 
+def test_locate_stamps_the_emlx_path_and_the_receipt_never_records_it(store):
+    # #177: the path rides the Target in memory so _backup/read_payloads don't re-walk
+    # the store — but it must NOT enter the receipt (as_dict), or receipts change shape.
+    [t] = mail_recover.locate([_target("a@x")])
+    assert t.path is not None and t.path.endswith("10.emlx")
+    assert "path" not in t.as_dict()
+
+
+def test_store_is_walked_once_per_destructive_op(store, monkeypatch):
+    # #177: locate walked the ~36k-file store, then _backup walked it AGAIN to re-find
+    # the very paths locate had just found (~4 s of duplicate I/O per op). One walk.
+    walks = []
+    real = mail_recover._rowid_paths
+
+    def counting(root):
+        walks.append(root)
+        return real(root)
+
+    monkeypatch.setattr(mail_recover, "_rowid_paths", counting)
+    result = mail_recover.recoverable(
+        "move",
+        [_target("a@x"), _target("b@x")],
+        lambda ts: {t.id: "ok" for t in ts},
+        destination=ARCHIVE,
+    )
+    assert len(walks) == 1
+    # the reuse changed the walk count, not the copies: both targets still backed up
+    assert [t["backup"] is not None for t in result["targets"]] == [True, True]
+
+
 # --- backup → log → act --------------------------------------------------------------
 
 

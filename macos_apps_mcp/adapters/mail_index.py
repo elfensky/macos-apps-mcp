@@ -17,6 +17,7 @@ from ..audit import state_dir
 from ..contracts import Pointer
 from ..errors import NativeError
 from ..runtime import read_via_sqlite
+from . import mailbox_url
 
 # The Envelope Index tables + the exact columns we read/filter on. A macOS schema move
 # that renames/drops any of these trips SchemaDrift → AppleScript fallback (never a
@@ -82,19 +83,15 @@ def _deeplink(message_id: str) -> str:
     return f"message://%3C{quote(mid, safe='@')}%3E"
 
 
-def account_of(mailbox_url: str) -> str | None:
+def account_of(url: str) -> str | None:
     """The account id embedded in a mailbox url — ``<scheme>://<UUID>/<path>`` (#155).
 
     The account is already inside the token every mail read returns, but that token is
     documented as opaque and a model must not be doing string surgery on it to answer
     "which inbox is this?". Lifting it into its own field costs no query and launches
     nothing; ``mail_overview`` reports the same id next to its display name, so one call
-    gives the caller the whole map."""
-    _, sep, rest = mailbox_url.partition("://")
-    if not sep:
-        return None
-    uuid, _, _ = rest.partition("/")
-    return uuid or None
+    gives the caller the whole map. (#175: the parse itself lives in mailbox_url.)"""
+    return mailbox_url.account(url)
 
 
 def row_to_pointer(row) -> Pointer | None:
@@ -121,25 +118,13 @@ def row_to_pointer(row) -> Pointer | None:
 # Sent-plus-folder pair. Apple hit this too (mailboxes.unread_count_adjusted_for_
 # duplicates). So one row per Message-ID, ranked: a live INBOX copy beats a filed copy,
 # which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
-# every *filter* value is still a bound param. Patterns are anchored to the FINAL path
-# segment (urls are percent-encoded, so the space in a name is a literal '%20', escaped
-# with ESCAPE so LIKE reads it as text and not as a wildcard): both-side wrapping
-# ('%Junk%', '%All%Mail') also matched real user folders — 'Junkyard',
-# 'Wallets/Old Mail' — and demoted them, so the OLDER filed copy won the citation.
-# Junk/Spam take a '<name>' or '<name>%20…' segment because Exchange names the folder
-# `Junk%20E-mail`, which a bare end-anchored '%/Junk' would rank as a preferred filed
-# folder and let beat a real Archive copy.
-_MAILBOX_RANK = r"""CASE
-           WHEN mb.url LIKE '%/INBOX' THEN 0
-           WHEN mb.url LIKE '%/All\%20Mail' ESCAPE '\'
-             OR mb.url LIKE '%/Archive'
-             OR mb.url LIKE '%/Trash'
-             OR mb.url LIKE '%/Deleted\%20Messages' ESCAPE '\'
-             OR mb.url LIKE '%/Junk'
-             OR mb.url LIKE '%/Junk\%20%' ESCAPE '\'
-             OR mb.url LIKE '%/Spam'
-             OR mb.url LIKE '%/Spam\%20%' ESCAPE '\' THEN 2
-           ELSE 1 END"""
+# every *filter* value is still a bound param. The patterns and their hard-won anchoring
+# rules (final-segment anchoring against 'Junkyard'/'Wallets/Old Mail' false matches,
+# the Junk/Spam '%20' prefix for Exchange's `Junk%20E-mail`) live in mailbox_url (#175),
+# the ONE table behind this rank, build_trash_query and dedupe's is_trash — which is
+# what closed the Bin gap: a `Bin`-spelling trash used to rank as a FILED copy and beat
+# an Archive copy for keeper and citation.
+_MAILBOX_RANK = mailbox_url.rank_case("mb.url")
 
 # The projected columns every deduped read returns; row_to_pointer consumes exactly
 # these names. Shared with build_thread_query.
@@ -530,11 +515,9 @@ ORDER BY message_id
 
 
 # The mailbox names a "Trash" is spelled with, per account type — device-verified
-# 2026-08-05 on four accounts: IMAP `Trash`, iCloud `Deleted%20Messages`, Gmail
-# `%5BGmail%5D/Trash`. Urls are percent-ENCODED here (this is the raw mailboxes.url), so
-# the literal `%` needs ESCAPE or LIKE reads it as a wildcard — the same trap
-# `_MAILBOX_RANK` documents, and the reason these are anchored to the FINAL segment.
-_TRASH_SUFFIXES = (r"%/Trash", r"%/Deleted\%20Messages", r"%/Bin")
+# 2026-08-05 on four accounts. Sourced from mailbox_url's one table (#175), same
+# vocabulary as _MAILBOX_RANK's demotions and dedupe's is_trash.
+_TRASH_SUFFIXES = mailbox_url.TRASH_SUFFIXES
 
 
 def build_trash_query(account: str):
