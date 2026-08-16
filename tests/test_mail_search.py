@@ -6,6 +6,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 import macos_apps_mcp.server as srv
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail_index
 from macos_apps_mcp.adapters.mail import MAX_MAILS, MailAdapter
 from macos_apps_mcp.errors import NativeError
@@ -580,14 +581,13 @@ def test_search_has_attachments_matches_document_not_image(tmp_path, monkeypatch
 
 
 def test_search_account_filters_by_uuid(tmp_path, monkeypatch):
-    import macos_apps_mcp.adapters.mail_addressing as ma
 
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     # A UUID must never reach osascript — that is what "no Mail launch" means.
     monkeypatch.setattr(
-        ma, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
+        runtime, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
     )
     ids = [p["id"] for p in MailAdapter().search(account=ACCT_B)["results"]]
     assert set(ids) == {
@@ -644,14 +644,13 @@ def test_search_account_on_my_mac_matches_the_local_store(tmp_path, monkeypatch)
     # N1: mail_overview maps local:// to the literal "On My Mac", so mail_search must
     # accept that exact name — and it must resolve without contacting Mail, the same
     # "no Mail launch" guarantee a real account UUID gets.
-    import macos_apps_mcp.adapters.mail_addressing as ma
 
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)
     _add_local_message(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(
-        ma, "run_osascript", lambda *a: pytest.fail("On My Mac launched Mail")
+        runtime, "run_osascript", lambda *a: pytest.fail("On My Mac launched Mail")
     )
     ids = [p["id"] for p in MailAdapter().search(account="On My Mac")["results"]]
     assert ids == ["<localnote@ex.com>"]
@@ -982,7 +981,6 @@ def test_overview_names_the_on_my_mac_store(tmp_path, monkeypatch):
 
 
 def test_overview_survives_mail_being_unreachable(tmp_path, monkeypatch):
-    import macos_apps_mcp.adapters.mail_addressing as ma
 
     db = tmp_path / "Envelope Index"
     _fake_envelope(db)
@@ -993,7 +991,7 @@ def test_overview_survives_mail_being_unreachable(tmp_path, monkeypatch):
         calls.append(a)
         raise OSError()
 
-    monkeypatch.setattr(ma, "run_osascript", _boom)
+    monkeypatch.setattr(runtime, "run_osascript", _boom)
     rows = MailAdapter().overview()
     assert rows  # counts never needed Mail
     assert all(r["account"] for r in rows)  # UUID stands in for the name
@@ -1197,7 +1195,7 @@ def test_bodies_reads_at_rest_and_never_calls_mail(tmp_path, monkeypatch):
     # The whole point of #158: the body comes off disk, so a message that arrived
     # since the last mail_index_bodies sweep still reads. Any osascript here is a bug.
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.runtime.run_osascript",
         lambda *a, **k: pytest.fail("mail_bodies must not touch Mail"),
     )
     a = _at_rest(tmp_path, monkeypatch, {10: "the invoice is attached"})

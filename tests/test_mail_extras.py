@@ -12,6 +12,7 @@ import time
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_addressing, mail_index, mail_recover
 from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import US
@@ -51,7 +52,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
         (root / "invoices" / "deal.pdf").write_bytes(b"%PDF-1.4")
         return f"1234{US}true"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     out = mail.MailAdapter().save_attachment("<a@x>", "invoices", name="deal.pdf")
     assert seen["script"] is mail._SAVE_ATTACHMENT
     assert seen["argv"] == (
@@ -83,7 +84,7 @@ def test_save_derives_the_filename_from_a_hostile_attachment_name(
         (root / "in" / "authorized_keys").write_bytes(b"x")
         return f"10{US}true"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     out = mail.MailAdapter().save_attachment(
         "<a@x>", "in", name="../../../.ssh/authorized_keys"
     )
@@ -99,7 +100,7 @@ def test_save_refuses_an_existing_file_before_any_native_call(
     def boom(*a, **k):
         raise AssertionError("must refuse before touching Mail")
 
-    monkeypatch.setattr(mail, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     with pytest.raises(FileExistsError):
         mail.MailAdapter().save_attachment("<a@x>", "", name="deal.pdf")
     assert (root / "deal.pdf").read_bytes() == b"mine"
@@ -114,7 +115,7 @@ def test_save_removes_an_empty_file_and_reports_it(root, resolved, monkeypatch):
         (root / "empty.pdf").touch()
         return f"0{US}false"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     with pytest.raises(ValueError, match="0 bytes"):
         mail.MailAdapter().save_attachment("<a@x>", "", name="empty.pdf")
     assert not (root / "empty.pdf").exists()
@@ -133,7 +134,7 @@ def test_save_by_attachment_id_leaves_the_name_slot_empty(root, resolved, monkey
         (root / "1.12").write_bytes(b"pdf")
         return f"3{US}false"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     mail.MailAdapter().save_attachment("<a@x>", "", attachment_id="1.12")
     assert seen["argv"][3:5] == ("", "1.12")
 
@@ -305,7 +306,7 @@ def test_export_rejects_an_empty_batch(root):
 
 def test_export_never_launches_mail(root, monkeypatch):
     monkeypatch.setattr(
-        mail,
+        runtime,
         "run_osascript",
         lambda *a, **k: pytest.fail("export is a read at rest — it must not run Mail"),
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail
 from macos_apps_mcp.adapters import mail_addressing as ma
 from macos_apps_mcp.contracts import Pointer, read_result
@@ -169,7 +170,7 @@ def test_get_body_with_no_mailbox_resolves_the_id_first(monkeypatch):
         seen["argv"] = argv
         return "the body"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     assert mail.MailAdapter().get_body("<a@b>") == "the body"
     # the resolved mailbox reaches the script as the (account, decoded path) pair
     assert seen["argv"] == ("a@b", _ACCT, "[Gmail]/Spam")
@@ -187,7 +188,7 @@ def test_attachments_by_id_addresses_one_message_and_makes_no_cap_claim(monkeypa
         seen["argv"] = argv
         return "<a@b>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
 
-    monkeypatch.setattr(mail, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     out = mail.MailAdapter().list_attachments(message_id="<a@b>")
     # query is empty, the mailbox came from the resolver, and the id is the 5th arg
     assert seen["argv"] == ("", str(mail.MAX_MAILS), _ACCT, "[Gmail]/Spam", "a@b")

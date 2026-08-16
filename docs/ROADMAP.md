@@ -91,7 +91,11 @@ were filed, each re-verified in-code before filing:
 - [#176](https://github.com/elfensky/macos-apps-mcp/issues/176) **one native-script seam** —
   `run_osascript`/`body_file` are imported into each adapter's namespace, so tests patch the seam
   per-module (`_patch_run`'s docstring records the #160 incident where a missed patch dialed real
-  Mail). Adapters call `runtime.` qualified; tests patch once. Precondition for #178.
+  Mail). Adapters call `runtime.` qualified; tests patch once. **Landed 2026-08-16** (the seam
+  cut): the three `mail`/`mail_outgoing` double-patch helpers collapse to one `setattr(runtime, …)`,
+  `tests/test_native_seam.py` fails if a by-name seam import returns, and a `conftest` fixture makes
+  the seam fail CLOSED — a unit test that forgets to fake it raises instead of dialing real Mail.
+  **#178 is unblocked.**
 - [#177](https://github.com/elfensky/macos-apps-mcp/issues/177) **one `.emlx` walk per destructive
   op** — filed as a 0.9.9 rider; floated when #167's trigger gate failed and 0.9.9 died. **Landed
   2026-08-16** in the plumbing cut with #175, as filed: the path map threaded through, measured
@@ -99,7 +103,8 @@ were filed, each re-verified in-code before filing:
 - [#178](https://github.com/elfensky/macos-apps-mcp/issues/178) **split mail.py where it cleaves** —
   triage/drafts/attachments (~610 lines, zero coupling verified by grep) move out along #160's
   pattern; `search` and the recoverable writes stay, deliberately — deep is not the smell.
-  Sequenced after #176; boundary work before 0.10.x, per DESIGN.md's lyfe-hardening premise.
+  Sequenced after #176 — **unblocked 2026-08-16**; boundary work before 0.10.x, per DESIGN.md's
+  lyfe-hardening premise.
 - [#179](https://github.com/elfensky/macos-apps-mcp/issues/179) **docstring invariants get one
   owner** — floating, see above.
 - [#180](https://github.com/elfensky/macos-apps-mcp/issues/180) **`build_*`/`query_*` doubling** —

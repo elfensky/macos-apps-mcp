@@ -48,8 +48,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .. import runtime
 from ..errors import NativeError
-from ..runtime import body_file, run_osascript
 from ..text import (
     READ_BODY,
     RS,
@@ -553,7 +553,7 @@ def _outbox_pending() -> int:
     integer coerced `as text`, so a parse failure means something is structurally
     wrong — let it raise rather than silently reporting 0 (which would itself be the
     dishonest-success failure this whole feature exists to prevent)."""
-    return int(run_osascript(_OUTBOX_COUNT).strip())
+    return int(runtime.run_osascript(_OUTBOX_COUNT).strip())
 
 
 def with_outbox_pending(result: dict) -> dict:
@@ -624,7 +624,7 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     carry, so the quote header stays clean even when the script side is bypassed (a
     mocked ``_ORIGINAL`` in tests). An original that cannot be read degrades to an
     unquoted body — the reply is the deliverable, the quote is decoration."""
-    raw = run_osascript(_ORIGINAL, message_id, *mailbox_args)
+    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args)
     if not raw.strip() or raw.strip() == _MISSING_VALUE:
         return body
     sender, _, rest = raw.partition(US)
@@ -658,8 +658,8 @@ def new_message(
     subj = subject or ""
 
     def dispatch() -> None:
-        with body_file(text) as path:
-            run_osascript(
+        with runtime.body_file(text) as path:
+            runtime.run_osascript(
                 _SEND,
                 subj,
                 path,
@@ -718,12 +718,14 @@ def reply_all_to(
     if not body.strip():
         raise ValueError("reply_all needs a non-empty body")
     mb = mail_addressing.mailbox_args(mailbox)
-    seen = _parse_reply_all_recipients(run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb))
+    seen = _parse_reply_all_recipients(
+        runtime.run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb)
+    )
 
     def dispatch() -> None:
         text = quoted_body(body, mid, mb) if include_quote else body
-        with body_file(text) as path:
-            run_osascript(_REPLY_ALL, mid, path, *mb)
+        with runtime.body_file(text) as path:
+            runtime.run_osascript(_REPLY_ALL, mid, path, *mb)
 
     return Outgoing(
         action="reply_all",
@@ -752,7 +754,7 @@ def forward_of(message_id: str, mailbox: str, to) -> Outgoing:
     mb = mail_addressing.mailbox_args(mailbox)
 
     def dispatch() -> None:
-        run_osascript(_FORWARD, mid, US.join(to_list), *mb)
+        runtime.run_osascript(_FORWARD, mid, US.join(to_list), *mb)
 
     return Outgoing(
         action="forward",
@@ -809,7 +811,7 @@ def stored_draft(draft_id: str) -> Outgoing:
     mid = bare_id(draft_id)
     if not mid:
         raise ValueError("send_mail(draft_id=…) needs the draft's message-id")
-    d = _parse_draft_envelope(run_osascript(_DRAFT_ENVELOPE, mid))
+    d = _parse_draft_envelope(runtime.run_osascript(_DRAFT_ENVELOPE, mid))
     if not d["to"]:
         raise ValueError(
             f"draft {mid!r} has no recipient — open it in Mail and address it first"
@@ -829,8 +831,8 @@ def stored_draft(draft_id: str) -> Outgoing:
         )
 
     def dispatch() -> None:
-        with body_file(d["body"]) as path:
-            run_osascript(
+        with runtime.body_file(d["body"]) as path:
+            runtime.run_osascript(
                 _SEND,
                 d["subject"],
                 path,

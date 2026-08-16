@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from macos_apps_mcp import dedupe
+from macos_apps_mcp import dedupe, runtime
 from macos_apps_mcp.adapters import mail as mail_mod
 from macos_apps_mcp.adapters import mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
@@ -42,7 +42,7 @@ def wired(monkeypatch):
         ids = args[-1].split(US) if args else []
         return "".join(f"{mid}{US}ok{RS}" for mid in ids if mid)
 
-    monkeypatch.setattr(mail_mod, "run_osascript", fake_osascript)
+    monkeypatch.setattr(runtime, "run_osascript", fake_osascript)
     monkeypatch.setattr(mail_index, "query_trash_url", lambda acct: TRASH)
     # no store on disk: locate stamps every target `absent`, backups write nothing
     monkeypatch.setattr(mail_index, "mail_root", lambda: None)
