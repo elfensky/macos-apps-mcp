@@ -58,6 +58,13 @@ def stored_id(message_id: str) -> str:
     return f"<{bare_id(message_id)}>"
 
 
+def _norm_mid(mid: str) -> str:
+    """A Message-ID as a COMPARISON key: the bare id, lowercased. Not a third id form
+    (this module owns the only two) — nothing is ever addressed with this, it only
+    answers "are these two the same message?" across headers that disagree on case."""
+    return bare_id(mid).lower()
+
+
 # --- mailbox -------------------------------------------------------------------------
 
 # Canonical system-mailbox names a mailbox-scoped operation accepts. Mailbox

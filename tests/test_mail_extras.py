@@ -13,7 +13,13 @@ import time
 import pytest
 
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters import mail, mail_addressing, mail_index, mail_recover
+from macos_apps_mcp.adapters import (
+    mail,
+    mail_addressing,
+    mail_attachments,
+    mail_index,
+    mail_recover,
+)
 from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import US
 
@@ -54,7 +60,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
 
     monkeypatch.setattr(runtime, "run_osascript", fake)
     out = mail.MailAdapter().save_attachment("<a@x>", "invoices", name="deal.pdf")
-    assert seen["script"] is mail._SAVE_ATTACHMENT
+    assert seen["script"] is mail_attachments._SAVE_ATTACHMENT
     assert seen["argv"] == (
         "a@x",
         _ACCT,
@@ -65,7 +71,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
         str(mail.mail_files.MAX_BYTES),
     )
     # saving can make Mail FETCH the message off the server, so this is not a 30s read
-    assert seen["kw"] == {"timeout": mail._SAVE_TIMEOUT}
+    assert seen["kw"] == {"timeout": mail_attachments._SAVE_TIMEOUT}
     assert out["bytes"] == 8
     assert out["reported_size"] == 1234
     assert out["was_downloaded"] is True
@@ -142,12 +148,11 @@ def test_save_by_attachment_id_leaves_the_name_slot_empty(root, resolved, monkey
 def test_save_script_enforces_the_cap_and_the_ambiguous_name():
     # the cap is checked in-script because `file size` is only knowable from Mail, and
     # the fetch above means "look, then save" costs a second Apple Event every time.
-    assert "over the cap" in mail._SAVE_ATTACHMENT
-    assert "pass attachment_id instead" in mail._SAVE_ATTACHMENT
+    assert "over the cap" in mail_attachments._SAVE_ATTACHMENT
+    assert "pass attachment_id instead" in mail_attachments._SAVE_ATTACHMENT
     # ...and the save is the LAST thing the script does, after both refusals
-    assert mail._SAVE_ATTACHMENT.index("over the cap") < mail._SAVE_ATTACHMENT.index(
-        "save found in"
-    )
+    script = mail_attachments._SAVE_ATTACHMENT
+    assert script.index("over the cap") < script.index("save found in")
 
 
 # --- #85: statistics -----------------------------------------------------------------

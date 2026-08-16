@@ -25,18 +25,25 @@ Mail's AppleScript is slow on large mailboxes, so reads are capped and the osasc
 timeout bounds a pathological search. User input goes via argv / a tempfile — not
 interpolated.
 
-Five modules, one adapter. ``mail_index`` is the read-at-rest sqlite plane;
+Nine modules, one adapter. ``mail_index`` is the read-at-rest sqlite plane;
 ``mail_addressing`` (#155) is the ONE home for "which message/mailbox/account does this
 token mean?" — the two id forms, the mailbox resolvers plus their AppleScript handler,
 the account map, and ``resolve(id, folder=None, account=None) -> ResolvedMessage``,
-which answers with exactly one target or raises; ``mail_recover`` (#159) is the
-recoverable destructive plane — **backup → log → act** — which owns the batch cap, the
-per-target action log and undo for every write that mutates stored mail;
-``mail_outgoing`` (#160) is the OUTBOUND lifecycle — envelope build → the one
-``would_send`` preview shape → construct → send → outbox truth-check — which
-``send``/``reply_all``/``forward``/``send(draft_id=…)`` are four parametrizations of,
-and which states once (and enforces) the rules a dry run must obey. This file keeps the
-rest of the AppleScript, the parsing, and the policy.
+which answers with exactly one target or raises; ``mailbox_url`` (#175) parses and
+synthesises the ``<scheme>://<uuid>/<path>`` tokens that addressing trades in;
+``mail_recover`` (#159) is the recoverable destructive plane — **backup → log → act**
+— which owns the batch cap, the per-target action log and undo for every write that
+mutates stored mail; ``mail_outgoing`` (#160) is the OUTBOUND lifecycle — envelope
+build → the one ``would_send`` preview shape → construct → send → outbox truth-check —
+which ``send``/``reply_all``/``forward``/``send(draft_id=…)`` are four
+parametrizations of, and which states once (and enforces) the rules a dry run must
+obey; ``mail_files`` (#81) is the filesystem boundary (allowlisted root, derived
+names, never-overwrite); ``mail_triage`` (#178) owns the needs-response /
+awaiting-reply scans and their pure classifiers; ``mail_drafts`` (#178) owns the draft
+lifecycle — create/list/resolve/delete plus the threaded ``reply`` draft;
+``mail_attachments`` (#178) lists and saves attachments. This file keeps the rest of
+the AppleScript, the parsing, and the policy — the caps, ``search``'s plane choice,
+and the recoverable writes' refusal rules.
 
 So a new mail capability adds a script + a method HERE, calls ``mail_addressing`` to
 name its target, hands anything that LEAVES THIS MACHINE to ``mail_outgoing`` rather
@@ -58,42 +65,38 @@ the same statement.
 
 from __future__ import annotations
 
-import email
-import re
 import time
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime
 
 from .. import runtime
-from ..contracts import Pointer, deletion_result, read_result
+from ..contracts import Pointer, read_result
 from ..errors import BatchTooLarge, NativeError, OutputOverflow
 from ..runtime import log
 from ..text import (
     BODY_HARD_MAX,
-    READ_BODY,
-    RS,
+    RS,  # noqa: F401  (re-export, #178: tests build framed fixtures off mail.RS)
     STRIP_FRAMING,
     US,
     Field,
-    addr_list,
+    _summary,  # re-export (#178): tests import it here; the parsers below use it
     blank_if_missing,
-    bool_or_none,
-    bool_strict,
     clean_body,
     clean_summary,
-    int_or_none,
-    int_or_zero,
     parse_framed,
     sanitize_line,
     split_framed,
 )
 from . import (
     mail_addressing,
+    mail_attachments,
+    mail_drafts,
     mail_files,
     mail_index,
     mail_outgoing,
     mail_recover,
+    mail_triage,
     mailbox_url,
 )
 from .mail_addressing import bare_id, stored_id
@@ -105,9 +108,6 @@ MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct
 # history, signatures and disclaimers, so 50 of them is a context dump, not a read. The
 # total budget (BODY_HARD_MAX) usually bites first anyway — this cap just fails fast.
 MAX_BODIES = 20
-NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
-SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
-REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 _TOP_N = 10  # mail_stats top-sender/top-mailbox lists (#85): token-bounded
 
 # US/RS framing contract (#68): separators, the shared stripFraming AppleScript
@@ -187,335 +187,6 @@ end run"""
 # path against it exactly as the id paths do (#61/#62 review) — never hand back a
 # "missing value" body as if it were the email's contents.
 _MISSING_VALUE = "missing value"
-
-# create_draft: draft-and-open, NEVER send. `make new outgoing message … visible:true`
-# opens a compose window for the HUMAN to review/send; there is deliberately no `send`
-# verb here (the two-tier safe gate — joshrutkowski/orchard/patrickfreyer). The body is
-# READ from a tempfile via the shared readBody handler (never interpolated into the
-# script — the supermemoryai pattern), so a long/multiline/unicode/EMPTY body can't
-# break, inject, or crash (-39 on a zero-byte file, #READ_BODY) the script. to/subject/
-# tempfile-path all arrive via argv. Atomic (#44), with a HARD LIMIT (#133): everything
-# after `make new outgoing message` is wrapped in a try and the partial outgoing message
-# is rolled back before re-raising — but that does NOT stop a duplicate appearing in
-# Drafts. Device-verified 2026-07-26: Mail autosaves ANY outgoing message to the Drafts
-# mailbox ~10-15 seconds after creation, asynchronously, and nothing cancels it. The
-# rollback removes the outgoing-message OBJECT (proven, -1728) and the autosave still
-# lands afterwards. Five suppression attempts all failed — one-shot `with properties`,
-# post-creation writes, visible:true, visible:false, and `close … saving no`. So a
-# failed create_draft CAN leave a stray draft; `drafts()` + `delete_draft()` are the
-# recovery, and the #44 comment must not be read as promising otherwise.
-_CREATE_DRAFT = (
-    READ_BODY
-    + "\n\n"
-    + mail_outgoing.ROLLBACK
-    + """
-
-on run argv
-  set recipientAddr to item 1 of argv
-  set subj to item 2 of argv
-  set bodyText to my readBody(item 3 of argv)
-  with timeout of 120 seconds
-  tell application "Mail"
-    set msg to make new outgoing message with properties {visible:true}
-    try
-      set subject of msg to subj
-      set content of msg to bodyText
-      tell msg to make new to recipient with properties {address:recipientAddr}
-      activate
-    on error errMsg
-      if my rollback(msg) then
-        error errMsg
-      else
-        error errMsg & my draftLeftover()
-      end if
-    end try
-  end tell
-  end timeout
-end run"""
-)
-
-# drafts (#82): list the Drafts mailbox as US/RS-framed (message id, subject, first
-# recipient) records. Iterates BY INDEX rather than with a `whose` filter — on device,
-# `messages of drafts mailbox whose subject is X` raised -1728 for a draft that
-# demonstrably existed, while index access is reliable (spike 2026-07-25). Output is
-# capped host-side at maxN, the _SEARCH idiom (#52). The first recipient is enough for a
-# pointer summary; a draft's own sender is the user, so it carries no signal.
-_DRAFTS = (
-    STRIP_FRAMING
-    + """
-
-on run argv
-  set maxN to (item 1 of argv) as integer
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  set c to 0
-  with timeout of 120 seconds
-  tell application "Mail"
-    set dm to drafts mailbox
-    set n to count of (messages of dm)
-    repeat with i from 1 to n
-      set m to message i of dm
-      set mid to message id of m
-      if mid is not missing value and mid is not "" then
-        set c to c + 1
-        if c > maxN then exit repeat
-        set subj to subject of m
-        if subj is missing value then set subj to ""
-        set rcpt to ""
-        try
-          set rcpt to (address of item 1 of (to recipients of m)) as text
-        end try
-        set out to out & (my stripFraming(mid)) & us & (my stripFraming(subj)) & ¬
-          us & (my stripFraming(rcpt)) & rs
-      end if
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-)
-
-# delete_draft (#82): resolve one draft by RFC822 message-id and delete it. Iterates
-# IN REVERSE BY INDEX: deleting while iterating a forward collection invalidates the
-# reference (-1728, device-verified), and a `whose` equality filter is unreliable on the
-# Drafts mailbox. Returns immediately after the delete, so at most one is removed.
-_DELETE_DRAFT = """on run argv
-  set mid to item 1 of argv
-  with timeout of 120 seconds
-  tell application "Mail"
-    set dm to drafts mailbox
-    set n to count of (messages of dm)
-    repeat with i from n to 1 by -1
-      set m to message i of dm
-      set thisId to message id of m
-      if thisId is not missing value and (thisId as text) is mid then
-        delete m
-        return "deleted"
-      end if
-    end repeat
-    error "no draft with that message id"
-  end tell
-  end timeout
-end run"""
-
-# reply builds a real reply via Mail's NATIVE reply verb (Mail owns In-Reply-To/
-# References threading — the only mechanism that threads; make-new-outgoing can't set
-# headers, spike 2026-07-11). The body (reply text + our quote) is set on the returned
-# outgoing message — keystroke-free (#46; no .eml). A window opens for the HUMAN to
-# review/send. NEVER sends. Atomic (#44): roll back the draft on any post-creation
-# failure — subject to #133's limit, i.e. Mail's async autosave can still leave a stray
-# Drafts copy. body via tempfile through the shared readBody handler, never a bare
-# `read` (an empty reply_body would otherwise crash -39, #READ_BODY); id via argv.
-_REPLY = (
-    READ_BODY
-    + "\n\n"
-    + mail_outgoing.ROLLBACK
-    + "\n\n"
-    + mail_addressing.MAILBOX_REF
-    + """
-
-on run argv
-  set mid to item 1 of argv
-  set bodyText to my readBody(item 2 of argv)
-  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
-  with timeout of 120 seconds
-  tell application "Mail"
-    set matches to (messages of mb whose message id is mid)
-    if (count of matches) is 0 then error ¬
-      "no message with that message id in " & (item 4 of argv)
-    set r to reply (item 1 of matches) opening window yes
-    try
-      set content of r to bodyText
-    on error errMsg
-      if my rollback(r) then
-        error errMsg
-      else
-        error errMsg & my draftLeftover()
-      end if
-    end try
-  end tell
-  end timeout
-end run"""
-)
-
-
-# list_attachments (#45): attachments of messages in a mailbox matching a subject query.
-# Mailbox addressing goes through the shared mailboxFor resolver, so this reaches ANY
-# mailbox (#146) — #45 shipped it with the five special names only, which left a filed
-# message's attachments as unreachable as its body. A special name still resolves
-# through Mail's UNIFIED, cross-account, locale-independent accessors (verified
-# on-device: `drafts mailbox`->"All Drafts", `sent mailbox`->"All Sent", `trash
-# mailbox`->"All Trash", `junk mailbox`->"All Junk", `inbox`->unified inbox), so that
-# case still can't pick the wrong (often empty) same-named mailbox on a multi-account
-# Mac; a url names its account outright, so neither can that one. An empty query lists
-# ALL messages in the mailbox (bounded by maxN) rather than none — `contains ""` is
-# false, so that case is branched explicitly. A non-empty `mid` (#155/#81) addresses ONE
-# message by RFC822 message-id instead, the same `whose message id is` predicate _BODY
-# uses; it wins over `q` because an id already names exactly one message. Caveat from
-# the facts doc: `whose` is unreliable on the Drafts mailbox — but an unsaved draft has
-# no message-id to pass in the first place, so the id branch is not the Drafts path (an
-# empty `mid` + empty `q` still lists the whole mailbox, which is).
-# Fields framed per the US/RS contract:
-# per record = subject, then (name, size, downloaded) TRIPLES per attachment; the
-# subject and each attachment name pass through the shared STRIP_FRAMING handler
-# before being joined, so a message that happens to contain those control chars can't
-# desync the parser. Output capped at maxN records. with timeout (#56). All inputs via
-# argv (no interpolation).
-_ATTACHMENTS = (
-    STRIP_FRAMING
-    + "\n\n"
-    + mail_addressing.MAILBOX_REF
-    + """
-
-on run argv
-  set q to item 1 of argv
-  set maxN to (item 2 of argv) as integer
-  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
-  set mid to item 5 of argv
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  set c to 0
-  with timeout of 120 seconds
-  tell application "Mail"
-    if mid is not "" then
-      set msgs to (messages of mb whose message id is mid)
-    else if q is "" then
-      set msgs to messages of mb
-    else
-      set msgs to (messages of mb whose subject contains q)
-    end if
-    repeat with m in msgs
-      set c to c + 1
-      if c > maxN then exit repeat
-      -- #155: the id first, so an attachment row is addressable. A draft that Mail has
-      -- not autosaved yet has no message id and raises here — that is expected, not an
-      -- error: it degrades to "" and the row still lists its attachments, which is the
-      -- documented reason this tool works on Drafts at all.
-      set mid to ""
-      try
-        set mid to (message id of m) as text
-      end try
-      set out to out & mid & us & my stripFraming(subject of m)
-      repeat with a in (mail attachments of m)
-        set aSize to ""
-        try
-          set aSize to (file size of a) as text
-        end try
-        set aDown to ""
-        try
-          set aDown to (downloaded of a) as text
-        end try
-        -- #81: the attachment's own id (a MIME part path, e.g. "1.12"). Four
-        -- attachments named image001.jpg on one message is normal, so the NAME is not
-        -- an address; this is. Guarded because it is the one property Mail.sdef
-        -- declares that has never been exercised on every message shape.
-        set aId to ""
-        try
-          set aId to (id of a) as text
-        end try
-        set out to out & us & my stripFraming(name of a) & us & aSize & us & aDown & ¬
-          us & my stripFraming(aId)
-      end repeat
-      set out to out & rs
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-)
-
-
-# save_mail_attachment (#81): write ONE attachment out. `mail attachment` is entirely
-# read-only in Mail.sdef but declares `<responds-to command="save">` — device-verified
-# 2026-08-05, and unlike most of that dictionary this one is TRUE. What the probing
-# added, and what shapes this script:
-#
-# * `save a in <file>` writes to the EXACT path given (it is not a directory), and
-#   OVERWRITES SILENTLY — a 0-byte placeholder came back holding 192 KB. So the
-#   never-overwrite rule cannot live here; `mail_files.target_path` refuses in Python
-#   before this script is ever reached.
-# * Saving an attachment on a NOT-downloaded message makes Mail FETCH the whole message
-#   synchronously — all seven attachments on a `.partial` message flipped to
-#   downloaded=true and `file size` changed from the base64 estimate (14509) to the real
-#   byte count (8755). So this call is not a read: it can hit the network, and it gets
-#   _SAVE_TIMEOUT rather than the 30s default.
-# * A missing destination DIRECTORY raises -10000 and writes nothing (`mail_files`
-#   creates it first, inside the allowlisted root).
-# * The size cap is enforced HERE, before `save`, because `file size` is only knowable
-#   from Mail — checking it in Python would cost a second Apple Event on every call,
-#   and the fetch above means "look, then save" is not free.
-#
-# Addressing: `attachment id` (a MIME part path like "1.12") when given, else the name.
-# The name is NOT unique — four `image00N.jpg` on one real message — so an ambiguous
-# name errors with the ids rather than silently saving the first match. Returns
-# `<size>US<downloaded>` as the attachment's own report of what it wrote.
-_SAVE_ATTACHMENT = (
-    mail_addressing.MAILBOX_REF
-    + """
-
-on run argv
-  set mid to item 1 of argv
-  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
-  set wantName to item 4 of argv
-  set wantId to item 5 of argv
-  set destPath to item 6 of argv
-  set maxBytes to (item 7 of argv) as integer
-  set us to character id 31
-  with timeout of 600 seconds
-  tell application "Mail"
-    set matches to (messages of mb whose message id is mid)
-    if (count of matches) is 0 then error ¬
-      "no message with that message id in " & (item 3 of argv)
-    set m to item 1 of matches
-    set found to missing value
-    set nMatch to 0
-    set seenIds to ""
-    repeat with a in (mail attachments of m)
-      set thisId to ""
-      try
-        set thisId to (id of a) as text
-      end try
-      if wantId is not "" then
-        if thisId is wantId then
-          set found to a
-          set nMatch to 1
-          exit repeat
-        end if
-      else if (name of a) is wantName then
-        set nMatch to nMatch + 1
-        set found to a
-        set seenIds to seenIds & thisId & " "
-      end if
-    end repeat
-    if found is missing value then error ¬
-      "no attachment on that message matches — list them with mail_attachments"
-    if nMatch > 1 then error ¬
-      "that name is on " & (nMatch as text) & " attachments of this message (ids: " & ¬
-      seenIds & ") — pass attachment_id instead"
-    set aSize to -1
-    try
-      set aSize to (file size of found) as integer
-    end try
-    if aSize > maxBytes then error ¬
-      "attachment is " & (aSize as text) & " bytes, over the cap"
-    set aDown to ""
-    try
-      set aDown to (downloaded of found) as text
-    end try
-    save found in (destPath as POSIX file)
-    return (aSize as text) & us & aDown
-  end tell
-  end timeout
-end run"""
-)
-
-# Saving can FETCH the message off the server (see above), so 30s is not enough — a
-# large attachment on a slow IMAP account is an ordinary case, not a hang. Same
-# reasoning as _MOVE_TIMEOUT.
-_SAVE_TIMEOUT = 300.0
-
 
 # --- organize: mailboxes, moves, status (#78/#79) ------------------------------------
 # Everything below MUTATES stored mail. The destructive half (`_MOVE`) never runs on its
@@ -1027,295 +698,6 @@ FLAG_COLORS = {
 }
 
 
-def _parse_attachments(raw: str) -> list[dict]:
-    """Parse the _ATTACHMENTS payload: RS-separated records, each US-separated as
-    message-id, subject, then (name, size, downloaded) triples. Malformed/partial
-    trailing records are skipped.
-
-    The id (#155) makes a row addressable — #81 (save an attachment to disk) has nothing
-    to name a file by without it, and "the attachment on THIS message" used to cost a
-    whole-mailbox scan. Each attachment carries its OWN ``id`` too (#81): a MIME part
-    path like ``1.12``, which is what ``save_mail_attachment`` addresses when several
-    attachments on one message share a name — device-verified, four ``image00N.jpg``
-    on one real message. A blank id is kept, not dropped: an unsaved draft has no
-    Message-ID yet, and listing its attachments is this tool's documented job. `folder`
-    is filled in by the caller, which knows the mailbox it was asked about."""
-    recs = parse_framed(
-        raw,
-        [Field("id", str.strip), Field("summary", clean_summary)],
-        repeat=[
-            Field("name", clean_summary, required=True),
-            Field("size", int_or_none),
-            Field("downloaded", bool_or_none),
-            Field("id", str.strip),
-        ],
-        repeat_key="attachments",
-    )
-    for r in recs:
-        r["summary"] = r["summary"] or "(no subject)"
-        # Only a real id yields a deeplink: message://%3C%3E resolves to nothing, and a
-        # citation that opens an empty window is worse than an absent one.
-        if r["id"]:
-            r["deeplink"] = _deeplink(r["id"])
-    return recs
-
-
-def _parse_triage_records(raw: str) -> list[dict]:
-    """Parse _INBOX_TRIAGE: RS-separated records, US-separated fields (id, subject,
-    sender, to_addrs (comma-joined), secs_ago, was_replied_to, read, flagged).
-    Malformed/partial records are skipped; addresses lowercased."""
-    return parse_framed(
-        raw,
-        [
-            Field("id"),
-            Field("subject"),
-            Field("sender", lambda s: s.strip().lower()),
-            Field("to_addrs", addr_list),
-            Field("secs_ago", int_or_zero),
-            Field("was_replied_to", bool_strict),
-            Field("read", bool_strict),
-            Field("flagged", bool_strict),
-        ],
-    )
-
-
-def _parse_sent_records(raw: str) -> list[dict]:
-    """Parse _SENT_TRIAGE: RS records, US fields (id, subject, recipients, secs_ago)."""
-    return parse_framed(
-        raw,
-        [
-            Field("id"),
-            Field("subject"),
-            Field("recipient_addrs", addr_list),
-            Field("secs_ago", int_or_zero),
-        ],
-    )
-
-
-def _parse_my_addrs(raw: str) -> set[str]:
-    return {a.strip().lower() for a in raw.split(US) if a.strip()}
-
-
-# _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
-# concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
-# like commands; booleans coerce inside `&`). Subject passes through the shared
-# STRIP_FRAMING handler before being joined, so a subject that happens to contain
-# those control chars can't desync the parser.
-# Addresses bare (extract address from / address of every to recipient, TID-joined)
-# — these can't carry framing bytes. Date as seconds-ago. maxN via argv.
-# Verified on-device.
-_INBOX_TRIAGE = (
-    STRIP_FRAMING
-    + """
-
-on run argv
-  set maxN to (item 1 of argv) as integer
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Mail"
-    set n to (count of messages of inbox)
-    if n > maxN then set n to maxN
-    repeat with i from 1 to n
-      set m to message i of inbox
-      set mid to message id of m
-      if mid is not missing value and mid is not "" then
-        set AppleScript's text item delimiters to ","
-        set toJoined to ((address of every to recipient of m) as text)
-        set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
-          (extract address from (sender of m)) & us & toJoined & us & ¬
-          (((current date) - (date received of m)) as integer) & us & ¬
-          (was replied to of m) & us & (read status of m) & us & ¬
-          (flagged status of m) & rs
-      end if
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-)
-
-# _SENT_TRIAGE: recent sent records from the unified `sent mailbox` (All Sent),
-# newest-first. Subject passes through the shared STRIP_FRAMING handler before
-# being joined, same rationale as _INBOX_TRIAGE.
-_SENT_TRIAGE = (
-    STRIP_FRAMING
-    + """
-
-on run argv
-  set maxN to (item 1 of argv) as integer
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Mail"
-    set sm to sent mailbox
-    set n to (count of messages of sm)
-    if n > maxN then set n to maxN
-    repeat with i from 1 to n
-      set m to message i of sm
-      set mid to message id of m
-      if mid is not missing value and mid is not "" then
-        set AppleScript's text item delimiters to ","
-        set toJoined to ((address of every to recipient of m) as text)
-        set AppleScript's text item delimiters to ""
-        set out to out & mid & us & (my stripFraming(subject of m)) & us & ¬
-          toJoined & us & (((current date) - (date sent of m)) as integer) & rs
-      end if
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-)
-
-# _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
-# iteration raises -1700). Verified on-device.
-_MY_ADDRESSES = """on run argv
-  set us to character id 31
-  set AppleScript's text item delimiters to us
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Mail"
-    repeat with acc in accounts
-      set out to out & ((email addresses of acc) as text) & us
-    end repeat
-  end tell
-  end timeout
-  set AppleScript's text item delimiters to ""
-  return out
-end run"""
-
-# _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation
-# window), emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry
-# In-Reply-To / References) — Python parses referenced ids (stdlib email handles
-# folding). Capped at maxN.
-_INBOX_REFS = """on run argv
-  set cutoffSecs to (item 1 of argv) as integer
-  set maxN to (item 2 of argv) as integer
-  set rs to character id 30
-  set out to ""
-  set c to 0
-  with timeout of 120 seconds
-  tell application "Mail"
-    set cutoff to (current date) - cutoffSecs
-    repeat with m in (messages of inbox whose date received > cutoff)
-      set h to all headers of m
-      if (h contains "In-Reply-To:") or (h contains "References:") then
-        set c to c + 1
-        if c > maxN then exit repeat
-        set out to out & h & rs
-      end if
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-
-
-def _summary(subject: str, sender: str) -> str:
-    subject, sender = subject.strip(), sender.strip()
-    if subject and sender:
-        return f"{subject} — {sender}"
-    return subject or sender or "(no subject)"
-
-
-def _classify_needs_response(records: list[dict], my_addrs: set[str]) -> list[Pointer]:
-    """Rank inbound messages that likely need the user's response. Drops already-replied
-    messages; keeps those directly addressed to the user (my_addrs ∩ to_addrs). If
-    my_addrs is empty (extraction failed) it degrades to FLAGGED-ONLY rather than
-    flooding the inbox. Reasons (stable): flagged > unread-direct > unanswered-direct;
-    recency (smallest secs_ago) breaks ties within a tier. Bounded to MAX_MAILS.
-
-    ``folder="inbox"`` (#155): the triage scan runs against Mail's unified `inbox`, so
-    "inbox" is both the truth and one of the five canonical names the id-taking tools
-    accept. Without it this tool — the documented triage ENTRY POINT — handed back ids
-    that ``mail_body``/``mail_reply`` could not take, since both require a mailbox they
-    said would come from the read. ``account`` stays unset: a unified accessor spans
-    every account, and guessing one would be worse than admitting we don't know."""
-    out: list[tuple[int, int, Pointer]] = []
-    for r in records:
-        if r["was_replied_to"]:
-            continue
-        direct = bool(my_addrs & set(r["to_addrs"]))
-        if my_addrs and not direct:
-            continue
-        if not my_addrs and not r["flagged"]:
-            continue  # can't confirm direct → flagged-only, no flood
-        if r["flagged"]:
-            tier, reason = 0, "flagged"
-        elif not r["read"]:
-            tier, reason = 1, "unread-direct"
-        else:
-            tier, reason = 2, "unanswered-direct"
-        p = Pointer(
-            id=r["id"],
-            summary=clean_summary(_summary(r["subject"], r["sender"])),
-            deeplink=_deeplink(r["id"]),
-            folder="inbox",
-            reason=reason,
-        )
-        out.append((tier, r["secs_ago"], p))
-    out.sort(key=lambda t: (t[0], t[1]))  # tier asc, then most-recent (secs_ago) first
-    return [p for _, _, p in out[:MAX_MAILS]]
-
-
-def _norm_mid(mid: str) -> str:
-    """A Message-ID as a COMPARISON key: the bare id, lowercased. Not a third id form
-    (``mail_addressing`` owns the only two) — nothing is ever addressed with this, it
-    only answers "are these two the same message?" across headers that disagree on
-    case."""
-    return bare_id(mid).lower()
-
-
-def _referenced_ids(header_blobs: list[str]) -> set[str]:
-    """Message-ids cited by inbox messages via In-Reply-To / References. Each blob is
-    one message's raw headers; stdlib email parses folded headers robustly."""
-    ids: set[str] = set()
-    for blob in header_blobs:
-        msg = email.message_from_string(blob)
-        refs = f"{msg.get('In-Reply-To', '')} {msg.get('References', '')}"
-        for tok in re.findall(r"<[^>]+>", refs):
-            ids.add(_norm_mid(tok))
-    return ids
-
-
-def _classify_awaiting_reply(
-    sent: list[dict], referenced_ids: set[str], days: int
-) -> list[Pointer]:
-    """Sent messages older than `days` whose Message-ID no inbox message references
-    (real In-Reply-To/References threading — accurate, no fuzzy subject matching).
-    Reason: stable 'awaiting-reply'. Sorted oldest-sent-first (most overdue). Bounded
-    to MAX_MAILS. A group-thread send is cleared if ANY recipient's reply cites it
-    (documented).
-
-    ``folder="sent"`` (#155): the scan runs through Mail's unified `sent mailbox`
-    accessor, so "sent" is the literal truth AND one of the five canonical names the
-    id-taking tools accept — a pointer from here now reaches ``mail_body`` unaided.
-    ``account`` stays unset: a unified accessor spans every account, so there is nothing
-    honest to put there."""
-    cutoff = days * 86400
-    out: list[tuple[int, Pointer]] = []
-    for r in sent:
-        if r["secs_ago"] < cutoff:
-            continue
-        if _norm_mid(r["id"]) in referenced_ids:
-            continue
-        to = ", ".join(r["recipient_addrs"]) or "(no recipients)"
-        p = Pointer(
-            id=r["id"],
-            summary=clean_summary(f"{r['subject']} — to {to}"),
-            deeplink=_deeplink(r["id"]),
-            folder="sent",
-            reason="awaiting-reply",
-        )
-        out.append((r["secs_ago"], p))
-    out.sort(key=lambda t: t[0], reverse=True)  # most overdue (largest secs_ago) first
-    return [p for _, p in out[:MAX_MAILS]]
-
-
 def _parse_search_results(raw: str) -> list[Pointer]:
     """Parse the _SEARCH payload: US/RS-framed (message id, subject, sender) records.
     Records with no stable message-id are skipped — a message without a Message-ID
@@ -1341,44 +723,6 @@ def _parse_search_results(raw: str) -> list[Pointer]:
             deeplink=_deeplink(r["id"]),
             folder="inbox",
         )
-        for r in recs
-    ]
-
-
-def _parse_draft_records(raw: str) -> list[dict]:
-    """Parse the _DRAFTS payload: US-framed (message id, subject, first recipient)
-    records. Records with no stable message-id are skipped — same rule as the inbox
-    reads (#61): never emit a non-resolvable id.
-
-    ``folder="drafts"`` (#155) — the canonical name, so a draft pointer round-trips
-    into ``mail_attachments`` (confirming an attachment landed) without guessing.
-
-    Each record keeps its ``subject`` and ``to`` as DISCRETE fields alongside the
-    Pointer's free-text ``summary`` (#157). Reacquiring "the draft I just made" used to
-    mean substring-matching ``"subject — to recipient"``, which is guesswork and
-    collides outright whenever two drafts share a subject."""
-    recs = parse_framed(
-        raw,
-        [
-            Field("id", str.strip, required=True),
-            Field("subject"),
-            Field("rcpt", str.strip),
-        ],
-        min_fields=1,
-    )
-    return [
-        {
-            **Pointer(
-                id=r["id"],
-                summary=clean_summary(
-                    _summary(r["subject"], f"to {r['rcpt']}" if r["rcpt"] else "")
-                ),
-                deeplink=_deeplink(r["id"]),
-                folder="drafts",
-            ).as_dict(),
-            "subject": r["subject"],
-            "to": r["rcpt"],
-        }
         for r in recs
     ]
 
@@ -1513,24 +857,12 @@ class MailAdapter:
         by the script as «class utf8» (never interpolated); to/subject go via argv.
         The tempfile is deleted after the (synchronous) script has read its content
         into the draft."""
-        addr = to.strip()
-        if not addr:
-            raise ValueError("create_draft needs a recipient address (to)")
-        with runtime.body_file(body or "") as path:
-            runtime.run_osascript(_CREATE_DRAFT, addr, subject or "", path)
-        return {
-            "created": True,
-            "subject": subject or "",
-            "mailbox": "Drafts",
-            "note": "opened in a Mail compose window for your review; save it to keep "
-            "it in Drafts, where it gets a stable message-id — see drafts()/"
-            "delete_draft().",
-        }
+        return mail_drafts.create_draft(to, subject, body)
 
     def _draft_records(self) -> list[dict]:
         """The Drafts read: Pointer fields plus the discrete ``subject``/``to`` (#157).
         ``list_drafts`` is the same read in the bounded-read envelope."""
-        return _parse_draft_records(runtime.run_osascript(_DRAFTS, str(MAX_MAILS)))
+        return mail_drafts.draft_records(MAX_MAILS)
 
     def list_drafts(self) -> dict:
         """List the Drafts mailbox: each record is a citable Pointer (id, summary,
@@ -1551,16 +883,7 @@ class MailAdapter:
         before-state an id-addressed write needs for the audit trail (#67). Satisfies
         the Snapshotter Protocol. Compares bracket-normalized (`_norm_mid`, M1 review):
         accepts a bracketed or bare ``ident`` against a bracketed or bare stored id."""
-        mid = _norm_mid(ident)
-        for r in self._draft_records():
-            if _norm_mid(r["id"]) == mid:
-                return Pointer(
-                    id=r["id"],
-                    summary=r["summary"],
-                    deeplink=r["deeplink"],
-                    folder=r.get("folder"),
-                )
-        return None
+        return mail_drafts.snapshot(ident, MAX_MAILS)
 
     def delete_draft(self, ident: str, dry_run: bool = False) -> dict:
         """Delete one draft by its RFC822 message-id (from `list_drafts`). Accepts a
@@ -1572,18 +895,9 @@ class MailAdapter:
         ``{"deleted": True, "id": mid}``, the one odd envelope out). Raises if the id
         resolves to no draft, so a stale id fails loudly instead of silently deleting
         nothing."""
-        mid = bare_id(ident)
-        if not mid:
-            raise ValueError(
-                "delete_draft needs a draft id (the message-id from drafts)"
-            )
-        if dry_run:
-            found = self.snapshot(mid)
-            if found is None:
-                raise ValueError(f"no draft with message id {mid!r}")
-            return deletion_result(mid, found)
-        runtime.run_osascript(_DELETE_DRAFT, mid)
-        return deletion_result(mid, None)
+        # self.snapshot passed in, not re-derived: the dry-run resolve stays a call on
+        # the class (the Snapshotter Protocol / audit plane address the adapter).
+        return mail_drafts.delete_draft(ident, dry_run, self.snapshot)
 
     def send(
         self,
@@ -1671,7 +985,7 @@ class MailAdapter:
         ``with_outbox_pending`` from raising. False means "still in Drafts, remove it
         with delete_draft"."""
         try:
-            runtime.run_osascript(_DELETE_DRAFT, mid)
+            runtime.run_osascript(mail_drafts._DELETE_DRAFT, mid)
         except (NativeError, OSError, ValueError):
             return False
         return True
@@ -1755,28 +1069,9 @@ class MailAdapter:
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
         produced ``message_id``, verbatim. It scopes BOTH native calls — the quote read
         and the draft build — so a filed original can't reply with an empty quote."""
-        mid = bare_id(message_id)
-        if not mid:
-            raise ValueError("reply needs the original message's id")
-        if not reply_body.strip():
-            raise ValueError("reply needs a non-empty reply_body")
-        mb = mail_addressing.mailbox_args(mailbox)
-        # the quote preamble lives ONCE, in mail_outgoing (#160) — reply and reply_all
-        # each carried a copy of the fetch/guard/partition/sanitize/build sequence.
-        body = (
-            mail_outgoing.quoted_body(reply_body, mid, mb)
-            if include_quote
-            else reply_body
+        return mail_drafts.reply(
+            message_id, mailbox, reply_body, include_quote=include_quote
         )
-        with runtime.body_file(body) as path:
-            runtime.run_osascript(_REPLY, mid, path, *mb)
-        return {
-            "created": True,
-            "subject": "(reply)",
-            "mailbox": "Drafts",
-            "note": "reply draft opened for review; save it to keep it in Drafts, "
-            "where it gets a stable message-id (see drafts())",
-        }
 
     def list_attachments(
         self, mailbox: str = "", query: str = "", message_id: str = ""
@@ -1804,28 +1099,9 @@ class MailAdapter:
         Returns the bounded-read envelope over records
         [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}].
         A read — never mutates."""
-        if not mailbox and not message_id:
-            raise ValueError(
-                "mail_attachments needs a mailbox (the `folder` value from a read) "
-                "or a message_id"
-            )
-        if message_id:
-            target = mail_addressing.resolve(message_id, folder=mailbox or None)
-            folder, mb, mid = target.folder, target.mailbox_args, target.id
-        else:
-            folder, mb, mid = mailbox, mail_addressing.mailbox_args(mailbox), ""
-        raw = runtime.run_osascript(
-            _ATTACHMENTS, query.strip(), str(MAX_MAILS), *mb, mid
-        )
-        recs = _parse_attachments(raw)[:MAX_MAILS]
-        # #155: hand back the mailbox this actually read, VERBATIM. It is already the
-        # round-trip token every id-taking tool wants, and echoing it means a row from
-        # here is complete on its own — id + deeplink + folder — instead of only being
-        # usable by a caller who still remembers what it asked for.
-        for r in recs:
-            r["folder"] = folder
+        recs = mail_attachments.records(mailbox, query, message_id, MAX_MAILS)
         # An id names one message, so the cap cannot have hidden anything.
-        return read_result(recs, cap=None if mid else MAX_MAILS)
+        return read_result(recs, cap=None if message_id else MAX_MAILS)
 
     def save_attachment(
         self,
@@ -1856,35 +1132,13 @@ class MailAdapter:
         its timeout is raised accordingly. An offline account cannot fetch, so a file
         that lands at 0 bytes is deleted and reported as a failure.
         """
-        target = mail_addressing.resolve(message_id, folder=mailbox or None)
-        wanted_name, wanted_id = name.strip(), attachment_id.strip()
-        if not wanted_name and not wanted_id:
-            raise ValueError(
-                "save_mail_attachment needs the attachment's name or its id — list "
-                "them with mail_attachments first"
-            )
-        path = mail_files.target_path(dest_dir, wanted_name or wanted_id)
-        raw = runtime.run_osascript(
-            _SAVE_ATTACHMENT,
-            target.id,
-            *target.mailbox_args,
-            wanted_name,
-            wanted_id,
-            str(path),
-            str(mail_files.MAX_BYTES),
-            timeout=_SAVE_TIMEOUT,
+        return mail_attachments.save_attachment(
+            message_id,
+            dest_dir,
+            name=name,
+            attachment_id=attachment_id,
+            mailbox=mailbox,
         )
-        size, _, downloaded = raw.strip().partition(US)
-        return {
-            "saved": str(path),
-            "name": path.name,
-            "original_name": wanted_name or wanted_id,
-            "bytes": mail_files.confirm_written(path),
-            "reported_size": int_or_none(size),
-            "was_downloaded": bool_or_none(downloaded),
-            "id": target.id,
-            "folder": target.folder,
-        }
 
     # --- organize (#78/#79) ----------------------------------------------------------
 
@@ -2367,36 +1621,13 @@ class MailAdapter:
         (flagged / unread-direct / unanswered-direct). Heuristic over headers/
         properties — no body scan; direct-addressed + not-yet-replied. Bounded to
         MAX_MAILS, and #156's `truncated` says when that bound bit."""
-        records = _parse_triage_records(
-            runtime.run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN))
-        )
-        my = _parse_my_addrs(runtime.run_osascript(_MY_ADDRESSES))
-        return read_result(_classify_needs_response(records, my), cap=MAX_MAILS)
+        return read_result(mail_triage.needs_response(MAX_MAILS), cap=MAX_MAILS)
 
     def get_awaiting_reply(self, days: int = 3) -> dict:
         """Sent messages older than `days` with no reply, ranked oldest-first (reason
         'awaiting-reply'). Real In-Reply-To/References threading. Bounded to
         MAX_MAILS."""
-        if not 1 <= days <= 365:
-            raise ValueError("days must be between 1 and 365")
-        sent = _parse_sent_records(runtime.run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
-        # The per-record age cutoff is applied in ONE place —
-        # _classify_awaiting_reply. Here only the correlation window is sized:
-        # scan inbox back to the oldest send; if even that is younger than the
-        # cutoff, no send can qualify, so skip the inbox scan entirely.
-        window = max((r["secs_ago"] for r in sent), default=0)
-        if window < days * 86400:
-            return read_result([])
-        blobs = [
-            b
-            for b in runtime.run_osascript(
-                _INBOX_REFS, str(window), str(REFS_SCAN)
-            ).split(RS)
-            if b.strip()
-        ]
-        return read_result(
-            _classify_awaiting_reply(sent, _referenced_ids(blobs), days), cap=MAX_MAILS
-        )
+        return read_result(mail_triage.awaiting_reply(days, MAX_MAILS), cap=MAX_MAILS)
 
     def search(
         self,

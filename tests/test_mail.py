@@ -7,7 +7,14 @@ from contextlib import nullcontext
 import pytest
 
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters import mail, mail_addressing, mail_outgoing
+from macos_apps_mcp.adapters import (
+    mail,
+    mail_addressing,
+    mail_attachments,
+    mail_drafts,
+    mail_outgoing,
+    mail_triage,
+)
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
     MailAdapter,
@@ -39,9 +46,10 @@ def _patch_body_file(monkeypatch, fake):
 
 def _script(name):
     """Resolve a script constant by name across the adapter's modules — the send
-    scripts live in ``mail_outgoing`` since #160, the draft ones still in ``mail``.
-    #176 unified the *seam*, not the constants; they stay split until #178."""
-    for mod in (mail, mail_outgoing):
+    scripts live in ``mail_outgoing`` (#160); #178 moved the draft, attachment and
+    triage ones into their own modules. The by-name lookup is what lets the ~40
+    identity tests keep pinning constants wherever a split files them."""
+    for mod in (mail, mail_outgoing, mail_drafts, mail_attachments, mail_triage):
         if hasattr(mod, name):
             return getattr(mod, name)
     raise AssertionError(f"no script constant named {name}")
@@ -172,7 +180,7 @@ def test_search_empty_query_raises():
 import os  # noqa: E402
 import re  # noqa: E402
 
-from macos_apps_mcp.adapters.mail import _BODY, _CREATE_DRAFT  # noqa: E402
+from macos_apps_mcp.adapters.mail import _BODY  # noqa: E402
 
 
 def test_get_body_resolves_and_bounds(monkeypatch):
@@ -222,198 +230,9 @@ def test_get_body_huge_body_overflows(monkeypatch):
         MailAdapter().get_body("abc@host", "inbox")
 
 
-def test_create_draft_never_sends():
-    # the SAFETY invariant: the draft script has NO `send` verb anywhere — it can only
-    # create-and-open, never send (joshrutkowski's two-tier gate; the #62 acceptance).
-    # Anchored on the VERB, not the substring: the shared #135 rollback preamble prose
-    # contains the word "sends", and a bare substring check would fail on that while
-    # still not proving anything about the verb.
-    assert not re.search(r"^\s*send \w+\s*$", _CREATE_DRAFT, re.M)
-    assert "make new outgoing message" in _CREATE_DRAFT
-    assert "visible:true" in _CREATE_DRAFT  # opens for human review
-
-
-def test_create_draft_passes_body_via_tempfile(monkeypatch, tmp_path):
-    # body must be READ from a tempfile as «class utf8», never interpolated into the
-    # script; to/subject/path go via argv. Assert the body reaches a real file and the
-    # path is argv[3].
-    captured = {}
-
-    def fake(script, *args):
-        captured["script"] = script
-        captured["args"] = args
-        # the tempfile must exist and hold the body at call time (script reads it)
-        with open(args[2], encoding="utf-8") as f:
-            captured["body_on_disk"] = f.read()
-        return ""
-
-    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", fake)
-    MailAdapter().create_draft("bob@x.com", "Hi", "multi\nline © body")
-    assert captured["script"] is _CREATE_DRAFT
-    assert captured["args"][0] == "bob@x.com" and captured["args"][1] == "Hi"
-    assert captured["body_on_disk"] == "multi\nline © body"  # never interpolated
-    assert "«class utf8»" in _CREATE_DRAFT  # read as utf8, not string-built
-
-
-def test_create_draft_cleans_up_tempfile(monkeypatch):
-    # the tempfile is deleted after the (synchronous) script read it.
-    paths = []
-    monkeypatch.setattr(
-        "macos_apps_mcp.runtime.run_osascript",
-        lambda script, *a: paths.append(a[2]) or "",
-    )
-    MailAdapter().create_draft("bob@x.com", "Hi", "body")
-    assert paths and not os.path.exists(paths[0])  # cleaned up
-
-
-def test_create_draft_empty_recipient_raises():
-    with pytest.raises(ValueError, match="recipient"):
-        MailAdapter().create_draft("  ", "Hi", "body")
-
-
-def test_create_draft_returns_locator_dict(monkeypatch):
-    # #43: a freshly opened compose window has no stable Message-ID YET, so
-    # create_draft returns a locator (where to find it) instead of a fabricated id.
-    # #82/F4 review: once saved to Drafts it DOES get one (drafts()/delete_draft()
-    # resolve by it) — the note must point at that recovery path, not claim drafts
-    # are permanently unaddressable.
-    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", lambda *a: "")
-    out = MailAdapter().create_draft("x@example.com", "Hi", "body")
-    assert out["created"] is True
-    assert out["mailbox"] == "Drafts"
-    assert out["subject"] == "Hi"
-    assert "drafts()" in out["note"]
-
-
-def test_create_draft_reads_body_through_shared_handler():
-    # Bug 1 (device-verified): a bare `read (POSIX file …) as «class utf8»` raises -39
-    # ("End of file error") on a ZERO-BYTE file — an empty create_draft body crashed
-    # since 0.8.0. The script must compose the shared readBody handler instead of
-    # reading directly.
-    assert "on readBody(p)" in _CREATE_DRAFT
-    assert "my readBody(item 3 of argv)" in _CREATE_DRAFT
-    # "read (POSIX file" legitimately appears ONCE, inside the readBody handler itself
-    # — the `on run` body must never call it bare (a second, direct occurrence).
-    assert _CREATE_DRAFT.count("read (POSIX file") == 1
-
-
-def test_create_draft_cleanup_on_failure_is_in_script():
-    # #44: atomicity is enforced INSIDE the osascript — the partial outgoing message is
-    # deleted in the error path. Assert the STRUCTURE (the rollback between `on error`
-    # and the re-raise), not just the words: a substring check would pass even if the
-    # block were gutted and a stray "delete"/"on error" comment left behind (#43/#44
-    # review). Since #135 the delete goes through the VERIFYING rollback handler, so the
-    # structure is `on error` -> rollback -> re-raise either way.
-    assert re.search(
-        r"on error errMsg\s+if my rollback\(msg\) then\s+error errMsg", _CREATE_DRAFT
-    ), "the on-error handler must roll back the partial draft, then re-raise"
-
-
-def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
-    # #44 Python-side contract: if osascript surfaces the propagated error, create_draft
-    # re-raises AND does not leak the body tempfile (the finally unlinks it) — so a
-    # failed create leaves nothing behind on either side.
-    seen = {}
-
-    def boom(script, *args):
-        seen["path"] = args[2]  # argv: to, subject, tempfile-path
-        raise RuntimeError("osascript failed")
-
-    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", boom)
-    with pytest.raises(RuntimeError, match="osascript failed"):
-        MailAdapter().create_draft("x@example.com", "Hi", "body")
-    assert not os.path.exists(seen["path"])  # tempfile cleaned up despite the error
-
-
-# --- list_attachments (#45) -----------------------------------------------------------
-
-
-def test_parse_attachments_groups_by_message():
-    from macos_apps_mcp.adapters.mail import _parse_attachments
-
-    us, rs = "\x1f", "\x1e"
-    raw = (
-        f"<a@x>{us}Logo files{us}LOGO.zip{us}1200000{us}true{us}1.2"
-        f"{us}spec.pdf{us}0{us}false{us}1.4{rs}"
-        f"{us}No attach subject{rs}"
-    )
-    out = _parse_attachments(raw)
-    assert out[0]["summary"] == "Logo files"
-    # #81: each attachment carries its own id (a MIME part path) — the NAME is not
-    # unique on a real message, so the id is what save_mail_attachment addresses.
-    assert out[0]["attachments"] == [
-        {"name": "LOGO.zip", "size": 1200000, "downloaded": True, "id": "1.2"},
-        {"name": "spec.pdf", "size": 0, "downloaded": False, "id": "1.4"},
-    ]
-    assert out[1]["summary"] == "No attach subject"
-    assert out[1]["attachments"] == []
-    # #155: the row is addressable — id + deeplink — and an unsaved draft (blank id) is
-    # still listed rather than dropped, but gets NO deeplink to a message that has none.
-    assert out[0]["id"] == "<a@x>"
-    assert out[0]["deeplink"] == "message://%3Ca@x%3E"
-    assert out[1]["id"] == ""
-    assert "deeplink" not in out[1]
-
-
-def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
-    import macos_apps_mcp.adapters.mail as mail
-
-    captured = {}
-
-    def fake(script, *args):
-        captured["script"] = script
-        captured["args"] = args
-        # more records than MAX_MAILS — the cap must actually bite
-        records = "".join(
-            f"<m{i}@x>\x1fLogo files {i}\x1fLOGO.zip\x1f100\x1ftrue\x1e"
-            for i in range(mail.MAX_MAILS + 5)
-        )
-        return records
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().list_attachments("drafts", "Logo")
-    # query, cap, the (account, path) mailbox pair and the (empty) message-id travel via
-    # argv — no localized candidates (the unified `drafts mailbox` accessor is
-    # locale-independent), and an empty account id is what selects that unified branch
-    # in the shared resolver
-    assert captured["args"] == ("Logo", str(mail.MAX_MAILS), "", "drafts", "")
-    assert len(out["results"]) == mail.MAX_MAILS
-    # #156: at the cap and NOT complete — the caller must be able to tell.
-    assert out["truncated"] is True
-
-
-def test_list_attachments_empty_query_lists_all(monkeypatch):
-    import macos_apps_mcp.adapters.mail as mail
-
-    def fake(script, *args):
-        return (
-            "<1@x>\x1fFirst\x1fa.pdf\x1f10\x1ftrue\x1e"
-            "<2@x>\x1fSecond\x1fb.pdf\x1f20\x1ffalse\x1e"
-            "<3@x>\x1fThird\x1e"
-        )
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().list_attachments("inbox")
-    assert [r["summary"] for r in out["results"]] == ["First", "Second", "Third"]
-    # #155: the mailbox the caller passed is echoed back, so each row round-trips on its
-    # own into mail_body / a future save-attachment tool.
-    assert {r["folder"] for r in out["results"]} == {"inbox"}
-    # under the cap: no truncation claim either way
-    assert "truncated" not in out
-
-
-def test_list_attachments_unknown_mailbox_raises():
-    import pytest
-
-    from macos_apps_mcp.adapters.mail import MailAdapter
-
-    with pytest.raises(ValueError, match="unknown mailbox"):
-        MailAdapter().list_attachments("nope", "x")
-
-
 # --- reply (#42/#46) ------------------------------------------------------------------
 
-from macos_apps_mcp.adapters.mail import _REPLY  # noqa: E402
+from macos_apps_mcp.adapters.mail_drafts import _REPLY  # noqa: E402
 from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
     _ORIGINAL,
 )
@@ -483,7 +302,18 @@ def test_framed_templates_compose_the_one_strip_framing_handler():
     from macos_apps_mcp.text import STRIP_FRAMING
 
     checked = []
-    for name in ("mail", "messages", "notes", "photos", "safari", "music", "contacts"):
+    for name in (
+        "mail",
+        "mail_attachments",
+        "mail_drafts",
+        "mail_triage",
+        "messages",
+        "notes",
+        "photos",
+        "safari",
+        "music",
+        "contacts",
+    ):
         mod = importlib.import_module(f"macos_apps_mcp.adapters.{name}")
         for attr in dir(mod):
             tpl = getattr(mod, attr)
@@ -691,121 +521,6 @@ def test_reply_cleanup_on_failure_is_in_script():
     assert re.search(
         r"on error errMsg\s+if my rollback\(r\) then\s+error errMsg", _REPLY
     ), "the on-error handler must roll back the partial reply, then re-raise"
-
-
-# --- drafts (#82) ---------------------------------------------------------------
-
-
-def test_list_drafts_parses_framed_records(monkeypatch):
-    raw = (
-        f"<a@b.com>{US}Q3 numbers{US}boss@corp.com{RS}"
-        f"<c@d.com>{US}Lunch?{US}pal@example.org{RS}"
-    )
-    _patch_run(monkeypatch, lambda *a: raw)
-    out = mail.MailAdapter().list_drafts()["results"]
-    assert [p["id"] for p in out] == ["<a@b.com>", "<c@d.com>"]
-    assert out[0]["summary"] == "Q3 numbers — to boss@corp.com"
-    assert out[0]["deeplink"].startswith("message://")
-
-
-def test_list_drafts_skips_records_without_message_id(monkeypatch):
-    # a draft with no Message-ID has no stable citation — never emit a garbage id.
-    raw = f"missing value{US}No id{US}x@y.com{RS}<ok@z>{US}Fine{US}a@b.com{RS}"
-    _patch_run(monkeypatch, lambda *a: raw)
-    assert [p["id"] for p in mail.MailAdapter().list_drafts()["results"]] == ["<ok@z>"]
-
-
-def test_list_drafts_empty_mailbox(monkeypatch):
-    _patch_run(monkeypatch, lambda *a: "")
-    assert mail.MailAdapter().list_drafts() == {"results": []}
-
-
-def test_list_drafts_summary_without_recipient(monkeypatch):
-    raw = f"<a@b>{US}Just a subject{US}{RS}"
-    _patch_run(monkeypatch, lambda *a: raw)
-    out = mail.MailAdapter().list_drafts()["results"]
-    assert out[0]["summary"] == "Just a subject"
-
-
-def test_snapshot_returns_pointer_for_known_draft(monkeypatch):
-    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
-    _patch_run(monkeypatch, lambda *a: raw)
-    p = mail.MailAdapter().snapshot("<a@b>")
-    assert p.summary == "Q3 numbers — to boss@corp.com"
-
-
-def test_snapshot_returns_none_for_unknown_id(monkeypatch):
-    _patch_run(monkeypatch, lambda *a: "")
-    assert mail.MailAdapter().snapshot("<nope@nowhere>") is None
-
-
-def test_delete_draft_dry_run_makes_no_native_call(monkeypatch):
-    raw = f"<a@b>{US}Q3 numbers{US}boss@corp.com{RS}"
-    calls = []
-
-    def fake(script, *argv):
-        calls.append(script)
-        return raw
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)
-    assert out["dry_run"] is True
-    assert out["would_delete"]["id"] == "<a@b>"
-    # exactly one call — the snapshot read. Never the delete script.
-    assert calls == [mail._DRAFTS]
-
-
-def test_delete_draft_dry_run_unknown_id_raises(monkeypatch):
-    _patch_run(monkeypatch, lambda *a: "")
-    with pytest.raises(ValueError, match="no draft"):
-        mail.MailAdapter().delete_draft("<nope@nowhere>", dry_run=True)
-
-
-def test_delete_draft_deletes_by_message_id(monkeypatch):
-    seen = {}
-
-    def fake(script, *argv):
-        seen[script] = argv
-        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().delete_draft("a@b")
-    assert out == {"deleted": "a@b"}  # C5d: the ONE deletion envelope
-    assert seen[mail._DELETE_DRAFT] == ("a@b",)
-
-
-def test_delete_draft_rejects_empty_id():
-    with pytest.raises(ValueError, match="draft id"):
-        mail.MailAdapter().delete_draft("   ")
-
-
-# --- M1 review: delete_draft accepts a bracketed id like every other id-taking method -
-
-
-def test_delete_draft_accepts_bracketed_id(monkeypatch):
-    # a caller passing "<id>" (the RFC822-looking form, matching what get_body/reply/
-    # reply_all/forward all accept) must resolve — not fail loudly. Brackets are
-    # stripped before the id reaches the AppleScript argv.
-    seen = {}
-
-    def fake(script, *argv):
-        seen[script] = argv
-        return f"<a@b>{US}Q3{US}x@y.com{RS}" if script is mail._DRAFTS else "deleted"
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().delete_draft("<a@b>")
-    assert out == {"deleted": "a@b"}  # C5d envelope; id bare like the wire
-    assert seen[mail._DELETE_DRAFT] == ("a@b",)  # bare on the wire, not "<a@b>"
-
-
-def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkeypatch):
-    # snapshot() must match regardless of whether the caller's id or the stored
-    # Pointer.id is bracketed (M1 review) — the dry-run path depends on this.
-    raw = f"a@b{US}Q3 numbers{US}boss@corp.com{RS}"  # stored id is BARE
-    _patch_run(monkeypatch, lambda *a: raw)
-    out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)  # caller id bracketed
-    assert out["dry_run"] is True
-    assert out["would_delete"]["id"] == "a@b"
 
 
 # --- send (#83) -------------------------------------------------------------------
@@ -1307,7 +1022,7 @@ def test_atomicity_comments_do_not_overclaim():
     # false (see above), and a false safety claim in a comment is worse than none — it
     # is what let #133 sit misdiagnosed. Assert the claim stays retired.
     assert "retry can't strand a duplicate" not in mail.__doc__
-    assert "retry can't strand a duplicate" not in mail._CREATE_DRAFT
+    assert "retry can't strand a duplicate" not in mail_drafts._CREATE_DRAFT
     assert "#133" in mail.__doc__  # the real limit is stated instead
 
 
@@ -1712,7 +1427,7 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
     _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
     mail.MailAdapter().reply("<orig@x>", _SPAM_URL, "Sounds good")
     assert seen[mail_outgoing._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
-    assert seen[mail._REPLY] == (
+    assert seen[mail_drafts._REPLY] == (
         "orig@x",
         "/tmp/fake-body",
         _GMAIL_UUID,
@@ -1790,21 +1505,6 @@ def test_forward_dry_run_still_makes_no_native_call(monkeypatch):
     assert out["dry_run"] is True
 
 
-def test_list_attachments_reaches_a_user_folder(monkeypatch):
-    # #45 gave mail_attachments a mailbox, but only the five special ones — a user
-    # folder was unreachable there too.
-    seen = {}
-
-    def fake(script, *args):
-        seen["args"] = args
-        return "<c@x>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1f1.2\x1e"
-
-    _patch_run(monkeypatch, fake)
-    out = mail.MailAdapter().list_attachments(f"imap://{_GMAIL_UUID}/Backup")
-    assert out["results"][0]["attachments"][0]["name"] == "deal.pdf"
-    assert seen["args"] == ("", str(mail.MAX_MAILS), _GMAIL_UUID, "Backup", "")
-
-
 # --- the addressing triple: id + folder + account (#155) ------------------------------
 
 
@@ -1813,14 +1513,14 @@ def test_applescript_path_pointers_carry_their_canonical_folder(monkeypatch):
     # mailbox and documents it as coming "from the SAME search result". Before #155
     # only the indexed path emitted `folder`, so the triage entry point handed back
     # ids that were dead on arrival.
-    from macos_apps_mcp.adapters.mail import _parse_draft_records
+    from macos_apps_mcp.adapters.mail_drafts import _parse_draft_records
 
     assert _parse_search_results(f"<a@x>{US}Subject{US}her@x{RS}")[0].folder == "inbox"
     assert _parse_draft_records(f"<d@x>{US}Draft{US}to@x{RS}")[0]["folder"] == "drafts"
 
 
 def test_needs_response_and_awaiting_reply_carry_a_folder(monkeypatch):
-    from macos_apps_mcp.adapters.mail import (
+    from macos_apps_mcp.adapters.mail_triage import (
         _classify_awaiting_reply,
         _classify_needs_response,
     )
@@ -1839,6 +1539,7 @@ def test_needs_response_and_awaiting_reply_carry_a_folder(monkeypatch):
             }
         ],
         {"me@x"},
+        25,
     )
     assert needs[0].folder == "inbox"
 
@@ -1853,6 +1554,7 @@ def test_needs_response_and_awaiting_reply_carry_a_folder(monkeypatch):
         ],
         set(),
         days=3,
+        limit=25,
     )
     assert awaiting[0].folder == "sent"
 

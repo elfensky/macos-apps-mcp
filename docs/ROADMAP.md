@@ -103,8 +103,12 @@ were filed, each re-verified in-code before filing:
 - [#178](https://github.com/elfensky/macos-apps-mcp/issues/178) **split mail.py where it cleaves** —
   triage/drafts/attachments (~610 lines, zero coupling verified by grep) move out along #160's
   pattern; `search` and the recoverable writes stay, deliberately — deep is not the smell.
-  Sequenced after #176 — **unblocked 2026-08-16**; boundary work before 0.10.x, per DESIGN.md's
-  lyfe-hardening premise.
+  Sequenced after #176 — **Landed 2026-08-16**: `mail_triage` / `mail_drafts` /
+  `mail_attachments`, mail.py 2,799 → ~2,030 lines. Pure move — the class keeps every method
+  (thin delegating bodies), the bounds are passed in (`MAX_MAILS` stays policy on the class),
+  `_summary` sank to `text.py` and `_norm_mid` to `mail_addressing`, so no module imports
+  `.mail` back. Test count conserved exactly (1,177 defs); the native-seam tripwire grew 7 → 10
+  modules by glob, as designed.
 - [#179](https://github.com/elfensky/macos-apps-mcp/issues/179) **docstring invariants get one
   owner** — floating, see above.
 - [#180](https://github.com/elfensky/macos-apps-mcp/issues/180) **`build_*`/`query_*` doubling** —

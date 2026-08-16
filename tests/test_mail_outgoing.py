@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters import mail, mail_outgoing
+from macos_apps_mcp.adapters import mail, mail_drafts, mail_outgoing
 from macos_apps_mcp.text import RS, US
 
 _PREVIEW_KEYS = {
@@ -211,7 +211,7 @@ def test_draft_send_uses_the_drafts_own_bytes_and_removes_the_source(monkeypatch
         "",
         "",
     )
-    assert seen[mail._DELETE_DRAFT] == ("d@x",)
+    assert seen[mail_drafts._DELETE_DRAFT] == ("d@x",)
 
 
 def test_draft_cleanup_failure_never_turns_a_completed_send_into_an_error(monkeypatch):
@@ -233,7 +233,7 @@ def test_draft_cleanup_failure_never_turns_a_completed_send_into_an_error(monkey
             return _draft_payload()
         if script is mail_outgoing._OUTBOX_COUNT:
             return "0"
-        if script is mail._DELETE_DRAFT:
+        if script is mail_drafts._DELETE_DRAFT:
             raise mail.NativeError("Mail is not responding")
         return "sent"
 

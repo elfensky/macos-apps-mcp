@@ -290,6 +290,16 @@ def clean_summary(text: object) -> str:
     return _truncate(sanitize_line(text), SUMMARY_MAX)
 
 
+def _summary(subject: str, sender: str) -> str:
+    """The mail ``Pointer.summary`` shape — ``subject — sender`` with a placeholder
+    when both are blank. Pure string work, shared by the mail modules #178 split
+    (each builds summaries; none may import ``mail`` back)."""
+    subject, sender = subject.strip(), sender.strip()
+    if subject and sender:
+        return f"{subject} — {sender}"
+    return subject or sender or "(no subject)"
+
+
 def clean_body(
     text: object, limit: int = BODY_MAX, hard: int | None = BODY_HARD_MAX
 ) -> str:
