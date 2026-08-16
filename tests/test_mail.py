@@ -6,6 +6,7 @@ from contextlib import nullcontext
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_addressing, mail_outgoing
 from macos_apps_mcp.adapters.mail import (
     MAX_MAILS,
@@ -20,24 +21,26 @@ from macos_apps_mcp.text import RS, US
 
 
 def _patch_run(monkeypatch, fake):
-    """Fake the AppleScript boundary in BOTH mail modules.
+    """Fake the AppleScript boundary — ONE seam, whatever the module.
 
-    #160 moved the outbound scripts into ``mail_outgoing``, which runs them from its
-    own module global — so a test that only patched ``mail.run_osascript`` would let a
-    send tool spawn osascript against real Mail. Patch both, always."""
-    monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail_outgoing, "run_osascript", fake)
+    The mail modules call ``runtime.run_osascript`` qualified (#176), so patching the
+    attribute on ``runtime`` covers every one of them. Before that they each held
+    their own module-global copy and this helper had to name them all — after #160's
+    split a test that patched only ``mail`` let a send tool spawn osascript against
+    real Mail. A missed member failed OPEN; ``tests/test_native_seam.py`` is the
+    tripwire that keeps the by-name import from coming back."""
+    monkeypatch.setattr(runtime, "run_osascript", fake)
 
 
 def _patch_body_file(monkeypatch, fake):
-    """Same split for the tempfile seam — ``mail_outgoing`` writes the send bodies."""
-    monkeypatch.setattr(mail, "body_file", fake)
-    monkeypatch.setattr(mail_outgoing, "body_file", fake)
+    """Same single seam for the tempfile boundary the send bodies go through."""
+    monkeypatch.setattr(runtime, "body_file", fake)
 
 
 def _script(name):
     """Resolve a script constant by name across the adapter's modules — the send
-    scripts live in ``mail_outgoing`` since #160, the draft ones still in ``mail``."""
+    scripts live in ``mail_outgoing`` since #160, the draft ones still in ``mail``.
+    #176 unified the *seam*, not the constants; they stay split until #178."""
     for mod in (mail, mail_outgoing):
         if hasattr(mod, name):
             return getattr(mod, name)
@@ -120,7 +123,7 @@ def test_get_pointers_bounds_host_side(monkeypatch):
     # stops emitting after MAX_MAILS — not fetched whole then sliced in Python.
     seen = {}
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.runtime.run_osascript",
         lambda script, *args: seen.setdefault("args", args) and "" or "",
     )
     MailAdapter().get_pointers("invoice")
@@ -152,7 +155,7 @@ def test_search_matches_subject_or_sender(monkeypatch):
     # script contains both predicates (the search is no longer subject-only).
     seen = {}
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.runtime.run_osascript",
         lambda script, *args: seen.setdefault("script", script) and "" or "",
     )
     MailAdapter().get_pointers("acme")
@@ -181,7 +184,7 @@ def test_get_body_resolves_and_bounds(monkeypatch):
         seen["call"] = (script, a)
         return "Hello\x00 body"
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", fake)
     out = MailAdapter().get_body("<abc@host>", "inbox")
     assert out == "Hello body"  # NUL stripped by clean_body
     assert seen["call"][0] is _BODY
@@ -199,7 +202,7 @@ def test_get_body_missing_value_is_not_surfaced_as_body(monkeypatch):
     from macos_apps_mcp.errors import NativeError
 
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "missing value"
+        "macos_apps_mcp.runtime.run_osascript", lambda *a: "missing value"
     )
     with pytest.raises(NativeError, match="not available locally"):
         MailAdapter().get_body("abc@host", "inbox")
@@ -212,7 +215,7 @@ def test_get_body_huge_body_overflows(monkeypatch):
     from macos_apps_mcp.text import BODY_HARD_MAX
 
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.runtime.run_osascript",
         lambda *a: "z" * (BODY_HARD_MAX + 1),
     )
     with pytest.raises(OutputOverflow):
@@ -244,7 +247,7 @@ def test_create_draft_passes_body_via_tempfile(monkeypatch, tmp_path):
             captured["body_on_disk"] = f.read()
         return ""
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", fake)
     MailAdapter().create_draft("bob@x.com", "Hi", "multi\nline © body")
     assert captured["script"] is _CREATE_DRAFT
     assert captured["args"][0] == "bob@x.com" and captured["args"][1] == "Hi"
@@ -256,7 +259,7 @@ def test_create_draft_cleans_up_tempfile(monkeypatch):
     # the tempfile is deleted after the (synchronous) script read it.
     paths = []
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.mail.run_osascript",
+        "macos_apps_mcp.runtime.run_osascript",
         lambda script, *a: paths.append(a[2]) or "",
     )
     MailAdapter().create_draft("bob@x.com", "Hi", "body")
@@ -274,7 +277,7 @@ def test_create_draft_returns_locator_dict(monkeypatch):
     # #82/F4 review: once saved to Drafts it DOES get one (drafts()/delete_draft()
     # resolve by it) — the note must point at that recovery path, not claim drafts
     # are permanently unaddressable.
-    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", lambda *a: "")
+    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", lambda *a: "")
     out = MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
@@ -316,7 +319,7 @@ def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
         seen["path"] = args[2]  # argv: to, subject, tempfile-path
         raise RuntimeError("osascript failed")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.mail.run_osascript", boom)
+    monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", boom)
     with pytest.raises(RuntimeError, match="osascript failed"):
         MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert not os.path.exists(seen["path"])  # tempfile cleaned up despite the error
@@ -1321,7 +1324,9 @@ def test_account_map_parses_osascript_pairs(monkeypatch):
 
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(
-        ma, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle"
+        runtime,
+        "run_osascript",
+        lambda *a: f"{_UUID_1}\x1fPersonal\x1e{_UUID_2}\x1fGoogle",
     )
     assert ma.account_map() == {_UUID_1: "Personal", _UUID_2: "Google"}
 
@@ -1335,7 +1340,7 @@ def test_account_map_empty_when_mail_unreachable(monkeypatch):
     def boom(*a):
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(ma, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     # a cosmetic label must never fail the call that wanted counts
     assert ma.account_map() == {}
 
@@ -1357,7 +1362,7 @@ def test_account_map_empty_success_is_leashed_not_cached_forever(monkeypatch):
         calls.append(a)
         return "" if len(calls) == 1 else f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(ma, "run_osascript", warming_up)
+    monkeypatch.setattr(runtime, "run_osascript", warming_up)
     assert ma.account_map() == {}
     now[0] += ma._ACCOUNT_MAP_FAILURE_TTL - 1  # inside the TTL: no re-spawn
     assert ma.account_map() == {}
@@ -1397,7 +1402,7 @@ def test_account_map_caches_the_failure_too(monkeypatch):
         calls.append(a)
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(ma, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     assert ma.account_map() == {}
     now[0] += ma._ACCOUNT_MAP_FAILURE_TTL - 1  # still inside the TTL
     assert ma.account_map() == {}
@@ -1426,7 +1431,7 @@ def test_account_map_failure_expires_and_retries(monkeypatch):
             raise NativeError("Automation denied")
         return f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(ma, "run_osascript", flaky)
+    monkeypatch.setattr(runtime, "run_osascript", flaky)
     assert ma.account_map() == {}
     now[0] += ma._ACCOUNT_MAP_FAILURE_TTL  # TTL fully elapsed
     assert ma.account_map() == {_UUID_1: "Personal"}
@@ -1448,7 +1453,7 @@ def test_account_map_success_survives_past_the_failure_ttl(monkeypatch):
         calls.append(a)
         return f"{_UUID_1}\x1fPersonal"
 
-    monkeypatch.setattr(ma, "run_osascript", ok)
+    monkeypatch.setattr(runtime, "run_osascript", ok)
     assert ma.account_map() == {_UUID_1: "Personal"}
     now[0] += ma._ACCOUNT_MAP_FAILURE_TTL * 100  # far past any failure TTL
     assert ma.account_map() == {_UUID_1: "Personal"}
@@ -1471,7 +1476,7 @@ def test_account_map_leak_repro_a_real_failure_leaks_timestamp(monkeypatch):
     def boom(*a):
         raise NativeError("Automation denied")
 
-    monkeypatch.setattr(ma, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     assert ma.account_map() == {}
     # _ACCOUNT_MAP_FAILURE_AT now holds a real time.monotonic() reading, left in place
     # on purpose — part B checks whether that survives into the next test.
@@ -1493,7 +1498,7 @@ def test_account_map_leak_repro_b_stale_failure_must_not_wipe_a_later_cache(
     monkeypatch.setattr(ma.time, "monotonic", lambda: future)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"some-uuid": "Personal"})
     monkeypatch.setattr(
-        ma,
+        runtime,
         "run_osascript",
         lambda *a: pytest.fail("stale failure timestamp wiped a live cache"),
     )
@@ -1504,7 +1509,7 @@ def test_resolve_account_maps_name_and_passes_uuid_through(monkeypatch):
     import macos_apps_mcp.adapters.mail_addressing as ma
 
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(ma, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: f"{_UUID_1}\x1fPersonal")
     assert ma.resolve_account("Personal") == _UUID_1
     assert ma.resolve_account(_UUID_1) == _UUID_1
 
@@ -1516,7 +1521,7 @@ def test_resolve_account_uuid_never_contacts_mail(monkeypatch):
 
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(
-        ma, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
+        runtime, "run_osascript", lambda *a: pytest.fail("a UUID account launched Mail")
     )
     assert ma.resolve_account(_UUID_1.upper()) == _UUID_1.upper()
 
@@ -2015,7 +2020,7 @@ def test_move_mail_allows_a_unified_destination_from_an_imap_source(
     # WORKS (it resolves to that account's concrete mailbox), so the #171 refusal must
     # not widen into "a unified accessor can never be a destination".
     monkeypatch.setattr(
-        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
+        runtime, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
     )
     out = MailAdapter().move_mail("a@x", _INBOX, "drafts", dry_run=False)
     assert out["succeeded"] == 1
@@ -2025,7 +2030,7 @@ def test_move_mail_reports_what_the_verify_found_not_what_it_hoped(
     monkeypatch, no_backup
 ):
     monkeypatch.setattr(
-        mail,
+        runtime,
         "run_osascript",
         lambda *a, **kw: _statuses(
             [("a@x", "ok"), ("b@x", "not-in-source"), ("c@x", "ERROR boom")]
@@ -2064,7 +2069,7 @@ def test_move_mail_gets_a_raised_timeout(monkeypatch, no_backup):
     # 30-second job — the host-side default would kill a legitimate batch
     seen = {}
     monkeypatch.setattr(
-        mail,
+        runtime,
         "run_osascript",
         lambda *a, **kw: seen.update(kw) or _statuses([("a@x", "ok")]),
     )
@@ -2077,7 +2082,7 @@ def test_move_mail_gets_a_raised_timeout(monkeypatch, no_backup):
 
 def test_undo_moves_the_batch_back_to_each_messages_source(monkeypatch, no_backup):
     monkeypatch.setattr(
-        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
+        runtime, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
     )
     adapter = MailAdapter()
     moved = adapter.move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
@@ -2118,7 +2123,7 @@ def test_update_status_rejects_an_unknown_flag_colour():
 def test_update_status_sends_the_tri_state_and_colour_index(monkeypatch):
     seen = []
     monkeypatch.setattr(
-        mail,
+        runtime,
         "run_osascript",
         lambda *a, **kw: seen.append(a) or _statuses([("a@x", "ok")]),
     )
@@ -2154,7 +2159,7 @@ def test_update_status_groups_a_batch_by_the_mailbox_each_id_lives_in(monkeypatc
 
 def test_update_status_reports_a_message_it_could_not_find(monkeypatch):
     monkeypatch.setattr(
-        mail, "run_osascript", lambda *a, **kw: _statuses([("a@x", "not-found")])
+        runtime, "run_osascript", lambda *a, **kw: _statuses([("a@x", "not-found")])
     )
     out = MailAdapter().update_status("a@x", mailbox=_INBOX, read=True)
     assert out["succeeded"] == 0

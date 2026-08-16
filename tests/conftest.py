@@ -19,7 +19,7 @@ per session.
 
 import pytest
 
-from macos_apps_mcp import deploy
+from macos_apps_mcp import deploy, runtime
 from macos_apps_mcp.adapters import mail_addressing
 
 
@@ -51,3 +51,25 @@ def _reset_account_map_globals(monkeypatch):
     """
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_FAILURE_AT", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_osascript(request, monkeypatch):
+    """Fail CLOSED on the native seam: a unit test that forgets to fake it raises
+    instead of spawning osascript against real Mail (#176).
+
+    Only reaches code that calls the seam qualified — ``runtime.run_osascript`` — which
+    since #176 is the whole mail plane; adapters still holding a module-global copy are
+    unaffected, and a test that patches ``runtime`` itself simply overrides this.
+    Integration tests (``-m integration``) must reach real apps, so they are exempt.
+    """
+    if "integration" in request.keywords:
+        return
+
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            "a unit test reached run_osascript — fake it with "
+            "monkeypatch.setattr(runtime, 'run_osascript', ...)"
+        )
+
+    monkeypatch.setattr(runtime, "run_osascript", _refuse)

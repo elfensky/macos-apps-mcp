@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_outgoing
 from macos_apps_mcp.text import RS, US
 
@@ -29,8 +30,7 @@ _PREVIEW_KEYS = {
 
 
 def _patch_run(monkeypatch, fake):
-    monkeypatch.setattr(mail, "run_osascript", fake)
-    monkeypatch.setattr(mail_outgoing, "run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
 
 
 def _draft_payload(
@@ -132,8 +132,7 @@ def test_the_quote_preamble_exists_once(monkeypatch):
         return "sent"
 
     _patch_run(monkeypatch, fake)
-    monkeypatch.setattr(mail, "body_file", _FakeFile)
-    monkeypatch.setattr(mail_outgoing, "body_file", _FakeFile)
+    monkeypatch.setattr(runtime, "body_file", _FakeFile)
     mail.MailAdapter().reply("<a@x>", "inbox", "hello")
     mail.MailAdapter().reply_all("<b@x>", "inbox", "hello", dry_run=False)
     assert seen == ["a@x", "b@x"]
@@ -196,7 +195,7 @@ def test_draft_send_uses_the_drafts_own_bytes_and_removes_the_source(monkeypatch
         return "sent"
 
     _patch_run(monkeypatch, fake)
-    monkeypatch.setattr(mail_outgoing, "body_file", _FakeFile)
+    monkeypatch.setattr(runtime, "body_file", _FakeFile)
     out = mail.MailAdapter().send(draft_id="<d@x>", dry_run=False)
     assert out["sent"] is True
     assert out["action"] == "send_draft"
@@ -239,7 +238,7 @@ def test_draft_cleanup_failure_never_turns_a_completed_send_into_an_error(monkey
         return "sent"
 
     _patch_run(monkeypatch, fake)
-    monkeypatch.setattr(mail_outgoing, "body_file", _FakeFile)
+    monkeypatch.setattr(runtime, "body_file", _FakeFile)
     out = mail.MailAdapter().send(draft_id="<d@x>", dry_run=False)
     assert out["sent"] is True
     assert out["draft_removed"] is False

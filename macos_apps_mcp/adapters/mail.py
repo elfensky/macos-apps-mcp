@@ -65,9 +65,10 @@ from collections import Counter
 from dataclasses import replace
 from datetime import datetime
 
+from .. import runtime
 from ..contracts import Pointer, deletion_result, read_result
 from ..errors import BatchTooLarge, NativeError, OutputOverflow
-from ..runtime import body_file, log, run_osascript
+from ..runtime import log
 from ..text import (
     BODY_HARD_MAX,
     READ_BODY,
@@ -1393,7 +1394,7 @@ class MailAdapter:
         if not q:
             raise ValueError("mail read needs a search substring (got an empty query)")
         # maxN is enforced host-side; the slice is a cheap backstop on the result.
-        return _parse_search_results(run_osascript(_SEARCH, q, str(MAX_MAILS)))[
+        return _parse_search_results(runtime.run_osascript(_SEARCH, q, str(MAX_MAILS)))[
             :MAX_MAILS
         ]
 
@@ -1418,7 +1419,7 @@ class MailAdapter:
         an explicitly named mailbox still raises."""
         target = mail_addressing.resolve(message_id, folder=mailbox or None)
         mid = target.id
-        body = run_osascript(_BODY, mid, *target.mailbox_args)
+        body = runtime.run_osascript(_BODY, mid, *target.mailbox_args)
         # defense in depth: the _BODY script already errors on a missing-value content,
         # but a Mail version that returns the coerced literal instead of erroring must
         # not surface it as the body (#62 review).
@@ -1515,8 +1516,8 @@ class MailAdapter:
         addr = to.strip()
         if not addr:
             raise ValueError("create_draft needs a recipient address (to)")
-        with body_file(body or "") as path:
-            run_osascript(_CREATE_DRAFT, addr, subject or "", path)
+        with runtime.body_file(body or "") as path:
+            runtime.run_osascript(_CREATE_DRAFT, addr, subject or "", path)
         return {
             "created": True,
             "subject": subject or "",
@@ -1529,7 +1530,7 @@ class MailAdapter:
     def _draft_records(self) -> list[dict]:
         """The Drafts read: Pointer fields plus the discrete ``subject``/``to`` (#157).
         ``list_drafts`` is the same read in the bounded-read envelope."""
-        return _parse_draft_records(run_osascript(_DRAFTS, str(MAX_MAILS)))
+        return _parse_draft_records(runtime.run_osascript(_DRAFTS, str(MAX_MAILS)))
 
     def list_drafts(self) -> dict:
         """List the Drafts mailbox: each record is a citable Pointer (id, summary,
@@ -1581,7 +1582,7 @@ class MailAdapter:
             if found is None:
                 raise ValueError(f"no draft with message id {mid!r}")
             return deletion_result(mid, found)
-        run_osascript(_DELETE_DRAFT, mid)
+        runtime.run_osascript(_DELETE_DRAFT, mid)
         return deletion_result(mid, None)
 
     def send(
@@ -1670,7 +1671,7 @@ class MailAdapter:
         ``with_outbox_pending`` from raising. False means "still in Drafts, remove it
         with delete_draft"."""
         try:
-            run_osascript(_DELETE_DRAFT, mid)
+            runtime.run_osascript(_DELETE_DRAFT, mid)
         except (NativeError, OSError, ValueError):
             return False
         return True
@@ -1767,8 +1768,8 @@ class MailAdapter:
             if include_quote
             else reply_body
         )
-        with body_file(body) as path:
-            run_osascript(_REPLY, mid, path, *mb)
+        with runtime.body_file(body) as path:
+            runtime.run_osascript(_REPLY, mid, path, *mb)
         return {
             "created": True,
             "subject": "(reply)",
@@ -1813,7 +1814,9 @@ class MailAdapter:
             folder, mb, mid = target.folder, target.mailbox_args, target.id
         else:
             folder, mb, mid = mailbox, mail_addressing.mailbox_args(mailbox), ""
-        raw = run_osascript(_ATTACHMENTS, query.strip(), str(MAX_MAILS), *mb, mid)
+        raw = runtime.run_osascript(
+            _ATTACHMENTS, query.strip(), str(MAX_MAILS), *mb, mid
+        )
         recs = _parse_attachments(raw)[:MAX_MAILS]
         # #155: hand back the mailbox this actually read, VERBATIM. It is already the
         # round-trip token every id-taking tool wants, and echoing it means a row from
@@ -1861,7 +1864,7 @@ class MailAdapter:
                 "them with mail_attachments first"
             )
         path = mail_files.target_path(dest_dir, wanted_name or wanted_id)
-        raw = run_osascript(
+        raw = runtime.run_osascript(
             _SAVE_ATTACHMENT,
             target.id,
             *target.mailbox_args,
@@ -1934,7 +1937,7 @@ class MailAdapter:
         local = mail_addressing.local_account_id()
         acct_arg = "local" if local and uuid == local else uuid
         scheme = "local" if acct_arg == "local" else "imap"
-        leaf = run_osascript(_CREATE_MAILBOX, acct_arg, mb).strip()
+        leaf = runtime.run_osascript(_CREATE_MAILBOX, acct_arg, mb).strip()
         if not leaf or leaf == _MISSING_VALUE:
             raise NativeError(
                 f"Mail reported no mailbox at {mb!r} after creating it — the create "
@@ -2034,13 +2037,15 @@ class MailAdapter:
             for mid in mids
         ]
         if dry_run:
-            present = _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+            present = _parse_statuses(
+                runtime.run_osascript(_PRESENT, *src, US.join(mids))
+            )
             targets = [replace(t, status=present.get(t.id, "missing")) for t in targets]
             return mail_recover.preview("move", targets, destination=to_mailbox)
 
         def act(located):
             return _parse_statuses(
-                run_osascript(
+                runtime.run_osascript(
                     _MOVE,
                     *src,
                     *dst,
@@ -2102,7 +2107,9 @@ class MailAdapter:
             mail_recover.Target(id=mid, folder=mailbox, account=account) for mid in mids
         ]
         if dry_run:
-            present = _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+            present = _parse_statuses(
+                runtime.run_osascript(_PRESENT, *src, US.join(mids))
+            )
             targets = [replace(t, status=present.get(t.id, "missing")) for t in targets]
             return mail_recover.preview("trash", targets, destination=trash)
 
@@ -2110,7 +2117,7 @@ class MailAdapter:
 
         def act(located):
             return _parse_statuses(
-                run_osascript(
+                runtime.run_osascript(
                     _TRASH,
                     *src,
                     *dst,
@@ -2175,7 +2182,7 @@ class MailAdapter:
         if not mids:
             return {}
         src = mail_addressing.mailbox_args(mailbox)
-        return _parse_statuses(run_osascript(_PRESENT, *src, US.join(mids)))
+        return _parse_statuses(runtime.run_osascript(_PRESENT, *src, US.join(mids)))
 
     def dedupe_batch(self, ids, mailbox: str, dry_run: bool = True) -> dict:
         """Collapse each named Message-ID's same-mailbox copies down to one (#140).
@@ -2215,7 +2222,7 @@ class MailAdapter:
 
         def act(located):
             statuses = _parse_statuses(
-                run_osascript(
+                runtime.run_osascript(
                     _DEDUPE,
                     *src,
                     *dst,
@@ -2329,7 +2336,7 @@ class MailAdapter:
         for mb, group in groups.items():
             statuses.update(
                 _parse_statuses(
-                    run_osascript(
+                    runtime.run_osascript(
                         _SET_STATUS,
                         *mb,
                         _tri(read),
@@ -2360,8 +2367,10 @@ class MailAdapter:
         (flagged / unread-direct / unanswered-direct). Heuristic over headers/
         properties — no body scan; direct-addressed + not-yet-replied. Bounded to
         MAX_MAILS, and #156's `truncated` says when that bound bit."""
-        records = _parse_triage_records(run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN)))
-        my = _parse_my_addrs(run_osascript(_MY_ADDRESSES))
+        records = _parse_triage_records(
+            runtime.run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN))
+        )
+        my = _parse_my_addrs(runtime.run_osascript(_MY_ADDRESSES))
         return read_result(_classify_needs_response(records, my), cap=MAX_MAILS)
 
     def get_awaiting_reply(self, days: int = 3) -> dict:
@@ -2370,7 +2379,7 @@ class MailAdapter:
         MAX_MAILS."""
         if not 1 <= days <= 365:
             raise ValueError("days must be between 1 and 365")
-        sent = _parse_sent_records(run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
+        sent = _parse_sent_records(runtime.run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
         # The per-record age cutoff is applied in ONE place —
         # _classify_awaiting_reply. Here only the correlation window is sized:
         # scan inbox back to the oldest send; if even that is younger than the
@@ -2380,7 +2389,9 @@ class MailAdapter:
             return read_result([])
         blobs = [
             b
-            for b in run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(RS)
+            for b in runtime.run_osascript(
+                _INBOX_REFS, str(window), str(REFS_SCAN)
+            ).split(RS)
             if b.strip()
         ]
         return read_result(

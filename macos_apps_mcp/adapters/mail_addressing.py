@@ -34,8 +34,8 @@ import time
 from dataclasses import dataclass
 from urllib.parse import unquote
 
+from .. import runtime
 from ..errors import AmbiguousTarget, NativeError
-from ..runtime import run_osascript
 from ..text import RS, STRIP_FRAMING, US
 from . import mail_index, mailbox_url
 
@@ -305,7 +305,7 @@ def account_map() -> dict[str, str]:
         _ACCOUNT_MAP_FAILURE_AT = None
     if _ACCOUNT_MAP_CACHE is None:
         try:
-            raw = run_osascript(_ACCOUNTS)
+            raw = runtime.run_osascript(_ACCOUNTS)
         except (NativeError, OSError):
             # Every osascript failure mode is one of these two and all mean the same
             # thing — no names available, never "the call failed". run_osascript raises
