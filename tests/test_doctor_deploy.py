@@ -1,4 +1,15 @@
-from macos_apps_mcp import doctor
+import pytest
+
+from macos_apps_mcp import doctor, server
+
+# Four tests below assert "the import-time gate was off in this process" — false by
+# construction under the RELEASING checklist's gated run (MACOS_APPS_ALLOW_SEND=mail
+# set before import registers the send tools). The gate-ON half of every claim is
+# pinned by test_gate_on_dispatch.py's subprocess; skipping here loses nothing.
+_gate_off_only = pytest.mark.skipif(
+    bool(server._SEND_REGISTERED),
+    reason="valid only in a gate-off process (see test_gate_on_dispatch.py)",
+)
 
 
 def _mock_grants(monkeypatch, identities, reasons=None):
@@ -13,6 +24,7 @@ def _mock_grants(monkeypatch, identities, reasons=None):
     )
 
 
+@_gate_off_only
 def test_deployment_section_stdio_graceful(monkeypatch):
     monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
@@ -86,6 +98,7 @@ def test_deployment_note_has_no_partial_marker_when_both_dbs_read(monkeypatch):
     assert "PARTIAL" not in doctor.diagnose()["deployment"]["note"]
 
 
+@_gate_off_only
 def test_deployment_section_outbound_pending_when_configured_not_registered(
     monkeypatch,
 ):
@@ -107,6 +120,7 @@ def test_deployment_section_outbound_pending_when_configured_not_registered(
     assert "restart" in d["outbound_note"].lower()
 
 
+@_gate_off_only
 def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     # MACOS_APPS_READ_ONLY wins unconditionally over MACOS_APPS_ALLOW_SEND (#104) —
     # the outbound report must reflect that, not the raw ALLOW_SEND value; and with
@@ -123,6 +137,7 @@ def test_deployment_section_outbound_off_when_read_only(monkeypatch):
     assert "outbound_pending" not in d
 
 
+@_gate_off_only
 def test_outbound_status_splits_registered_from_configured(monkeypatch):
     # C6: the two truths that can DISAGREE. registered = gate state at import (off in
     # this process); configured = what the env/toggle enables RIGHT NOW. The former
