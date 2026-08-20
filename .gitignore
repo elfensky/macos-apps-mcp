@@ -11,3 +11,5 @@ build/
 .claude/
 .claude-octopus/
 .desloppify
+# graphify graph (generated locally)
+graphify-out/

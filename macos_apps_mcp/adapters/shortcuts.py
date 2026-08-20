@@ -128,9 +128,17 @@ class ShortcutsAdapter:
         entries = _filter_entries(_list_entries(), query)
         return [_list_pointer(name, uuid) for name, uuid in entries]
 
-    def run_shortcut(self, name: str, input_text: str | None = None) -> Pointer:
+    def run_shortcut(
+        self, name: str, input_text: str | None = None, *, dry_run: bool = False
+    ) -> Pointer:
         """Run a shortcut by name OR UUID id (the CLI takes either); optional text
         ``input_text`` piped via stdin.
+
+        ``dry_run=True`` resolves the handle to its display name and reports what WOULD
+        run — **no shortcut is ever run** (C6c; a shortcut can reach off-machine, e.g.
+        post to a webhook, so a preview path matters). It is not CLI-free: a UUID handle
+        costs one read-only ``shortcuts list`` to name it, since a preview citing a bare
+        UUID tells the reader nothing. A NAME handle touches nothing at all.
 
         The result is written to a temp file (``--output-path``) and only a bounded
         prefix is read back, so a shortcut returning a huge blob can't balloon the
@@ -140,6 +148,11 @@ class ShortcutsAdapter:
         name = name.strip()
         if not name:
             raise ValueError("run_shortcut needs a shortcut name (got an empty name)")
+        if dry_run:
+            summary = f"DRY RUN — would run {sanitize_line(self._display_name(name))}"
+            if input_text is not None:
+                summary += " with the given input"
+            return Pointer(id=name, summary=summary, deeplink="")
         with tempfile.TemporaryDirectory(prefix="macos-apps-mcp-shortcut-") as tmp:
             # ponytail: --output-path bounds *memory* (we read back only a snippet,
             # see below), not disk — a huge result writes fully here first. Fine: the

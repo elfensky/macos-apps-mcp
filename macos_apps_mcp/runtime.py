@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -137,9 +138,71 @@ _OSASCRIPT_TIMEOUT = 30.0  # seconds
 # form so a bare digit run never false-fingerprints. Codes per the survey (#47 design).
 _AUTOMATION_DENIED = "(-1743)"  # Automation (Apple-events) consent not granted
 _APP_NOT_RUNNING = ("(-609)", "(-10810)")  # connection invalid / app not launchable
+_APPLE_EVENT_TIMEOUT = "(-1712)"  # the app never answered the Apple Event
+
+# #183 (facts §9b): a timeout/-1712 from an app that is IDLE is a wedged event queue —
+# permanent, survives a UI quit-and-reopen, cleared only by a force-quit that actually
+# changes the pid. The same signal from an ACTIVE process is a busy app (e.g. a
+# post-restart account resync) that recovers on its own. Both signatures were observed
+# live. The process read happens only on the failure path — never on a happy path.
+_TELL_APP = re.compile(r'tell application "([^"]+)"')
+_BUSY_CPU = 5.0  # %CPU at/above which a sleeping process still counts as working
 
 
-def _classify_osascript_failure(stderr: str) -> NativeError:
+def app_process_info(app: str) -> dict | None:
+    """pid/state/%cpu/etime of the running app named ``app``, via one ``pgrep`` + one
+    ``ps`` (no TCC needed). ``None`` when it isn't running or ps is unreadable. Used by
+    the timeout classification (#183) and doctor's automation report."""
+    try:
+        pid = int(tracked_run(["pgrep", "-x", app], timeout=5.0).stdout.split()[0])
+        state, cpu, etime = tracked_run(
+            ["ps", "-o", "state=,%cpu=,etime=", "-p", str(pid)], timeout=5.0
+        ).stdout.split()
+        return {"pid": pid, "state": state, "cpu": float(cpu), "etime": etime}
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None
+
+
+def classify_stuck_app(state: str, cpu: float) -> str:
+    """``'wedged'`` vs ``'busy'`` for an app that just refused/timed out an Apple Event
+    (#183). Wedged: idle (sleeping, ~1% CPU) yet unresponsive — permanent, needs a
+    force-quit. Busy: running/uninterruptible state or real CPU — working through
+    something (an account resync) and self-recovering. Pure, so it unit-tests with
+    plain values; facts §9b holds the observed signatures."""
+    return "busy" if state[:1] in {"R", "U"} or cpu >= _BUSY_CPU else "wedged"
+
+
+def _timeout_hint(script: str) -> str:
+    """The #183 classification, appended to a timeout error's message. Empty when the
+    script names no app or the process can't be read — the generic timeout message
+    then reads exactly as before."""
+    m = _TELL_APP.search(script)
+    if not m:
+        return ""
+    app = m.group(1)
+    info = app_process_info(app)
+    if info is None:
+        return ""
+    desc = (
+        f"{app} (pid {info['pid']}, up {info['etime']}, state {info['state']}, "
+        f"{info['cpu']:.1f}% CPU)"
+    )
+    if classify_stuck_app(info["state"], info["cpu"]) == "busy":
+        return (
+            f" {desc} is ACTIVE — likely busy (e.g. an account resync) and usually "
+            "recovers on its own. Wait a minute, then retry once."
+        )
+    return (
+        f" {desc} is IDLE yet not answering Apple Events — its event queue is likely "
+        "WEDGED (facts §9b): it will not recover on its own, and a normal "
+        "quit-and-reopen can leave the same wedged process running. Tell the user to "
+        f"force-quit (`killall {app} && open -a {app}`), then confirm the pid changed "
+        "(doctor reports it). Do not retry until it has. sqlite-backed reads keep "
+        "working meanwhile."
+    )
+
+
+def _classify_osascript_failure(stderr: str, script: str = "") -> NativeError:
     """Fingerprint a non-zero osascript exit into a typed, agent-directed error.
 
     Only the failures with a *clear* remediation get a specific class; everything else
@@ -159,6 +222,12 @@ def _classify_osascript_failure(stderr: str) -> NativeError:
         return AppNotRunning(
             "The target macOS app isn't running or couldn't be launched. Tell the user "
             f"to open it, then try again once it's open. [{detail}]"
+        )
+    if _APPLE_EVENT_TIMEOUT in stderr:
+        # the script's own `with timeout` fired: the app never answered the event.
+        return NativeTimeout(
+            "The macOS app did not answer the Apple Event in time (-1712)."
+            f"{_timeout_hint(script)} [{detail}]"
         )
     return NativeError(f"osascript failed: {detail}")
 
@@ -272,10 +341,10 @@ def run_osascript(script: str, *args: str, timeout: float = _OSASCRIPT_TIMEOUT) 
                     f"The macOS app didn't respond within {timeout}s (it may be "
                     "blocked on a dialog, or the query is too broad). Tell the user to "
                     "dismiss any stuck prompt, then retry with a narrower query. Do "
-                    "not retry immediately."
+                    f"not retry immediately.{_timeout_hint(script)}"
                 ) from e
         if proc.returncode != 0:
-            raise _classify_osascript_failure(err)
+            raise _classify_osascript_failure(err, script)
         # debug telemetry (#56): opt-in via logging level, zero cost otherwise.
         log.debug(
             "osascript %.0fms, %d bytes out",

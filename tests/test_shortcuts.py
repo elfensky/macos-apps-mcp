@@ -176,6 +176,49 @@ def test_run_shortcut_rejects_empty_name(monkeypatch):
         ShortcutsAdapter().run_shortcut("   ")
 
 
+def test_run_shortcut_dry_run_runs_nothing(monkeypatch):
+    # C6c: a NAME handle needs no resolution, so dry_run touches the CLI not at all
+    # (a fake that raises if reached proves it).
+    def boom(*a, **kw):
+        raise AssertionError("dry_run must not invoke the shortcuts CLI")
+
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", boom)
+    p = ShortcutsAdapter().run_shortcut("Weather", dry_run=True)
+    assert p.id == "Weather"
+    assert "would run" in p.summary.lower() and "Weather" in p.summary
+
+
+def test_run_shortcut_dry_run_uuid_resolves_the_name_but_never_runs(monkeypatch):
+    # The UUID branch of _display_name DOES shell out — one read-only `shortcuts list`,
+    # so the preview cites a name instead of a bare UUID. What dry_run guarantees is
+    # that no shortcut RUNS. The name-handle test above cannot reach this branch
+    # (_UUID_RE doesn't match "Weather"), so both spellings passed it either way.
+    uuid = "11111111-2222-3333-4444-555555555555"
+    calls = []
+
+    class _Proc:
+        returncode = 0
+        stdout = f"Morning Routine ({uuid})\n"
+        stderr = ""
+
+    def record(cmd, **kw):
+        calls.append(cmd)
+        assert cmd[:2] != ["shortcuts", "run"], "dry_run must never RUN a shortcut"
+        return _Proc()
+
+    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", record)
+    p = ShortcutsAdapter().run_shortcut(uuid, dry_run=True)
+    assert p.id == uuid
+    assert "Morning Routine" in p.summary  # resolved, not echoed back as the UUID
+    assert calls and calls[0][:2] == ["shortcuts", "list"]
+
+
+def test_run_shortcut_dry_run_still_rejects_empty_name(monkeypatch):
+    _fake_run(monkeypatch)  # never reached
+    with pytest.raises(ValueError, match="needs a shortcut name"):
+        ShortcutsAdapter().run_shortcut("  ", dry_run=True)
+
+
 def test_list_pointer_summary_sanitized_uuid_id():
     # #52 + #63: the display summary is control-stripped; with a UUID the id is the
     # clean UUID (an oddly-named shortcut runs by its stable id, not the raw name).

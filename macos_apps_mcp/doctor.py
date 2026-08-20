@@ -27,7 +27,7 @@ import EventKit as EK
 
 from . import deploy
 from .errors import PRIVACY_PANE, NativeError
-from .runtime import request_access_each, run_native, run_osascript
+from .runtime import app_process_info, request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
@@ -48,7 +48,17 @@ _AUTOMATION_APPS = (
 # check — so a probe asking for them proves nothing; it must send a REAL event, and
 # `count windows` is the cheapest read-only command that does. Trade-off: it launches
 # a quit app, and a never-authorized one can surface the one-time consent dialog.
-_PROBE = "on run argv\n  tell application (item 1 of argv) to count windows\nend run"
+# with timeout (#56's second line of defense): self-terminates a hung child even if
+# the Python side died first — this probe launches each quit app in turn, making it
+# the template most likely to strand an orphan. test_applescript_timeout.py sweeps
+# only the adapters package, so this one is pinned by test_doctor.py instead.
+_PROBE = (
+    "on run argv\n"
+    "  with timeout of 120 seconds\n"
+    "  tell application (item 1 of argv) to count windows\n"
+    "  end timeout\n"
+    "end run"
+)
 # Budget for the one-time Automation consent dialog — a human answer, same rationale as
 # runtime._ACCESS_TIMEOUT; already-granted/denied probes return in well under a second.
 _PROBE_TIMEOUT = 120.0
@@ -56,7 +66,8 @@ _PROBE_TIMEOUT = 120.0
 # A read of this path is gated by Full Disk Access and it always exists on macOS, so a
 # PermissionError vs a clean read cleanly separates FDA-denied from FDA-granted. The
 # 0.5.0 sqlite read planes (chat.db, NoteStore.sqlite) need FDA — surface it now.
-_FDA_PATH = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
+# One declaration: deploy owns the user TCC.db path (it also reads grant rows from it).
+_FDA_PATH = deploy._TCC_DB
 
 # EKAuthorizationStatus integer values (stable across SDKs — map by value, not by
 # constant name, so a missing WriteOnly symbol on an older pyobjc can't crash import).
@@ -122,6 +133,19 @@ def _eventkit_surfaces(request: bool) -> list[dict]:
     return out
 
 
+def _process_line(app: str) -> str:
+    """The app's pid + uptime, so "did the force-quit actually restart it?" is
+    answerable from a doctor report (#183 — a UI quit left a 37-minute-old wedged
+    Mail process alive). ps-only, no Apple Event, no TCC."""
+    info = app_process_info(app)
+    if info is None:
+        return "not running"
+    return (
+        f"pid {info['pid']}, up {info['etime']}, state {info['state']}, "
+        f"{info['cpu']:.1f}% CPU"
+    )
+
+
 def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
@@ -137,14 +161,15 @@ def _automation_surfaces(request: bool) -> list[dict]:
                     "(a never-authorized app may show a one-time dialog).",
                 )
             )
-            continue
-        try:
-            run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
-            out.append(_surface(name, "automation", True, "ok"))
-        except NativeError as e:
-            # #47 already fingerprinted it (automation_denied / app_not_running / …);
-            # str(e) is the agent-directed remediation. Report, don't raise.
-            out.append(_surface(name, "automation", False, e.kind, str(e)))
+        else:
+            try:
+                run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
+                out.append(_surface(name, "automation", True, "ok"))
+            except NativeError as e:
+                # #47 already fingerprinted it (automation_denied / app_not_running /
+                # …); str(e) is the agent-directed remediation. Report, don't raise.
+                out.append(_surface(name, "automation", False, e.kind, str(e)))
+        out[-1]["process"] = _process_line(app)
     return out
 
 
@@ -221,17 +246,42 @@ def _version() -> str:
         return "unknown"
 
 
-def _outbound_state() -> list[str]:
-    """Adapters with OUTBOUND send currently enabled (#130) — read straight from
-    ``server._allow_send``/``server._SEND_ADAPTERS`` rather than re-reading
-    ``MACOS_APPS_ALLOW_SEND`` here, so this report can never disagree with what
-    actually got registered at import time. Imported LOCALLY: ``server.py`` does
-    ``from .doctor import diagnose`` at module level, so a module-level `import
-    server` here would be circular — this is the one place doctor.py reaches into
-    server.py, and it does so lazily."""
+# Baked into the installed package by scripts/build_app.sh — absent in a dev checkout.
+_BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
+
+
+def _build_stamp() -> str:
+    """Which BUILD is serving this call (#143) — `version` alone cannot see a
+    same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
+    `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
+    has no stamp file and honestly reports "dev"."""
+    try:
+        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+def _outbound_state() -> dict[str, list[str]]:
+    """``server.outbound_status()`` — registered vs configured outbound adapters
+    (#130, C6). Imported LOCALLY: ``server.py`` does ``from .doctor import diagnose``
+    at module level, so a module-level `import server` here would be circular — this
+    is the one place doctor.py reaches into server.py, and it does so lazily."""
     from . import server
 
-    return sorted(a for a in server._SEND_ADAPTERS if server._allow_send(a))
+    return server.outbound_status()
+
+
+def _tcc_note(reasons: dict[str, str | None]) -> str:
+    """Why the grant-identity report is empty — the CLASSIFIED reason (C7), not an
+    unconditional FDA blame: a missing db, schema drift, and an FDA denial used to
+    collapse into the same swallowed None."""
+    detail = ", ".join(f"{k} db: {v or 'ok'}" for k, v in reasons.items())
+    if "no-full-disk-access" in reasons.values():
+        return (
+            f"TCC.db unreadable ({detail}) — grant Full Disk Access (FDA) to THIS "
+            "process's responsible identity (grant it, or run via the daemon)."
+        )
+    return f"TCC.db unreadable ({detail}) — not an FDA denial; see the reason codes."
 
 
 def diagnose(request: bool = False) -> dict:
@@ -263,16 +313,17 @@ def diagnose(request: bool = False) -> dict:
     else:
         summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
 
-    ids = deploy.grant_identities()
+    grants = deploy.grant_report()
+    ids = grants["identities"]
     try:
         agent = deploy.agent_status()
     except Exception as e:  # not in a bundle / SM bridge absent — report, don't die
         agent = f"unavailable: {e}"
-    outbound = _outbound_state()
+    ob = _outbound_state()
+    outbound = ob["registered"]  # what this process actually serves, not the config
     deployment = {
-        "mode": "daemon"
-        if os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon"
-        else "stdio",
+        # argv, not the env var alone — see deploy.is_daemon_role()
+        "mode": "daemon" if deploy.is_daemon_role() else "stdio",
         "agent": agent,
         "grant_identities": ids,
         "outbound": outbound,
@@ -287,19 +338,51 @@ def diagnose(request: bool = False) -> dict:
             "block cannot reach it (see README 'Outbound (send) mode')."
         ),
         "note": (
-            "TCC.db unreadable — grant identity report needs Full Disk Access (FDA) "
-            "for THIS process's responsible identity (grant it, or run via the "
-            "daemon)."
+            _tcc_note(grants["reasons"])
             if ids is None
             else "grants listed per identity; the daemon identity is "
-            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) also reports "
-            "granted=False here — if a service looks unexpectedly denied, check "
-            "System Settings before assuming it's actually off."
+            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
+            'granted=False plus status="limited" — not a plain denial.'
         ),
     }
+    # A PARTIAL read (one db answered, the other did not) still has to say so. FDA rows
+    # live only in the SYSTEM db (#123), so an unreadable system db yields an identity
+    # map with no FDA row — indistinguishable, to the reader, from "FDA not granted".
+    # That is the misdiagnosis C7 exists to end; reporting it only when BOTH dbs fail
+    # left it alive in exactly the case it started as.
+    if ids is not None and any(grants["reasons"].values()):
+        deployment["note"] += " PARTIAL read — " + ", ".join(
+            f"{k} db: {v}" for k, v in grants["reasons"].items() if v
+        )
+    # Registration is fixed at import; the toggle/env is re-read per call. When they
+    # differ (allow-send flipped the toggle but the daemon kept running — deploy's
+    # "no daemon restarted" branch), say so instead of reporting config as live state.
+    if ob["configured"] != ob["registered"]:
+        deployment["outbound_pending"] = ob["configured"]
+        deployment["outbound_note"] += (
+            " Outbound config changed since this process launched (configured: "
+            + (", ".join(ob["configured"]) or "none")
+            + ") — restart the daemon to apply it."
+        )
+
+    # #163: the recoverable plane keeps every backup forever (no pruning code exists, on
+    # purpose — see mail_recover), so the ONE thing that makes that safe is saying out
+    # loud how much disk it holds. Terse for the same token-budget reason as
+    # outbound_note; the advisory that fires past the threshold carries the remedy.
+    from .adapters.mail_recover import backup_usage
+
+    usage = backup_usage()
+    # The absolute path is deliberately NOT here: it is long, it rides in every report,
+    # and the advisory that fires past the threshold carries it with the rm command.
+    deployment["mail_backups"] = (
+        f"{usage['bytes'] / 1024**2:.1f} MB in {usage['receipts']} receipts"
+        + (f" (oldest {usage['oldest']})" if usage["oldest"] else "")
+        + ", kept forever in <state>/backup/mail"
+    )
 
     return {
         "version": _version(),
+        "build": _build_stamp(),
         "responsible_process": _responsible_process(),
         "note": (
             "TCC attributes permissions to the process that launched macos-apps-mcp "

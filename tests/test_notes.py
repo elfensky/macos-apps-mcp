@@ -6,18 +6,19 @@ import pytest
 
 from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
+    MAX_NOTES,
     NotesAdapter,
     _compose_html,
     _parse_all,
     _parse_bodies,
 )
-from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.text import RS, US
 
 
 def test_parse_all_id_folder_title():
     raw = (
-        "x-coredata://S/ICNote/p1\tiCloud / Groceries\tMilk\n"
-        "x-coredata://S/ICNote/p2\tOn My Mac / Ideas\tRocket\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Groceries{US}Milk{RS}"
+        f"x-coredata://S/ICNote/p2{US}On My Mac / Ideas{US}Rocket{RS}"
     )
     ptrs = _parse_all(raw)
     assert len(ptrs) == 2
@@ -29,9 +30,15 @@ def test_parse_all_id_folder_title():
 
 
 def test_parse_all_untitled():
-    ptrs = _parse_all("x-coredata://S/ICNote/p3\tiCloud / Notes\t\n")
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p3{US}iCloud / Notes{US}{RS}")
     assert ptrs[0].summary == "(untitled note)"
     assert ptrs[0].folder == "iCloud / Notes"
+
+
+def test_parse_all_survives_newline_in_title():
+    # US/RS framing (C4-B): a newline in a note title no longer splits the record.
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}A\nB{RS}")
+    assert len(ptrs) == 1 and ptrs[0].summary == "A B"
 
 
 def test_parse_all_skips_blank():
@@ -97,8 +104,9 @@ def test_delete_without_title_passes_only_id(monkeypatch):
         "macos_apps_mcp.adapters.notes.run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
-    NotesAdapter().delete("N-1")
+    out = NotesAdapter().delete("N-1")
     assert calls == [("N-1",)]
+    assert out == {"deleted": "N-1"}  # C5d: the ONE deletion envelope
 
 
 def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
@@ -136,8 +144,10 @@ def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
         return "Groceries"  # the preview script returns the live title
 
     monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
-    p = NotesAdapter().delete("N-1", dry_run=True)
-    assert isinstance(p, Pointer) and p.id == "N-1" and p.summary == "Groceries"
+    out = NotesAdapter().delete("N-1", dry_run=True)
+    # C5d: the adapter owns the deletion envelope — tools pass it through
+    assert out["dry_run"] is True
+    assert out["would_delete"] == {"id": "N-1", "summary": "Groceries", "deeplink": ""}
     assert calls == [(_PREVIEW_DELETE, ("N-1",))]  # only id passed, no expect_title
     assert all(s != _DELETE for s, _ in calls)  # ACCEPTANCE: nothing was deleted
 
@@ -343,6 +353,32 @@ def test_sqlite_all_excludes_recently_deleted(notestore):
     }
 
 
+def test_get_all_caps_at_max_notes(tmp_path, monkeypatch):
+    # notes_all is a listing tool, not an export — without a cap the whole note
+    # library lands in the model's context (get_pointers already caps; this must too).
+    extra = [(pk, f"N{pk}", f"note {pk}") for pk in range(100, 100 + MAX_NOTES + 10)]
+    path = _make_notestore(tmp_path / "NoteStore.sqlite", extra_notes=extra)
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    assert len(NotesAdapter().get_all()) == MAX_NOTES
+
+
+def test_get_all_fallback_caps_at_max_notes(tmp_path, monkeypatch):
+    # same cap on the AppleScript fallback — degrading must not also unbound the read.
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = "".join(
+        f"x-coredata://S/ICNote/p{i}{US}iCloud / Notes{US}N{i}{RS}"
+        for i in range(MAX_NOTES + 10)
+    )
+    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    assert len(NotesAdapter().get_all()) == MAX_NOTES
+
+
 def test_note_pointer_folder_null_branches():
     # folder label degrades gracefully: no account → folder name only; no folder → None.
     row = (9, "T", "snip", 0, 0, "Work", None)  # folder present, account NULL
@@ -435,8 +471,8 @@ def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = (
-        "x-coredata://S/ICNote/p1\tiCloud / Notes\tCafé résumé\n"
-        "x-coredata://S/ICNote/p2\tiCloud / Notes\tOther\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Café résumé{RS}"
+        f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Other{RS}"
     )
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_pointers("cafe resume")
@@ -456,8 +492,8 @@ def test_search_fallback_ignores_untitled_placeholder(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = (
-        "x-coredata://S/ICNote/p1\tiCloud / Notes\t\n"  # untitled (empty title)
-        "x-coredata://S/ICNote/p2\tiCloud / Notes\tShopping\n"
+        f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}{RS}"  # untitled (empty title)
+        f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Shopping{RS}"
     )
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     assert NotesAdapter().get_pointers("note") == []  # placeholder must not match
@@ -474,7 +510,7 @@ def test_schema_drift_falls_back_to_applescript(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
-    canned = "x-coredata://S/ICNote/p1\tiCloud / Notes\tFrom AppleScript\n"
+    canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}From AppleScript{RS}"
     monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_all()
     assert [p.summary for p in ptrs] == ["From AppleScript"]  # the fallback ran
@@ -487,7 +523,7 @@ def test_missing_fda_falls_back_to_applescript(notestore, monkeypatch):
     # (the whole reason Notes keeps its AppleScript reader).
     os.chmod(notestore, 0o000)
     try:
-        canned = "x-coredata://S/ICNote/p1\tiCloud / Notes\tFallback\n"
+        canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Fallback{RS}"
         monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
         ptrs = NotesAdapter().get_all()
         assert [p.summary for p in ptrs] == ["Fallback"]
@@ -787,3 +823,14 @@ def test_update_refuses_folder(monkeypatch):
         NotesAdapter().update(
             "x-coredata://S/ICNote/p1", NoteData(title="T", folder="Work")
         )
+
+
+def test_parse_all_absent_title_and_folder_fall_back():
+    # AppleScript's absent-property marker reaches the wire as the literal
+    # "missing value". Untitled must show the placeholder, and an absent folder must
+    # be omitted (None) — not reported as a folder literally named "missing value".
+    # It also must not leak into the #64 raw-title fold, where searching "missing"
+    # would otherwise match every untitled note.
+    ptrs = _parse_all(f"x-coredata://S/ICNote/p3{US}missing value{US}missing value{RS}")
+    assert ptrs[0].summary == "(untitled note)"
+    assert "missing value" not in ptrs[0].as_dict().get("folder", "")

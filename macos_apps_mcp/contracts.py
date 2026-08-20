@@ -90,6 +90,86 @@ def parse_all_day(value: str) -> datetime:
     return dt
 
 
+def deletion_result(ident: str, preview: Pointer | None) -> dict:
+    """The ONE wire shape for every delete tool (C5d): a dry run answers
+    ``{"dry_run": True, "would_delete": <pointer dict>}``; a real delete answers
+    ``{"deleted": ident}``. Adapters own ``dry_run`` and build this envelope —
+    tools stay one-line delegations."""
+    if preview is not None:
+        return {"dry_run": True, "would_delete": preview.as_dict()}
+    return {"deleted": ident}
+
+
+def read_result(
+    results,
+    *,
+    cap: int | None = None,
+    plane: str | None = None,
+    coverage: str | None = None,
+) -> dict:
+    """The ONE wire shape for a BOUNDED read (#156): ``{results, truncated?, plane?,
+    coverage?}``. Lives here next to ``deletion_result`` for the same reason — "what
+    does a successful call MEAN" is one contracts fact with one test, not ten tool-level
+    behaviours that drift.
+
+    The defect it closes: a read that succeeds while under-answering, with nothing in
+    the payload to say so. For a caller whose job is to tell a human what they missed, a
+    false negative that reads as authoritative is the worst available failure mode —
+    worse than an error, which at least prompts a retry.
+
+    Every optional field is **emitted only when set**, like ``Pointer.folder``, and the
+    absences are meaningful because every bounded read uses this one helper:
+
+    - ``truncated``  present (True) when the read came back exactly AT its cap, so there
+      may be more. Absent means the answer is complete. Deliberately conservative: a set
+      that happens to be exactly ``cap`` long is reported as possibly-truncated rather
+      than possibly-lying.
+    - ``plane``  present only when a read did NOT use its documented plane — today only
+      ``mail_search``'s AppleScript inbox fallback, which is shaped identically to a
+      whole-store result but scanned one mailbox. Absent means the documented plane.
+    - ``coverage``  present when an empty/short answer is explained by an index that
+      does not cover the whole store, so "no matches" is not mistaken for "nothing
+      exists".
+
+    Pointers are serialized through ``as_dict`` here, so a tool stays a one-line
+    delegation and the adapter keeps deciding what it actually answered.
+    """
+    rows = [r.as_dict() if isinstance(r, Pointer) else r for r in results]
+    out: dict = {"results": rows}
+    if cap is not None and len(rows) >= cap:
+        out["truncated"] = True
+    if plane is not None:
+        out["plane"] = plane
+    if coverage is not None:
+        out["coverage"] = coverage
+    return out
+
+
+def parse_optional(label: str, value: str | None) -> datetime | None:
+    """Optional ISO datetime tool-arg → naive local; empty/absent → None. A bad value
+    fails at the tool boundary, labeled with the failing param (C5a — lives here with
+    parse_datetime/parse_all_day so the datetime domain rules aren't smeared into the
+    dispatch layer, the parse_recurrence principle)."""
+    if not value:
+        return None
+    try:
+        return parse_datetime(value)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
+def parse_bound(label: str, value: str, *, all_day: bool) -> datetime:
+    """Required event bound (start/end) tool-arg → naive local, labeled on failure.
+
+    ``all_day=True`` parses a calendar DATE (an aware timestamp is rejected — see
+    parse_all_day); otherwise an ISO datetime. Bad/empty input fails clearly at the
+    tool boundary."""
+    try:
+        return parse_all_day(value) if all_day else parse_datetime(value)
+    except ValueError as e:
+        raise ValueError(f"{label}: {e}") from e
+
+
 def _format_offset(offset: timedelta | None) -> str:
     """A UTC offset as ``±HH:MM`` (``+00:00`` if unknown)."""
     total = int((offset or timedelta()).total_seconds())
@@ -132,9 +212,18 @@ class Pointer:
     summary: str
     deeplink: str
     # notes reads (notes_all, search): "Account / Folder"; create_note: the requested
-    # bare folder name; None elsewhere
+    # bare folder name; mail reads: the round-trip mailbox token; None elsewhere
     folder: str | None = None
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
+    # mail reads: the owning account's id — the uuid segment of ``folder``'s url, so it
+    # costs no extra query and no Mail launch (#155). Deliberately UNSET, never guessed,
+    # on the reads that go through Mail's unified cross-account accessors: there the
+    # account genuinely is unknown. ``mail_overview`` maps it to a display name.
+    account: str | None = None
+    # mail_thread(snippets=True) only: a bounded first-extract of the body, read at rest
+    # (#158). It stays optional and opt-in because a snippet on every pointer of a
+    # 100-message thread is the payload dump "pointers, not payload" exists to prevent.
+    snippet: str | None = None
 
     def as_dict(self) -> dict[str, str]:
         """The wire shape: required fields always; optional fields only when set.
@@ -144,6 +233,10 @@ class Pointer:
             d["folder"] = self.folder
         if self.reason is not None:
             d["reason"] = self.reason
+        if self.account is not None:
+            d["account"] = self.account
+        if self.snippet is not None:
+            d["snippet"] = self.snippet
         return d
 
 

@@ -44,6 +44,28 @@ def test_audit_read_newest_first_and_since(tmp_path, monkeypatch):
     assert [r["tool"] for r in au.audit_read(since="2026-07-21T11:00:00")] == ["c", "b"]
 
 
+def test_audit_read_since_compares_instants_not_strings(tmp_path, monkeypatch):
+    """Records are written naive-local; the audit tool's docstring tells the model to
+    ground `since` via now(), which returns an OFFSET-CARRYING ISO string. Lexically
+    '…T12:00:00' < '…T12:00:00+02:00' (prefix, shorter string), so a record written
+    at the very instant of the cutoff was silently dropped — and any offset-carrying
+    `since` compared as a string, not an instant."""
+    from datetime import datetime
+
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.audit_write({"ts": "2026-07-21T12:00:00", "tool": "same-instant"})
+    au.audit_write({"ts": "2026-07-21T13:00:00", "tool": "later"})
+    # the same instant as the first record, expressed the way now() expresses it
+    since = datetime(2026, 7, 21, 12, 0).astimezone().isoformat()
+    assert [r["tool"] for r in au.audit_read(since=since)] == ["later", "same-instant"]
+
+
+def test_audit_read_unparseable_since_never_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.audit_write({"ts": "2026-07-21T12:00:00", "tool": "a"})
+    assert isinstance(au.audit_read(since="garbage"), list)  # never raises
+
+
 def test_audit_read_skips_malformed(tmp_path, monkeypatch):
     monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
     (tmp_path / "audit.jsonl").write_text(

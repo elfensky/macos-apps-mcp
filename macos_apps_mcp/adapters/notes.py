@@ -20,7 +20,7 @@ import html
 import zlib
 from pathlib import Path
 
-from ..contracts import NoteData, Pointer
+from ..contracts import NoteData, Pointer, deletion_result
 from ..errors import (
     NativeError,
     OutputOverflow,
@@ -28,7 +28,18 @@ from ..errors import (
     verify_persisted,
 )
 from ..runtime import body_file, read_via_sqlite, run_osascript
-from ..text import RS, US, clean_body, clean_summary, fold_text, norm_text
+from ..text import (
+    RS,
+    STRIP_FRAMING,
+    US,
+    Field,
+    blank_if_missing,
+    clean_body,
+    clean_summary,
+    fold_text,
+    norm_text,
+    parse_framed,
+)
 
 MAX_NOTES = 25
 MAX_BODIES = 50
@@ -79,10 +90,18 @@ _BODY_FINGERPRINT = {
 # notes_all: every note across accounts, excluding Recently Deleted. id+name read in
 # one multi-property snapshot ({id, name} of (notes of f)) stay aligned — do NOT split
 # into separate "id of every note" / "name of every note" events (they can mispair if
-# Notes mutates between calls). Lines via `set end of` + TID join avoid O(n^2) string
-# concatenation on large libraries. ponytail: no cap — 30s osascript timeout is the
-# de-facto ceiling; a too-large library fails whole. Add pagination only if needed.
-_LIST_ALL = """on run argv
+# Notes mutates between calls). Records via `set end of` + TID join (on rs) avoid
+# O(n^2) string concatenation on large libraries. US/RS-framed (#68); folder label and
+# title pass through the shared STRIP_FRAMING handler. ponytail: no cap — 30s osascript
+# timeout is the de-facto ceiling; a too-large library fails whole. Add pagination only
+# if needed.
+_LIST_ALL = (
+    STRIP_FRAMING
+    + """
+
+on run argv
+  set us to character id 31
+  set rs to character id 30
   set theLines to {}
   with timeout of 120 seconds
   tell application "Notes"
@@ -92,11 +111,12 @@ _LIST_ALL = """on run argv
         if name of f is not "Recently Deleted" then
           set {theIds, theNames} to ({id, name} of (notes of f))
           set fName to name of f
-          set folder_label to accName & " / " & fName
+          set folder_label to my stripFraming(accName & " / " & fName)
           repeat with i from 1 to (count of theIds)
             set nId to item i of theIds
             set nName to item i of theNames
-            set noteLine to (nId & tab & folder_label & tab & nName)
+            set noteLine to ((my stripFraming(nId)) & us & folder_label & us & ¬
+              (my stripFraming(nName)))
             set end of theLines to noteLine
           end repeat
         end if
@@ -104,9 +124,10 @@ _LIST_ALL = """on run argv
     end repeat
   end tell
   end timeout
-  set AppleScript's text item delimiters to linefeed
+  set AppleScript's text item delimiters to rs
   return theLines as text
 end run"""
+)
 
 # note_bodies: opt-in, batched body hydration. plaintext contains newlines/tabs,
 # so a line/tab-delimited format can't frame it — use ASCII control chars that
@@ -232,24 +253,33 @@ _UPDATE_NOTE = """on run argv
 end run"""
 
 
-def _parse_all(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        ident = parts[0]
-        folder = parts[1] if len(parts) > 1 else None
-        title = parts[2] if len(parts) > 2 else ""
-        out.append(
-            Pointer(
-                id=ident,
-                summary=clean_summary(title) or "(untitled note)",
-                deeplink="",
-                folder=folder,
-            )
+# The ONE field spec for _LIST_ALL records — both _parse_all and get_pointers'
+# fallback (which must filter on the RAW title before Pointers exist) read through it.
+_ALL_FIELDS = [
+    Field("id"),
+    Field("folder", lambda s: blank_if_missing(s) or None),
+    # blanked, not just placeholder-fixed: get_pointers folds on the RAW title (#64),
+    # so a literal "missing value" would make a search for "missing" match every
+    # untitled note — the same spurious match #64 exists to prevent.
+    Field("title", blank_if_missing),
+]
+
+
+def _all_pointers(recs: list[dict]) -> list[Pointer]:
+    return [
+        Pointer(
+            id=r["id"],
+            summary=clean_summary(r["title"]) or "(untitled note)",
+            deeplink="",
+            folder=r["folder"],
         )
-    return out
+        for r in recs
+    ]
+
+
+def _parse_all(raw: str) -> list[Pointer]:
+    """Parse the _LIST_ALL payload: US/RS-framed (id, "Account / Folder", title)."""
+    return _all_pointers(parse_framed(raw, _ALL_FIELDS, min_fields=1))
 
 
 def _parse_bodies(raw: str) -> list[dict]:
@@ -525,20 +555,14 @@ class NotesAdapter:
         def fallback():
             # degraded path folds the same way, matching on the RAW title only (no
             # snippet — _LIST_ALL doesn't carry one). Filter on the raw title field
-            # (`parts[2]`, as _parse_all reads it) BEFORE building Pointers — NOT on
+            # (via the shared _ALL_FIELDS spec) BEFORE building Pointers — NOT on
             # the Pointer.summary, which for an untitled note is the display placeholder
             # "(untitled note)" and would spuriously match "note"/"untitled" (#64
             # review). An empty raw title folds to "" and matches nothing, like the
             # sqlite path (raw ZTITLE1 → "") and the old `whose name contains`.
-            kept = []
-            for line in run_osascript(_LIST_ALL).splitlines():
-                if not line.strip():
-                    continue
-                parts = line.split("\t")
-                title = parts[2] if len(parts) > 2 else ""
-                if needle in fold_text(title):
-                    kept.append(line)
-            return _parse_all("\n".join(kept))[:MAX_NOTES]
+            recs = parse_framed(run_osascript(_LIST_ALL), _ALL_FIELDS, min_fields=1)
+            kept = [r for r in recs if needle in fold_text(r["title"])]
+            return _all_pointers(kept[:MAX_NOTES])
 
         return read_via_sqlite(
             NOTESTORE,
@@ -549,19 +573,25 @@ class NotesAdapter:
         )
 
     def get_all(self) -> list[Pointer]:
-        """Every live note (excludes Recently Deleted + tombstoned) as account-qualified
-        pointers (sqlite, read-only, newest first). Folder is "Account / Folder". Falls
-        back to the AppleScript enumeration on missing FDA / schema drift."""
+        """The MAX_NOTES newest live notes (excludes Recently Deleted + tombstoned) as
+        account-qualified pointers (sqlite, read-only, newest first). Folder is
+        "Account / Folder". Falls back to the AppleScript enumeration on missing FDA /
+        schema drift. Capped: a listing tool, not an export — an unbounded read lands
+        the whole note library in the model's context."""
 
         def read(conn):
             uuid = _store_uuid(conn)
-            return [_note_pointer(r, uuid) for r in conn.execute(_ALL_SQL).fetchall()]
+            # cap here, not in _ALL_SQL — get_pointers scans ALL rows for its fold
+            return [
+                _note_pointer(r, uuid)
+                for r in conn.execute(_ALL_SQL).fetchmany(MAX_NOTES)
+            ]
 
         return read_via_sqlite(
             NOTESTORE,
             _FINGERPRINT,
             read,
-            fallback=lambda: _parse_all(run_osascript(_LIST_ALL)),
+            fallback=lambda: _parse_all(run_osascript(_LIST_ALL))[:MAX_NOTES],
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
@@ -678,8 +708,9 @@ class NotesAdapter:
 
     def delete(
         self, ident: str, expect_title: str | None = None, dry_run: bool = False
-    ) -> Pointer | None:
-        """Delete a note by id → Recently Deleted (recoverable).
+    ) -> dict:
+        """Delete a note by id → Recently Deleted (recoverable); returns the
+        ``deletion_result`` envelope (C5d).
 
         When expect_title is given, the note is deleted only if its current title
         matches — content-verify first by passing it. Without it, delete-by-id fires
@@ -687,9 +718,9 @@ class NotesAdapter:
 
         ``dry_run=True`` runs the SAME id + expect_title guard as the real delete — in
         AppleScript, so the case/whitespace semantics are byte-identical — but returns
-        the pointer that WOULD be deleted instead of deleting it. A title mismatch or
-        unknown id raises exactly as the real delete would, so the preview can never
-        disagree with the real op (#54).
+        the preview envelope instead of deleting. A title mismatch or unknown id
+        raises exactly as the real delete would, so the preview can never disagree
+        with the real op (#54).
         """
         if not ident.strip():
             raise ValueError("delete_note needs a note id")
@@ -697,13 +728,16 @@ class NotesAdapter:
         args = (ident,) if expect_title is None else (ident, expect_title)
         if dry_run:
             title = run_osascript(_PREVIEW_DELETE, *args)
-            return Pointer(
-                id=ident,
-                summary=clean_summary(title) or "(untitled note)",
-                deeplink="",
+            return deletion_result(
+                ident,
+                Pointer(
+                    id=ident,
+                    summary=clean_summary(title) or "(untitled note)",
+                    deeplink="",
+                ),
             )
         run_osascript(_DELETE, *args)
-        return None
+        return deletion_result(ident, None)
 
     def create(self, data: NoteData) -> Pointer:
         """Create a note from plaintext title+body; return its stable x-coredata id.

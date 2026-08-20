@@ -27,6 +27,11 @@ cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file 
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
 uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" "$REPO"
+# Build stamp (#143): doctor().build reports which BUILD serves a call — version
+# alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
+# build cannot masquerade as its commit.
+printf '%s %s\n' "$(git -C "$REPO" describe --always --dirty --exclude '*')" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SITE/macos_apps_mcp/build_stamp"
 sed "s|__APP__|/Applications/macos-apps-mcp.app|" \
   "$REPO/packaging/ren.lav.macos-apps-mcp.plist" \
   > "$APP/Contents/Library/LaunchAgents/ren.lav.macos-apps-mcp.plist"

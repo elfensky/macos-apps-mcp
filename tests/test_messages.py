@@ -26,12 +26,13 @@ from macos_apps_mcp.adapters.messages import (
 )
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import FullDiskAccessDenied, SchemaDrift
+from macos_apps_mcp.text import RS, US
 
 # --- chat list (osascript) — unchanged -----------------------------------------------
 
 
 def test_parse_guid_and_name():
-    ptrs = _parse("guid-1\tFamily\nguid-2\t\n")
+    ptrs = _parse(f"guid-1{US}Family{RS}guid-2{US}{RS}")
     assert len(ptrs) == 2
     assert isinstance(ptrs[0], Pointer)
     assert ptrs[0].id == "guid-1" and ptrs[0].summary == "Family"
@@ -44,8 +45,14 @@ def test_parse_skips_blank():
 
 
 def test_parse_sanitizes_control_chars_in_summary():
-    ptr = _parse("guid-1\tTeam\x07Alert\n")[0]
+    ptr = _parse(f"guid-1{US}Team\x07Alert{RS}")[0]
     assert ptr.summary == "TeamAlert" and "\x07" not in ptr.summary
+
+
+def test_parse_survives_newline_in_chat_name():
+    # US/RS framing (C4-B): a newline in a chat name no longer splits the record.
+    ptr = _parse(f"guid-1{US}Line one\nline two{RS}")[0]
+    assert ptr.summary == "Line one line two"
 
 
 # --- Apple-epoch conversion ----------------------------------------------------------
@@ -472,3 +479,10 @@ def test_message_body_unknown_id_raises(bodydb):
 def test_message_body_empty_id_raises(bodydb):
     with pytest.raises(ValueError, match="message id"):
         messages.MessagesAdapter().message_body("  ")
+
+
+def test_parse_absent_chat_name_falls_back_to_the_placeholder():
+    # An unnamed 1:1 chat has no `name`; AppleScript writes the literal "missing value"
+    # onto the wire, which is truthy and defeated the `or "(chat)"` fallback.
+    ptr = _parse(f"guid-1{US}missing value{RS}")[0]
+    assert ptr.summary == "(chat)"

@@ -11,35 +11,48 @@ from __future__ import annotations
 
 from ..contracts import Pointer
 from ..runtime import run_osascript
-from ..text import clean_summary
+from ..text import (
+    STRIP_FRAMING,
+    Field,
+    blank_if_missing,
+    clean_summary,
+    parse_framed,
+)
 
 MAX_PHOTOS = 25
 
 # with timeout (#56): bound the Apple Events so an orphaned osascript can't pin Photos.
-_SEARCH = """on run argv
+# US/RS-framed (#68); id and filename pass through the shared STRIP_FRAMING handler.
+_SEARCH = (
+    STRIP_FRAMING
+    + """
+
+on run argv
   set q to item 1 of argv
+  set us to character id 31
+  set rs to character id 30
   set out to ""
   with timeout of 120 seconds
   tell application "Photos"
     repeat with m in (search for q)
-      set out to out & (id of m) & tab & (filename of m) & linefeed
+      set out to out & (my stripFraming(id of m)) & us & ¬
+        (my stripFraming(filename of m)) & rs
     end repeat
   end tell
   end timeout
   return out
 end run"""
+)
 
 
 def _parse(raw: str) -> list[Pointer]:
-    out = []
-    for line in raw.splitlines():
-        if not line.strip():
-            continue
-        ident, _, filename = line.partition("\t")
-        out.append(
-            Pointer(id=ident, summary=clean_summary(filename) or "(photo)", deeplink="")
+    """Parse the _SEARCH payload: US/RS-framed (media id, filename) records."""
+    return [
+        Pointer(id=r["id"], summary=clean_summary(r["name"]) or "(photo)", deeplink="")
+        for r in parse_framed(
+            raw, [Field("id"), Field("name", blank_if_missing)], min_fields=1
         )
-    return out
+    ]
 
 
 class PhotosAdapter:

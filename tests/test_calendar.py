@@ -541,9 +541,30 @@ def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
     monkeypatch.setattr(cal, "run_native", lambda fn: fn())
     monkeypatch.setattr(cal, "store", lambda: store)
 
-    p = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    out = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
     assert removed == []  # ACCEPTANCE: dry_run mutated nothing
-    assert isinstance(p, Pointer) and p.summary == "Standup 09:00–09:15"
+    # C5d: the adapter owns the deletion envelope — tools pass it through
+    assert out["dry_run"] is True
+    assert out["would_delete"]["summary"] == "Standup 09:00–09:15"
+
+
+def test_delete_event_real_returns_deletion_envelope(monkeypatch):
+    # C5d: the real delete answers with the same envelope family, {"deleted": id}.
+    import macos_apps_mcp.adapters.calendar as cal
+
+    removed = []
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,
+        removeEvent_span_commit_error_=lambda *a: (removed.append(a), (True, None))[1],
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    assert cal.CalendarAdapter().delete_event("E-1") == {"deleted": "E-1"}
+    assert removed  # the event actually got removed
 
 
 def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):

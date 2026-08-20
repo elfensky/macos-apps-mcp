@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 from .errors import OutputOverflow
 
@@ -64,6 +66,121 @@ def split_framed(raw: str) -> list[list[str]]:
     """Split a US/RS-framed payload into records of fields, skipping blank records —
     the single Python-side counterpart of the framing contract above."""
     return [record.split(US) for record in raw.split(RS) if record.strip()]
+
+
+# --- declarative record parsing over split_framed (C4) -------------------------------
+# Every adapter parser used to re-implement the same loop: arity guard, per-field
+# strip/coerce, skip-malformed. parse_framed owns that loop once; a parser becomes a
+# field spec. Pointer/summary construction deliberately stays in each caller — folding
+# it in here would make a config language, not a helper.
+
+# AppleScript reports an absent property as the literal text "missing value" once it
+# is coerced into a string concat — on the wire it is indistinguishable from a real
+# value, so the missing-check is part of the framing vocabulary and lives here.
+_MISSING = ("", "missing value")
+
+
+def blank_if_missing(v: str) -> str:
+    """An absent AppleScript property → ``""`` so the caller's placeholder fires.
+
+    ``required=True`` drops the whole record; an OPTIONAL free-text field wants the
+    opposite — keep the record, blank the value, let ``or "(chat)"`` do its job.
+    Without this the literal "missing value" is truthy and ships as the summary.
+
+    Exact match only: a real value merely CONTAINING the marker is left alone. A chat
+    genuinely named "missing value" is blanked, which is unavoidable — AppleScript
+    gives the wire no way to tell the two apart.
+    """
+    return "" if v.strip() in _MISSING else v
+
+
+@dataclass(frozen=True)
+class Field:
+    """One field of a framed record: output key, coercer, and whether an empty /
+    "missing value" wire value drops the containing unit (the whole record for a
+    head field, the one tuple for a ``repeat`` field)."""
+
+    name: str
+    coerce: Callable[[str], object] = str
+    required: bool = False
+
+
+def _build(fields: Sequence[Field], values: list[str]) -> dict | None:
+    """values → {name: coerce(value)}, or None when a required field is missing.
+    A missing tail value is "" through the coercer — same result the hand-rolled
+    ``fields[i] if len(fields) > i else ""`` produced."""
+    out = {}
+    for i, f in enumerate(fields):
+        v = values[i] if i < len(values) else ""
+        if f.required and v.strip() in _MISSING:
+            return None
+        out[f.name] = f.coerce(v)
+    return out
+
+
+def parse_framed(
+    raw: str,
+    fields: Sequence[Field],
+    *,
+    min_fields: int | None = None,
+    repeat: Sequence[Field] | None = None,
+    repeat_key: str = "items",
+) -> list[dict]:
+    """Parse a US/RS-framed payload into dicts by field spec.
+
+    Records shorter than ``min_fields`` (default: all of ``fields``) are skipped —
+    a partial trailing record is malformed wire, not a half-usable answer. With
+    ``repeat``, the fields after the head are consumed in ``len(repeat)``-sized
+    tuples under ``repeat_key``; a partial trailing tuple is dropped, and a tuple
+    whose required field is missing is dropped alone (the record survives)."""
+    need = len(fields) if min_fields is None else min_fields
+    out = []
+    for values in split_framed(raw):
+        if len(values) < need:
+            continue
+        rec = _build(fields, values)
+        if rec is None:
+            continue
+        if repeat is not None:
+            n = len(repeat)
+            rest = values[len(fields) :]
+            items = []
+            for i in range(0, len(rest) - (n - 1), n):
+                item = _build(repeat, rest[i : i + n])
+                if item is not None:
+                    items.append(item)
+            rec[repeat_key] = items
+        out.append(rec)
+    return out
+
+
+def int_or_none(s: str) -> int | None:
+    """Unsigned int, or None on anything else — a size that doesn't parse is
+    unknown, never 0 (0 would claim an empty file)."""
+    s = s.strip()
+    return int(s) if s.isdigit() else None
+
+
+def int_or_zero(s: str) -> int:
+    """Int allowing a leading '-' (clock skew makes secs_ago negative), 0 on junk."""
+    s = s.strip()
+    return int(s) if s.lstrip("-").isdigit() else 0
+
+
+def bool_or_none(s: str) -> bool | None:
+    """Tri-state: "true"/"false" (any case) → bool, anything else → unknown."""
+    s = s.strip().lower()
+    return s == "true" if s in ("true", "false") else None
+
+
+def bool_strict(s: str) -> bool:
+    """AppleScript boolean-in-a-concat: exactly "true" is True, all else False."""
+    return s.strip().lower() == "true"
+
+
+def addr_list(s: str) -> list[str]:
+    """Comma-joined addresses → lowered list, blanks dropped."""
+    return [a.strip().lower() for a in s.split(",") if a.strip()]
 
 
 def norm_text(v) -> str | None:
@@ -171,6 +288,16 @@ def sanitize_block(text: object) -> str:
 def clean_summary(text: object) -> str:
     """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
     return _truncate(sanitize_line(text), SUMMARY_MAX)
+
+
+def _summary(subject: str, sender: str) -> str:
+    """The mail ``Pointer.summary`` shape — ``subject — sender`` with a placeholder
+    when both are blank. Pure string work, shared by the mail modules #178 split
+    (each builds summaries; none may import ``mail`` back)."""
+    subject, sender = subject.strip(), sender.strip()
+    if subject and sender:
+        return f"{subject} — {sender}"
+    return subject or sender or "(no subject)"
 
 
 def clean_body(

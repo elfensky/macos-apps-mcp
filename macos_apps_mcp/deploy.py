@@ -73,22 +73,70 @@ def agent_status() -> str:
     return _STATUS.get(int(_agent_service().status()), "unknown")
 
 
-def _tcc_rows(db: Path, wanted: list[str]) -> list | None:
-    """Rows from ONE TCC db, or None if unreadable. Values bound; only `?` marks
-    are interpolated."""
+# C7: the TCC read used to be the one sqlite read bypassing the runtime seam — a raw
+# unquoted connect (a `#` in the path truncated at the fragment → "no such table") and
+# `except sqlite3.Error: return None`, which swallowed missing-file and chmod-000 alike
+# (their OperationalErrors are byte-identical — measured). Only the columns the query
+# reads are fingerprinted, same rule as the adapters' stores.
+_TCC_FINGERPRINT = {"access": {"service", "client", "auth_value"}}
+# TCC auth_value meanings. `granted` stays the auth==2 bool (wire-stable for existing
+# consumers); a non-binary state (limited/prompt/unknown) additionally carries
+# `status`, so limited(3) — partial access — stops masquerading as a plain denial.
+_TCC_AUTH = {0: "denied", 1: "unknown", 2: "granted", 3: "limited"}
+
+
+def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
+    """Rows from ONE TCC db, or ``(None, reason)`` — reason ∈ ``no-full-disk-access |
+    absent | schema-drift | error``. Never raises. Borrows runtime's hardened opener
+    (percent-quoted URI + the FDA-vs-absent preflight) and the schema fingerprint via
+    LAZY import: runtime at module scope would drag EventKit into the four CLI roles
+    that never need it (precedent: doctor's lazy server import). NOT routed through
+    read_via_sqlite — its raise-on-unavailable contract inverts this module's
+    never-raises rule. Values bound; only `?` marks are interpolated."""
+    from .errors import FullDiskAccessDenied, SchemaDrift
+    from .runtime import _open_sqlite_ro, verify_sqlite_schema
+
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        try:
-            marks = ",".join("?" for _ in wanted)
-            return conn.execute(
+        conn = _open_sqlite_ro(db)
+    except FullDiskAccessDenied:
+        return None, "no-full-disk-access"
+    except NativeError:  # typed by the opener; classify by what's on disk
+        return None, "absent" if not db.exists() else "error"
+    try:
+        verify_sqlite_schema(conn, _TCC_FINGERPRINT)
+        marks = ",".join("?" for _ in wanted)
+        return (
+            conn.execute(
                 f"SELECT service, client, auth_value FROM access "  # noqa: S608
                 f"WHERE service IN ({marks})",
                 wanted,
-            ).fetchall()
-        finally:
-            conn.close()
+            ).fetchall(),
+            None,
+        )
+    except SchemaDrift:
+        return None, "schema-drift"
     except sqlite3.Error:
-        return None
+        return None, "error"
+    finally:
+        conn.close()
+
+
+def grant_report(services: list[str] | None = None) -> dict:
+    """``grant_identities``' mapping PLUS the classified per-db read reason (C7) —
+    doctor prints the reason instead of unconditionally blaming FDA. Never raises."""
+    wanted = services or _SERVICES
+    u_rows, u_reason = _tcc_rows(_TCC_DB, wanted)
+    s_rows, s_reason = _tcc_rows(_TCC_SYSTEM_DB, wanted)
+    identities: dict[str, list[dict]] | None = None
+    if not (u_rows is None and s_rows is None):
+        identities = {}
+        for rows in (u_rows, s_rows):
+            for service, client, auth in rows or []:
+                entry = {"client": client, "granted": auth == 2}
+                if auth not in (0, 2):  # limited/prompt/future values: say which
+                    entry["status"] = _TCC_AUTH.get(auth, f"unknown({auth})")
+                identities.setdefault(service, []).append(entry)
+    return {"identities": identities, "reasons": {"user": u_reason, "system": s_reason}}
 
 
 def grant_identities(services: list[str] | None = None) -> dict | None:
@@ -96,15 +144,7 @@ def grant_identities(services: list[str] | None = None) -> dict | None:
     db (FDA rows live only in the latter, #123). None when NEITHER is readable
     (reading either needs FDA for OUR responsible process: the spec §E
     chicken-and-egg). Never raises; a wrong claim is worse than no claim."""
-    wanted = services or _SERVICES
-    per_db = [_tcc_rows(db, wanted) for db in (_TCC_DB, _TCC_SYSTEM_DB)]
-    if all(rows is None for rows in per_db):
-        return None
-    out: dict[str, list[dict]] = {}
-    for rows in per_db:
-        for service, client, auth in rows or []:
-            out.setdefault(service, []).append({"client": client, "granted": auth == 2})
-    return out
+    return grant_report(services)["identities"]
 
 
 def _run_bundle_role(app: Path, role: str) -> None:
@@ -223,6 +263,29 @@ def install_agent(argv: list[str]) -> None:
 # gate is closed. Tests isolate this by monkeypatching the constant itself (see
 # tests/conftest.py), never by moving the path.
 _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
+
+
+def is_daemon_role() -> bool:
+    """True when THIS process is the launchd daemon.
+
+    Reads **argv first**, and that is the whole point. ``daemon.serve()`` sets
+    ``MACOS_APPS_MCP_ROLE`` before its own ``from .server import mcp`` — but
+    ``macos_apps_mcp/__init__.py`` already did ``from .server import mcp`` when the
+    package was imported, several frames earlier, so by the time the env var is set
+    every tool has ALREADY been registered and the gate has already been read. The flag
+    therefore never influenced registration in the daemon, and the outbound tier could
+    not be enabled there at all: ``outbound_status()`` reported
+    ``{"registered": [], "configured": ["mail"]}`` on a freshly restarted daemon whose
+    toggle plainly said ``mail``, and ``doctor`` blamed it on a stale restart —
+    permanently, because a restart could never fix it.
+
+    ``sys.argv`` is available at the earliest possible moment and is what ``cli.main()``
+    dispatches on, so it is the honest source of truth. The env var stays supported: it
+    is how a test (or anything embedding the server) says the same thing.
+    """
+    return os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon" or sys.argv[1:2] == [
+        "daemon"
+    ]
 
 
 def allow_send_file() -> str:

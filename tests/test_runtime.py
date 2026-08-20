@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import datetime
 from types import SimpleNamespace
 
 import EventKit as EK
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence
 from macos_apps_mcp.errors import (
     AccessDenied,
@@ -221,6 +223,87 @@ def test_run_osascript_timeout_raises_native_timeout():
     # NativeTimeout (not a bare TimeoutError, not a masked hang).
     with pytest.raises(NativeTimeout):
         run_osascript("delay 2", timeout=0.1)
+
+
+# --- #183: wedged-vs-busy classification on the timeout path -------------------------
+
+
+def test_classify_stuck_app_wedged_vs_busy():
+    # facts §9b signatures: wedged = idle (state S, ~1% CPU) yet unresponsive,
+    # permanent; busy = active process (running state or real CPU), self-recovering.
+    assert runtime.classify_stuck_app("S", 0.9) == "wedged"
+    assert runtime.classify_stuck_app("I", 0.0) == "wedged"  # idle >20s, still wedged
+    assert runtime.classify_stuck_app("R", 1.0) == "busy"
+    assert runtime.classify_stuck_app("U", 0.0) == "busy"
+    assert runtime.classify_stuck_app("S+", 42.0) == "busy"  # sleeping, chewing CPU
+
+
+def test_app_process_info_parses_ps(monkeypatch):
+    def fake_tracked_run(cmd, *, timeout):
+        out = "838\n" if cmd[0] == "pgrep" else "S    0.9 05:28:53\n"
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(runtime, "tracked_run", fake_tracked_run)
+    info = runtime.app_process_info("Mail")
+    assert info == {"pid": 838, "state": "S", "cpu": 0.9, "etime": "05:28:53"}
+
+
+def test_app_process_info_not_running_is_none(monkeypatch):
+    # pgrep with no match exits 1 with empty stdout → None, never an exception.
+    monkeypatch.setattr(
+        runtime,
+        "tracked_run",
+        lambda cmd, *, timeout: subprocess.CompletedProcess(cmd, 1, "", ""),
+    )
+    assert runtime.app_process_info("Mail") is None
+
+
+def test_timeout_hint_wedged_names_force_quit_and_pid(monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "app_process_info",
+        lambda app: {"pid": 838, "state": "S", "cpu": 0.9, "etime": "37:12"},
+    )
+    hint = runtime._timeout_hint('tell application "Mail" to count accounts')
+    # The wedged remediation must be the honest one (facts §9b): force-quit — a UI
+    # quit can leave the wedged process alive — and verify the pid actually changed.
+    assert "WEDGED" in hint and "killall Mail" in hint and "pid 838" in hint
+    assert "pid changed" in hint
+
+
+def test_timeout_hint_busy_says_self_recovering(monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "app_process_info",
+        lambda app: {"pid": 99, "state": "R", "cpu": 87.0, "etime": "02:01"},
+    )
+    hint = runtime._timeout_hint('tell application "Mail" to count accounts')
+    assert "busy" in hint and "recovers on its own" in hint
+    assert "killall" not in hint  # never suggest a force-quit for a busy app
+
+
+def test_timeout_hint_empty_without_app_or_process(monkeypatch):
+    # No `tell application` in the script, or no readable process → empty hint, so
+    # the generic timeout message reads exactly as before.
+    assert runtime._timeout_hint("delay 2") == ""
+    monkeypatch.setattr(runtime, "app_process_info", lambda app: None)
+    assert runtime._timeout_hint('tell application "Mail" to count accounts') == ""
+
+
+def test_classify_1712_is_native_timeout_with_hint(monkeypatch):
+    # The in-script `with timeout` firing (-1712) must surface as the TYPED timeout
+    # carrying the #183 classification, not a generic "osascript failed".
+    monkeypatch.setattr(
+        runtime,
+        "app_process_info",
+        lambda app: {"pid": 1, "state": "S", "cpu": 0.5, "etime": "40:00"},
+    )
+    err = _classify_osascript_failure(
+        "execution error: Mail got an error: AppleEvent timed out. (-1712)",
+        'tell application "Mail" to count accounts',
+    )
+    assert isinstance(err, NativeTimeout)
+    assert "WEDGED" in str(err) and "-1712" in str(err)
 
 
 # --- verify-after-write diff (#49) ---------------------------------------------------

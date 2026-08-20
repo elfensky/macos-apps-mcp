@@ -19,8 +19,8 @@ per session.
 
 import pytest
 
-from macos_apps_mcp import deploy
-from macos_apps_mcp.adapters import mail
+from macos_apps_mcp import deploy, runtime
+from macos_apps_mcp.adapters import mail_addressing
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -35,13 +35,13 @@ def _isolated_state(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _reset_account_map_globals(monkeypatch):
-    """Reset mail.py's account-map cache globals before every test.
+    """Reset mail_addressing's account-map cache globals before every test.
 
     _ACCOUNT_MAP_CACHE and _ACCOUNT_MAP_FAILURE_AT are two halves of ONE cache — the
-    failure timestamp is what lets _account_map() reap a stale failure and retry. They
+    failure timestamp is what lets account_map() reap a stale failure and retry. They
     must be reset TOGETHER, in one place: resetting only the cache dict leaves a live
     monotonic timestamp behind, and once real (or monkeypatched) time crosses
-    _ACCOUNT_MAP_FAILURE_TTL past it, _account_map() silently wipes a cache dict a
+    _ACCOUNT_MAP_FAILURE_TTL past it, account_map() silently wipes a cache dict a
     LATER test installed for its own purposes and falls through to the real
     run_osascript — spawning osascript against Mail.app from a unit test. This is set
     BEFORE each test (not just torn down after) so a leak written by plain global
@@ -49,5 +49,27 @@ def _reset_account_map_globals(monkeypatch):
     survives into the next test either. If a third global joins this cache, it must be
     added here too, or it becomes the next leak of this exact class.
     """
-    monkeypatch.setattr(mail, "_ACCOUNT_MAP_CACHE", None)
-    monkeypatch.setattr(mail, "_ACCOUNT_MAP_FAILURE_AT", None)
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", None)
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_FAILURE_AT", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_osascript(request, monkeypatch):
+    """Fail CLOSED on the native seam: a unit test that forgets to fake it raises
+    instead of spawning osascript against real Mail (#176).
+
+    Only reaches code that calls the seam qualified — ``runtime.run_osascript`` — which
+    since #176 is the whole mail plane; adapters still holding a module-global copy are
+    unaffected, and a test that patches ``runtime`` itself simply overrides this.
+    Integration tests (``-m integration``) must reach real apps, so they are exempt.
+    """
+    if "integration" in request.keywords:
+        return
+
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            "a unit test reached run_osascript — fake it with "
+            "monkeypatch.setattr(runtime, 'run_osascript', ...)"
+        )
+
+    monkeypatch.setattr(runtime, "run_osascript", _refuse)

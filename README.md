@@ -86,21 +86,27 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | Tool | Args | Notes |
 |------|------|-------|
 | `mail` | subject-OR-sender substring | inbox matches; id = stable RFC822 message-id, `message://` deeplink |
-| `mail_body` | id | one message's plaintext, bounded + truncation-marked |
+| `mail_body` | id, mailbox | one message's plaintext, bounded + truncation-marked; `mailbox` is the `folder` value from a `mail_search` result passed back **verbatim** (or a canonical name) — **any** mailbox, not just the inbox |
 | `mail_search` | subject, from_, to, mailbox, account, since, until, unread, flagged, has_attachments, body, limit | indexed search via Envelope Index (at rest — no Mail launch **unless** `account=` is a display name, which is resolved through Mail; a UUID stays pure sqlite, an unknown name raises); one result per message (INBOX **preferred**); `has_attachments` excludes inline images; `body` best-effort (indexed only) |
 | `mail_index_bodies` | rebuild | builds/refreshes opt-in **FTS body index** from `.emlx` at rest; resumable, size-capped; skips not-yet-downloaded (partial coverage by design) |
 | `mail_thread` | id, limit (default 100) | whole conversation, oldest-first, **includes your sent messages**; deduped; over `limit` **oldest dropped** (thread read for reply) |
 | `mail_overview` | — | every mailbox with total + unread, unread-first; includes Junk/Trash/All Mail; counts live (stored counters go stale) and per distinct message; account **names** come from Mail (launches it), UUIDs stand in when it's unreachable; On My Mac always named |
-| `mail_attachments` | mailbox (`inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
+| `mail_attachments` | mailbox (a search result's `folder`, verbatim — or `inbox`/`sent`/`drafts`/`trash`/`junk`), optional query | attachment name/size/downloaded per message; works on **Drafts** |
 | `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
-| `mail_reply` | message_id, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
+| `create_mailbox` | name (`/` nests), account | creates the folder; missing parents auto-created. **No delete counterpart** — `delete <mailbox>` is not scriptable, so removing one is a Mail.app action |
+| `move_mail` | ids (≤25), from_mailbox, to_mailbox, `dry_run` | file/archive/refile; every message backed up + logged **before** anything moves, so `mail_undo` puts it back. `dry_run` defaults to `True`. Cross-account moves leave exactly one copy |
+| `trash_mail` | ids (≤25), mailbox, `dry_run` | **soft delete, and the only delete there is** — Mail's `delete` moves to the account's Trash and nothing in its scripting dictionary erases from there. Undoable via `mail_undo`; emptying Trash is yours to do in Mail.app. `dry_run` defaults to `True` |
+| `mail_undo` | receipt, `dry_run` | replay a `move_mail`/`trash_mail` receipt in reverse; the undo is itself backed up and undoable |
+| `update_mail_status` | ids (≤25), mailbox, `read`, `flagged`, `flag_color` | mark read/unread, flag (+colour). Re-issuing with the opposite value **is** the undo, so `dry_run` defaults to `False` |
+| `mail_duplicates` | `limit` | **report only** — per-mailbox redundant-copy counts + worst offenders. Cleanup is the `dedupe-mail` CLI below; this tool cannot delete |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
-| `reply_all` | `message_id`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
-| `forward_mail` | `message_id`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
+| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
+| `forward_mail` | `message_id`, `mailbox`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
 
@@ -146,6 +152,34 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 
 Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
+
+### Cleaning up duplicate mail
+
+Mail accumulates redundant copies of the same message — a UI drag copies rather than moves, Gmail
+shows one message under both a label and All Mail, migrations leave copies on two accounts. The
+read tools already collapse them, so this is only about what is physically on the server. Ask a
+session for `mail_duplicates()` to see the damage, then clean up in a terminal:
+
+```sh
+macos-apps-mcp dedupe-mail                       # preview every mailbox — changes nothing
+macos-apps-mcp dedupe-mail --verbose             # also list the sets it will NOT touch
+macos-apps-mcp dedupe-mail --execute --mailbox=<folder-url>   # do one mailbox for real
+```
+
+A **CLI command, not a tool**, for the same reason as `allow-send`: thousands of deletes against a
+30-second-capped serialized worker is hours of work a human starts. It only collapses copies that
+are **byte-identical** (size *and* date sent) — Mail gives no way to address one specific copy, so
+the survivor is whichever one Mail leaves, and identical bytes are what make that safe. Sets that
+differ are counted, left alone, and listed under `--verbose`.
+
+Redundant copies go to **Trash**, in small batches, each its own `mail_undo` receipt. Emptying the
+Trash is yours to do in Mail.app — nothing here can erase a message.
+
+**It is slow: ~1 minute per duplicate set** against a real IMAP account (Mail's `whose` lookup scans
+the whole mailbox), so a big folder is hours. Run it in a terminal you can leave, one mailbox at a
+time. It is resumable — the plan is recomputed from Mail's index on every run, so interrupting it
+costs nothing and re-running just finds less to do. A set Mail fails to delete is reported, not
+retried silently.
 
 ### Outbound (send) mode
 

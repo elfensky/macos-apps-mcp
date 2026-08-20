@@ -4,6 +4,143 @@ All notable changes to macos-apps-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); the project is pre-1.0, so the public
 surface may still shift between minor versions.
 
+## [Unreleased]
+
+### Added
+
+- **A recoverable destructive plane for Mail** (`adapters/mail_recover.py`, #159). Every
+  destructive mail write now goes **backup → log → act**, in that order, through one module
+  instead of re-deriving the same four invariants per call site. Before an Apple Event is sent,
+  each target's RFC822 bytes are copied out of its `.emlx` as a plain, importable `.eml` under
+  `state_dir()/backup/mail/<receipt>/`, and the full per-target plan — message-id, source
+  mailbox, account, backup path, fidelity — is appended to the existing audit JSONL
+  **un-truncated** (the `AuditMiddleware` path caps every string at 200 chars, which could never
+  carry a batch). A receipt comes back with the batch; `mail_undo(receipt)` replays it. The batch
+  cap is 25 and is deliberately **not** overridable. Backups are stamped `full` | `partial` |
+  `absent`, because 62.5% of local messages on a real Mac are headers-only — so a *permanent*
+  delete (0.9.3) will refuse a non-full target without `allow_lossy`, while a move never needs
+  the gate. `tests/test_tool_annotations.py` fails if a new destructive mail write is neither
+  declared recoverable nor exempted with a stated reason.
+
+- **`move_mail` — move, file and archive messages** (#78), the plane's first consumer.
+  `dry_run=True` by default, and the preview reads Mail through AppleScript rather than sqlite
+  (the index lags — measured mid-move on a real store), so it reports per id whether it is really
+  `present` in the source. Both mailboxes are required and are address tokens: a message id alone
+  does not locate a message. Archiving is a move into a mailbox named Archive, not a separate
+  tool. **Cross-account moves leave exactly one copy** — device-verified across two accounts and
+  re-checked after sync — and each message is verified present in the destination *and* gone from
+  the source afterwards, so a per-id `status` reports what happened instead of assuming success.
+
+- **`mail_undo(receipt)`** (#159). Undoes a recoverable operation by moving every message back to
+  the exact mailbox it came from, recorded per message before the original ran. It is itself
+  backed up, logged and verified, and returns its own receipt — so an undo can be undone.
+
+- **`create_mailbox(name, account)`** (#78). Nested paths work and missing parents are created.
+  The returned `folder` address is **synthesised**, not read back: `make new mailbox` answers
+  `missing value`, the `mailbox` class has no url property, and the Envelope Index does not know
+  the mailbox exists until Mail syncs — all three possible sources are blind. It works
+  immediately because a mailbox path is percent-decoded before use; a `%` in the name is rejected
+  rather than silently mis-decoded. There is no delete counterpart: `delete <mailbox>` is not
+  scriptable (-10000 in every form), so removing one is a Mail.app action.
+
+- **`update_mail_status`** (#79) — mark read/unread and flag/unflag with an optional colour
+  (a name, not a magic integer), batched and grouped by the mailbox each id actually lives in.
+  Deliberately **not** on the recoverable plane: it changes two booleans, destroys nothing, and
+  re-issuing it with the opposite value is the undo — so `dry_run` defaults to `False` here.
+  Each message is re-read after the write, so `results` reports what actually persisted.
+
+- **A Mail id resolves on its own** (#155). `mail_body(id)` and
+  `mail_attachments(message_id=…)` no longer need the mailbox: the id resolves through the
+  Envelope Index to the same ranked copy every other read cites. This is what a vault note
+  storing only `[📧](message://…)` — the correct pointers-not-payload thing to store — needs to
+  still work months later, and what keeps a citation alive after 0.9.2's `move_mail` invalidates
+  whatever folder token it once had. An explicit `mailbox` remains the (cheaper, Automation-only)
+  disambiguator; id-only resolution reads sqlite, so it needs Full Disk Access.
+
+- **One addressing module** (`adapters/mail_addressing.py`, #155). "What addresses a message"
+  lived in ~10 places — seven inline `<>`-strips plus `_norm_mid` plus `thread()`'s re-bracketing
+  for ids, four cooperating helpers for mailboxes, three for accounts. They are now one module
+  with two sanctioned id conversions (`bare_id`/`stored_id`) and one entry point,
+  `resolve(id, folder=None, account=None) -> ResolvedMessage`, which answers with exactly one
+  target or raises. Every 0.9.2+ destructive write needs that rule and inherits it instead of
+  building an eleventh copy.
+
+### Changed
+
+- **BREAKING — every bounded Mail read answers `{results, truncated?, plane?, coverage?}`**
+  (#156), not a bare list. `mail`, `mail_search`, `mail_thread`, `mail_needs_response`,
+  `mail_awaiting_reply`, `mail_attachments` and `drafts` all changed shape; the pointer rows
+  inside `results` are unchanged. `MAX_MAILS = 25` is a hard CEILING, not a default — on a 36k
+  store no search could ever return more than 25, and the bare list read as a complete answer, so
+  *"find every invoice from the accountant in 2025"* returned 25 and looked exhaustive.
+  `truncated` marks a result that came back at its cap; `plane` marks a `mail_search` that fell
+  back to the AppleScript scan, which reaches the INBOX ONLY while being shaped identically to a
+  whole-store result; `coverage` explains an empty `body=` answer (most local messages are
+  headers-only until their bodies are downloaded and indexed). Each is emitted only when set —
+  absence is meaningful because one `contracts.read_result` serves every read.
+
+- **BREAKING — `mail_attachments`'s `mailbox` is now optional**, and either it or the new
+  `message_id` is required. Passing neither raises instead of erroring deep inside AppleScript.
+
+- **An unresolvable Mail mailbox NAME now raises** (#156). `mail_search(mailbox="Sent Itmes")`
+  answered `[]`, making a typo, a wrong-account guess and a genuinely empty mailbox
+  indistinguishable. A name is something a model typed from memory, so it gets a followable error
+  naming `mail_overview`; a `folder` URL that no longer resolves still answers empty — it was a
+  real handle when a read issued it, and going stale is not a caller error.
+
+- **Repo conformance sweep.** Added `dependabot.yml` (pip + github-actions, minor/patch
+  grouped), a version-bump gate workflow (advisory, PR-triggered), and `.python-version` (3.14).
+  `AGENTS.md` is now the real agent file with `CLAUDE.md` symlinked to it; `graphify-out/` is
+  generated locally and git-ignored. Dependabot security updates and GitHub-native secret scanning
+  + push protection enabled repo-side (no third-party gitleaks). No version bump — notes accumulate
+  under `[Unreleased]`.
+
+### Fixed
+
+- **`mail_search(mailbox=…)` now accepts the `folder` token every read hands back.** A live
+  round-trip URL matched zero rows and read as an empty mailbox: mailbox resolution
+  substring-matched the decoded mailbox *path*, and a URL is never a substring of a bare path.
+  So doing exactly what every read's docstring says — "pass the `folder` value back verbatim" —
+  silently returned nothing. A URL is now matched exactly (account segment + decoded path, so a
+  synthesised `…/Social & SEO` and Mail's own `…/Social%20&%20SEO` both resolve); a plain name
+  still substring-matches. Found by an integration fixture following the documented round trip.
+
+- **Mail's body/reply/forward/attachment tools reach any mailbox, not just the inbox**
+  (#146). `mail_search` reads every mailbox via the Envelope Index, but six tools were
+  hard-scoped to `messages of inbox`, so a filed message could be found and then not
+  opened, replied to or forwarded — `mail_body` answered *"no inbox message with that
+  message id"* for an id the project's own search had just produced. The scope was
+  correct when `mail_body` shipped (#62, reads were inbox-only) and was falsified by
+  #70/#75 widening search; nobody re-read the six copies of the premise. All of them now
+  resolve the mailbox through one shared AppleScript handler, and a test asserts none of
+  them names `inbox` itself.
+
+- **AppleScript's `missing value` no longer ships as a summary.** An absent property
+  reaches the wire as the literal text `"missing value"`, which is truthy and so
+  defeated every `or "(placeholder)"` fallback. Confirmed on real data: **115 of 115**
+  chats in `messages_chats` were listed as `missing value` instead of `(chat)`. Also
+  affected `mail_search` (a no-subject mail never fell through to the sender),
+  `notes_all` and `photos`. Pre-existing — the old tab-delimited wire produced the
+  identical string.
+
+### Changed
+
+- **BREAKING — `mailbox` is now a required argument** on `mail_body`, `mail_reply`,
+  `reply_all` and `forward_mail`, and `mail_attachments` accepts far more than before
+  (#146). Its value is the `folder` field of the `mail_search` result that produced the
+  message id, passed back **verbatim**: an opaque round-trip token
+  (`imap://<account-uuid>/%5BGmail%5D/Spam`), *not* a human-readable name. Requiring a
+  name would hand #144's percent-encoding mismatch back to the caller; the url also
+  carries the account, so same-named folders under two accounts cannot collide and a
+  Message-ID that genuinely lives in several mailboxes is unambiguous by construction.
+  The five canonical names (`inbox`/`sent`/`drafts`/`trash`/`junk`) still work as an
+  alias layer, so existing `mail_attachments` callers are unaffected.
+- **One deletion envelope (C5d).** `delete_draft`'s real-delete answer changes from
+  `{"deleted": true, "id": "<mid>"}` to `{"deleted": "<mid>"}` — the shape
+  `delete_event` and `delete_note` already spoke, now built by one
+  `contracts.deletion_result`. Dry-run answers are unchanged everywhere.
+- **`safari_tabs` is bounded to 50 tabs** and now says so in its tool docstring.
+
 ## [0.9.0] - 2026-07-27 — Outbound mail, gated
 
 ### Added

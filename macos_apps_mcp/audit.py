@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -62,12 +63,24 @@ def audit_write(record: dict) -> None:
         log.debug("audit_write failed: %s", e)
 
 
+def _instant(ts) -> datetime | None:
+    """Parse an ISO datetime string into an aware instant; a naive value is taken as
+    LOCAL time (the only form ``audit_write`` writes). None when unparseable."""
+    try:
+        return datetime.fromisoformat(ts).astimezone()
+    except (ValueError, TypeError):
+        return None
+
+
 def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
     """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
-    drops older entries by lexical ts compare (entries are naive-local, one format).
-    Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
-    log yields a single explicit error entry — never a raw ``OSError``, and never an
-    empty list masquerading as "no writes"."""
+    drops older entries by INSTANT compare, not string compare: entries are written
+    naive-local, but the audit tool tells the model to ground ``since`` via now() —
+    which returns an offset-carrying ISO string, and lexically ``…T12:00:00`` <
+    ``…T12:00:00+02:00`` silently dropped boundary entries. Unparseable values fall
+    back to the old lexical compare. Malformed lines are skipped; a missing log is
+    empty. NEVER raises: an unreadable log yields a single explicit error entry —
+    never a raw ``OSError``, and never an empty list masquerading as "no writes"."""
     path = _audit_path()
     if not path.exists():
         return []
@@ -76,14 +89,21 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     except OSError as e:
         log.debug("audit_read failed: %s", e)
         return [{"error": f"audit log unreadable: {e}"}]
+    since_i = _instant(since) if since else None
     out = []
     for line in text.splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
             continue  # skip a truncated/corrupt line, never fail the read
-        if since and rec.get("ts", "") < since:
-            continue
+        if since:
+            ts = rec.get("ts", "")
+            rec_i = _instant(ts) if ts else None
+            if since_i is not None and rec_i is not None:
+                if rec_i < since_i:
+                    continue
+            elif str(ts) < since:
+                continue
         out.append(rec)
     out.reverse()  # newest first
     return out[:limit]
@@ -139,6 +159,24 @@ def usage_read() -> dict[str, dict]:
             if ts:
                 entry["last"] = ts
     return out
+
+
+def usage_report(registered: Iterable[str]) -> dict:
+    """The full ``usage`` tool report from the tally + the registered-tool names
+    (C5b — report logic lives here, the tool is a one-line delegation): ``tools``
+    busiest-first, ``never_used`` (registered minus called — the pruning list),
+    ``total_calls``."""
+    tally = usage_read()
+    tools = sorted(
+        ({"tool": t, **stats} for t, stats in tally.items()),
+        key=lambda e: e["count"],
+        reverse=True,
+    )
+    return {
+        "tools": tools,
+        "never_used": sorted(set(registered) - tally.keys()),
+        "total_calls": sum(e["count"] for e in tally.values()),
+    }
 
 
 # --- record schema -----------------------------------------------------------------
@@ -214,6 +252,17 @@ class AuditMiddleware(Middleware):
         source = self._snapshot_sources.get(tool)
         if source is not None and args.get("id"):
             before = await anyio.to_thread.run_sync(_safe_snapshot, source, args["id"])
+        # The snapshot above is a SECOND native read on top of whatever the write does
+        # (delete_draft: one `_DRAFTS` spawn here, one `_DELETE_DRAFT` spawn in the
+        # adapter — two, not the three #161 estimated; dry-run is also two). #161 asked
+        # whether the write should hand its own before-state over so this could be
+        # skipped. MEASURED 2026-08-11 on the real Drafts mailbox: 638/652/653 ms, and
+        # it is bounded — `_DRAFTS` stops at 25 records, so it is osascript spawn cost,
+        # not O(mailbox). Not worth it: ~0.65s on a human-paced tool against reshaping
+        # the seam EVERY adapter's audit trail runs through, plus teaching one script to
+        # rebuild the exact Pointer this produces or the record silently changes shape.
+        # before-state is what makes mail_undo and the audit log trustworthy; it does
+        # not get cheapened for a spawn. Revisit only if a batch write lands here.
         result = await call_next(context)
         if tool in self._write_tools and not result.is_error:
             try:

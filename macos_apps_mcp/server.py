@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import functools
 import os
-from datetime import datetime
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
@@ -16,6 +15,7 @@ from fastmcp.server.middleware import Middleware
 from mcp.types import TextContent
 
 from . import deploy
+from .adapters import mail_recover
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -26,7 +26,7 @@ from .adapters.photos import PhotosAdapter
 from .adapters.reminders import RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
-from .audit import AuditMiddleware, audit_read, usage_read
+from .audit import AuditMiddleware, audit_read, usage_report
 from .contracts import (
     CalendarEventData,
     ContactData,
@@ -34,8 +34,8 @@ from .contracts import (
     ReminderData,
     Snapshotter,
     now_local,
-    parse_all_day,
-    parse_datetime,
+    parse_bound,
+    parse_optional,
     parse_recurrence,
     parse_recurrence_update,
 )
@@ -85,11 +85,17 @@ def _allow_send(adapter: str) -> bool:
     from a client config (#130), so on-disk state is the only way to opt in there. In
     stdio mode the env var is reachable and is the whole story, which also keeps the
     test suite hermetic: it never reads this machine's toggle file.
+
+    "Am I the daemon?" goes through ``deploy.is_daemon_role()``, which reads argv —
+    NOT the ``MACOS_APPS_MCP_ROLE`` env var alone. That var is set by ``daemon.serve()``
+    long after ``macos_apps_mcp/__init__.py`` has already imported this module and run
+    every registration, so reading it here meant the daemon's outbound tier could never
+    register no matter what the toggle said. See that function.
     """
     if _read_only():
         return False
     val = os.environ.get("MACOS_APPS_ALLOW_SEND", "")
-    if not val and os.environ.get("MACOS_APPS_MCP_ROLE") == "daemon":
+    if not val and deploy.is_daemon_role():
         val = deploy.allow_send_file()
     val = val.strip().lower()
     if val in ("1", "true", "yes", "all"):
@@ -156,11 +162,15 @@ def _read_tool(fn):
     return mcp.tool(annotations=_READ_ANNOTATIONS)(_guard(fn))
 
 
-def _write_tool(fn=None, *, snapshot: Snapshotter | None = None):
+def _write_tool(
+    fn=None, *, snapshot: Snapshotter | None = None, open_world: bool = False
+):
     """Register a write that modifies/overwrites/deletes existing state — skipped in
     read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57).
     ``snapshot``: the adapter answering ``snapshot(id)`` for audit before-state — pass
-    it on every id-addressed update/delete/complete tool (#67)."""
+    it on every id-addressed update/delete/complete tool (#67). ``open_world``: the
+    tool MAY reach beyond this machine (run_shortcut — a shortcut can call a webhook)
+    without being outbound-by-design; the send tier stays ``_send_tool`` (C6c)."""
 
     def deco(f):
         if _read_only():
@@ -168,7 +178,10 @@ def _write_tool(fn=None, *, snapshot: Snapshotter | None = None):
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
             _SNAPSHOT_SOURCES[f.__name__] = snapshot
-        return mcp.tool(annotations=_DESTRUCTIVE_ANNOTATIONS)(_guard(f))
+        ann = _DESTRUCTIVE_ANNOTATIONS
+        if open_world:
+            ann = {**ann, "openWorldHint": True}
+        return mcp.tool(annotations=ann)(_guard(f))
 
     return deco(fn) if fn is not None else deco
 
@@ -189,6 +202,25 @@ def _additive_tool(fn):
 # currently enabled — which is what makes doctor able to say "mail: off".
 _SEND_ADAPTERS: set[str] = set()
 
+# Adapters whose send tools actually GOT registered — the gate as it stood at import.
+# `_allow_send` re-reads env + toggle per call, so after `allow-send` flips the toggle
+# without a daemon restart the two diverge; outbound_status() surfaces that (C6).
+_SEND_REGISTERED: set[str] = set()
+
+
+# The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
+# that is genuinely byte-identical across every mail send tool (the folder-VERBATIM /
+# FDA / truncated wordings are hand-tuned per tool and stay in place). Composed into
+# each mail send tool's __doc__ at registration by _send_tool below, so a wording fix
+# is a one-site edit; test_send_tools_document_the_unsuppressable_autosave pins that
+# every send tool carries it.
+_MAIL_AUTOSAVE_DOC = """
+
+Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
+outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
+it — so a successful send still litters. Remove it with `drafts()` +
+`delete_draft()`. A dry run constructs nothing and so leaves nothing."""
+
 
 def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
@@ -199,14 +231,35 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
 
     def deco(f):
         _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
+        if adapter == "mail":
+            # #179: composed before the gate check, so __doc__ carries the #133
+            # paragraph whether or not the tool registers (tests read it either way).
+            f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
         if not _allow_send(adapter):
             return f
+        _SEND_REGISTERED.add(adapter)  # the gate was ON when this tool registered
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
             _SNAPSHOT_SOURCES[f.__name__] = snapshot
         return mcp.tool(annotations=_SEND_ANNOTATIONS)(_guard(f))
 
     return deco
+
+
+def outbound_status() -> dict[str, list[str]]:
+    """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
+    whose tools actually got registered at import; ``configured`` = what the env/toggle
+    enables RIGHT NOW. They diverge when ``macos-apps-mcp allow-send`` writes the toggle
+    but the daemon keeps running (deploy's "no daemon restarted" branch) — doctor
+    reports the delta as ``outbound_pending`` with a restart directive.
+
+    A third key, ``capable`` (= every adapter a ``@_send_tool`` names), was carried here
+    and read by nothing; ``_SEND_ADAPTERS`` is right there for whoever needs it. Add it
+    back when a second send adapter gives it a job."""
+    return {
+        "registered": sorted(_SEND_REGISTERED),
+        "configured": sorted(a for a in _SEND_ADAPTERS if _allow_send(a)),
+    }
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
@@ -228,19 +281,38 @@ UNTRUSTED_NOTICE = (
 _NO_NOTICE = frozenset({"ping", "now", "doctor", "usage"})
 
 
+# #163: the tools that WRITE recoverable-plane backups. The storage advisory rides these
+# and only these — it is a notice about a directory these three create, so putting it on
+# `mail_search` would be noise on a read that cannot grow it, and putting it nowhere
+# would leave a keep-forever tree with nothing ever mentioning it. Deliberately a small
+# explicit set rather than "every mail tool": the advisory should appear at the moment
+# the user is adding to the pile.
+_BACKUP_NOTICE_TOOLS = frozenset({"move_mail", "trash_mail", "mail_undo"})
+
+
 class UntrustedDataNotice(Middleware):
-    """Prepend ``UNTRUSTED_NOTICE`` to every tool result except the meta tools (#53)."""
+    """Prepend ``UNTRUSTED_NOTICE`` to every tool result except the meta tools (#53),
+    and the backup-storage advisory to the plane's writes once it is over threshold
+    (#163)."""
 
     async def on_call_tool(self, context, call_next):
         # call_next RAISES on a tool error (surfaced as ToolError by _guard), so an
         # error never reaches this prepend — the notice rides only on real payloads.
         # is_error is belt-and-suspenders for a future path that returns instead.
         result = await call_next(context)
-        if context.message.name not in _NO_NOTICE and not result.is_error:
-            result.content = [
-                TextContent(type="text", text=UNTRUSTED_NOTICE),
-                *result.content,
-            ]
+        name = context.message.name
+        if name not in _NO_NOTICE and not result.is_error:
+            notices = [TextContent(type="text", text=UNTRUSTED_NOTICE)]
+            if name in _BACKUP_NOTICE_TOOLS:
+                # Never let a storage read fail a write that already succeeded: the
+                # mail is already moved by the time this runs.
+                try:
+                    advisory = mail_recover.backup_advisory()
+                except Exception:  # noqa: BLE001 - a notice must not break a result
+                    advisory = None
+                if advisory:
+                    notices.append(TextContent(type="text", text=advisory))
+            result.content = [*notices, *result.content]
         return result
 
 
@@ -290,18 +362,7 @@ async def usage() -> dict:
     (each `{tool, count, first, last}`, busiest first), `never_used` (registered tools
     with zero calls — the pruning list), and `total_calls`. Read-only; no permission
     (reads a local log at ~/.local/state/macos-apps-mcp)."""
-    tally = usage_read()
-    tools = sorted(
-        ({"tool": t, **stats} for t, stats in tally.items()),
-        key=lambda e: e["count"],
-        reverse=True,
-    )
-    registered = {t.name for t in await mcp.list_tools()}
-    return {
-        "tools": tools,
-        "never_used": sorted(registered - tally.keys()),
-        "total_calls": sum(e["count"] for e in tally.values()),
-    }
+    return usage_report({t.name for t in await mcp.list_tools()})
 
 
 @_read_tool
@@ -349,51 +410,100 @@ def contacts(name: str) -> list[dict[str, str]]:
 
 
 @_read_tool
-def mail(query: str) -> list[dict[str, str]]:
+def mail(query: str) -> dict:
     """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
-    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL.
-    Read-only; needs Automation access for Mail. Bodies are never fetched."""
-    return [p.as_dict() for p in _mail.get_pointers(query)]
+    RFC822 message-id, summary = subject — sender, deeplink = a message:// URL,
+    folder = "inbox" (this scans the inbox only) — pass that folder straight to
+    `mail_body`. Prefer `mail_search`, which reaches every mailbox and reports the
+    account. Returns {results, truncated?} — `truncated` means the 25-message cap was
+    reached and there may be more. Read-only; needs Automation access for Mail. Bodies
+    are never fetched."""
+    return _mail.inbox_search(query)
 
 
 @_read_tool
-def mail_body(id: str) -> str:
-    """Full plaintext body of one inbox message by id (bounded + truncation-marked).
-    Read-only; needs Automation access for Mail. `id` is a message-id from `mail`."""
-    return _mail.get_body(id)
+def mail_body(id: str, mailbox: str = "") -> str:
+    """Full plaintext body of one message by id (bounded + truncation-marked).
+
+    `id` is a message-id from `mail`/`mail_search` — or from a note written months ago:
+    an id resolves ON ITS OWN, so a stored citation still works after the message was
+    filed or moved. `mailbox` is OPTIONAL and is the disambiguator: pass the `folder`
+    value from the SAME search result back VERBATIM — it is an opaque round-trip token
+    (`imap://<uuid>/<path>`), not a folder name to retype — or one of the five canonical
+    names ("inbox"/"sent"/"drafts"/"trash"/"junk"). With it the read is Automation-only
+    and an id absent from that mailbox raises; without it the id is resolved through
+    Mail's index (Full Disk Access) to the same copy every other read cites. Read-only.
+    """
+    return _mail.get_body(id, mailbox)
 
 
 @_read_tool
-def mail_attachments(mailbox: str, query: str = "") -> list[dict]:
-    """List attachments on messages in a Mail mailbox (Automation).
+def mail_bodies(ids: list[str]) -> dict:
+    """Plaintext bodies for up to 20 message ids in ONE call — the bulk read behind
+    "catch me up on this thread". Opt-in and bounded: reading a thread stays
+    mail_search -> mail_thread -> mail_bodies, three calls total, and with
+    `mail_thread(snippets=True)` often only two.
 
-    mailbox: canonical system mailbox — "inbox" | "sent" | "drafts" | "trash" |
-    "junk" (resolved via Mail's unified, cross-account accessors). query: optional
+    Returns {"results": [{"id", "body"}], "missing": [ids]}. An id whose message can't
+    be read off disk is listed in `missing` — it is NEVER returned with an empty body,
+    so "unreadable" is never mistaken for "the sender wrote nothing". Each body is
+    truncated at the usual per-body budget with an explicit marker; if the batch total
+    is too large the call REFUSES (output_overflow) rather than dumping — ask for fewer
+    ids.
+
+    Reads Mail's message files at rest: fast, no Mail launch, and it sees messages that
+    arrived seconds ago (unlike the mail_search(body=) FTS index, which only knows what
+    mail_index_bodies last swept). Read-only. Needs Full Disk Access."""
+    return _mail.get_bodies(ids)
+
+
+@_read_tool
+def mail_attachments(mailbox: str = "", query: str = "", message_id: str = "") -> dict:
+    """List attachments on messages in a Mail mailbox, or on ONE message (Automation).
+
+    mailbox: the `folder` value from a `mail_search` result passed back VERBATIM (an
+    opaque `imap://<uuid>/<path>` token, not a name to retype), or a canonical system
+    mailbox — "inbox" | "sent" | "drafts" | "trash" | "junk" (resolved via Mail's
+    unified, cross-account accessors). query: optional
     subject substring — an empty/omitted query lists ALL messages in the mailbox
     (bounded), unlike `mail`/`get_pointers` which rejects an empty query. Use this to
     confirm an attachment landed on a DRAFT before it's saved (a freshly opened compose
-    window has no stable id yet — once saved to Drafts it does, see drafts()). Returns
-    [{summary, attachments: [{name, size, downloaded}]}], bounded.
+    window has no stable id yet — once saved to Drafts it does, see drafts()).
+    message_id: address ONE message instead of scanning; with no `mailbox` the id
+    resolves on its own (Full Disk Access), and `query` is then ignored. Prefer it when
+    you know the message — a mailbox scan stops at 25 records, so the one you meant is
+    often past the cap. Either `mailbox` or `message_id` is required.
+    Returns {results, truncated?} over
+    [{id, deeplink, folder, summary, attachments: [{name, size, downloaded}]}].
+    `id`/`deeplink` identify the carrying message and `folder` names the mailbox read,
+    so a row is actionable on its own. An unsaved draft has no message-id yet:
+    its `id` is "" and it carries no `deeplink` — it is still listed.
     """
-    return _mail.list_attachments(mailbox, query)
+    return _mail.list_attachments(mailbox, query, message_id)
 
 
 @_read_tool
-def mail_needs_response() -> list[dict[str, str]]:
+def mail_needs_response() -> dict:
     """Inbox messages that likely need your response, ranked with a machine-readable
     `reason` (flagged / unread-direct / unanswered-direct). Heuristic over headers +
     message properties — no body is read; keeps direct-addressed, not-yet-replied mail.
-    Read-only; needs Automation access for Mail. Bounded to 25."""
-    return [p.as_dict() for p in _mail.get_needs_response()]
+    Each pointer carries folder = "inbox", so an id from here goes straight into
+    `mail_body`/`mail_reply` with no second lookup. No `account`: this reads Mail's
+    unified inbox across every account, so the owning account is genuinely unknown —
+    use `mail_search` when you need it. Returns {results, truncated?}; `truncated`
+    means the 25 cap was reached. Read-only; needs Automation access for Mail."""
+    return _mail.get_needs_response()
 
 
 @_read_tool
-def mail_awaiting_reply(days: int = 3) -> list[dict[str, str]]:
+def mail_awaiting_reply(days: int = 3) -> dict:
     """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
     oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
-    group send is cleared once any recipient replies. Read-only; needs Automation access
-    for Mail. Bounded to 25."""
-    return [p.as_dict() for p in _mail.get_awaiting_reply(days)]
+    group send is cleared once any recipient replies. Each pointer carries
+    folder = "sent" — ready for `mail_body`/`reply_all`; no `account` (unified accessor,
+    see mail_needs_response). Returns {results, truncated?}; `truncated` means the 25
+    cap was reached. Read-only; needs Automation access for Mail."""
+    return _mail.get_awaiting_reply(days)
 
 
 @_read_tool
@@ -410,13 +520,17 @@ def mail_search(
     has_attachments: bool = False,
     account: str = "",
     limit: int = 25,
-) -> list[dict]:
+) -> dict:
     """Indexed search across ALL mailboxes via Mail's Envelope Index — fast and
     read-only. All filters optional and ANDed:
-    subject/from_/to/mailbox substrings, since/until (epoch seconds on received date),
+    subject/from_/to substrings, `mailbox` a mailbox NAME exactly as mail_overview
+    reports it ("Junk E-mail" — case-insensitive substring; the encoded spelling also
+    works; a name that matches nothing RAISES — it is a typo, not an empty mailbox —
+    while a stale `folder` url just returns no results), since/until (epoch seconds on
+    received date),
     unread/flagged. `body` searches message TEXT via the FTS index and is BEST-EFFORT —
-    it only sees messages already downloaded AND indexed by mail_index_bodies (run that
-    first; partial coverage is normal). At least one filter required. Returns citable
+    it only sees messages already indexed by mail_index_bodies (run that first;
+    incomplete coverage is normal). At least one filter required. Returns citable
     Pointers, newest first. Falls back to AppleScript inbox search on missing Automation
     access / schema drift.
     `has_attachments` means a real DOCUMENT — inline signature/newsletter images are
@@ -426,56 +540,60 @@ def mail_search(
     it isn't running (an unknown name raises rather than guessing). Every other filter
     reads the index at rest and never launches Mail.
     Read-only; needs Full Disk Access, plus Automation access for Mail on the
-    account-name path and the AppleScript fallback."""
-    # since/until=0 (epoch 0) is a valid timestamp, not an absent filter — checked via
-    # `is not None` rather than truthiness so it isn't wrongly treated as unset (#70
-    # review M3).
-    text_filters = [subject, from_, to, mailbox, body, account]
-    if (
-        not any(text_filters)
-        and since is None
-        and until is None
-        and not unread
-        and not flagged
-        and not has_attachments
-    ):
-        raise ValueError("mail_search needs at least one filter")
-    return [
-        p.as_dict()
-        for p in _mail.search(
-            subject=subject or None,
-            from_=from_ or None,
-            to=to or None,
-            mailbox=mailbox or None,
-            since=since,
-            until=until,
-            unread=unread,
-            flagged=flagged,
-            body=body or None,
-            has_attachments=has_attachments,
-            account=account or None,
-            limit=limit,
-        )
-    ]
+    account-name path and the AppleScript fallback.
+    Each Pointer carries `folder` (the round-trip mailbox token) and `account` (the
+    owning account's uuid — map it to a name with one `mail_overview` call), so a hit
+    is complete on its own: no second read to work out where it lives.
+    Returns {results, truncated?, plane?, coverage?}. `truncated` means the answer came
+    back AT `limit` (25 max) and there may be more — do NOT report such a search as
+    exhaustive. `plane` = "applescript-inbox" means the sqlite index was unreachable and
+    this scanned the INBOX ONLY. `coverage` explains an empty `body=` answer: bodies are
+    only matchable once mail_index_bodies has indexed them."""
+    return _mail.search(
+        subject=subject,
+        from_=from_,
+        to=to,
+        mailbox=mailbox,
+        since=since,
+        until=until,
+        unread=unread,
+        flagged=flagged,
+        body=body,
+        has_attachments=has_attachments,
+        account=account,
+        limit=limit,
+    )
 
 
 @_read_tool
-def mail_thread(id: str, limit: int = 100) -> list[dict[str, str]]:
+def mail_thread(id: str, limit: int = 100, snippets: bool = False) -> dict:
     """Every message in the conversation containing `id`, oldest-first — the transcript,
     including messages YOU sent. Deduped: a message filed in several mailboxes appears
-    once. Returns citable Pointers; use mail_body(id) for any message's text. Over
-    `limit` messages the OLDEST are dropped, since a thread is usually read to reply to
-    it. Unknown id returns []. Fast, read-only, no Mail launch.
-    Needs Full Disk Access."""
-    return [p.as_dict() for p in _mail.thread(id, limit)]
+    once. Returns {results, truncated?} of citable Pointers. Over `limit` messages the
+    OLDEST are dropped (and `truncated` says so), since a thread is usually read to
+    reply to it. Unknown id returns no results.
+
+    `snippets=True` adds a short `snippet` (first ~200 chars of the body) to each
+    pointer, read off disk in one pass — no Mail launch and no extra calls. Use it to
+    see WHO SPOKE LAST and roughly about what before deciding which messages are worth
+    hydrating; then `mail_bodies(ids)` for the few that are. A message whose body can't
+    be read carries no `snippet` key at all (absent, not empty). Leave it off for a
+    long thread you only need to enumerate.
+
+    Fast, read-only, no Mail launch. Needs Full Disk Access."""
+    return _mail.thread(id, limit, snippets)
 
 
 @_read_tool
 def mail_overview() -> list[dict]:
     """Every mailbox with its message total and unread count, unread-first — the triage
-    entry point ("what's unread where?"). Includes Junk/Trash/All Mail so you can see
-    what they are rather than having them silently filtered. Counts are computed live,
-    not read from Mail's own stored counters, which go stale, and each message is
+    entry point ("what's unread where?"). Rows are {account, account_id, mailbox,
+    folder, total, unread}: `account_id` is the same uuid every mail Pointer reports as
+    `account`, so ONE call here is the whole uuid -> name map; `folder` is the exact
+    mailbox url, so a mailbox picked here round-trips into `mail_search`/`mail_body`
+    without going back through name matching. Includes Junk/Trash/All Mail so you can
+    see what they are rather than having them silently filtered. Counts are computed
+    live, not read from Mail's own stored counters, which go stale, and each message is
     counted ONCE even when it is filed in the same mailbox twice.
     Account NAMES are looked up through Mail, so this tool does contact Mail (launching
     it if it isn't running); when Mail is unreachable the account UUID stands in and
@@ -486,15 +604,107 @@ def mail_overview() -> list[dict]:
     return _mail.overview()
 
 
+# READ TIER ON PURPOSE (#161a) — do not "fix" this to _write_tool/_additive_tool because
+# it writes a sqlite file. `readOnlyHint` is a claim about the USER'S data, and the only
+# thing this writes is OUR FTS sidecar in OUR state dir; it never launches Mail and
+# never touches Mail's store. Demoting it would also make it SKIPPED under
+# MACOS_APPS_READ_ONLY, which is the actual regression: that flag is a safe-deploy guard
+# against mutating the user's data, and it would instead freeze body search at whatever
+# the sidecar last held — degrading the READ surface the flag exists to protect.
 @_read_tool
 def mail_index_bodies(rebuild: bool = False) -> dict:
-    """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads
-    downloaded .emlx files at rest (never launches Mail, never writes in Mail's data);
-    skips not-yet-downloaded messages. Resumable and size-capped — safe to re-run; a
-    re-run continues where it left off. rebuild=True re-indexes from scratch. Returns
-    {indexed, skipped, total_emlx, capped, coverage}. Read-only; needs Automation
-    access for Mail."""
+    """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads every
+    .emlx file at rest, `.partial` ones included (never launches Mail, never writes in
+    Mail's data). Resumable and size-capped — safe to re-run; a re-run continues where
+    it left off. rebuild=True re-indexes from scratch. Returns {indexed, skipped,
+    total_emlx, capped, indexed_this_run}. Read-only for Mail; the one thing it writes
+    is this server's own FTS sidecar. Needs Full Disk Access (it reads .emlx at rest),
+    NOT Automation.
+
+    `indexed_this_run` is THIS RUN's progress, NOT coverage: a resumable indexer's own
+    counters cannot say how much of the store is searchable (a fully-indexed store
+    re-runs as "14 newly indexed"). mail_search(body=…) is the one place that answers
+    "is body search usable?", and it does so on the path that needs it — an empty
+    result.
+
+    A `.partial.emlx` is missing its ATTACHMENTS, not its body, so partials are indexed
+    like any other message (#119). The residual unsearchable tail is ~0.5%: messages
+    Mail never stored a text part for."""
     return _mail.index_bodies(rebuild=rebuild)
+
+
+@_read_tool
+def mail_stats(days: int = 30, account: str = "") -> dict:
+    """Mail volume, read ratio and top senders over the last `days` (Full Disk Access).
+
+    Pure Envelope Index — never launches Mail. Counted per DISTINCT message, not per
+    row: the same message filed twice is one message (raw rows overcount by up to 3.6x
+    on a real store). `account` takes a raw account UUID — the `account` field every
+    mail Pointer and `mail_overview` row carries — not a display name.
+
+    Returns a compact aggregate: {window_days, since, messages, unread, read_ratio,
+    flagged, with_attachments, per_day, busiest_day, top_senders[10],
+    top_mailboxes[10], plane}. Deliberately token-bounded: top-N only, no per-day
+    series. `top_mailboxes` carries the decoded name plus `folder` (the round-trip url)
+    and the account uuid — map the uuid to a name with one `mail_overview` call.
+    Read-only."""
+    return _mail.stats(days=days, account=account)
+
+
+@_additive_tool
+def export_mail(ids: str, dest_dir: str) -> dict:
+    """Write messages out as importable .eml files (Full Disk Access).
+
+    Read AT REST — the same on-disk bytes the undo backups copy — so this never
+    launches Mail and needs no Automation. `ids` are RFC822 message-ids from a mail
+    read, comma-separated, max 25. `dest_dir` must be inside the allowed root
+    (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
+    a path outside it is REFUSED. Filenames are derived, never overwritten.
+
+    .eml is the only format — it is lossless and opens in Mail and everything else,
+    and `mail_body` already covers "give me the text".
+
+    Returns {results, written, dest_dir, plane}. A message with no local file is
+    reported per-id as `status: "absent"` rather than failing the batch.
+    `fidelity: "partial"` means the .eml is missing its ATTACHMENT payloads — the body
+    is complete (#119). It is lossy for archival, not for reading.
+    Additive: writes new files, never overwrites or modifies mail."""
+    return _mail.export(ids, dest_dir)
+
+
+@_additive_tool
+def save_mail_attachment(
+    message_id: str,
+    dest_dir: str,
+    name: str = "",
+    attachment_id: str = "",
+    mailbox: str = "",
+) -> dict:
+    """Save ONE attachment to disk (Automation, plus Full Disk Access to resolve a bare
+    message_id).
+
+    List them with `mail_attachments` first, then address one by `name` or — when
+    several on the same message share a name, which is ordinary — by its
+    `attachment_id` (the `id` field on the attachment row). An ambiguous name RAISES
+    and lists the ids rather than picking one.
+
+    `dest_dir` must be inside the allowed root (~/Downloads by default;
+    MACOS_APPS_FILE_ROOT moves it) and is created if needed; a path outside it is
+    REFUSED. The filename is DERIVED from the attachment's name — an attachment name
+    comes from whoever sent the mail, so it is treated as hostile — and an existing
+    file is never overwritten. Writes are capped at 25 MiB.
+
+    `mailbox` is optional: the `folder` value from the read that produced `message_id`,
+    verbatim. Omitted, the id resolves on its own through the index.
+
+    Saving an attachment Mail has not downloaded makes Mail FETCH the message first, so
+    this can take much longer than a read; if the account is offline the file lands
+    empty, and it is then removed and reported as a failure rather than left behind.
+    Returns {saved, name, original_name, bytes, reported_size, was_downloaded, id,
+    folder}. Additive: writes a new file, never modifies mail."""
+    return _mail.save_attachment(
+        message_id, dest_dir, name=name, attachment_id=attachment_id, mailbox=mailbox
+    )
 
 
 @_additive_tool
@@ -506,28 +716,54 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     `drafts()` resolves it by its stable message-id. If the create FAILS partway, Mail
     may still leave a stray autosaved draft behind (#133 — its autosave is
     asynchronous and cannot be suppressed); `drafts()` + `delete_draft()` clear it.
+
+    THE AUTOSAVE WINDOW: Mail stamps the Message-ID only when it autosaves the draft,
+    ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
+    `drafts()` called immediately shows nothing. That is normal. Wait for the window,
+    then `drafts()` resolves it. **Do NOT retry this call** because the draft has not
+    appeared: you get two drafts and the first one still arrives.
     Additive (creates a draft; does not send/modify/delete); needs Automation access
     for Mail."""
     return _mail.create_draft(to, subject, body)
 
 
 @_additive_tool
-def mail_reply(message_id: str, reply_body: str, include_quote: bool = True) -> dict:
-    """Reply to an inbox message, opening a threaded draft for review (Automation).
+def mail_reply(
+    message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
+) -> dict:
+    """Reply to a message, opening a threaded draft for review (Automation).
 
-    NEVER sends. message_id: the RFC822 id from a mail read. Mail sets the threading
-    headers natively; include_quote appends the quoted original. Returns a locator
-    dict — save the draft to Drafts and `drafts()` resolves it by a stable message-id.
+    NEVER sends. message_id: the RFC822 id from a mail read. mailbox is REQUIRED: the
+    `folder` value from the SAME search result, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
+    threading headers natively; include_quote appends the quoted original. Returns a
+    locator dict — save the draft to Drafts and `drafts()` resolves it by a stable
+    message-id.
+
+    THE AUTOSAVE WINDOW: that message-id is stamped only when Mail autosaves the draft,
+    ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
+    `drafts()` called immediately shows nothing; that is normal, not a failed create.
+    Wait for the window, then `drafts()` resolves it. **Do NOT retry this call**
+    because the draft has not appeared: you get two drafts and the first still arrives.
+    Note a reply draft cannot be sent with `send_mail(draft_id=…)` — rebuilding it
+    would drop the threading headers, so that call refuses and points you at
+    `reply_all(dry_run=False)` instead.
     """
-    return _mail.reply(message_id, reply_body, include_quote)
+    return _mail.reply(message_id, mailbox, reply_body, include_quote)
 
 
 @_read_tool
-def drafts() -> list[dict[str, str]]:
-    """List Mail drafts as pointers (id + "subject — to recipient"), newest mailbox
-    order, bounded. The id is the RFC822 message-id — pass it to delete_draft.
-    Read-only; needs Automation access for Mail."""
-    return [p.as_dict() for p in _mail.list_drafts()]
+def drafts() -> dict:
+    """List Mail drafts, newest mailbox order. Returns {results, truncated?};
+    `truncated` means the 25 cap was reached. Each record is a citable pointer (id,
+    summary, deeplink, folder = "drafts") PLUS discrete `subject` and `to` fields, so
+    picking out one specific draft is a field comparison, not substring-matching the
+    summary — which collides whenever two drafts share a subject. The id is the RFC822
+    message-id: pass it to `delete_draft`, or to `send_mail(draft_id=…)` to send a
+    draft the human has approved.
+    A compose window Mail has not autosaved yet (~10-15s) is absent here — wait, do not
+    retry the create. Read-only; needs Automation access for Mail."""
+    return _mail.list_drafts()
 
 
 @_write_tool(snapshot=_mail)
@@ -538,30 +774,183 @@ def delete_draft(id: str, dry_run: bool = False) -> dict:
     return _mail.delete_draft(id, dry_run=dry_run)
 
 
+@_additive_tool
+def create_mailbox(name: str, account: str) -> dict:
+    """Create a Mail mailbox (folder) under one account. `name` may contain "/" to nest
+    ("Projects/2026") — missing parents are created for you. `account` is a display name
+    ("Personal"), an account UUID, or "On My Mac", and is REQUIRED: a folder has to land
+    somewhere specific.
+
+    Returns {created, mailbox, account, folder, note}. `folder` is the address token to
+    pass back verbatim to `move_mail`/`mail_search`; it works immediately, and
+    `mail_overview` will report Mail's own equivalent spelling of it once the account
+    syncs — both address the same mailbox. A "%" in the name is rejected (it cannot be
+    addressed unambiguously). There is no delete counterpart: removing a mailbox is not
+    scriptable, so do it in Mail. Additive (creates a folder; touches no message); needs
+    Automation access for Mail, plus Full Disk Access to resolve "On My Mac"."""
+    return _mail.create_mailbox(name, account)
+
+
+@_write_tool
+def move_mail(
+    ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
+) -> dict:
+    """Move messages between Mail mailboxes — archive, file, or refile. DESTRUCTIVE but
+    recoverable: every message's bytes are copied to a backup directory and its source
+    mailbox is logged BEFORE anything moves, so `mail_undo` puts the batch back.
+
+    `dry_run` DEFAULTS TO TRUE — the preview reads Mail and reports, per id, whether it
+    is actually `present` in from_mailbox. Pass `dry_run=False` to move.
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call and
+    the cap is not overridable. BOTH mailboxes are required and are address tokens: the
+    `folder` value from the read that produced the ids, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token, not a name to retype), or one of the canonical
+    "inbox"/"sent"/"drafts"/"trash"/"junk". A canonical name as `to_mailbox` files into
+    the SOURCE message's own account (it names Mail's cross-account accessor, not one
+    mailbox), so it is refused for an On My Mac source — that store has none of the
+    five. Pass a `folder` url from mail_overview when in doubt. To archive, move into a
+    mailbox named Archive — there is no separate archive tool.
+    Cross-account moves are supported and leave exactly ONE copy; each message is
+    verified present in the destination and gone from the source afterwards, so a
+    per-id `status` reports what really happened rather than assuming success.
+    Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
+    keep `receipt` to undo the batch. Needs Automation access for Mail,
+    plus Full Disk Access to locate each message's file for the backup."""
+    return _mail.move_mail(ids, from_mailbox, to_mailbox, dry_run=dry_run)
+
+
+@_write_tool
+def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
+    """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
+
+    Mail's scripting layer cannot permanently erase a message: `delete` moves it to the
+    owning account's Trash, and nothing in the dictionary empties Trash from a script.
+    Emptying Trash is something the user does in Mail.app. So this is always
+    recoverable, and there is no permanent-delete tool to ask for.
+
+    DESTRUCTIVE but recoverable: every message's bytes are copied to a backup directory
+    and its source mailbox logged BEFORE anything is deleted, so `mail_undo` moves the
+    batch back out of Trash. `dry_run` DEFAULTS TO TRUE — the preview reports, per id,
+    whether it is actually `present` in `mailbox`. Pass `dry_run=False` to delete.
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call and
+    the cap is not overridable. `mailbox` is REQUIRED and must be the `folder` url from
+    the read that produced the ids, passed back VERBATIM — not one of the canonical
+    names: Mail files a deleted message in its OWNING account's Trash, and a unified
+    name ("inbox") cannot say which account that is.
+    Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
+    keep `receipt` to undo the batch. Each id is verified to have ARRIVED in Trash
+    (Mail's delete clears the source asynchronously, so "gone from the source" is not
+    a signal that can be read straight after the call). Needs Automation access for
+    Mail, plus Full Disk Access to locate each message's file for the backup."""
+    return _mail.trash_mail(ids, mailbox, dry_run=dry_run)
+
+
+@_read_tool
+def mail_duplicates(limit: int = 25) -> dict:
+    """Where Mail is storing redundant copies of the same message — a REPORT, read-only.
+
+    Mail accumulates duplicate rows (a UI drag copies rather than moves, Gmail shows one
+    message under a label and All Mail, migrations leave copies on two accounts). The
+    read tools already hide them — `mail_search`/`mail_thread`/`mail_overview` report
+    result per Message-ID — so this exists to show what is still physically there.
+    Returns {redundant, mailboxes, worst, cross_account, note}: `mailboxes` is
+    {mailbox_url, total, distinct_, redundant} per mailbox worst-first, `worst` names
+    individual messages with the most copies ({mailbox_url, id, subject, copies}), and
+    `cross_account` counts rows whose Message-ID also exists under another account.
+    This tool CANNOT delete anything. Cleaning up is `macos-apps-mcp dedupe-mail`, run
+    a terminal by the user — thousands of deletes is a job a human starts, not a tool
+    call. Tell them that command rather than proposing per-message deletes.
+    Fast and read-only, straight from Mail's index at rest (so it may lag Mail by a few
+    minutes and never launches Mail). Needs Full Disk Access."""
+    return _mail.duplicates(limit)
+
+
+@_write_tool
+def mail_undo(receipt: str, dry_run: bool = True) -> dict:
+    """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
+    result, or from `audit`). A move is undone by moving the messages back to the exact
+    mailbox each came from — recorded per message before the original ran.
+
+    `dry_run` DEFAULTS TO TRUE: preview which messages would be restored, then pass
+    `dry_run=False`. The undo is itself backed up, logged and verified, and returns its
+    own receipt — so an undo can be undone. A receipt for an operation with no
+    destination mailbox cannot be replayed; the error names the directory holding the
+    preserved message bytes for manual re-import. Destructive (it moves mail); needs
+    Automation access for Mail and Full Disk Access."""
+    return _mail.undo(receipt, dry_run=dry_run)
+
+
+@_write_tool
+def update_mail_status(
+    ids: str,
+    mailbox: str = "",
+    read: bool | None = None,
+    flagged: bool | None = None,
+    flag_color: str = "",
+    dry_run: bool = False,
+) -> dict:
+    """Mark Mail messages read/unread and flag/unflag them, optionally with a colour.
+
+    `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call.
+    `mailbox` is OPTIONAL and is the disambiguator: pass the `folder` value from the
+    SAME read back VERBATIM (an opaque `imap://<uuid>/<path>` token) and the whole batch
+    is addressed directly; omit it and each id is resolved through Mail's index (Full
+    Disk Access), which also lets one call span several mailboxes.
+    At least one of `read`, `flagged` or `flag_color` is required. `flag_color` is a
+    name — red/orange/yellow/green/blue/purple/grey — and setting one implies flagged.
+    `dry_run` defaults to FALSE: this changes two booleans, destroys nothing, and
+    re-issuing it with the opposite value is the undo — so it does not use the backup
+    plane that `move_mail` does. Each message is re-read after the write, so the per-id
+    `results` report what actually persisted. Destructive (it modifies stored messages);
+    needs Automation access for Mail."""
+    return _mail.update_status(
+        ids,
+        mailbox=mailbox,
+        read=read,
+        flagged=flagged,
+        flag_color=flag_color,
+        dry_run=dry_run,
+    )
+
+
 @_send_tool("mail")
 def send_mail(
-    to: str,
+    to: str = "",
     subject: str = "",
     body: str = "",
     cc: str | None = None,
     bcc: str | None = None,
     html: bool = False,
     from_address: str | None = None,
+    draft_id: str = "",
     dry_run: bool = True,
 ) -> dict:
-    """SEND a new mail — this leaves your machine and cannot be recalled.
+    """SEND mail — this leaves your machine and cannot be recalled.
 
-    `dry_run` DEFAULTS TO TRUE: the first call previews the resolved envelope without
-    touching Mail. Pass `dry_run=False` to actually send. Addresses are
-    comma-separated (or a list). `from_address` picks the sending account; omitted,
-    Mail uses its default. `html=True` sends the body as HTML. Registered ONLY when
-    MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for Mail.
+    Two mutually exclusive modes; passing both RAISES rather than guessing:
+    * NEW message — `to` plus `subject`/`body`.
+    * APPROVED DRAFT — `draft_id` alone: the message-id `drafts()` reports for a draft
+      the human has already reviewed. Its own stored text is sent, so what was
+      approved and what goes out are the same text; the source draft is then removed
+      so nobody sends it a second time (`draft_removed` says whether that worked).
+      Mail cannot script-send a stored draft, so this REBUILDS it — and therefore
+      REFUSES a draft that carries attachments or that is a reply/forward, because a
+      rebuild would silently drop the attachments or the threading headers. Both
+      refusals name what to use instead (send it from Mail, or reply_all/forward_mail
+      against the original).
 
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
+    A draft is only addressable once Mail has AUTOSAVED it — ~10-15 seconds after
+    `create_draft`/`mail_reply` returns, asynchronously, and nothing can hurry it.
+    `drafts()` resolves the id after that window. Do NOT retry the create because the
+    draft has not shown up yet: you get two drafts and the first still arrives.
+
+    `dry_run` DEFAULTS TO TRUE: the first call previews the resolved envelope. The
+    preview shape is the same for every send tool here — {action, to, cc, bcc, from,
+    subject, source, body_chars, html}. Pass `dry_run=False` to actually send.
+    Addresses are comma-separated (or a list). `from_address` picks the sending
+    account; omitted, Mail uses its default. `html=True` sends the body as HTML.
+    Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
+    Automation access for Mail."""
     return _mail.send(
         to,
         subject,
@@ -570,6 +959,7 @@ def send_mail(
         bcc=bcc,
         html=html,
         from_address=from_address,
+        draft_id=draft_id,
         dry_run=dry_run,
     )
 
@@ -577,44 +967,38 @@ def send_mail(
 @_send_tool("mail")
 def reply_all(
     message_id: str,
+    mailbox: str,
     body: str,
     include_quote: bool = True,
     dry_run: bool = True,
 ) -> dict:
-    """Reply-all to an inbox message and SEND it — this leaves your machine.
+    """Reply-all to a message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
-    message_id is the RFC822 id from a mail read; Mail sets the threading headers
-    natively and the sending account is inherited from the original. Registered ONLY
-    when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs Automation access for
-    Mail.
-
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
-    return _mail.reply_all(message_id, body, include_quote, dry_run=dry_run)
+    message_id is the RFC822 id from a mail read and mailbox is REQUIRED — the `folder`
+    value from the SAME search result, passed back VERBATIM (an opaque
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
+    threading headers natively and the sending account is inherited from the original.
+    Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
+    Automation access for Mail."""
+    return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
 @_send_tool("mail")
-def forward_mail(message_id: str, to: str, dry_run: bool = True) -> dict:
-    """Forward an inbox message and SEND it — this leaves your machine.
+def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -> dict:
+    """Forward a message and SEND it — this leaves your machine.
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
+    mailbox is REQUIRED — the `folder` value from the SAME search result that gave you
+    message_id, passed back VERBATIM (an opaque `imap://<uuid>/<path>` token; the five
+    canonical names also work).
     The original message and its attachments are forwarded intact and unchanged.
     There is NO covering-note parameter: AppleScript cannot add text to a forward
     without destroying the original body and its attachments (device-verified) — if
     you want to add your own commentary, use `send_mail` instead. `to` is
     comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
-    adapter. Needs Automation access for Mail.
-
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
-    return _mail.forward(message_id, to, dry_run=dry_run)
+    adapter. Needs Automation access for Mail."""
+    return _mail.forward(message_id, mailbox, to, dry_run=dry_run)
 
 
 @_read_tool
@@ -628,10 +1012,10 @@ def notes(title: str) -> list[dict[str, str]]:
 
 @_read_tool
 def notes_all() -> list[dict[str, str]]:
-    """List every note as pointers (id + "Account / Folder" + snippet), excluding
-    Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk
-    Access); degrades to Automation (Notes) enumeration without it (very large libraries
-    can hit the osascript timeout, all-or-nothing). See note_bodies."""
+    """List the 25 newest notes as pointers (id + "Account / Folder" + snippet),
+    excluding Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full
+    Disk Access); degrades to Automation (Notes) enumeration without it (very large
+    libraries can hit the osascript timeout, all-or-nothing). See note_bodies."""
     return [p.as_dict() for p in _notes.get_all()]
 
 
@@ -645,7 +1029,7 @@ def note_bodies(ids: list[str]) -> list[dict[str, str]]:
 
 @_read_tool
 def safari_tabs() -> list[dict[str, str]]:
-    """List open Safari tabs as pointers (url + title).
+    """List open Safari tabs as pointers (url + title). Bounded to 50.
     Read-only; needs Automation access for Safari. See safari_open to open a URL."""
     return [p.as_dict() for p in _safari.get_tabs()]
 
@@ -717,34 +1101,6 @@ def shortcuts(name: str = "") -> list[dict[str, str]]:
     return [p.as_dict() for p in _shortcuts.get_pointers(name)]
 
 
-def _parse(label: str, s: str | None) -> datetime | None:
-    """Optional ISO datetime → naive local (contracts.parse_datetime). Empty/absent →
-    None. A bad value fails at the tool boundary, labeled with the failing param."""
-    return _parse_required(label, s) if s else None
-
-
-def _parse_required(label: str, s: str) -> datetime:
-    """Required ISO datetime (event start/end) → naive local.
-
-    Bad/empty input fails clearly at the tool boundary.
-    """
-    try:
-        return parse_datetime(s)
-    except ValueError as e:
-        raise ValueError(f"{label}: {e}") from e
-
-
-def _parse_all_day(label: str, s: str) -> datetime:
-    """Required all-day date (a calendar DATE, not an instant) → naive datetime.
-
-    A timestamp with a UTC offset fails clearly at the tool boundary.
-    """
-    try:
-        return parse_all_day(s)
-    except ValueError as e:
-        raise ValueError(f"{label}: {e}") from e
-
-
 @_additive_tool
 def create_reminder(
     title: str,
@@ -762,11 +1118,11 @@ def create_reminder(
     name is refused (with the candidate ids listed), never guessed."""
     data = ReminderData(
         title=title,
-        due=_parse("due", due),
+        due=parse_optional("due", due),
         list_name=list_name,
         notes=notes,
         priority=priority,
-        start=_parse("start", start),
+        start=parse_optional("start", start),
         recurrence=parse_recurrence(recurrence),
     )
     return _reminders.create_reminder(data).as_dict()
@@ -791,11 +1147,11 @@ def update_reminder(
     reminders."""
     data = ReminderData(
         title=title,
-        due=_parse("due", due),
+        due=parse_optional("due", due),
         list_name=list_name,
         notes=notes,
         priority=priority,
-        start=_parse("start", start),
+        start=parse_optional("start", start),
         recurrence=parse_recurrence_update(recurrence),
     )
     return _reminders.update_reminder(id, data).as_dict()
@@ -825,11 +1181,10 @@ def create_event(
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
-    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=parse("start", start),
-        end=parse("end", end),
+        start=parse_bound("start", start, all_day=all_day),
+        end=parse_bound("end", end, all_day=all_day),
         calendar=calendar,
         location=location,
         notes=notes,
@@ -858,11 +1213,10 @@ def update_event(
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
     events."""
-    parse = _parse_all_day if all_day else _parse_required
     data = CalendarEventData(
         title=title,
-        start=parse("start", start),
-        end=parse("end", end),
+        start=parse_bound("start", start, all_day=all_day),
+        end=parse_bound("end", end, all_day=all_day),
         calendar=calendar,
         location=location,
         notes=notes,
@@ -879,15 +1233,7 @@ def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dic
     for single events. `dry_run=True` previews the event that WOULD be deleted (pointer,
     no mutation) — call it first to confirm the target before the real delete.
     Destructive; needs EventKit (Calendar) access. `id` from events."""
-    if dry_run:
-        return {
-            "dry_run": True,
-            "would_delete": _calendar.delete_event(
-                id, span=span, dry_run=True
-            ).as_dict(),
-        }
-    _calendar.delete_event(id, span=span)
-    return {"deleted": id}
+    return _calendar.delete_event(id, span=span, dry_run=dry_run)
 
 
 @_write_tool(snapshot=_notes)
@@ -898,13 +1244,7 @@ def delete_note(
     Pass expect_title to verify the target before deleting (content-verify first).
     `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation).
     Needs Automation access for Notes. `id` from notes / notes_all."""
-    if dry_run:
-        return {
-            "dry_run": True,
-            "would_delete": _notes.delete(id, expect_title, dry_run=True).as_dict(),
-        }
-    _notes.delete(id, expect_title)
-    return {"deleted": id}
+    return _notes.delete(id, expect_title, dry_run=dry_run)
 
 
 @_additive_tool
@@ -946,13 +1286,17 @@ def create_contact(
     return _contacts.create_contact(data).as_dict()
 
 
-@_write_tool
-def run_shortcut(name: str, input_text: str | None = None) -> dict[str, str]:
+@_write_tool(open_world=True)
+def run_shortcut(
+    name: str, input_text: str | None = None, dry_run: bool = False
+) -> dict[str, str]:
     """Run a Shortcut by name OR its UUID id (from shortcuts — the id is unambiguous
     across renames/duplicate names); optional `input_text` piped in. Returns a pointer
-    citing the run + a bounded output snippet. Side effect (runs arbitrary automation
-    the user owns); uses the Shortcuts CLI (no TCC prompt)."""
-    return _shortcuts.run_shortcut(name, input_text).as_dict()
+    citing the run + a bounded output snippet. `dry_run=True` resolves the shortcut
+    and reports what WOULD run without running anything. Side effect (runs arbitrary
+    automation the user owns, which may reach beyond this machine — a shortcut can
+    call web services); uses the Shortcuts CLI (no TCC prompt)."""
+    return _shortcuts.run_shortcut(name, input_text, dry_run=dry_run).as_dict()
 
 
 @_additive_tool

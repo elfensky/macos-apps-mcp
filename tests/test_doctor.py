@@ -83,6 +83,26 @@ def test_automation_unprobed_when_request_false(monkeypatch):
     assert all("request=True" in s["remediation"] for s in surfaces)
 
 
+def test_automation_surfaces_carry_process_line(monkeypatch):
+    # #183: pid + uptime answer "did the force-quit actually restart Mail?" — a UI
+    # quit once left a 37-minute-old wedged process alive. Reported even unprobed
+    # (request=False): a ps read is not an Apple Event and needs no TCC.
+    monkeypatch.setattr(doc, "run_osascript", _boom_osascript)
+    monkeypatch.setattr(
+        doc,
+        "app_process_info",
+        lambda app: (
+            {"pid": 838, "state": "S", "cpu": 0.9, "etime": "37:12"}
+            if app == "Mail"
+            else None
+        ),
+    )
+    surfaces = doc._automation_surfaces(request=False)
+    by_name = {s["surface"]: s for s in surfaces}
+    assert by_name["mail"]["process"] == "pid 838, up 37:12, state S, 0.9% CPU"
+    assert by_name["notes"]["process"] == "not running"
+
+
 def test_automation_probe_ok(monkeypatch):
     monkeypatch.setattr(doc, "run_osascript", lambda *a, **k: "AppName")
     surfaces = doc._automation_surfaces(request=True)
@@ -169,6 +189,7 @@ def test_diagnose_shape(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert set(report) == {
         "version",
+        "build",
         "responsible_process",
         "note",
         "probed_automation",
@@ -238,8 +259,25 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_osascript", denied_automation)
     monkeypatch.setattr(doc.shutil, "which", lambda _: None)
     monkeypatch.setattr(doc, "open", denied_open, raising=False)
+    # deterministic worst case for the #183 process lines: every automation app
+    # running (a live pgrep would make this test's length machine-dependent).
+    monkeypatch.setattr(
+        doc,
+        "app_process_info",
+        lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
+    )
     report = doc.diagnose(request=True)
-    assert len(json.dumps(report, ensure_ascii=False)) < 6000
+    assert len(json.dumps(report, ensure_ascii=False)) < 7000
+
+
+def test_probe_carries_applescript_side_timeout():
+    # #56's second line of defense: the in-script `with timeout` self-terminates a
+    # hung child even if the Python side died first. _PROBE — the template most
+    # likely to strand an orphan (it launches each quit app in turn) — was the one
+    # template without it; test_applescript_timeout.py sweeps only the adapters
+    # package, so it never saw this one.
+    assert "with timeout of" in doc._PROBE
+    assert doc._PROBE.count("with timeout of") == doc._PROBE.count("end timeout")
 
 
 # --- integration: real TCC on this Mac (never in CI) ---------------------------------
@@ -253,3 +291,26 @@ def test_doctor_integration_real():
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:
         assert {"surface", "kind", "ok", "status"} <= set(s)
+
+
+# --- #143: the build stamp — version alone cannot see a same-version rebuild ---------
+
+
+def test_build_stamp_reports_dev_without_a_stamp_file(tmp_path, monkeypatch):
+    # a dev checkout (and any bundle whose build script predates #143) has no stamp
+    monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", tmp_path / "build_stamp")
+    assert doc._build_stamp() == "dev"
+
+
+def test_build_stamp_reads_the_baked_file(tmp_path, monkeypatch):
+    stamp = tmp_path / "build_stamp"
+    stamp.write_text("b7fbde6 2026-08-20T10:00:00Z\n")
+    monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", stamp)
+    assert doc._build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
+
+
+def test_report_carries_the_build_stamp(monkeypatch):
+    monkeypatch.setattr(doc, "run_native", lambda fn: 3)
+    monkeypatch.setattr(doc, "_build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
+    report = doc.diagnose(request=False)
+    assert report["build"] == "b7fbde6 2026-08-20T10:00:00Z"

@@ -1,6 +1,33 @@
 from macos_apps_mcp.adapters import mail_index
 
 
+def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
+    # sorted() on p.parts is LEXICOGRAPHIC: 'V10' < 'V9', so a Mac that kept an old
+    # V9 dir from before an OS upgrade silently read the STALE index — every index
+    # tool (search/thread/overview) reporting success against outdated data.
+    for v in ("V2", "V9", "V10"):
+        d = tmp_path / "Library" / "Mail" / v / "MailData"
+        d.mkdir(parents=True)
+        (d / "Envelope Index").touch()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = mail_index.envelope_index_path()
+    assert path is not None
+    assert path.parts[-3] == "V10"
+
+
+def test_text_filter_like_metacharacters_are_escaped():
+    # like_escape existed for exactly this and was applied to `account` only: the
+    # other LIKE filters still read '%'/'_' as wildcards, so subject='50% off'
+    # matched '50 anything off' — a confidently wrong answer, not a literal match.
+    # (mailbox is no longer a LIKE at all — #144 resolves it to exact urls.)
+    _, params = mail_index.build_header_query(
+        subject="50%", from_="j_x", to="a%b", limit=5
+    )
+    assert r"%50\%%" in params
+    assert r"%j\_x%" in params
+    assert r"%a\%b%" in params
+
+
 class _Row(dict):
     # sqlite3.Row supports __getitem__ by column name; a dict stands in for tests.
     pass
@@ -43,7 +70,7 @@ def test_build_header_query_binds_all_filters():
     sql, params = mail_index.build_header_query(
         subject="inv",
         from_="jane",
-        mailbox="INBOX",
+        mailbox_urls=["imap://A/INBOX"],
         since=1000,
         until=2000,
         unread=True,
@@ -61,6 +88,18 @@ def test_build_header_query_binds_all_filters():
     assert "inv" not in sql and "jane" not in sql
     assert "%inv%" in params and "%jane%" in params
     assert 1000 in params and 2000 in params and 10 in params
+
+
+def test_build_header_query_mailbox_urls_uses_in_clause():
+    # #144: the mailbox filter binds RESOLVED urls exactly (IN), never a LIKE over
+    # the encoded url — exact IN also kills the '%Trash%'-matches-"Trash Archive"
+    # trap the account clause already documents.
+    sql, params = mail_index.build_header_query(
+        mailbox_urls=["imap://A/INBOX", "imap://A/Junk%20E-mail"], limit=5
+    )
+    assert "mb.url in (?,?)" in sql.lower()
+    assert "imap://A/INBOX" in params and "imap://A/Junk%20E-mail" in params
+    assert "like" not in sql.lower().split("mb.url in")[1].split("and")[0]
 
 
 def test_build_header_query_message_ids_uses_in_clause():
@@ -134,16 +173,42 @@ def _write_emlx(path, mid, body):
     path.write_bytes(f"{len(rfc)}\n".encode() + rfc + b"<plist/>")
 
 
-def test_build_body_index_indexes_full_skips_partial(tmp_path):
+def test_build_body_index_indexes_partials_too(tmp_path):
+    """#119: a ``.partial.emlx`` is missing its ATTACHMENTS, not its body.
+
+    Device-measured 2026-08-06 over all 22,748 partials on the dev Mac: 22,627 (99.47%)
+    carry a complete body, byte-identical to what Mail returns after fetching the whole
+    message. This test used to assert the opposite — that a partial is skipped — which
+    is how ~62% of the store stayed invisible to ``mail_search(body=…)``.
+    """
     root = tmp_path / "Mail"
     msgs = root / "V10/acct/INBOX.mbox/Data/Messages"
     msgs.mkdir(parents=True)
     _write_emlx(msgs / "1.emlx", "<a@x>", "quarterly invoice total")
-    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "should be skipped")
+    _write_emlx(msgs / "2.partial.emlx", "<b@x>", "partial carries a real body")
     fts = tmp_path / "mail_fts.sqlite"
     res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
-    assert res["indexed"] == 1 and res["total_emlx"] == 1  # partial not counted
+    assert res["indexed"] == 2 and res["total_emlx"] == 2
     assert mail_index.fts_search(fts, "invoice") == ["<a@x>"]
+    assert mail_index.fts_search(fts, "carries") == ["<b@x>"]
+
+
+def test_partial_that_fills_in_is_reindexed_without_duplicating(tmp_path):
+    """``1.partial.emlx`` → ``1.emlx`` is a NEW key in indexed_files, so the filled-in
+    message is re-read rather than skipped as unchanged — and the DELETE-by-message-id
+    before each insert keeps that from leaving two FTS rows for one message."""
+    root = tmp_path / "Mail"
+    msgs = root / "V10/M"
+    msgs.mkdir(parents=True)
+    _write_emlx(msgs / "7.partial.emlx", "<c@x>", "receipt enclosed")
+    fts = tmp_path / "mail_fts.sqlite"
+    mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    (msgs / "7.partial.emlx").unlink()
+    _write_emlx(msgs / "7.emlx", "<c@x>", "receipt enclosed plus the attachment text")
+    res = mail_index.build_body_index(mail_root=root, fts_db=fts, max_bytes=10**9)
+    assert res["indexed"] == 1
+    assert mail_index.fts_search(fts, "receipt") == ["<c@x>"]  # one row, not two
+    assert mail_index.fts_search(fts, "attachment") == ["<c@x>"]
 
 
 def test_build_body_index_resumes(tmp_path):

@@ -58,6 +58,26 @@ def test_usage_log_rotates_at_cap(tmp_path, monkeypatch):
     assert (tmp_path / "usage.jsonl").exists()  # a fresh current file remains
 
 
+def test_usage_report_builds_the_whole_report(tmp_path, monkeypatch):
+    # C5b: the report logic lives in audit (no async, no mcp) — the tool is a
+    # one-line delegation over the registered-tool names.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.usage_log("busy")
+    au.usage_log("busy")
+    au.usage_log("quiet")
+    report = au.usage_report({"busy", "quiet", "never"})
+    assert [e["tool"] for e in report["tools"]] == ["busy", "quiet"]  # busiest first
+    assert report["tools"][0]["count"] == 2
+    assert report["never_used"] == ["never"]
+    assert report["total_calls"] == 3
+
+
+def test_usage_report_empty_tally(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    report = au.usage_report({"a", "b"})
+    assert report == {"tools": [], "never_used": ["a", "b"], "total_calls": 0}
+
+
 def test_usage_tool_reports_never_used(tmp_path, monkeypatch):
     from macos_apps_mcp.server import usage as usage_tool
 
@@ -69,3 +89,17 @@ def test_usage_tool_reports_never_used(tmp_path, monkeypatch):
     # a registered tool we never logged shows up in the pruning list
     assert "usage" in result["never_used"]
     assert "audit" not in result["never_used"]
+
+
+def test_usage_report_keeps_a_tool_that_is_no_longer_registered(tmp_path, monkeypatch):
+    # A tool RENAMED after its audit rows exist is still in the tally but no longer in
+    # `registered`. It must stay visible in `tools` and keep counting toward
+    # total_calls — dropping it would quietly rewrite usage history, and filtering the
+    # comprehension by `registered` passed the whole suite before this test.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    au.usage_log("old_name")
+    au.usage_log("current")
+    report = au.usage_report({"current"})  # old_name no longer registered
+    assert {e["tool"] for e in report["tools"]} == {"old_name", "current"}
+    assert report["total_calls"] == 2
+    assert report["never_used"] == []  # registered−tally, not tally−registered

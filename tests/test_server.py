@@ -21,6 +21,7 @@ from macos_apps_mcp.contracts import (
     Pointer,
     Recurrence,
     ReminderData,
+    read_result,
 )
 from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
@@ -33,6 +34,11 @@ class _FakeSource:
     def get_pointers(self, query: str) -> list[Pointer]:
         self.queries.append(query)
         return [Pointer(id="P-1", summary="s", deeplink="d")]
+
+    def inbox_search(self, query: str) -> dict:
+        # the mail read in its bounded-read envelope (#156), exactly as MailAdapter
+        # wraps its own get_pointers
+        return read_result(self.get_pointers(query), cap=25)
 
     def get_lists(self) -> list[Pointer]:
         self.enumerated += 1
@@ -108,23 +114,38 @@ def test_mail_tool_dispatches(monkeypatch):
     monkeypatch.setattr(srv, "_mail", fake)
     out = srv.mail("invoice")
     assert fake.queries == ["invoice"]
-    assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    # #156: a mail read answers the envelope; one hit is under the cap, so no
+    # `truncated` claim either way.
+    assert out == {"results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]}
 
 
 def test_mail_needs_response_dispatches(monkeypatch):
     class _F:
         def get_needs_response(self):
-            return [
-                Pointer(
-                    id="<m@x>", summary="s", deeplink="message://m", reason="flagged"
-                )
-            ]
+            return read_result(
+                [
+                    Pointer(
+                        id="<m@x>",
+                        summary="s",
+                        deeplink="message://m",
+                        reason="flagged",
+                    )
+                ],
+                cap=25,
+            )
 
     monkeypatch.setattr(srv, "_mail", _F())
     out = srv.mail_needs_response()
-    assert out == [
-        {"id": "<m@x>", "summary": "s", "deeplink": "message://m", "reason": "flagged"}
-    ]
+    assert out == {
+        "results": [
+            {
+                "id": "<m@x>",
+                "summary": "s",
+                "deeplink": "message://m",
+                "reason": "flagged",
+            }
+        ]
+    }
 
 
 def test_mail_awaiting_reply_dispatches(monkeypatch):
@@ -133,18 +154,22 @@ def test_mail_awaiting_reply_dispatches(monkeypatch):
     class _F:
         def get_awaiting_reply(self, days=3):
             seen["days"] = days
-            return [
-                Pointer(
-                    id="<s@x>",
-                    summary="s",
-                    deeplink="message://s",
-                    reason="awaiting-reply",
-                )
-            ]
+            return read_result(
+                [
+                    Pointer(
+                        id="<s@x>",
+                        summary="s",
+                        deeplink="message://s",
+                        reason="awaiting-reply",
+                    )
+                ],
+                cap=25,
+            )
 
     monkeypatch.setattr(srv, "_mail", _F())
     out = srv.mail_awaiting_reply(7)
-    assert seen["days"] == 7 and out[0]["reason"] == "awaiting-reply"
+    assert seen["days"] == 7
+    assert out["results"][0]["reason"] == "awaiting-reply"
 
 
 def test_notes_tool_dispatches(monkeypatch):
@@ -246,8 +271,9 @@ class _FakeWriter:
         self.calls.append(("update_event", ident, data, span))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def delete_event(self, ident: str, span: str | None = None) -> None:
+    def delete_event(self, ident: str, span: str | None = None, dry_run: bool = False):
         self.calls.append(("delete_event", ident, span))
+        return {"deleted": ident}  # the adapter owns the envelope (C5d)
 
     def create_contact(self, data: ContactData) -> Pointer:
         self.calls.append(("create_contact", data))
@@ -499,14 +525,14 @@ def test_run_shortcut_dispatches(monkeypatch):
         def __init__(self):
             self.calls = []
 
-        def run_shortcut(self, name, input_text=None):
-            self.calls.append((name, input_text))
+        def run_shortcut(self, name, input_text=None, *, dry_run=False):
+            self.calls.append((name, input_text, dry_run))
             return Pointer(id=name, summary=f"ran {name}", deeplink="")
 
     fake = _FakeShortcuts()
     monkeypatch.setattr(srv, "_shortcuts", fake)
     out = srv.run_shortcut("Driving Mode", input_text="go")
-    assert fake.calls == [("Driving Mode", "go")]
+    assert fake.calls == [("Driving Mode", "go", False)]  # dry_run defaults OFF
     assert out == {"id": "Driving Mode", "summary": "ran Driving Mode", "deeplink": ""}
 
 
@@ -655,8 +681,9 @@ def test_delete_note_dispatches(monkeypatch):
         def __init__(self):
             self.calls = []
 
-        def delete(self, ident, expect_title=None):
+        def delete(self, ident, expect_title=None, dry_run=False):
             self.calls.append((ident, expect_title))
+            return {"deleted": ident}  # the adapter owns the envelope (C5d)
 
     fake = _FakeNotes()
     monkeypatch.setattr(srv, "_notes", fake)
@@ -689,6 +716,9 @@ class _DeniedSource:
 
     def get_pointers(self, query: str) -> list[Pointer]:
         raise AutomationDenied("grant Automation access, then restart macos-apps-mcp")
+
+    def inbox_search(self, query: str) -> dict:
+        return read_result(self.get_pointers(query), cap=25)
 
 
 class _EmptySource:
@@ -877,20 +907,11 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
 # --- dry_run dispatch (#54) ----------------------------------------------------------
 
 
-def test_delete_event_dry_run_dispatches_and_formats_preview(monkeypatch):
+def test_delete_event_dry_run_dispatches_and_passes_envelope_through(monkeypatch):
+    # C5d: the adapter builds the deletion envelope (contracts.deletion_result);
+    # the tool is a one-line delegation that must not reshape it.
     calls = []
-
-    class _Cal:
-        def delete_event(self, ident, span=None, dry_run=False):
-            calls.append((ident, span, dry_run))
-            return Pointer(
-                id=ident, summary="Standup 09:00–09:15", deeplink="calshow:1"
-            )
-
-    monkeypatch.setattr(srv, "_calendar", _Cal())
-    out = srv.delete_event("E-1", dry_run=True)
-    assert calls == [("E-1", None, True)]  # dry_run flag reached the adapter
-    assert out == {
+    envelope = {
         "dry_run": True,
         "would_delete": {
             "id": "E-1",
@@ -898,6 +919,16 @@ def test_delete_event_dry_run_dispatches_and_formats_preview(monkeypatch):
             "deeplink": "calshow:1",
         },
     }
+
+    class _Cal:
+        def delete_event(self, ident, span=None, dry_run=False):
+            calls.append((ident, span, dry_run))
+            return envelope
+
+    monkeypatch.setattr(srv, "_calendar", _Cal())
+    out = srv.delete_event("E-1", dry_run=True)
+    assert calls == [("E-1", None, True)]  # dry_run flag reached the adapter
+    assert out == envelope
 
 
 def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypatch):
@@ -907,28 +938,29 @@ def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypa
     class _Cal:
         def delete_event(self, ident, span=None, dry_run=False):
             calls.append((ident, span, dry_run))
-            return None
+            return {"deleted": ident}
 
     monkeypatch.setattr(srv, "_calendar", _Cal())
     assert srv.delete_event("E-1") == {"deleted": "E-1"}
     assert calls == [("E-1", None, False)]
 
 
-def test_delete_note_dry_run_dispatches_and_formats_preview(monkeypatch):
+def test_delete_note_dry_run_dispatches_and_passes_envelope_through(monkeypatch):
     calls = []
+    envelope = {
+        "dry_run": True,
+        "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
+    }
 
     class _Notes:
         def delete(self, ident, expect_title=None, dry_run=False):
             calls.append((ident, expect_title, dry_run))
-            return Pointer(id=ident, summary="Groceries", deeplink="")
+            return envelope
 
     monkeypatch.setattr(srv, "_notes", _Notes())
     out = srv.delete_note("N-1", dry_run=True)
     assert calls == [("N-1", None, True)]
-    assert out == {
-        "dry_run": True,
-        "would_delete": {"id": "N-1", "summary": "Groceries", "deeplink": ""},
-    }
+    assert out == envelope
 
 
 def test_audit_tool_reads(monkeypatch):
@@ -950,3 +982,9 @@ def test_audit_tool_passes_since(monkeypatch):
     )
     srv2.audit("2026-07-21T00:00:00")
     assert seen["since"] == "2026-07-21T00:00:00"
+
+
+def test_ping_returns_the_server_identity():
+    # #110: through the mac-mcp → macos-apps-mcp rename only a grep gate kept this
+    # string consistent — pin the identity so a stray edit can't pass CI silently.
+    assert srv.ping() == "macos-apps-mcp ok"
