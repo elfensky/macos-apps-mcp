@@ -77,6 +77,8 @@ Follow [DAEMON.md](DAEMON.md) for build → sign → notarize → staple → ins
 
 ```
 doctor().version   # must report the version you just cut
+doctor().build     # must report the sha you just built (#143) — version alone
+                   # cannot see a same-version rebuild
 ```
 
 Judge that output. A successful build says nothing about which binary launchd is running.
@@ -96,4 +98,4 @@ not close a milestone just because a same-numbered release went out.
 - [ ] Merged to `main` with `--no-ff`, tagged `vX.Y.Z`, pushed with `--follow-tags`
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
-- [ ] `doctor().version` reports the new version
+- [ ] `doctor().version` reports the new version and `doctor().build` the built sha

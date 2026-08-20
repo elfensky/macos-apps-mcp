@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 import EventKit as EK
 
@@ -245,6 +246,21 @@ def _version() -> str:
         return "unknown"
 
 
+# Baked into the installed package by scripts/build_app.sh — absent in a dev checkout.
+_BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
+
+
+def _build_stamp() -> str:
+    """Which BUILD is serving this call (#143) — `version` alone cannot see a
+    same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
+    `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
+    has no stamp file and honestly reports "dev"."""
+    try:
+        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
 def _outbound_state() -> dict[str, list[str]]:
     """``server.outbound_status()`` — registered vs configured outbound adapters
     (#130, C6). Imported LOCALLY: ``server.py`` does ``from .doctor import diagnose``
@@ -366,6 +382,7 @@ def diagnose(request: bool = False) -> dict:
 
     return {
         "version": _version(),
+        "build": _build_stamp(),
         "responsible_process": _responsible_process(),
         "note": (
             "TCC attributes permissions to the process that launched macos-apps-mcp "

@@ -189,6 +189,7 @@ def test_diagnose_shape(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert set(report) == {
         "version",
+        "build",
         "responsible_process",
         "note",
         "probed_automation",
@@ -290,3 +291,26 @@ def test_doctor_integration_real():
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:
         assert {"surface", "kind", "ok", "status"} <= set(s)
+
+
+# --- #143: the build stamp — version alone cannot see a same-version rebuild ---------
+
+
+def test_build_stamp_reports_dev_without_a_stamp_file(tmp_path, monkeypatch):
+    # a dev checkout (and any bundle whose build script predates #143) has no stamp
+    monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", tmp_path / "build_stamp")
+    assert doc._build_stamp() == "dev"
+
+
+def test_build_stamp_reads_the_baked_file(tmp_path, monkeypatch):
+    stamp = tmp_path / "build_stamp"
+    stamp.write_text("b7fbde6 2026-08-20T10:00:00Z\n")
+    monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", stamp)
+    assert doc._build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
+
+
+def test_report_carries_the_build_stamp(monkeypatch):
+    monkeypatch.setattr(doc, "run_native", lambda fn: 3)
+    monkeypatch.setattr(doc, "_build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
+    report = doc.diagnose(request=False)
+    assert report["build"] == "b7fbde6 2026-08-20T10:00:00Z"
