@@ -208,6 +208,20 @@ _SEND_ADAPTERS: set[str] = set()
 _SEND_REGISTERED: set[str] = set()
 
 
+# The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
+# that is genuinely byte-identical across every mail send tool (the folder-VERBATIM /
+# FDA / truncated wordings are hand-tuned per tool and stay in place). Composed into
+# each mail send tool's __doc__ at registration by _send_tool below, so a wording fix
+# is a one-site edit; test_send_tools_document_the_unsuppressable_autosave pins that
+# every send tool carries it.
+_MAIL_AUTOSAVE_DOC = """
+
+Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
+outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
+it — so a successful send still litters. Remove it with `drafts()` +
+`delete_draft()`. A dry run constructs nothing and so leaves nothing."""
+
+
 def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
     (#104). Annotated destructive + open-world (#57). ``snapshot``: as on
@@ -217,6 +231,10 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
 
     def deco(f):
         _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
+        if adapter == "mail":
+            # #179: composed before the gate check, so __doc__ carries the #133
+            # paragraph whether or not the tool registers (tests read it either way).
+            f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
         if not _allow_send(adapter):
             return f
         _SEND_REGISTERED.add(adapter)  # the gate was ON when this tool registered
@@ -932,13 +950,7 @@ def send_mail(
     Addresses are comma-separated (or a list). `from_address` picks the sending
     account; omitted, Mail uses its default. `html=True` sends the body as HTML.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
-    Automation access for Mail.
-
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
+    Automation access for Mail."""
     return _mail.send(
         to,
         subject,
@@ -968,13 +980,7 @@ def reply_all(
     `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
     threading headers natively and the sending account is inherited from the original.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
-    Automation access for Mail.
-
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
+    Automation access for Mail."""
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
@@ -991,13 +997,7 @@ def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -
     without destroying the original body and its attachments (device-verified) — if
     you want to add your own commentary, use `send_mail` instead. `to` is
     comma-separated. Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail
-    adapter. Needs Automation access for Mail.
-
-    Mail leaves a copy of every message it builds in Drafts (#133): it autosaves any
-    outgoing message ~10-15s after creation, asynchronously, and nothing suppresses
-    it — so a successful send still litters. Remove it with `drafts()` +
-    `delete_draft()`. A dry run constructs nothing and so leaves nothing.
-    """
+    adapter. Needs Automation access for Mail."""
     return _mail.forward(message_id, mailbox, to, dry_run=dry_run)
 
 
