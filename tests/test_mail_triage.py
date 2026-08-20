@@ -190,3 +190,36 @@ def test_parse_sent_records():
 def test_parse_my_addrs_lowercases():
     addrs = _parse_my_addrs("Me@X.com" + US + "you@y.com" + US)
     assert addrs == {"me@x.com", "you@y.com"}
+
+
+# --- #188: the host cap must not undercut the scripts' own 120s budget ---------------
+
+
+def test_scans_pass_the_triage_timeout(monkeypatch):
+    # All four scripts declare `with timeout of 120 seconds`; run_osascript's 30s
+    # default killed every scan whenever Mail was slow (facts §3c), making the inner
+    # timeout unreachable dead code. Pin timeout=_TRIAGE_TIMEOUT on every call site.
+    from macos_apps_mcp import runtime
+    from macos_apps_mcp.adapters import mail_triage
+
+    seen: list[tuple[object, dict]] = []
+
+    def fake(script, *argv, **kw):
+        seen.append((script, kw))
+        if script is mail_triage._SENT_TRIAGE:
+            # one sent record old enough to open the correlation window, so
+            # awaiting_reply reaches its _INBOX_REFS call too
+            return US.join(["<s1@x>", "Subj", "bob@y.com", str(8 * 86400)]) + RS
+        return ""
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    mail_triage.needs_response(25)
+    mail_triage.awaiting_reply(7, 25)
+    assert {id(s) for s, _ in seen} == {
+        id(mail_triage._INBOX_TRIAGE),
+        id(mail_triage._MY_ADDRESSES),
+        id(mail_triage._SENT_TRIAGE),
+        id(mail_triage._INBOX_REFS),
+    }
+    for _script, kw in seen:
+        assert kw == {"timeout": mail_triage._TRIAGE_TIMEOUT}
