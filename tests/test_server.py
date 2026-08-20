@@ -982,3 +982,9 @@ def test_audit_tool_passes_since(monkeypatch):
     )
     srv2.audit("2026-07-21T00:00:00")
     assert seen["since"] == "2026-07-21T00:00:00"
+
+
+def test_ping_returns_the_server_identity():
+    # #110: through the mac-mcp → macos-apps-mcp rename only a grep gate kept this
+    # string consistent — pin the identity so a stray edit can't pass CI silently.
+    assert srv.ping() == "macos-apps-mcp ok"
