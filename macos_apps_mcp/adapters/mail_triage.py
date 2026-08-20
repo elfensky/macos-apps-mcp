@@ -40,12 +40,15 @@ NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
-# All four scan scripts declare `with timeout of 120 seconds` themselves; the host
-# cap must match that budget, not undercut it (#188 — the 30s default killed every
-# scan whenever Mail was in the §3c degraded-throughput state). Same pattern as
-# _MOVE_TIMEOUT/_SAVE_TIMEOUT: raised host-side ceiling, with the AppleScript-level
-# `with timeout` as the second line of defense.
-_TRIAGE_TIMEOUT = 120.0
+# Host-side wall-clock ceiling for the four scan scripts (#188, resized by #192).
+# The scripts' own `with timeout of 120 seconds` bounds each Apple EVENT, not the
+# block — so this cap is the only wall-clock bound the scan has. Device-measured
+# 2026-08-20 on an IDLE Mail: _SENT_TRIAGE reads 100 records off a 13k-message
+# unified All Sent in 209s (~4-5 events per message; each event is fast, the loop
+# is not), while the inbox scan fits in ~34s. 600 = ~3x the idle measurement, the
+# same headroom rationale as _MOVE_TIMEOUT/_SAVE_TIMEOUT (300s). Do NOT shrink the
+# scan sizes to "fix" a timeout (changes results, not latency) and do not retry.
+_TRIAGE_TIMEOUT = 600.0
 
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
