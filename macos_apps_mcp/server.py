@@ -500,9 +500,12 @@ def mail_awaiting_reply(days: int = 3) -> dict:
     """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
     oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
     group send is cleared once any recipient replies. Each pointer carries
-    folder = "sent" — ready for `mail_body`/`reply_all`; no `account` (unified accessor,
-    see mail_needs_response). Returns {results, truncated?}; `truncated` means the 25
-    cap was reached. Read-only; needs Automation access for Mail."""
+    folder = "sent" — ready for `mail_body`/`reply_all`; no `account` (the scan spans
+    every account, see mail_needs_response). Returns {results, truncated?}; `truncated`
+    means the 25 cap was reached. Read-only. Fast path reads Mail's index at rest
+    (needs Full Disk Access; never launches Mail); without it, degrades to an
+    AppleScript scan — Automation access is the floor, and that path is SLOW on a
+    large store."""
     return _mail.get_awaiting_reply(days)
 
 

@@ -543,6 +543,71 @@ ORDER BY length(url) ASC LIMIT 1
     return sql, [f"%://{like_escape(account)}/%", *_TRASH_SUFFIXES]
 
 
+# Sent-role spellings, one per account type — same one-table sourcing as
+# _TRASH_SUFFIXES (#175), consumed by the awaiting-reply index plane (#192).
+_SENT_SUFFIXES = mailbox_url.SENT_SUFFIXES
+
+
+def build_sent_triage_query(limit: int):
+    """Build (sql, params) for the awaiting-reply sent scan (#192) — the index-plane
+    replacement for the AppleScript ``_SENT_TRIAGE`` + ``_INBOX_REFS`` pair, which
+    was high-variance O(store) against Mail's unified All Sent (measured 209s idle,
+    >600s busy, on a 13k-message store; this query answers in ~0.3s at rest).
+
+    One row per DISTINCT sent message (same dedupe rule as every count here),
+    newest-first, capped. ``answered`` uses Mail's own References graph:
+    ``message_references.reference`` stores the CITED message's ``messages.message_id``
+    integer (device-verified 2026-08-20 against a live reply), and the citing message
+    is required to sit in an ``%/INBOX`` mailbox — the exact semantics the AppleScript
+    scan had (unified inbox only), which is also what keeps a reply DRAFT (it cites
+    the original too, from Drafts) from clearing a send prematurely.
+
+    ``MIN(COALESCE(m.subject_prefix,'') || s.subject)``: subjects.subject stores the
+    stripped subject and the "Re: "/"Fwd: " lives in subject_prefix — concatenated so
+    the record reads like AppleScript's ``subject of m`` did."""
+    clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
+    sql = f"""
+WITH sent AS (
+  SELECT m.message_id AS mid_int,
+         MIN(m.ROWID) AS rowid,
+         MIN(g.message_id_header) AS mid,
+         MIN(COALESCE(m.subject_prefix, '') || s.subject) AS subject,
+         MAX(m.date_sent) AS date_sent
+  FROM messages m
+  JOIN mailboxes mb ON mb.ROWID = m.mailbox
+  JOIN subjects s ON s.ROWID = m.subject
+  LEFT JOIN message_global_data g ON g.message_id = m.message_id
+  WHERE m.deleted = 0 AND m.message_id != 0 AND ({clauses})
+  GROUP BY m.message_id
+  ORDER BY date_sent DESC LIMIT ?
+)
+SELECT mid, subject, date_sent, rowid,
+  EXISTS (
+    SELECT 1 FROM message_references r
+    JOIN messages cm ON cm.ROWID = r.message
+    JOIN mailboxes cmb ON cmb.ROWID = cm.mailbox
+    WHERE r.reference = sent.mid_int AND cm.deleted = 0
+      AND cmb.url LIKE '%/INBOX'
+  ) AS answered
+FROM sent ORDER BY date_sent DESC
+"""
+    return sql, [*_SENT_SUFFIXES, limit]
+
+
+def build_sent_recipients_query(rowids):
+    """Build (sql, params) hydrating To-addresses for ``build_sent_triage_query``'s
+    representative rowids. ``type = 0`` is the To list (probed 2026-08-20 against a
+    known single-recipient send); position keeps Mail's own ordering."""
+    placeholders = ",".join("?" for _ in rowids)
+    sql = f"""
+SELECT r.message AS rowid, a.address
+FROM recipients r JOIN addresses a ON a.ROWID = r.address
+WHERE r.type = 0 AND r.message IN ({placeholders})
+ORDER BY r.message, r.position
+"""
+    return sql, list(rowids)
+
+
 def build_local_account_query():
     """Build (sql, params) that finds the account segment mailboxes.url embeds for the
     On My Mac store — the value ``build_header_query``'s ``account`` clause anchors on
@@ -809,6 +874,23 @@ def _dict_rows(sql, params) -> list[dict]:
         return [dict(r) for r in conn.execute(sql, params)]
 
     return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+
+
+def query_sent_triage(limit: int) -> list[dict]:
+    """Awaiting-reply's sent scan off the index at rest (#192): one dict per distinct
+    sent message — {mid, subject, date_sent, rowid, answered, to_addrs} — newest
+    first. Two reads: the triage rows, then one To-address hydration over the
+    representative rowids. Pure sqlite; never launches Mail. Raises NativeError when
+    the store or FDA is missing — the caller decides whether to fall back."""
+    rows = _dict_rows(*build_sent_triage_query(limit))
+    rowids = [r["rowid"] for r in rows]
+    to_map: dict[int, list[str]] = {}
+    if rowids:
+        for rec in _dict_rows(*build_sent_recipients_query(rowids)):
+            to_map.setdefault(rec["rowid"], []).append(rec["address"])
+    for r in rows:
+        r["to_addrs"] = to_map.get(r["rowid"], [])
+    return rows
 
 
 def query_stats_rows(since: int, account: str | None = None) -> list[dict]:

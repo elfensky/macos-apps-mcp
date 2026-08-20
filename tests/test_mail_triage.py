@@ -201,6 +201,7 @@ def test_scans_pass_the_triage_timeout(monkeypatch):
     # timeout unreachable dead code. Pin timeout=_TRIAGE_TIMEOUT on every call site.
     from macos_apps_mcp import runtime
     from macos_apps_mcp.adapters import mail_triage
+    from macos_apps_mcp.errors import NativeError
 
     seen: list[tuple[object, dict]] = []
 
@@ -213,6 +214,14 @@ def test_scans_pass_the_triage_timeout(monkeypatch):
         return ""
 
     monkeypatch.setattr(runtime, "run_osascript", fake)
+    # Force awaiting_reply onto the AppleScript FALLBACK (#192): the index plane
+    # answers first when the Envelope Index is reachable, and this test pins the
+    # timeout kwarg on the scripts, not the index.
+    monkeypatch.setattr(
+        mail_triage.mail_index,
+        "query_sent_triage",
+        lambda limit: (_ for _ in ()).throw(NativeError("no index")),
+    )
     mail_triage.needs_response(25)
     mail_triage.awaiting_reply(7, 25)
     assert {id(s) for s, _ in seen} == {
@@ -223,3 +232,79 @@ def test_scans_pass_the_triage_timeout(monkeypatch):
     }
     for _script, kw in seen:
         assert kw == {"timeout": mail_triage._TRIAGE_TIMEOUT}
+
+
+# --- #192: awaiting_reply reads the Envelope Index, not Mail --------------------------
+
+
+def _index_row(**kw):
+    base = {
+        "mid": "<s1@x>",
+        "subject": "Proposal",
+        "date_sent": 0,  # overridden per test via secs_ago math
+        "rowid": 1,
+        "answered": 0,
+        "to_addrs": ["Bob@Y.com"],
+    }
+    base.update(kw)
+    return base
+
+
+def test_awaiting_reply_classifies_index_rows(monkeypatch):
+    import time as _time
+
+    from macos_apps_mcp.adapters import mail_triage
+
+    now = 1_787_000_000
+    monkeypatch.setattr(_time, "time", lambda: now)
+    rows = [
+        _index_row(mid="<old@x>", date_sent=now - 5 * 86400),  # overdue, unanswered
+        _index_row(mid="<answered@x>", date_sent=now - 6 * 86400, answered=1),
+        _index_row(mid="<fresh@x>", date_sent=now - 3600),  # too recent
+        _index_row(mid=None, date_sent=now - 9 * 86400),  # no stored header -> skipped
+    ]
+    seen = {}
+    monkeypatch.setattr(
+        mail_triage.mail_index,
+        "query_sent_triage",
+        lambda limit: seen.setdefault("limit", limit) and rows or rows,
+    )
+    out = mail_triage.awaiting_reply(3, 25)
+    assert seen["limit"] == mail_triage.SENT_SCAN
+    assert [p.id for p in out] == ["<old@x>"]
+    assert out[0].reason == "awaiting-reply"
+    assert out[0].folder == "sent"
+    # recipient addresses are lowercased on the way in, same as the AppleScript path
+    assert "bob@y.com" in out[0].summary
+
+
+def test_awaiting_reply_falls_back_to_applescript_without_index(monkeypatch):
+    from macos_apps_mcp import runtime
+    from macos_apps_mcp.adapters import mail_triage
+    from macos_apps_mcp.errors import NativeError
+
+    monkeypatch.setattr(
+        mail_triage.mail_index,
+        "query_sent_triage",
+        lambda limit: (_ for _ in ()).throw(NativeError("no FDA")),
+    )
+    scripts = []
+
+    def fake(script, *argv, **kw):
+        scripts.append(script)
+        return ""
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    assert mail_triage.awaiting_reply(3, 25) == []
+    assert scripts and scripts[0] is mail_triage._SENT_TRIAGE
+
+
+def test_awaiting_reply_still_validates_days(monkeypatch):
+    import pytest
+
+    from macos_apps_mcp.adapters import mail_triage
+
+    with pytest.raises(ValueError):
+        mail_triage.awaiting_reply(0, 25)
+    with pytest.raises(ValueError):
+        mail_triage.awaiting_reply(366, 25)
