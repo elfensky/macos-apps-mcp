@@ -40,9 +40,12 @@ NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
-# Host-side wall-clock ceiling for the four scan scripts (#188, resized by #192).
-# The scripts' own `with timeout of 120 seconds` bounds each Apple EVENT, not the
-# block — so this cap is the only wall-clock bound the scan has. Device-measured
+# Wall-clock ceiling for the four scan scripts (#188, resized by #192). The
+# scripts' own `with timeout of 600 seconds` bounds each Apple EVENT, not the
+# block — so this cap is the only wall-clock bound the scan has, and the two
+# budgets AGREE on purpose: a single event on a busy Mail was observed blowing a
+# 120s per-event budget (-1712) while the same scan's events are all fast when
+# Mail is idle — and busy Mail is exactly when triage is asked for. Device-measured
 # 2026-08-20 on an IDLE Mail: _SENT_TRIAGE reads 100 records off a 13k-message
 # unified All Sent in 209s (~4-5 events per message; each event is fast, the loop
 # is not), while the inbox scan fits in ~34s. 600 = ~3x the idle measurement, the
@@ -67,7 +70,7 @@ on run argv
   set us to character id 31
   set rs to character id 30
   set out to ""
-  with timeout of 120 seconds
+  with timeout of 600 seconds
   tell application "Mail"
     set n to (count of messages of inbox)
     if n > maxN then set n to maxN
@@ -103,7 +106,7 @@ on run argv
   set us to character id 31
   set rs to character id 30
   set out to ""
-  with timeout of 120 seconds
+  with timeout of 600 seconds
   tell application "Mail"
     set sm to sent mailbox
     set n to (count of messages of sm)
@@ -131,7 +134,7 @@ _MY_ADDRESSES = """on run argv
   set us to character id 31
   set AppleScript's text item delimiters to us
   set out to ""
-  with timeout of 120 seconds
+  with timeout of 600 seconds
   tell application "Mail"
     repeat with acc in accounts
       set out to out & ((email addresses of acc) as text) & us
@@ -152,7 +155,7 @@ _INBOX_REFS = """on run argv
   set rs to character id 30
   set out to ""
   set c to 0
-  with timeout of 120 seconds
+  with timeout of 600 seconds
   tell application "Mail"
     set cutoff to (current date) - cutoffSecs
     repeat with m in (messages of inbox whose date received > cutoff)
