@@ -40,6 +40,13 @@ NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
 SENT_SCAN = 100  # recent sent messages scanned for awaiting-reply candidates
 REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 
+# All four scan scripts declare `with timeout of 120 seconds` themselves; the host
+# cap must match that budget, not undercut it (#188 — the 30s default killed every
+# scan whenever Mail was in the §3c degraded-throughput state). Same pattern as
+# _MOVE_TIMEOUT/_SAVE_TIMEOUT: raised host-side ceiling, with the AppleScript-level
+# `with timeout` as the second line of defense.
+_TRIAGE_TIMEOUT = 120.0
+
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the
 # concat (a `set x to (read status of m)` statement mis-parses — `read`/`was` lead
 # like commands; booleans coerce inside `&`). Subject passes through the shared
@@ -288,9 +295,9 @@ def needs_response(limit: int) -> list[Pointer]:
     own addresses, classify. ``mail.MailAdapter.get_needs_response`` supplies the
     bound and wraps the answer in the bounded-read envelope."""
     records = _parse_triage_records(
-        runtime.run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN))
+        runtime.run_osascript(_INBOX_TRIAGE, str(NEEDS_SCAN), timeout=_TRIAGE_TIMEOUT)
     )
-    my = _parse_my_addrs(runtime.run_osascript(_MY_ADDRESSES))
+    my = _parse_my_addrs(runtime.run_osascript(_MY_ADDRESSES, timeout=_TRIAGE_TIMEOUT))
     return _classify_needs_response(records, my, limit)
 
 
@@ -299,7 +306,9 @@ def awaiting_reply(days: int, limit: int) -> list[Pointer]:
     the inbox's In-Reply-To/References headers."""
     if not 1 <= days <= 365:
         raise ValueError("days must be between 1 and 365")
-    sent = _parse_sent_records(runtime.run_osascript(_SENT_TRIAGE, str(SENT_SCAN)))
+    sent = _parse_sent_records(
+        runtime.run_osascript(_SENT_TRIAGE, str(SENT_SCAN), timeout=_TRIAGE_TIMEOUT)
+    )
     # The per-record age cutoff is applied in ONE place —
     # _classify_awaiting_reply. Here only the correlation window is sized:
     # scan inbox back to the oldest send; if even that is younger than the
@@ -309,9 +318,9 @@ def awaiting_reply(days: int, limit: int) -> list[Pointer]:
         return []
     blobs = [
         b
-        for b in runtime.run_osascript(_INBOX_REFS, str(window), str(REFS_SCAN)).split(
-            RS
-        )
+        for b in runtime.run_osascript(
+            _INBOX_REFS, str(window), str(REFS_SCAN), timeout=_TRIAGE_TIMEOUT
+        ).split(RS)
         if b.strip()
     ]
     return _classify_awaiting_reply(sent, _referenced_ids(blobs), days, limit)
