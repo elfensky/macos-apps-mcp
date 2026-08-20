@@ -6,7 +6,7 @@
   <key>CFBundleName</key><string>macos-apps-mcp</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleShortVersionString</key><string>0.9.0</string>
+  <key>CFBundleShortVersionString</key><string>0.10.0</string>
   <key>LSUIElement</key><true/>
   <key>NSCalendarsFullAccessUsageDescription</key>
   <string>macos-apps-mcp reads and writes your calendar on request from your MCP client.</string>
