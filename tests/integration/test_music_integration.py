@@ -39,7 +39,10 @@ def test_now_playing_shape(adapter):
 def test_play_pause_roundtrip(adapter):
     try:
         playing = adapter.control("play")
-        assert playing["state"] in {"playing", "stopped"}  # stopped if library empty
+        # stopped if the library is empty; paused observed on device 2026-08-23 when
+        # `play` hits a cold-launched Music with nothing queued — the verb is
+        # accepted, the player just has nothing to advance into.
+        assert playing["state"] in {"playing", "paused", "stopped"}
         paused = adapter.control("pause")
         assert paused["state"] in {"paused", "stopped"}
     finally:
