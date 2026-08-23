@@ -1501,7 +1501,15 @@ def scratch_mailbox():
     rows = [r for r in m.overview() if r["folder"].startswith("imap://")]
     if not rows:
         pytest.skip("no IMAP account in Mail on this Mac")
-    account = rows[0]["account_id"]
+    # Prefer a NON-Gmail account, deterministically. overview() sorts unread-first,
+    # so "first account" changed day to day — and on a Gmail account the move/undo
+    # verifications are structurally unreliable: a Gmail "move" is a label edit the
+    # server reconciles at its own pace, and label copies were observed RESURRECTING
+    # after both a verified trash and a verified unlabel (2026-08-20, -23). True
+    # IMAP accounts verify moves synchronously (§5b), so pick one when it exists.
+    gmail_accounts = {r["account_id"] for r in rows if "%5BGmail%5D" in r["folder"]}
+    account_ids = sorted({r["account_id"] for r in rows})
+    account = next((a for a in account_ids if a not in gmail_accounts), account_ids[0])
     name = "macos-apps-mcp-test"
     folder = f"imap://{account}/{name}"
     # already there from an earlier run is the NORMAL case — the stable name is the
@@ -1611,6 +1619,11 @@ def test_update_mail_status_persists_and_reverses(inbox_messages):
 
 def test_create_mailbox_synthesised_address_actually_addresses_it(scratch_mailbox):
     # The address is composed, never read back (make new mailbox returns `missing
-    # value`). This is the test that the composition is USABLE, not merely well-shaped.
+    # value`). This is the test that the composition is USABLE, not merely well-shaped:
+    # an unresolvable mailbox raises, so a clean read IS the proof. Do NOT assert the
+    # mailbox is EMPTY — the fixture's own docstring calls prior-run residue "the
+    # NORMAL case" (the mailbox is permanent and reused, and a raced undo can strand
+    # a message here until a later sync clears it; observed 2026-08-20 and -23).
     m = _mail_adapter()
-    assert m.list_attachments(mailbox=scratch_mailbox)["results"] == []
+    listing = m.list_attachments(mailbox=scratch_mailbox)
+    assert "results" in listing

@@ -1,12 +1,13 @@
 """Mail triage (#178) — "what needs my attention?", answered from headers alone.
 
-Two questions, one plane: ``needs_response`` ranks inbound messages that likely need
-the user's reply, ``awaiting_reply`` finds sent messages nobody answered. Both read
-through Mail's UNIFIED accessors (``inbox`` / ``sent mailbox``) — no per-account
-addressing, no Envelope Index, no body scan — and both classify in pure Python over
-US/RS-framed header records, which is what makes the classifiers testable without a
-Mac. Deliberately zero coupling to ``mail_index`` / ``mail_addressing``'s resolvers /
-``mail_recover``: triage names nothing and mutates nothing.
+Two questions, two planes: ``needs_response`` ranks inbound messages that likely need
+the user's reply, reading Mail's UNIFIED ``inbox`` accessor (small, ~34s on this Mac);
+``awaiting_reply`` finds sent messages nobody answered, reading the ENVELOPE INDEX at
+rest (#192) — the AppleScript sent-scan was high-variance O(store) against a
+13k-message unified All Sent (209s idle, >600s busy) and survives only as the
+fallback for a machine without Full Disk Access. Both classify in pure Python over
+plain records, which is what makes the classifiers testable without a Mac. Triage
+still names nothing and mutates nothing.
 
 The result bound is PASSED IN (``limit``) rather than imported: the cap is the
 adapter's policy (``mail.MAX_MAILS``), this module is the mechanism — and taking it as
@@ -18,9 +19,11 @@ from __future__ import annotations
 
 import email
 import re
+import time
 
 from .. import runtime
 from ..contracts import Pointer
+from ..errors import NativeError
 from ..text import (
     RS,
     STRIP_FRAMING,
@@ -33,6 +36,7 @@ from ..text import (
     int_or_zero,
     parse_framed,
 )
+from . import mail_index
 from .mail_addressing import _norm_mid
 from .mail_index import _deeplink
 
@@ -308,10 +312,45 @@ def needs_response(limit: int) -> list[Pointer]:
 
 
 def awaiting_reply(days: int, limit: int) -> list[Pointer]:
-    """The scan behind ``mail_awaiting_reply``: recent sent records, correlated against
-    the inbox's In-Reply-To/References headers."""
+    """The scan behind ``mail_awaiting_reply`` — Envelope Index at rest (#192).
+
+    Sent candidates and the "was it answered?" correlation both come from the index:
+    Mail stores the References graph itself (``message_references``), so the answer is
+    one join instead of ~500 Apple Events against the unified All Sent (measured 209s
+    idle / >600s busy; this path is ~0.3s and immune to Mail's process health). The
+    citing message must sit in an ``%/INBOX`` mailbox — the same unified-inbox
+    semantics the AppleScript scan had, which also keeps a reply DRAFT (it cites the
+    original too) from clearing a send prematurely.
+
+    Falls back to the AppleScript scan when the index is unreachable (no Full Disk
+    Access / no store) — slow, but the tool stays present on that machine."""
     if not 1 <= days <= 365:
         raise ValueError("days must be between 1 and 365")
+    try:
+        rows = mail_index.query_sent_triage(SENT_SCAN)
+    except NativeError:
+        return _awaiting_reply_applescript(days, limit)
+    now = time.time()
+    sent = [
+        {
+            "id": r["mid"],
+            "subject": r["subject"] or "",
+            "recipient_addrs": [a.strip().lower() for a in r["to_addrs"]],
+            "secs_ago": max(0, int(now - r["date_sent"])),
+        }
+        for r in rows
+        # No stored Message-ID header → not citable and not answerable-by-reference;
+        # same exclusion the AppleScript scan applied at the `mid is not ""` check.
+        if r["mid"] and r["date_sent"]
+    ]
+    referenced = {_norm_mid(r["mid"]) for r in rows if r["mid"] and r["answered"]}
+    return _classify_awaiting_reply(sent, referenced, days, limit)
+
+
+def _awaiting_reply_applescript(days: int, limit: int) -> list[Pointer]:
+    """The pre-#192 scan, kept as the no-FDA fallback: recent sent records through
+    Mail's unified accessors, correlated against the inbox's In-Reply-To/References
+    headers. O(store) and high-variance — see _TRIAGE_TIMEOUT."""
     sent = _parse_sent_records(
         runtime.run_osascript(_SENT_TRIAGE, str(SENT_SCAN), timeout=_TRIAGE_TIMEOUT)
     )

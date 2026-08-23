@@ -423,3 +423,27 @@ def test_overview_query_counts_live_not_stored():
     assert "unread_count" not in low
     assert "count(" in low and "m.read = 0" in low
     assert "m.deleted = 0" in low
+
+
+# --- #192: the awaiting-reply sent scan, off the index at rest -----------------------
+
+
+def test_sent_triage_query_binds_sent_suffixes_and_limit():
+    sql, params = mail_index.build_sent_triage_query(100)
+    # one LIKE clause per sent spelling, bound as params ahead of the limit
+    assert sql.count("mb.url LIKE ? ESCAPE") == len(mail_index._SENT_SUFFIXES)
+    assert params == [*mail_index._SENT_SUFFIXES, 100]
+    # deduped per distinct message, newest first, and correlated through Mail's own
+    # References graph — the citing message must sit in an inbox, so a reply DRAFT
+    # (which also cites the original) cannot clear a send prematurely
+    assert "GROUP BY m.message_id" in sql
+    assert "message_references" in sql
+    assert "'%/INBOX'" in sql
+    assert "m.deleted = 0" in sql
+
+
+def test_sent_recipients_query_is_to_only_and_ordered():
+    sql, params = mail_index.build_sent_recipients_query([7, 9])
+    assert params == [7, 9]
+    assert "r.type = 0" in sql  # To — probed 2026-08-20
+    assert "ORDER BY r.message, r.position" in sql

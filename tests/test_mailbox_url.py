@@ -92,3 +92,15 @@ def test_rank_case_keeps_the_anchoring_rules():
     # Trash/Archive/All Mail/Bin deliberately have NO prefix form — 'Trash bin' or
     # 'Archive 2019' are user folders.
     assert r"'%/Trash\%20%'" not in sql and r"'%/Bin\%20%'" not in sql
+
+
+def test_sent_suffixes_cover_every_account_type_leaf_anchored():
+    # #192: IMAP/Yahoo `Sent`, iCloud `Sent Messages`, Gmail `Sent Mail`, Exchange
+    # `Sent Items` — final-segment anchored so a user folder `Sentimental` (or a
+    # nested `Sent/2019`) doesn't read as a Sent mailbox.
+    assert mailbox_url.SENT_SUFFIXES == (
+        "%/Sent",
+        r"%/Sent\%20Messages",
+        r"%/Sent\%20Mail",
+        r"%/Sent\%20Items",
+    )

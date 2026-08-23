@@ -58,6 +58,16 @@ def _like_leaf(leaf: str) -> str:
 # bound as params by mail_index.build_trash_query.
 TRASH_SUFFIXES = tuple(_like_leaf(leaf) for leaf, is_trash, _ in _SPECIALS if is_trash)
 
+# Sent-role leaves (#192) — device-verified 2026-08-20 across this Mac's account
+# types: IMAP/Yahoo `Sent`, iCloud `Sent Messages`, Gmail `[Gmail]/Sent Mail`
+# (leaf: `Sent Mail`). `Sent Items` is Exchange's standard spelling, included so
+# an Exchange account doesn't silently vanish from the awaiting-reply scan.
+# Final-segment-anchored like TRASH_SUFFIXES, and for the same reason: a user
+# folder named `Sentimental` must not read as a Sent mailbox.
+SENT_SUFFIXES = tuple(
+    _like_leaf(leaf) for leaf in ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
+)
+
 
 def rank_case(col: str) -> str:
     """The copy-rank CASE expression over ``col`` (a mailboxes.url column): a live
