@@ -47,28 +47,23 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - [ ] Full device integration sweep (`uv run pytest -m integration`) green on the current OS
 
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
-- [ ] Contacts: sqlite-backed fast search (#95); full cards, `contacts_me`, update (#94)
-- [ ] Calendar: alarms on create/update (#89); extended recurrence — BYDAY and friends (#90)
-- [ ] Reminders: tags + subtasks (#91); delete + list management (#92)
-- [ ] Messages depth: unread + date-range filters (#88); attachments via progressive disclosure (#87); gated send reusing `allow-send messages` (#86)
-- [ ] Photos: albums, metadata, export (#96)
-- [ ] Safari: bookmarks, reading list, history (#97)
-- [ ] Notes: semantic search sidecar — local embeddings, evaluate first (#93)
+- [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90)
+- [ ] Reminders: delete + list management (#92); subtasks via the public `parentReminder` route, tags investigate-first and read-only if no public write exists (#91)
+- [ ] Contacts: full cards (notes excluded), `contacts_me`, update by id (#94); sqlite-backed fast search with AppleScript fallback (#95)
+- [ ] Messages depth: since/until + unread filters (#88); attachments via progressive disclosure, saved to disk (#87); gated send reusing `allow-send messages`, id-addressed, device-verified (#86)
+- [ ] Notes: semantic search sidecar — decision first, then an optional `[semantic]` extra (#93)
+- [ ] Photos: settle osxphotos vs PhotoKit by running `uv add`; albums, bounded metadata, export to disk (#96)
 
-**New domains — one adapter module per app, after the existing nine are stable**
-- [ ] Maps: search, directions, ETA (#98); Location: current + geocode — headless CoreLocation TCC is the spike (#99)
-- [ ] Weather: mechanism decision first (WeatherKit is entitlement-blocked; keyless HTTP vs Shortcuts) (#100)
-- [ ] Capture: screenshot; camera/audio maybe (#101)
-- [ ] System utilities cluster — cherry-pick: clipboard, Spotlight, notifications, system info, volume, Finder (#102)
+**Platform & distribution — let others use it, safely**
+- [ ] Per-adapter enable/disable (want Mail, not Photos) read at daemon start; a disabled adapter's tools are absent, `doctor` reports the active set
+- [ ] Localhost dashboard served by the daemon: grants/`doctor`, `usage`, audit trail, browsable recoverable-plane backups, adapter toggles; loopback-only (#126)
+- [ ] Distribution: README leads with `uvx` (#113), `[project.urls]` (#111), `.mcpb` per release + Homebrew cask for the notarized `.app` (#107), companion skill + Claude Code plugin whose `skills/` layout is also `npx skills`-installable (#106)
 
-**Platform & DX — let others use it**
-- [ ] Distribution: uvx/PyPI install docs (#113), `[project.urls]` (#111), `.mcpb` + brew tap (#107), companion skill + Claude Code plugin (#106)
-- [ ] User-preferences env context injected into tool docstrings (#105)
-- [ ] Signed release + localhost onboarding/dashboard UI (#126), extended with a **menubar companion app**: lifetime stats, browsable recovery/history (the audit trail and backups made visible)
-- [ ] Network transport + auth so remote MCP clients (Home Assistant on another machine) can talk to the daemon (#127)
+**Deferred to v2 (tracked in REQUIREMENTS.md):** Safari bookmarks/reading list/history (#97); Maps, geocode, current position, Weather (#98–#100, low priority); user-preferences env context (#105); menubar companion (Swift `MenuBarExtra`, pure client of the daemon); network transport + auth + SSE bridge for Home Assistant (#127); alarms on reminders.
 
 ### Out of Scope
 
+- **Screenshot, camera, audio capture (#101) and the system-utilities cluster (#102)** — "an apps MCP, not a Mac-control MCP" (owner, 2026-08-28); the caller already has Bash and a screenshot capability.
 - **Generic AppleScript/JXA escape hatch (#103)** — bypasses the typed-safety design; run `steipete/macos-automator-mcp` alongside if needed. Roadmap marks it likely-wontfix.
 - **Journal** — no API at all (settled in DESIGN.md).
 - **Rewriting as an iMCP-shaped GUI app** — the stdio server + signed helper stays. The menubar companion (above) is a *client* of the daemon, not a replacement for the server; this narrows, not reverses, the DESIGN.md "not planned" note.
@@ -105,7 +100,9 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Gate first: land the spiked review before any feature work | Cards 1/7/5 are green pure moves that rot if left; card 1 makes the whole suite fail-closed before server.py/runtime.py are reshaped; Contacts work would touch the same files | — Pending |
 | Existing nine adapters stable and full-featured before new domains | Owner's call 2026-08-28: "make sure the ones we have now are all working, stable, and as fully featured as possible" | — Pending |
 | Phase order: Gate → adapter depth → new domains → platform | Platform (#127 network transport, menubar) is the largest job and benefits from a settled registry/tier module | — Pending |
-| Menubar companion app as a client of the daemon | Wanted for lifetime stats + browsable recovery/history; keeps DESIGN.md's "the server stays a server" while narrowing its "no GUI" note | — Pending |
+| Apps MCP, not a Mac-control MCP | Capture and system utilities (#101/#102) are out; Bash and the host already cover them | ✓ Good |
+| Menubar companion deferred to v2; dashboard first | The dashboard builds the endpoints the menubar would consume; the companion stays a Swift client of the daemon, never a second TCC identity | — Pending |
+| Home Assistant access (#127) deferred to v2, rescoped as SSE bridge + auth | HA's MCP Client is SSE-only; auth alone would not connect | — Pending |
 | #103 escape hatch out of scope | Bypasses typed safety; an external server covers the need | ✓ Good |
 | Spike branches are primary sources, not landing branches | Each cut re-lands by rebasing onto the previous PR; branches + worktrees deleted afterwards | — Pending |
 | `dry_run=True` on every destructive tool, enforced from the registry | Today `delete_event`/`delete_draft` default False and `delete_note` has none — three safety contracts for one class of call | — Pending |
@@ -128,4 +125,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 after initialization*
+*Last updated: 2026-08-28 after requirements definition*
