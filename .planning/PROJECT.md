@@ -49,8 +49,6 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
 - [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90)
 - [ ] Reminders: delete + list management (#92); subtasks via the public `parentReminder` route, tags investigate-first and read-only if no public write exists (#91)
-- [ ] Contacts: full cards (notes excluded), `contacts_me`, update by id (#94); sqlite-backed fast search with AppleScript fallback (#95)
-- [ ] Messages depth: since/until + unread filters (#88); attachments via progressive disclosure, saved to disk (#87); gated send reusing `allow-send messages`, id-addressed, device-verified (#86)
 - [ ] Notes: semantic search sidecar — decision first, then an optional `[semantic]` extra (#93)
 - [ ] Photos: settle osxphotos vs PhotoKit by running `uv add`; albums, bounded metadata, export to disk (#96)
 
@@ -59,7 +57,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - [ ] Localhost dashboard served by the daemon: grants/`doctor`, `usage`, audit trail, browsable recoverable-plane backups, adapter toggles; loopback-only (#126)
 - [ ] Distribution: README leads with `uvx` (#113), `[project.urls]` (#111), `.mcpb` per release + Homebrew cask for the notarized `.app` (#107), companion skill + Claude Code plugin whose `skills/` layout is also `npx skills`-installable (#106)
 
-**Deferred to v2 (tracked in REQUIREMENTS.md):** Safari bookmarks/reading list/history (#97); Maps, geocode, current position, Weather (#98–#100, low priority); user-preferences env context (#105); menubar companion (Swift `MenuBarExtra`, pure client of the daemon); network transport + auth + SSE bridge for Home Assistant (#127); alarms on reminders.
+**Deferred to v2 (tracked in REQUIREMENTS.md):** Contacts depth (#94/#95) and Messages depth (#86–#88) — owner's call at the 2026-08-28 roadmap review; Safari bookmarks/reading list/history (#97); Maps, geocode, current position, Weather (#98–#100, low priority); user-preferences env context (#105); menubar companion (Swift `MenuBarExtra`, pure client of the daemon); network transport + auth + SSE bridge for Home Assistant (#127); alarms on reminders.
 
 ### Out of Scope
 
@@ -100,6 +98,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Gate first: land the spiked review before any feature work | Cards 1/7/5 are green pure moves that rot if left; card 1 makes the whole suite fail-closed before server.py/runtime.py are reshaped; Contacts work would touch the same files | — Pending |
 | Existing nine adapters stable and full-featured before new domains | Owner's call 2026-08-28: "make sure the ones we have now are all working, stable, and as fully featured as possible" | — Pending |
 | Phase order: Gate → adapter depth → new domains → platform | Platform (#127 network transport, menubar) is the largest job and benefits from a settled registry/tier module | — Pending |
+| Contacts and Messages depth deferred to v2 | Owner's call at roadmap review 2026-08-28: v1 depth is Calendar/Reminders, Notes, Photos | — Pending |
 | Apps MCP, not a Mac-control MCP | Capture and system utilities (#101/#102) are out; Bash and the host already cover them | ✓ Good |
 | Menubar companion deferred to v2; dashboard first | The dashboard builds the endpoints the menubar would consume; the companion stays a Swift client of the daemon, never a second TCC identity | — Pending |
 | Home Assistant access (#127) deferred to v2, rescoped as SSE bridge + auth | HA's MCP Client is SSE-only; auth alone would not connect | — Pending |
@@ -125,4 +124,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 after requirements definition*
+*Last updated: 2026-08-28 after roadmap review*

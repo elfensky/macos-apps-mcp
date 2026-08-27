@@ -5,7 +5,7 @@
 
 ## v1 Requirements
 
-Requirements for this project. Each maps to roadmap phases. Order of areas = phase order (gate → adapter depth → platform/distribution).
+Requirements for this project. Each maps to roadmap phases. Order of areas = phase order (gate → adapter depth → platform/distribution). Contacts and Messages depth moved to v2 at the 2026-08-28 roadmap review.
 
 ### Gate — land the spiked architecture review, make the suite fail-closed
 
@@ -36,22 +36,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **REM-03**: User can read and create subtasks via the public `parentReminder` route (macOS 14+)
 - [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write
 
-### Contacts
 
-- [ ] **CON-01**: User can fetch a full, bounded contact card by id — all handles, addresses, birthday, organisation; the notes field is excluded by design (entitlement-gated, crashes updates)
-- [ ] **CON-02**: User can fetch their own card (`contacts_me`)
-- [ ] **CON-03**: User can update a contact by id (write tier, dry-runnable, audited, verify-after-write); native `CNContactStore` if the daemon's bundle identity is granted Contacts TCC (device spike), else the osascript update path — notes excluded either way
-- [ ] **CON-04**: Contact search reads the AddressBook sqlite store when Full Disk Access is present and falls back to AppleScript otherwise; the schema fingerprint covers every column the queries read; `doctor` reports which plane is active
-
-### Messages
-
-- [ ] **MSG-01**: User can filter `messages_with` and `messages_search` by `since`/`until`
-- [ ] **MSG-02**: User can filter for unread incoming messages
-- [ ] **MSG-03**: Message Pointers are annotated with attachment name/type when present
-- [ ] **MSG-04**: User can search attachments (by contact, date, MIME) as bounded Pointers
-- [ ] **MSG-05**: User can save one attachment to disk by id (`mail_files` discipline: derived basename, allowlisted root, no silent overwrite, size cap; never inline bytes)
-- [ ] **MSG-06**: User can send an iMessage/SMS (outbound tier: registered only under `allow-send messages`, `dry_run=True` default, dry-run makes no native call); recipient is an id-addressed handle or `chat_id` — no fuzzy auto-pick; iMessage-vs-SMS routing and group chats device-verified like Mail's outbound lifecycle
-- [ ] **MSG-07**: User can check whether a handle is iMessage-reachable (ungated read)
 
 ### Notes
 
@@ -81,6 +66,21 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 ## v2 Requirements
 
 Deferred. Tracked but not in the current roadmap.
+
+### Contacts (deferred 2026-08-28 — owner's call at roadmap review)
+- **CON-01**: User can fetch a full, bounded contact card by id — all handles, addresses, birthday, organisation; the notes field is excluded by design (entitlement-gated, crashes updates)
+- **CON-02**: User can fetch their own card (`contacts_me`)
+- **CON-03**: User can update a contact by id (write tier, dry-runnable, audited, verify-after-write); native `CNContactStore` if the daemon's bundle identity is granted Contacts TCC (device spike), else the osascript update path — notes excluded either way
+- **CON-04**: Contact search reads the AddressBook sqlite store when Full Disk Access is present and falls back to AppleScript otherwise; the schema fingerprint covers every column the queries read; `doctor` reports which plane is active
+
+### Messages (deferred 2026-08-28 — owner's call at roadmap review)
+- **MSG-01**: User can filter `messages_with` and `messages_search` by `since`/`until`
+- **MSG-02**: User can filter for unread incoming messages
+- **MSG-03**: Message Pointers are annotated with attachment name/type when present
+- **MSG-04**: User can search attachments (by contact, date, MIME) as bounded Pointers
+- **MSG-05**: User can save one attachment to disk by id (`mail_files` discipline: derived basename, allowlisted root, no silent overwrite, size cap; never inline bytes)
+- **MSG-06**: User can send an iMessage/SMS (outbound tier: registered only under `allow-send messages`, `dry_run=True` default, dry-run makes no native call); recipient is an id-addressed handle or `chat_id` — no fuzzy auto-pick; iMessage-vs-SMS routing and group chats device-verified like Mail's outbound lifecycle
+- **MSG-07**: User can check whether a handle is iMessage-reachable (ungated read)
 
 ### Safari
 - **SAF-01**: Bookmarks + reading list as Pointers (Bookmarks.plist; reading list needs FDA) (#97)
@@ -122,13 +122,47 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by roadmap) | | |
+| GATE-01 | Phase 1 | Pending |
+| GATE-02 | Phase 1 | Pending |
+| GATE-03 | Phase 1 | Pending |
+| GATE-04 | Phase 1 | Pending |
+| GATE-05 | Phase 1 | Pending |
+| GATE-06 | Phase 1 | Pending |
+| GATE-07 | Phase 2 | Pending |
+| GATE-08 | Phase 1 | Pending |
+| GATE-09 | Phase 1 | Pending |
+| GATE-10 | Phase 1 | Pending |
+| GATE-11 | Phase 2 | Pending |
+| GATE-12 | Phase 2 | Pending |
+| GATE-13 | Phase 1 | Pending |
+| CAL-01 | Phase 3 | Pending |
+| CAL-02 | Phase 3 | Pending |
+| CAL-03 | Phase 3 | Pending |
+| REM-01 | Phase 3 | Pending |
+| REM-02 | Phase 3 | Pending |
+| REM-03 | Phase 3 | Pending |
+| REM-04 | Phase 3 | Pending |
+| NOTE-01 | Phase 4 | Pending |
+| NOTE-02 | Phase 4 | Pending |
+| PHO-01 | Phase 4 | Pending |
+| PHO-02 | Phase 4 | Pending |
+| PHO-03 | Phase 4 | Pending |
+| PHO-04 | Phase 4 | Pending |
+| PLAT-01 | Phase 5 | Pending |
+| PLAT-02 | Phase 5 | Pending |
+| DIST-01 | Phase 6 | Pending |
+| DIST-02 | Phase 6 | Pending |
+| DIST-03 | Phase 6 | Pending |
+| DIST-04 | Phase 6 | Pending |
+| DIST-05 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 44 total
-- Mapped to phases: 0
-- Unmapped: 44 ⚠️
+- v1 requirements: 33 total
+- Mapped to phases: 33
+- Unmapped: 0 ✓
+
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 3: 7 · Phase 4: 6 · Phase 5: 2 · Phase 6: 5
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-08-28 after initial definition*
+*Last updated: 2026-08-28 after roadmap revision (Contacts + Messages deferred to v2; 33/33 mapped across 6 phases)*
