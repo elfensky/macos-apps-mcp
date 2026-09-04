@@ -1,4 +1,9 @@
+import sqlite3
+
+import pytest
+
 from macos_apps_mcp.adapters import mail_index
+from macos_apps_mcp.errors import SchemaDrift
 
 
 def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
@@ -447,3 +452,102 @@ def test_sent_recipients_query_is_to_only_and_ordered():
     assert params == [7, 9]
     assert "r.type = 0" in sql  # To — probed 2026-08-20
     assert "ORDER BY r.message, r.position" in sql
+
+
+# --- check_index_schema + the #199 platform floor ------------------------------------
+# A Sequoia (macOS 15) Envelope Index has no message_global_data.message_id_header —
+# the column is a macOS 26 (Tahoe) migration. That exact condition on a pre-Tahoe
+# system must diagnose as a platform floor, NOT as "macOS likely changed the schema";
+# any other drift (and the same condition on 26+) keeps the generic message.
+
+
+def _fingerprint_index(path, *, message_id_header=True, subjects_table=True):
+    """A rowless store carrying exactly the fingerprinted tables/columns, with the
+    two knobs these tests turn: the #199 column, and an unrelated whole table."""
+    subjects = (
+        "CREATE TABLE subjects(ROWID INTEGER PRIMARY KEY, subject TEXT);"
+        if subjects_table
+        else ""
+    )
+    header_col = ", message_id_header TEXT" if message_id_header else ""
+    c = sqlite3.connect(path)
+    c.executescript(
+        f"""
+        CREATE TABLE messages(
+            ROWID INTEGER PRIMARY KEY, subject INT, sender INT, global_message_id INT,
+            mailbox INT, date_received INT, date_sent INT, read INT, flagged INT,
+            deleted INT, conversation_id INT);
+        {subjects}
+        CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
+        CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
+        CREATE TABLE message_global_data(ROWID INTEGER PRIMARY KEY{header_col});
+        CREATE TABLE recipients(ROWID INTEGER PRIMARY KEY, message INT, address INT);
+        CREATE TABLE attachments(ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
+        """
+    )
+    c.commit()
+    c.close()
+
+
+def _mac_ver(monkeypatch, ver):
+    monkeypatch.setattr(
+        mail_index.platform, "mac_ver", lambda: (ver, ("", "", ""), "x86_64")
+    )
+
+
+def test_check_index_schema_ok(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    assert mail_index.check_index_schema() == "ok"
+
+
+def test_check_index_schema_no_store(monkeypatch):
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    assert mail_index.check_index_schema() == "no_mail_data"
+
+
+def test_missing_header_column_on_sequoia_is_a_platform_floor(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    _mac_ver(monkeypatch, "15.7.9")
+    with pytest.raises(SchemaDrift) as exc:
+        mail_index.check_index_schema()
+    msg = str(exc.value)
+    assert "macOS 26" in msg and "15.7.9" in msg
+    assert "platform floor" in msg
+    assert "trash_mail" in msg  # the destructive-tool consequence, spelled out
+    assert "likely changed the schema" not in msg
+
+
+def test_missing_header_column_on_tahoe_stays_generic_drift(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    _mac_ver(monkeypatch, "26.1")
+    with pytest.raises(SchemaDrift) as exc:
+        mail_index.check_index_schema()
+    # On 26+ the column SHOULD exist: this really is drift, and the fingerprint
+    # really is the thing to update.
+    assert "likely changed the schema" in str(exc.value)
+    assert "platform floor" not in str(exc.value)
+
+
+def test_other_drift_on_sequoia_stays_generic(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, subjects_table=False)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    _mac_ver(monkeypatch, "15.7.9")
+    with pytest.raises(SchemaDrift) as exc:
+        mail_index.check_index_schema()
+    assert "platform floor" not in str(exc.value)
+
+
+def test_floor_drift_still_runs_fallback(tmp_path, monkeypatch):
+    # The specialization must not break #58's degrade policy: a read WITH a
+    # fallback still falls back on floor drift instead of raising.
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "15.7.9")
+    assert mail_index._read_index(db, lambda conn: None, fallback=lambda: "FB") == "FB"

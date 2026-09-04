@@ -26,7 +26,8 @@ from pathlib import Path
 import EventKit as EK
 
 from . import deploy
-from .errors import PRIVACY_PANE, NativeError
+from .adapters import mail_index
+from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .runtime import app_process_info, request_access_each, run_native, run_osascript
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
@@ -213,6 +214,30 @@ def _fda_surface() -> dict:
         return _surface("full_disk_access", "fda", None, "error", str(e))
 
 
+def _mail_index_surface() -> dict:
+    """The Envelope Index schema (#199) — read-only and prompt-free, like the sqlite
+    reads it stands for. A pre-Tahoe macOS reports ok=False carrying the platform-
+    floor diagnosis; before this surface existed, doctor said "no denied surfaces"
+    on a machine where every sqlite-backed mail read was broken. FDA-unreadable is
+    ok=None (indeterminate), not False — the full_disk_access surface already owns
+    that failure, and double-counting it would misname the problem."""
+    try:
+        status = mail_index.check_index_schema()
+    except SchemaDrift as e:
+        return _surface("mail_index", "sqlite", False, "schema_unsupported", str(e))
+    except NativeError as e:
+        return _surface("mail_index", "sqlite", None, e.kind, str(e))
+    if status == "no_mail_data":
+        return _surface(
+            "mail_index",
+            "sqlite",
+            None,
+            "no_mail_data",
+            "No Envelope Index found — open Mail once to create it.",
+        )
+    return _surface("mail_index", "sqlite", True, "ok")
+
+
 def _process_name(pid: int) -> str:
     """Best-effort executable path for a pid (no TCC needed). ponytail: immediate parent
     only — walk the ancestor chain to the first *.app if the .app is ever ambiguous."""
@@ -295,6 +320,7 @@ def diagnose(request: bool = False) -> dict:
         *_automation_surfaces(request),
         _shortcuts_surface(),
         _fda_surface(),
+        _mail_index_surface(),
     ]
     needs = [s["surface"] for s in surfaces if s["ok"] is False]
     unknown = [s["surface"] for s in surfaces if s["ok"] is None]
