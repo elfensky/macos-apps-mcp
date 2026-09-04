@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform
 import sqlite3
 from email import message_from_bytes
 from html.parser import HTMLParser
@@ -15,7 +16,7 @@ from urllib.parse import quote
 
 from ..audit import state_dir
 from ..contracts import Pointer
-from ..errors import NativeError
+from ..errors import NativeError, SchemaDrift
 from ..runtime import read_via_sqlite
 from . import mailbox_url
 
@@ -745,6 +746,70 @@ def require_index_path() -> Path:
     return path
 
 
+# The first macOS whose Envelope Index stores the RFC822 Message-ID: Apple added
+# message_global_data.message_id_header in macOS 26 (Tahoe) by ALTER TABLE migration.
+# Device-verified absent on 15.6.1 and 15.7.9 (#199) — not drift, a platform floor.
+_MACOS_FLOOR = 26
+
+_FLOOR_MESSAGE = (
+    "Mail's Envelope Index on this macOS ({ver}) does not store the RFC822 "
+    "Message-ID: message_global_data.message_id_header was added in macOS 26 "
+    "(Tahoe); macOS 15 (Sequoia) and earlier never had it (#199). The sqlite-backed "
+    "mail reads (mail_overview, mail_stats, mail_thread, filtered mail_search, ...) "
+    "need macOS 26+ — and because only they emit the per-account folder urls the "
+    "write tools require, trash_mail/move_mail/update_mail_status are unreachable "
+    "too. Still working on this macOS: mail, mail_needs_response, and mail_search "
+    "with only a subject/from filter. This is a fixed platform floor, not schema "
+    "drift — do not retry, and do not update the fingerprint."
+)
+
+
+def _specialize_drift(e: SchemaDrift) -> SchemaDrift:
+    """#199: the one KNOWN drift — message_id_header missing on a pre-Tahoe macOS —
+    gets the platform-floor diagnosis instead of the generic "macOS likely changed
+    the schema", which sent readers hunting in the wrong direction (the fingerprint
+    was never stale; the machine is below the floor). Any other drift, and this
+    same condition on macOS 26+, keep the generic message: there it really is
+    drift, and the fingerprint really is the thing to update."""
+    if "message_id_header" not in str(e):
+        return e
+    major = platform.mac_ver()[0].split(".")[0]
+    if not major.isdigit() or int(major) >= _MACOS_FLOOR:
+        return e
+    return SchemaDrift(_FLOOR_MESSAGE.format(ver=platform.mac_ver()[0]))
+
+
+def _read_index(path, read, *, fallback=None):
+    """The ONE ``read_via_sqlite`` wiring for the Envelope Index — every read below
+    goes through here so the #199 floor specialization can't be skipped by a new
+    call site. A fallback (when the caller passed one) still runs inside
+    ``read_via_sqlite`` before anything raises; only the raising path is rewritten."""
+    try:
+        return read_via_sqlite(
+            path, HEADER_FINGERPRINT, read, fallback=fallback, immutable=False
+        )
+    except SchemaDrift as e:
+        specialized = _specialize_drift(e)
+        if specialized is e:
+            raise
+        raise specialized from e
+
+
+def check_index_schema() -> str:
+    """Doctor's Envelope Index probe (#199): ``"ok"``, ``"no_mail_data"``, or a raise.
+
+    Read-only and prompt-free — a fingerprint check on the open store, nothing
+    else — so doctor can run it in its default path. Raises ``SchemaDrift`` (floor-
+    specialized like every index read) or ``FullDiskAccessDenied``; without this
+    surface, doctor reported "no denied surfaces" on a machine where every sqlite
+    mail read was broken."""
+    path = envelope_index_path()
+    if path is None:
+        return "no_mail_data"
+    _read_index(path, lambda conn: None)
+    return "ok"
+
+
 def _pointer_rows(sql, params, *, fallback=None) -> list[Pointer]:
     """Run a Pointer-projecting query against the required index.
 
@@ -765,9 +830,7 @@ def _pointer_rows(sql, params, *, fallback=None) -> list[Pointer]:
                 out.append(p)
         return out
 
-    return read_via_sqlite(
-        path, HEADER_FINGERPRINT, read, fallback=fallback, immutable=False
-    )
+    return _read_index(path, read, fallback=fallback)
 
 
 def query_search(
@@ -819,7 +882,7 @@ def query_mailbox_urls() -> list[str]:
     def read(conn):
         return [r[0] for r in conn.execute("SELECT url FROM mailboxes")]
 
-    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+    return _read_index(path, read)
 
 
 def query_thread(message_id: str, limit: int) -> list[Pointer]:
@@ -841,7 +904,7 @@ def query_overview_rows() -> list[dict]:
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(sql, params)]
 
-    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+    return _read_index(path, read)
 
 
 def query_message_locations(stored_ids) -> list[dict]:
@@ -861,7 +924,7 @@ def query_message_locations(stored_ids) -> list[dict]:
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(sql, params)]
 
-    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+    return _read_index(path, read)
 
 
 def _dict_rows(sql, params) -> list[dict]:
@@ -873,7 +936,7 @@ def _dict_rows(sql, params) -> list[dict]:
         conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(sql, params)]
 
-    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+    return _read_index(path, read)
 
 
 def query_sent_triage(limit: int) -> list[dict]:
@@ -1030,7 +1093,7 @@ def query_local_account_url() -> str | None:
         row = conn.execute(sql, params).fetchone()
         return row["url"] if row else None
 
-    return read_via_sqlite(path, HEADER_FINGERPRINT, read, immutable=False)
+    return _read_index(path, read)
 
 
 class _TextExtractor(HTMLParser):
@@ -1332,9 +1395,7 @@ def body_coverage() -> str:
             )
         }
 
-    live = read_via_sqlite(
-        require_index_path(), HEADER_FINGERPRINT, read, immutable=False
-    )
+    live = _read_index(require_index_path(), read)
     total = len(live)
     searchable = len(have & live)
     pct = f" ({100 * searchable / total:.1f}%)" if total else ""

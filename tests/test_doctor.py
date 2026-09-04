@@ -9,7 +9,12 @@ import json
 import pytest
 
 import macos_apps_mcp.doctor as doc
-from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
+from macos_apps_mcp.errors import (
+    AppNotRunning,
+    AutomationDenied,
+    FullDiskAccessDenied,
+    SchemaDrift,
+)
 
 
 def _boom_osascript(*args, **kwargs):
@@ -175,6 +180,57 @@ def test_fda_denied(monkeypatch):
 # --- whole-report shape / summary / budget -------------------------------------------
 
 
+# --- mail_index surface (#199) -------------------------------------------------------
+
+
+def test_mail_index_surface_ok(monkeypatch):
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "ok")
+    s = doc._mail_index_surface()
+    assert s["ok"] is True and s["status"] == "ok"
+
+
+def test_mail_index_surface_reports_floor_drift(monkeypatch):
+    def drift():
+        raise SchemaDrift("platform floor — needs macOS 26+")
+
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", drift)
+    s = doc._mail_index_surface()
+    assert s["ok"] is False
+    assert s["status"] == "schema_unsupported"
+    assert "macOS 26" in s["remediation"]
+
+
+def test_mail_index_surface_no_mail_data_is_indeterminate(monkeypatch):
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "no_mail_data")
+    s = doc._mail_index_surface()
+    assert s["ok"] is None and s["status"] == "no_mail_data"
+
+
+def test_mail_index_surface_fda_denied_is_indeterminate_not_false(monkeypatch):
+    # The full_disk_access surface owns that failure — this one must not double-
+    # count it as a schema problem.
+    def denied():
+        raise FullDiskAccessDenied("grant FDA")
+
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", denied)
+    s = doc._mail_index_surface()
+    assert s["ok"] is None
+    assert s["status"] == "full_disk_access_denied"
+
+
+def test_summary_names_mail_index_drift(monkeypatch, tmp_path):
+    # The #199 acceptance: a Sequoia machine must NOT report "no denied surfaces".
+    _all_granted(monkeypatch, tmp_path)
+
+    def drift():
+        raise SchemaDrift("platform floor — needs macOS 26+")
+
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", drift)
+    report = doc.diagnose(request=False)
+    assert "mail_index" in report["summary"]
+    assert "need attention" in report["summary"]
+
+
 def _all_granted(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 3)
     monkeypatch.setattr(doc, "run_osascript", lambda *a, **k: "AppName")
@@ -182,6 +238,7 @@ def _all_granted(monkeypatch, tmp_path):
     probe = tmp_path / "TCC.db"
     probe.write_bytes(b"x")
     monkeypatch.setattr(doc, "_FDA_PATH", probe)
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "ok")
 
 
 def test_diagnose_shape(monkeypatch, tmp_path):
@@ -197,10 +254,11 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "surfaces",
         "deployment",
     }
-    assert len(report["surfaces"]) == 11  # 2 EventKit + 7 Automation + shortcuts + FDA
+    # 2 EventKit + 7 Automation + shortcuts + FDA + mail_index
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 11 surfaces OK"
+    assert report["summary"] == "all 12 surfaces OK"
 
 
 def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
@@ -208,7 +266,7 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 11 surfaces need attention")
+    assert report["summary"].startswith("2 of 12 surfaces need attention")
 
 
 def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
@@ -226,7 +284,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 11 surfaces OK" not in report["summary"]
+    assert "all 12 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -255,10 +313,15 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     def denied_open(*a, **k):
         raise PermissionError()
 
+    def floor_drift():
+        # The longest string this surface can carry: the #199 platform-floor message.
+        raise SchemaDrift(doc.mail_index._FLOOR_MESSAGE.format(ver="15.7.9"))
+
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)
     monkeypatch.setattr(doc, "run_osascript", denied_automation)
     monkeypatch.setattr(doc.shutil, "which", lambda _: None)
     monkeypatch.setattr(doc, "open", denied_open, raising=False)
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", floor_drift)
     # deterministic worst case for the #183 process lines: every automation app
     # running (a live pgrep would make this test's length machine-dependent).
     monkeypatch.setattr(

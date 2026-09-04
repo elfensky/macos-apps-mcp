@@ -198,6 +198,7 @@ def fake_rule(freq=0, interval=1, count=None):
 # In test_reminders.py
 from tests._fakes import fake_rule
 
+
 def _fake_reminder(title, ident, due=None):
     """Test-local helper (not in _fakes) — used only here."""
     return SimpleNamespace(
@@ -214,13 +215,15 @@ def _fake_reminder(title, ident, due=None):
 @pytest.fixture(autouse=True, scope="session")
 def _isolated_state(tmp_path_factory):
     """Isolation guard: Repoint XDG_STATE_HOME and deploy._ALLOW_SEND_FILE.
-    
+
     Without this, a test run would read/write:
     - Audit log to the developer's real ~/.local/share/
-    - The launchd daemon's allow_send toggle to ~/ 
+    - The launchd daemon's allow_send toggle to ~/
     """
     state_home = tmp_path_factory.mktemp("xdg-state-home")
-    mp = pytest.MonkeyPatch()  # Session scope, so pytest.MonkeyPatch (not monkeypatch fixture)
+    mp = (
+        pytest.MonkeyPatch()
+    )  # Session scope, so pytest.MonkeyPatch (not monkeypatch fixture)
     mp.setenv("XDG_STATE_HOME", str(state_home))
     mp.setattr(deploy, "_ALLOW_SEND_FILE", state_home / "allow_send")
     yield state_home
@@ -332,11 +335,13 @@ def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
   # WRONG: Just checking return value
   result = send_mail(...)
   assert result["sent"] is True
-  
+
   # CORRECT: Verify the message actually arrived
   result = send_mail(...)
   assert result["sent"] is True
-  import time; time.sleep(20)  # Wait for autosave
+  import time
+
+  time.sleep(20)  # Wait for autosave
   # Then manually check Outbox/Sent in Mail.app that the message is there
   ```
 
@@ -346,13 +351,14 @@ def test_search_returns_pointers_from_sqlite(tmp_path, monkeypatch):
 ```python
 import asyncio
 
+
 def test_server_lists_tools():
     """Integration with FastMCP Client — must be async-wrapped."""
-    
+
     async def _run():
         async with Client(srv.mcp) as c:
             return await c.list_tools()
-    
+
     tools = asyncio.run(_run())
     assert any(t.name == "reminders" for t in tools)
 ```
@@ -374,7 +380,8 @@ def test_require_full_access_raises_on_denied():
 **Parametrized Testing:**
 ```python
 @pytest.mark.parametrize(
-    "status", [0, 1, 2, 4]  # notDetermined, restricted, denied, writeOnly
+    "status",
+    [0, 1, 2, 4],  # notDetermined, restricted, denied, writeOnly
 )
 def test_require_full_access_raises_on_anything_else(status):
     with pytest.raises(AccessDenied):
@@ -386,12 +393,15 @@ def test_require_full_access_raises_on_anything_else(status):
 def test_parse_datetime_on_dst_day(monkeypatch):
     """Pin timezone for determinism — test runs on any machine."""
     import time
-    
+
     monkeypatch.setenv("TZ", "America/New_York")
     time.tzset()
     try:
         aware = "2026-11-01T05:30:00+00:00"  # Fall-back fold UTC instant
-        assert parse_datetime(aware).timestamp() == datetime.fromisoformat(aware).timestamp()
+        assert (
+            parse_datetime(aware).timestamp()
+            == datetime.fromisoformat(aware).timestamp()
+        )
     finally:
         monkeypatch.undo()
         time.tzset()
@@ -416,7 +426,7 @@ def test_every_tool_is_annotated_from_read_write_seam():
         assert a is not None, f"{t.name} has no annotations"
         assert isinstance(a.readOnlyHint, bool), f"{t.name} readOnlyHint not set"
         expected_readonly = t.name not in _WRITE_TOOLS
-        assert a.readOnlyHint is expected_readonly, (...)
+        assert a.readOnlyHint is expected_readonly, ...
 ```
 
 **Mail Write Verification:**
@@ -490,7 +500,7 @@ def snapshot(ident: str) -> Pointer | None:
     """Return the before-state of an item, or None if not found."""
     # Used by AuditMiddleware to log before-state
     # mail.snapshot(id) -> find the message in index, return Pointer or None
-    return self.get_pointers(f'message_id:{ident}')
+    return self.get_pointers(f"message_id:{ident}")
 ```
 
 **Test Verification (test_tool_annotations.py):**
