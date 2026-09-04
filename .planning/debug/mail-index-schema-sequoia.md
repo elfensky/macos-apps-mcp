@@ -1,5 +1,5 @@
 ---
-status: investigating
+status: resolved
 trigger: "our mail mcp doesnt seen to work on sequoia (GitHub issue #199)"
 created: 2026-08-31
 updated: 2026-09-05
@@ -54,6 +54,6 @@ next_action: handoff checklist 1–8 COMPLETE (root cause verified end-to-end on
 ## Resolution
 
 root_cause: mail_index.py depends on `message_global_data.message_id_header`, a column Apple introduced in Tahoe (macOS 26) via migration. On Sequoia (macOS 15) the RFC822 Message-ID is not stored in the Envelope Index at all — device-verified on 15.6.1 (reporter) and 15.7.9 (rig) — so every sqlite-backed read trips SchemaDrift. Knock-on: no Sequoia-reachable read can emit the per-account `folder` url (sqlite emitters broken, AppleScript pointers carry no folder), so all destructive/move mail tools are unreachable (issue #199).
-fix: null
-verification: null
-files_changed: []
+fix: diagnosable floor (PR #200, scope chosen by Andrei 2026-09-05) — every Envelope Index read routes through mail_index._read_index, which specializes the missing-message_id_header drift on a pre-Tahoe macOS into a platform-floor message (floor, knock-on, what still works); doctor gains a mail_index surface via the new check_index_schema() probe, so a Sequoia machine reports "1 of 12 surfaces need attention" instead of "no denied surfaces". The AppleScript/.emlx fallback plane for macOS 15 stays an open follow-up option.
+verification: 1204 unit tests pass (11 new); device-verified on the Sequoia rig (15.7.9) — overview raises the floor message with the live OS version, doctor flags the surface, subject-only mail_search still answers via the AppleScript fallback.
+files_changed: [macos_apps_mcp/adapters/mail_index.py, macos_apps_mcp/doctor.py, tests/test_mail_index.py, tests/test_doctor.py]
