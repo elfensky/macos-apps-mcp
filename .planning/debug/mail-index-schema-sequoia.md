@@ -2,7 +2,7 @@
 status: investigating
 trigger: "our mail mcp doesnt seen to work on sequoia (GitHub issue #199)"
 created: 2026-08-31
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 ## Symptoms
@@ -23,7 +23,7 @@ DATA_END
 hypothesis: CONFIRMED — see root_cause.
 test: compared reporter's Sequoia 15.6.1 schema (issue #199) against local Tahoe Envelope Index (both V10)
 expecting: n/a
-next_action: on the rig, grant the pending TCC consents at the screen (Calendar + Reminders for server bootstrap, Automation → Mail for the AppleScript plane), then finish checklist items 6–7 at server level (doctor, mail_overview via stdio; mail / mail_needs_response; subject-only mail_search to exercise the AppleScript fallback). After that: scope decision (Tahoe-only floor vs AppleScript/.emlx fallback plane for macOS 15).
+next_action: handoff checklist 1–8 COMPLETE (root cause verified end-to-end on the rig). Remaining: owner scope decision — Tahoe-only floor with diagnosable failure (doctor + SchemaDrift must state the macOS floor and the destructive-tool consequence) vs an AppleScript/.emlx fallback plane for macOS 15. Evidence favors feasibility of a fallback: AppleScript message id IS the RFC822 Message-ID, and .emlx files carry the header.
 
 ## Evidence
 
@@ -41,6 +41,10 @@ next_action: on the rig, grant the pending TCC consents at the screen (Calendar 
 - 2026-09-04 (rig): mail_search nuance: a bare subject/from substring query with NO other filters falls back to the AppleScript inbox scan (mail.py `_run_fallback` gating) instead of raising — so on Sequoia that one shape still answers, inbox-only, with the `plane` flag. Every other filter shape raises SchemaDrift. Also useful for the fix design: AppleScript `message id` IS the RFC822 Message-ID, so Sequoia can mint stable citations via the AppleScript plane; only the index lacks them.
 - 2026-09-04 (rig): unit suite 1193 passed / 3 failed — all three are `time.tzset` missing from uv's cross-compiled x86_64 python-build-standalone CPython 3.14 (rig quirk, unrelated to #199). Rig setup notes: brew has no Intel-Sequoia bottles (Tier 3) — install uv via the astral.sh standalone installer; cryptography 50.0.0 ships arm64-only macOS wheels, so `uv sync --no-install-package cryptography` (transitive via mcp→pyjwt[crypto], unused on the stdio path).
 - 2026-09-04 (rig): server-level doctor/mail_overview over stdio NOT yet captured: `server.main()` → `bootstrap()` requests Calendar+Reminders TCC at startup, and this rig has no grants for the host process (user TCC.db has no Calendar/Reminders/AppleEvents rows for it), so the consent prompt blocks the MCP handshake. Automation → Mail is also ungranted, so the AppleScript-plane checks (`mail`, `mail_needs_response`, the search fallback) are pending the same screen-side clicks.
+- 2026-09-05 (rig): TCC granted at the screen (responsible app = com.apple.Terminal): Calendar 2, Reminders 2; AppleEvents→Mail was first DENIED (auth_value 0 — an earlier prompt got Don't Allow) then flipped to 2 mid-session. With Calendar+Reminders granted, `bootstrap()` no longer blocks and the stdio handshake completes — confirms the earlier hang diagnosis.
+- 2026-09-05 (rig, server-level over stdio, checklist item 6 CLOSED): `doctor()` → version 0.10.1, full_disk_access ok, calendar+reminders full_access, automation surfaces unprobed (request=False is prompt-free by design); `deployment.grant_identities` faithfully mirrored TCC, including the then-denied Terminal→Mail AppleEvents row. NOTE for the fix: doctor's summary reads "no denied surfaces" on a machine where EVERY sqlite mail read is broken — nothing in doctor probes the Envelope Index schema, which is exactly the reporter's diagnosability complaint. `mail_overview` → isError=True with the verbatim SchemaDrift message.
+- 2026-09-05 (rig, checklist item 7 CLOSED, after the Mail Automation grant): `mail(query="invoice")` → real inbox Pointers (RFC822 ids, `folder:"inbox"`); `mail_needs_response()` → works (flagged + unread-direct reasons); `mail_search(subject="invoice")` → answers via the fallback with `"plane":"applescript-inbox"` honestly set; `mail_search(subject="invoice", unread=True)` → verbatim SchemaDrift (the dropped-filter rule). All four match the 2026-09-04 code-path analysis exactly.
+- 2026-09-05 (rig): knock-on confirmed END-TO-END, not just by code reading: every working AppleScript read emits `folder:"inbox"` — the unified accessor trash_mail/move_mail reject by design — and no Sequoia-reachable read emits a per-account url. Destructive/move tools are unreachable on macOS 15 in practice.
 
 ## Eliminated
 
