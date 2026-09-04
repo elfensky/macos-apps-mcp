@@ -2,7 +2,7 @@
 status: investigating
 trigger: "our mail mcp doesnt seen to work on sequoia (GitHub issue #199)"
 created: 2026-08-31
-updated: 2026-08-31
+updated: 2026-09-04
 ---
 
 ## Symptoms
@@ -23,7 +23,7 @@ DATA_END
 hypothesis: CONFIRMED — see root_cause.
 test: compared reporter's Sequoia 15.6.1 schema (issue #199) against local Tahoe Envelope Index (both V10)
 expecting: n/a
-next_action: on the Sequoia iMac — run the read-only verification checklist from the issue #199 handoff comment, append results to Evidence, then decide scope (Tahoe-only vs AppleScript fallback plane)
+next_action: on the rig, grant the pending TCC consents at the screen (Calendar + Reminders for server bootstrap, Automation → Mail for the AppleScript plane), then finish checklist items 6–7 at server level (doctor, mail_overview via stdio; mail / mail_needs_response; subject-only mail_search to exercise the AppleScript fallback). After that: scope decision (Tahoe-only floor vs AppleScript/.emlx fallback plane for macOS 15).
 
 ## Evidence
 
@@ -32,6 +32,15 @@ next_action: on the Sequoia iMac — run the read-only verification checklist fr
 - 2026-08-31: reporter (Sequoia 15.6.1 / 24G90): no `%header%` column in ANY table of their Envelope Index; RFC822 Message-ID text absent from the index entirely. Both machines use `~/Library/Mail/V10/` — the V-directory number does not discriminate; only column presence does (which the fingerprint already checks).
 - 2026-08-31: local Tahoe: `messages.global_message_id` is typeof INTEGER (not the RFC822 string) — not an alternate route. Coverage wrinkle: only 47073 of 64574 messages have message_id_header populated (~73%) even on Tahoe — the migration backfills lazily.
 - 2026-08-31: verification rig chosen: iMac 2012 running Sequoia via OpenCore. Handoff prompt posted on issue #199.
+- 2026-09-04 (rig, all sqlite opens mode=ro): environment — macOS 15.7.9 (24G830), Mail.app 16.0, only `~/Library/Mail/V10` exists. This is a NEWER Sequoia point release than the reporter's 15.6.1 (24G90).
+- 2026-09-04 (rig): `pragma_table_info('message_global_data')` → 17 columns, NO `message_id_header`. Answers the open point-release question: 15.7.9 does not add or backfill the column either — it is genuinely Tahoe-only, not a lagging 15.x migration.
+- 2026-09-04 (rig): no `%header%` column in ANY table; every `%message_id%`/`%global%` column is an internal id; `messages.global_message_id` typeof integer. All four tables the reporter flagged as new (brand_indicators, data_detection_results, duplicates_unread_count, generated_summaries) exist here too → 15.6.1 and 15.7.9 index schemas agree. `PRAGMA user_version` = 0 — useless for floor detection; the column fingerprint stays the only discriminator.
+- 2026-09-04 (rig): .emlx format verified (first line = byte count, then raw RFC822); 200/200 sampled files in one mailbox — including `.partial.emlx` — carry a `Message-ID:` header. Sample is one mailbox, but supports .emlx as the fallback source for id-addressing.
+- 2026-09-04 (rig): live repro in-process (thin-dispatch adapter calls): `MailAdapter().stats()` and `.overview()` both raise verbatim: `SchemaDrift: table 'message_global_data' is missing column(s) ['message_id_header'] — macOS likely changed the schema. Do not trust a sqlite result until the fingerprint is updated.` `overview()` reads sqlite BEFORE contacting Mail, so it fails fast with no Mail launch and no Automation prompt.
+- 2026-09-04 (rig): CORRECTION to the knock-on mechanism: `account_of()` is a pure string parse (`mailbox_url.account`) — it never touches the index. `trash_mail(..., mailbox="inbox", dry_run=True)` raises ValueError ("needs a mailbox that names its account") on EVERY macOS by design. The Sequoia-specific breakage is upstream: every emitter of per-account `folder` urls (mail_search sqlite plane, mail_overview) is SchemaDrift-broken, and the AppleScript `_SEARCH` payload is only (message id, subject, sender) — no folder — so no reachable read can produce the token the destructive tools require. Same conclusion (all destructive/move tools unreachable), more precise mechanism.
+- 2026-09-04 (rig): mail_search nuance: a bare subject/from substring query with NO other filters falls back to the AppleScript inbox scan (mail.py `_run_fallback` gating) instead of raising — so on Sequoia that one shape still answers, inbox-only, with the `plane` flag. Every other filter shape raises SchemaDrift. Also useful for the fix design: AppleScript `message id` IS the RFC822 Message-ID, so Sequoia can mint stable citations via the AppleScript plane; only the index lacks them.
+- 2026-09-04 (rig): unit suite 1193 passed / 3 failed — all three are `time.tzset` missing from uv's cross-compiled x86_64 python-build-standalone CPython 3.14 (rig quirk, unrelated to #199). Rig setup notes: brew has no Intel-Sequoia bottles (Tier 3) — install uv via the astral.sh standalone installer; cryptography 50.0.0 ships arm64-only macOS wheels, so `uv sync --no-install-package cryptography` (transitive via mcp→pyjwt[crypto], unused on the stdio path).
+- 2026-09-04 (rig): server-level doctor/mail_overview over stdio NOT yet captured: `server.main()` → `bootstrap()` requests Calendar+Reminders TCC at startup, and this rig has no grants for the host process (user TCC.db has no Calendar/Reminders/AppleEvents rows for it), so the consent prompt blocks the MCP handshake. Automation → Mail is also ungranted, so the AppleScript-plane checks (`mail`, `mail_needs_response`, the search fallback) are pending the same screen-side clicks.
 
 ## Eliminated
 
@@ -40,7 +49,7 @@ next_action: on the Sequoia iMac — run the read-only verification checklist fr
 
 ## Resolution
 
-root_cause: mail_index.py depends on `message_global_data.message_id_header`, a column Apple introduced in Tahoe (macOS 26) via migration. On Sequoia (macOS 15) the RFC822 Message-ID is not stored in the Envelope Index at all, so every sqlite-backed read trips SchemaDrift, and account_of() failing makes all destructive/move mail tools unreachable (issue #199 knock-on).
+root_cause: mail_index.py depends on `message_global_data.message_id_header`, a column Apple introduced in Tahoe (macOS 26) via migration. On Sequoia (macOS 15) the RFC822 Message-ID is not stored in the Envelope Index at all — device-verified on 15.6.1 (reporter) and 15.7.9 (rig) — so every sqlite-backed read trips SchemaDrift. Knock-on: no Sequoia-reachable read can emit the per-account `folder` url (sqlite emitters broken, AppleScript pointers carry no folder), so all destructive/move mail tools are unreachable (issue #199).
 fix: null
 verification: null
 files_changed: []
