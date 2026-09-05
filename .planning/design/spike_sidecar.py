@@ -43,7 +43,7 @@ def harvest():
         "JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted=0 "
         "GROUP BY mb.ROWID ORDER BY n DESC"
     ).fetchall()
-    distinct, = conn.execute(
+    (distinct,) = conn.execute(
         "SELECT COUNT(DISTINCT global_message_id) FROM messages WHERE deleted=0"
     ).fetchone()
 
@@ -59,7 +59,8 @@ def harvest():
         d = mbox_dir(b["url"])
         rows = conn.execute(
             "SELECT ROWID, global_message_id FROM messages "
-            "WHERE mailbox=? AND deleted=0", (b["ROWID"],)
+            "WHERE mailbox=? AND deleted=0",
+            (b["ROWID"],),
         ).fetchall()
         if d is None:
             no_dir_rows += len(rows)
@@ -92,14 +93,18 @@ def harvest():
             )
             inserted += 1
     sc.commit()
-    got, = sc.execute("SELECT COUNT(*) FROM global_ids").fetchone()
+    (got,) = sc.execute("SELECT COUNT(*) FROM global_ids").fetchone()
     sc.close()
     dt = time.monotonic() - t0
-    print(f"  harvest: {files_seen} files parsed in {dt:.0f}s "
-          f"({files_seen / dt:.0f}/s), {inserted} inserts")
-    print(f"  coverage: {got}/{distinct} distinct global ids "
-          f"({100 * got / distinct:.2f}%)  [rows w/o dir={no_dir_rows}, "
-          f"w/o file={no_file}, w/o Message-ID={no_mid}]")
+    print(
+        f"  harvest: {files_seen} files parsed in {dt:.0f}s "
+        f"({files_seen / dt:.0f}/s), {inserted} inserts"
+    )
+    print(
+        f"  coverage: {got}/{distinct} distinct global ids "
+        f"({100 * got / distinct:.2f}%)  [rows w/o dir={no_dir_rows}, "
+        f"w/o file={no_file}, w/o Message-ID={no_mid}]"
+    )
     conn.close()
     return got, distinct
 
@@ -123,12 +128,13 @@ def inject():
     runtime._open_sqlite_ro = wrapped
     # Does the native fingerprint pass against the shadowing view?
     c = wrapped(IDX)
-    cols = {r[0] for r in c.execute(
-        "SELECT name FROM pragma_table_info('message_global_data')")}
+    cols = {
+        r[0]
+        for r in c.execute("SELECT name FROM pragma_table_info('message_global_data')")
+    }
     c.close()
     print(f"  pragma_table_info on shadowed name -> {sorted(cols)}")
-    print(f"  native fingerprint satisfied: "
-          f"{ {'ROWID', 'message_id_header'} <= cols }")
+    print(f"  native fingerprint satisfied: { {'ROWID', 'message_id_header'} <= cols }")
 
 
 def timed(label, fn):
@@ -146,45 +152,67 @@ def battery():
     a = MailAdapter()
 
     r, dt, err = timed("overview", a.overview)
-    print(f"  mail_overview: {dt:.0f}ms " + (
-        f"-> {len(r)} mailboxes, e.g. {r[0]['account']}/{r[0]['mailbox']} "
-        f"unread={r[0]['unread']}" if r else f"ERR {err}"))
+    print(
+        f"  mail_overview: {dt:.0f}ms "
+        + (
+            f"-> {len(r)} mailboxes, e.g. {r[0]['account']}/{r[0]['mailbox']} "
+            f"unread={r[0]['unread']}"
+            if r
+            else f"ERR {err}"
+        )
+    )
 
     r, dt, err = timed("search", lambda: a.search(subject="invoice", unread=True))
     hits = r["results"] if r else []
-    print(f"  mail_search(subject+unread) [was BROKEN]: {dt:.0f}ms -> "
-          + (f"{len(hits)} hits, plane={r.get('plane', 'sqlite')}" if r else f"ERR {err}"))
+    print(
+        f"  mail_search(subject+unread) [was BROKEN]: {dt:.0f}ms -> "
+        + (f"{len(hits)} hits, plane={r.get('plane', 'sqlite')}" if r else f"ERR {err}")
+    )
 
     r2, dt, err = timed("search2", lambda: a.search(from_="github", limit=10))
     hits2 = r2["results"] if r2 else []
-    print(f"  mail_search(from_) : {dt:.0f}ms -> "
-          + (f"{len(hits2)} hits" if r2 else f"ERR {err}"))
+    print(
+        f"  mail_search(from_) : {dt:.0f}ms -> "
+        + (f"{len(hits2)} hits" if r2 else f"ERR {err}")
+    )
 
     r3, dt, err = timed("stats", lambda: a.stats(days=365))
-    print(f"  mail_stats(365d) [was BROKEN]: {dt:.0f}ms -> " + (
-        f"received={r3.get('received')} " if r3 else f"ERR {err}"))
+    print(
+        f"  mail_stats(365d) [was BROKEN]: {dt:.0f}ms -> "
+        + (f"received={r3.get('received')} " if r3 else f"ERR {err}")
+    )
 
     seed = hits[0] if hits else (hits2[0] if hits2 else None)
     if seed:
         rt, dt, err = timed("thread", lambda: a.thread(seed["id"], 10, False))
         n = len(rt["results"]) if rt else 0
-        print(f"  mail_thread [was BROKEN]: {dt:.0f}ms -> "
-              + (f"{n} members" if rt else f"ERR {err}"))
+        print(
+            f"  mail_thread [was BROKEN]: {dt:.0f}ms -> "
+            + (f"{n} members" if rt else f"ERR {err}")
+        )
 
         rr, dt, err = timed("resolve", lambda: mail_addressing.resolve(seed["id"]))
-        print(f"  mail_addressing.resolve(id) [was BROKEN]: {dt:.0f}ms -> "
-              + (f"folder={rr.folder[:55]} account={rr.account[:13]}…"
-                 if rr else f"ERR {err}"))
+        print(
+            f"  mail_addressing.resolve(id) [was BROKEN]: {dt:.0f}ms -> "
+            + (
+                f"folder={rr.folder[:55]} account={rr.account[:13]}…"
+                if rr
+                else f"ERR {err}"
+            )
+        )
 
     rd, dt, err = timed("dups", lambda: a.duplicates(limit=3))
-    print(f"  mail_duplicates [was BROKEN]: {dt:.0f}ms -> " + (
-        f"{len(rd.get('mailboxes', []))} mailbox rows" if rd else f"ERR {err}"))
+    print(
+        f"  mail_duplicates [was BROKEN]: {dt:.0f}ms -> "
+        + (f"{len(rd.get('mailboxes', []))} mailbox rows" if rd else f"ERR {err}")
+    )
 
     # THE knock-on: destructive gates with a real per-account folder url, dry-run.
     if seed:
         folder = seed["folder"]
         rw, dt, err = timed(
-            "trash", lambda: a.trash_mail(seed["id"], folder, dry_run=True))
+            "trash", lambda: a.trash_mail(seed["id"], folder, dry_run=True)
+        )
         print(f"  trash_mail(dry_run, real folder url) [was UNREACHABLE]: {dt:.0f}ms")
         if rw:
             print(f"    -> preview ok: destination={str(rw)[:100]}")

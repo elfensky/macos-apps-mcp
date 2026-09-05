@@ -93,6 +93,7 @@ from . import (
     mail_attachments,
     mail_drafts,
     mail_files,
+    mail_ids,
     mail_index,
     mail_outgoing,
     mail_recover,
@@ -2028,3 +2029,18 @@ class MailAdapter:
             "coverage — mail_search(body=…) reports coverage when it finds nothing."
         )
         return res
+
+    def index_ids(self, rebuild: bool = False) -> dict:
+        """Build/refresh the Message-ID sidecar (#201) — the map that gives a
+        pre-Tahoe Envelope Index the RFC822 Message-IDs it never stored (#199).
+        Harvested headers-only off the ``.emlx`` files at rest; resumable (a row
+        whose file is absent is retried next run), self-healing on a Mail index
+        rebuild. Never launches Mail, never writes in Mail's data.
+
+        ``rebuild=True`` starts from an empty sidecar — the recovery move when the
+        sidecar itself is suspect; a plain re-run already re-harvests everything
+        unmapped and self-heals via INSERT OR REPLACE."""
+        path = mail_index.require_index_path()
+        if rebuild:
+            mail_ids.sidecar_path().unlink(missing_ok=True)
+        return mail_ids.build(path)

@@ -18,7 +18,7 @@ from ..audit import state_dir
 from ..contracts import Pointer
 from ..errors import NativeError, SchemaDrift
 from ..runtime import read_via_sqlite
-from . import mailbox_url
+from . import mail_ids, mailbox_url
 
 # The Envelope Index tables + the exact columns we read/filter on. A macOS schema move
 # that renames/drops any of these trips SchemaDrift → AppleScript fallback (never a
@@ -776,7 +776,11 @@ def _specialize_drift(e: SchemaDrift) -> SchemaDrift:
     major = platform.mac_ver()[0].split(".")[0]
     if not major.isdigit() or int(major) >= _MACOS_FLOOR:
         return e
-    return SchemaDrift(_FLOOR_MESSAGE.format(ver=platform.mac_ver()[0]))
+    floor = SchemaDrift(_FLOOR_MESSAGE.format(ver=platform.mac_ver()[0]))
+    # Marked so callers (doctor's sidecar state) can tell THIS diagnosis from any
+    # other drift without string-matching the prose.
+    floor.platform_floor = True
+    return floor
 
 
 def _read_index(path, read, *, fallback=None):
@@ -796,17 +800,24 @@ def _read_index(path, read, *, fallback=None):
 
 
 def check_index_schema() -> str:
-    """Doctor's Envelope Index probe (#199): ``"ok"``, ``"no_mail_data"``, or a raise.
+    """Doctor's Envelope Index probe (#199/#201): ``"ok"``, ``"no_mail_data"``,
+    ``"sidecar"``, or a raise.
 
     Read-only and prompt-free — a fingerprint check on the open store, nothing
     else — so doctor can run it in its default path. Raises ``SchemaDrift`` (floor-
     specialized like every index read) or ``FullDiskAccessDenied``; without this
     surface, doctor reported "no denied surfaces" on a machine where every sqlite
-    mail read was broken."""
+    mail read was broken. ``"sidecar"`` is a pre-Tahoe store WITH a built Message-ID
+    sidecar (#201) — doctor reports its coverage instead of the floor."""
     path = envelope_index_path()
     if path is None:
         return "no_mail_data"
-    _read_index(path, lambda conn: None)
+    try:
+        _read_index(path, lambda conn: None)
+    except SchemaDrift as e:
+        if getattr(e, "platform_floor", False) and mail_ids.sidecar_path().exists():
+            return "sidecar"
+        raise
     return "ok"
 
 

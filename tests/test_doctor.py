@@ -200,6 +200,23 @@ def test_mail_index_surface_reports_floor_drift(monkeypatch):
     assert "macOS 26" in s["remediation"]
 
 
+def test_mail_index_surface_sidecar_reports_coverage(monkeypatch):
+    # #201: a pre-Tahoe store served through the Message-ID sidecar is a WORKING
+    # surface (ok=True) whose coverage rides as remediation-free detail — a partial
+    # sidecar degrades the detail line, never the verdict.
+    monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "sidecar")
+    monkeypatch.setattr(doc.mail_index, "require_index_path", lambda: "idx")
+    monkeypatch.setattr(
+        doc.mail_ids,
+        "coverage_line",
+        lambda path: "9 of 10 ids mapped (90.0%), high-water ROWID 42, built T",
+    )
+    s = doc._mail_index_surface()
+    assert s["ok"] is True and s["status"] == "sidecar"
+    assert s["coverage"].startswith("9 of 10 ids mapped")
+    assert "remediation" not in s
+
+
 def test_mail_index_surface_no_mail_data_is_indeterminate(monkeypatch):
     monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "no_mail_data")
     s = doc._mail_index_surface()
