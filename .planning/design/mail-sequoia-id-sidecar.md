@@ -1,9 +1,10 @@
 ---
-status: proposed
+status: spike-verified
 depends_on: PR #200 (diagnosable floor)
-issue: #199 (follow-up)
+issue: "#201 (tracker); #199 (background)"
 created: 2026-09-05
 verified_on: Sequoia rig — iMac 2012, macOS 15.7.9 (24G830), Mail 16.0, 36,354-row store
+spike: .planning/design/spike_sidecar.py (run 2026-09-05, results below)
 ---
 
 # Mail on macOS 15: the Message-ID sidecar plane
@@ -88,23 +89,31 @@ makes increments O(new mail).
   column is lazily backfilled and sat at ~73% populated on the dev machine. Sequoia
   with sidecar at 100% local coverage is *better* than native Tahoe, not worse.
 
-### The query-layer swap
+### The query-layer swap — SUPERSEDED by the spike: shadow, don't swap
 
-`_BASE_SQL` (and the other `gd.`-referencing builders: thread seed, sent triage,
-message locations, the FTS `message_ids IN` filter) keep the alias `gd` and the column
-name `message_id_header`. The ONLY generated difference per mode:
+The spike found something better than the mode-parameterized join this section first
+proposed. In sidecar mode, connection setup runs:
 
 ```sql
--- native (macOS 26+):
-JOIN message_global_data gd ON gd.ROWID = m.global_message_id
--- sidecar (macOS 15):
-JOIN mid.global_ids gd ON gd.global_message_id = m.global_message_id
+ATTACH DATABASE 'file:<state>/mail_ids.sqlite?mode=ro' AS mid;
+CREATE TEMP VIEW message_global_data AS
+  SELECT global_message_id AS ROWID, message_id_header FROM mid.global_ids;
 ```
 
-Builders become mode-parameterized (`_gd_join(mode)`); every downstream reference —
-partition, WHERE, projections, `row_to_pointer` — is untouched. The `ATTACH` happens
-inside the adapter's `read(conn)` callback (`ATTACH ? AS mid`, `mode=ro` URI), so
-`runtime.read_via_sqlite` and the single-worker architecture stay unchanged.
+SQLite resolves unqualified names temp-first, so the view **shadows** Sequoia's real
+(column-less) `message_global_data` for every existing query — the join
+`gd.ROWID = m.global_message_id` lands on the view's aliased gid. Spike-verified
+bonus: `pragma_table_info('message_global_data')` ALSO resolves the view, so the
+native `HEADER_FINGERPRINT` passes untouched. Net production delta: **zero SQL-builder
+changes, zero fingerprint variants** — one setup hook.
+
+Plumbing: `runtime.read_via_sqlite` gains a generic optional `setup:
+Callable[[Connection], None]` (runtime stays Mail-agnostic); `mail_index` passes the
+attach-and-shadow hook in sidecar mode. Mode detection stays EXPLICIT (a
+schema-qualified `pragma main.table_info` probe, cached) — doctor, coverage
+reporting, and the floor message must know which mode they are in even though the
+queries no longer care. (The join-swap variant remains a fallback if shadowing is
+ever judged too implicit; it was also prototyped and works.)
 
 ### Mode detection
 
@@ -126,6 +135,27 @@ ids mapped (100%), high-water ROWID …, built …". Coverage below ~99% or a st
 high-water mark degrades the message, never the answer. `body_coverage()` (currently
 reads the native column) moves onto the same mode switch.
 
+## Spike results (2026-09-05, this rig — `spike_sidecar.py`)
+
+Full-store harvest + the attach-and-shadow injection at the `_open_sqlite_ro` seam,
+then the REAL adapters ran **unmodified**:
+
+- Harvest: 36,346 files parsed in 52 s (695/s); **22,679 of 22,688 distinct global
+  ids (99.96%)**. Gaps: 14 rows whose account directory does not exist under V10 at
+  all (an account with no local store — the skip-and-report case), 9 messages with
+  no Message-ID header (uncitable on every macOS, same rule as Tahoe).
+- `pragma_table_info` on the shadowed name → `{ROWID, message_id_header}` — native
+  fingerprint satisfied: True.
+- Battery (all previously broken on Sequoia, all through untouched adapter code):
+  `mail_overview` 376 ms / 47 mailboxes · `mail_search(subject+unread)` 8 ms, no
+  fallback plane flag · `mail_search(from_)` 61 ms · `mail_stats(365d)` 141 ms,
+  `plane: envelope-index`, real numbers (4,903 messages, read_ratio 0.971) ·
+  `mail_thread` 30 ms · `mail_addressing.resolve(id)` 29 ms → per-account folder url
+  · `mail_duplicates` 450 ms / 24 mailbox rows.
+- **The knock-on is closed**: `trash_mail(<real id>, <real folder url>,
+  dry_run=True)` → 351 ms, full preview with `would_affect` — account gate passed,
+  Trash resolved, presence probe ran. The destructive plane is reachable end-to-end.
+
 ## What stays untouched
 
 The AppleScript fallback lane (subject/from-only search), all write tools' own logic,
@@ -139,9 +169,10 @@ activates and no new code runs.
   `mail_index_ids` tool/CLI role, doctor coverage state, high-water increments.
   Unit tests over a fake Mail tree (existing `_write_emlx` helpers); no query changes
   yet — lands inert on every machine.
-- **PR-B — the swap** (~200 LOC + tests): mode resolver, `_gd_join`, ATTACH helper,
-  bounded auto top-up, staleness/coverage notes, floor-message update. Key test move:
-  parameterize the existing `_fake_envelope` battery to run the WHOLE existing
+- **PR-B — activation** (~150 LOC + tests): mode resolver, the `setup` hook on
+  `read_via_sqlite`, the attach-and-shadow hook, bounded auto top-up,
+  staleness/coverage notes, floor-message update. Key test move: parameterize the
+  existing `_fake_envelope` battery to run the WHOLE existing
   search/thread/overview/triage suite in both modes — the proof this is one code
   path, not two.
 - **Rig verification pass** (this machine, before release): full build, real
