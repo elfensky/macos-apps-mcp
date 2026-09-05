@@ -254,6 +254,59 @@ def build(index_path: Path, *, sidecar_db: Path | None = None) -> dict:
     }
 
 
+def top_up(
+    index_conn: sqlite3.Connection,
+    *,
+    v_root: Path,
+    sidecar_db: Path,
+    high_water: int,
+    new_high_water: int,
+) -> int:
+    """Harvest rows above ``high_water`` through an ALREADY-OPEN index connection —
+    the bounded read-time top-up (#201 PR-B). The caller has counted the delta and
+    decided it is small; this just does the work and advances the mark.
+
+    Runs BEFORE the sidecar is ATTACHed to ``index_conn`` (a database being written
+    must not also be attached read-only to the reader). A row skipped here (file not
+    on disk yet, no Message-ID) is behind the advanced mark and is retried by the
+    next ``build`` run, not the next read — reads stay bounded.
+
+    Returns the number of ids written."""
+    rows = index_conn.execute(
+        "SELECT m.ROWID, m.global_message_id, mb.url"
+        " FROM messages m JOIN mailboxes mb ON mb.ROWID = m.mailbox"
+        " WHERE m.deleted = 0 AND m.ROWID > ? AND m.global_message_id IS NOT NULL",
+        (high_water,),
+    ).fetchall()
+    by_url: dict[str, list[tuple[int, int]]] = {}
+    for rowid, gid, url in rows:
+        by_url.setdefault(url, []).append((rowid, gid))
+    conn = _connect(sidecar_db)
+    try:
+        harvested = 0
+        for url, wanted in by_url.items():
+            store = _mailbox_store_dir(v_root, url)
+            if store is None:
+                continue
+            files = _rowid_files(store)
+            for rowid, gid in wanted:
+                f = files.get(rowid)
+                mid = _read_message_id(f) if f is not None else ""
+                if mid:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO global_ids VALUES (?, ?)", (gid, mid)
+                    )
+                    harvested += 1
+        conn.execute(
+            "INSERT OR REPLACE INTO meta VALUES ('max_rowid_harvested', ?)",
+            (str(new_high_water),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return harvested
+
+
 def _coverage_text(mapped: int, total: int) -> str:
     pct = f" ({100 * mapped / total:.1f}%)" if total else ""
     return f"{mapped} of {total} ids mapped{pct}"

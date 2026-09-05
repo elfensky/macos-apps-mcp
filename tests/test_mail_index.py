@@ -471,6 +471,10 @@ def _fingerprint_index(path, *, message_id_header=True, subjects_table=True):
     )
     header_col = ", message_id_header TEXT" if message_id_header else ""
     c = sqlite3.connect(path)
+    # message_global_data carries message_id (an internal integer id) on BOTH shapes
+    # — device-verified: Sequoia 15.7.9 has it, Tahoe has it; only message_id_header
+    # is the Tahoe-only migration. The #201 shadow view reads it, so the fixture
+    # must be shaped like the device.
     c.executescript(
         f"""
         CREATE TABLE messages(
@@ -480,7 +484,8 @@ def _fingerprint_index(path, *, message_id_header=True, subjects_table=True):
         {subjects}
         CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
         CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
-        CREATE TABLE message_global_data(ROWID INTEGER PRIMARY KEY{header_col});
+        CREATE TABLE message_global_data(
+            ROWID INTEGER PRIMARY KEY, message_id INTEGER{header_col});
         CREATE TABLE recipients(ROWID INTEGER PRIMARY KEY, message INT, address INT);
         CREATE TABLE attachments(ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
         """
@@ -551,3 +556,118 @@ def test_floor_drift_still_runs_fallback(tmp_path, monkeypatch):
     _fingerprint_index(db, message_id_header=False)
     _mac_ver(monkeypatch, "15.7.9")
     assert mail_index._read_index(db, lambda conn: None, fallback=lambda: "FB") == "FB"
+
+
+# --- #201: store-mode detection + the sidecar shadow --------------------------------
+# native (Tahoe: the column exists), sidecar (pre-26, column absent, sidecar built),
+# floor (pre-26, no sidecar → the #199 message, now naming mail_index_ids).
+
+
+def _built_sidecar(tmp_path, monkeypatch, *, mappings=(), high_water=0):
+    """A REAL (schema-complete) sidecar at a monkeypatched location — an empty FILE
+    is not enough: the shadow view resolves mid.global_ids at first use, so only a
+    store with the actual table stands in for a harvest's output."""
+    from macos_apps_mcp.adapters import mail_ids
+
+    side = tmp_path / "mail_ids.sqlite"
+    conn = mail_ids._connect(side)
+    conn.executemany("INSERT INTO global_ids VALUES (?, ?)", list(mappings))
+    conn.execute(
+        "INSERT OR REPLACE INTO meta VALUES ('max_rowid_harvested', ?)",
+        (str(high_water),),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: side)
+    return side
+
+
+def test_mode_native_when_the_column_exists(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db)
+    assert mail_index._index_mode(db) == "native"
+
+
+def test_mode_sidecar_when_column_absent_pre26_with_sidecar(tmp_path, monkeypatch):
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "15.7.9")
+    _built_sidecar(tmp_path, monkeypatch)
+    assert mail_index._index_mode(db) == "sidecar"
+
+
+def test_mode_floor_without_a_sidecar(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters import mail_ids
+
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "15.7.9")
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: tmp_path / "absent.sqlite")
+    assert mail_index._index_mode(db) == "floor"
+
+
+def test_mode_on_tahoe_ignores_a_sidecar(tmp_path, monkeypatch):
+    # column absent on 26+ is REAL drift — a sidecar must never mask it.
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "26.1")
+    _built_sidecar(tmp_path, monkeypatch)
+    assert mail_index._index_mode(db) == "floor"
+    with pytest.raises(SchemaDrift, match="likely changed the schema"):
+        mail_index._read_index(db, lambda conn: None)
+
+
+def test_mode_flips_floor_to_sidecar_without_a_restart(tmp_path, monkeypatch):
+    # The cache is keyed on sidecar existence: the moment mail_index_ids finishes,
+    # the very next read serves sidecar mode — no process restart, no cache flush.
+    from macos_apps_mcp.adapters import mail_ids
+
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "15.7.9")
+    side = tmp_path / "mail_ids.sqlite"
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: side)
+    assert mail_index._index_mode(db) == "floor"
+    conn = mail_ids._connect(side)
+    conn.commit()
+    conn.close()
+    assert mail_index._index_mode(db) == "sidecar"
+
+
+def test_sidecar_mode_serves_the_native_fingerprint_and_queries(tmp_path, monkeypatch):
+    # The whole spike finding in one test: with the shadow view attached, the
+    # UNCHANGED fingerprint passes and the UNCHANGED join answers with the
+    # sidecar's Message-ID.
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        INSERT INTO subjects VALUES (1, 'Invoice 42');
+        INSERT INTO mailboxes VALUES (1, 'imap://A/INBOX');
+        INSERT INTO message_global_data (ROWID) VALUES (100);
+        INSERT INTO messages VALUES (10,1,NULL,100,1,1700000000,1700000000,0,0,0,7);
+        """
+    )
+    conn.commit()
+    conn.close()
+    _mac_ver(monkeypatch, "15.7.9")
+    _built_sidecar(tmp_path, monkeypatch, mappings=[(100, "<a@x>")], high_water=10)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    out = mail_index.query_search(subject="Invoice")
+    assert [p.id for p in out] == ["<a@x>"]
+    assert out[0].folder == "imap://A/INBOX"
+    assert mail_index.check_index_schema() == "sidecar"
+
+
+def test_floor_message_names_mail_index_ids(tmp_path, monkeypatch):
+    # #200's floor told the user the platform was the end of the road; #201 makes
+    # the same message the START of the fix.
+    from macos_apps_mcp.adapters import mail_ids
+
+    db = tmp_path / "Envelope Index"
+    _fingerprint_index(db, message_id_header=False)
+    _mac_ver(monkeypatch, "15.7.9")
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: tmp_path / "absent.sqlite")
+    with pytest.raises(SchemaDrift, match="mail_index_ids"):
+        mail_index._read_index(db, lambda conn: None)

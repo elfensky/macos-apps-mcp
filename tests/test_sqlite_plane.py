@@ -242,6 +242,59 @@ def test_read_via_sqlite_runs_inline_when_already_on_worker(db):
     assert run_native(on_worker) == ["hi"]
 
 
+def test_read_via_sqlite_setup_runs_before_the_fingerprint_check(tmp_path):
+    # #201: the setup hook exists so an adapter can prepare the connection (ATTACH,
+    # TEMP VIEW) and have the UNCHANGED fingerprint verified against what it built —
+    # here a store missing a fingerprinted column passes because the hook shadows
+    # the table with a view that carries it.
+    db = tmp_path / "store.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE message (guid TEXT)")  # no `text` column
+    conn.execute("CREATE TABLE chat (guid TEXT, name TEXT)")
+    conn.execute("INSERT INTO message VALUES ('g1')")
+    conn.commit()
+    conn.close()
+
+    def setup(c):
+        c.execute(
+            "CREATE TEMP VIEW message AS"
+            " SELECT guid, 'via-view' AS text FROM main.message"
+        )
+
+    out = read_via_sqlite(
+        db,
+        _FINGERPRINT,
+        lambda c: [r[1] for r in c.execute("SELECT * FROM message")],
+        setup=setup,
+    )
+    assert out == ["via-view"]
+
+
+def test_read_via_sqlite_setup_sqlite_error_degrades_to_fallback(db):
+    # a broken hook (corrupt sidecar, failed ATTACH) is "store unavailable", exactly
+    # like drift — degrade, never a raw sqlite3 error past the guard.
+    def setup(c):
+        c.execute("ATTACH DATABASE '/nonexistent/dir/x.db' AS mid")
+
+    assert read_via_sqlite(
+        db, _FINGERPRINT, _query, fallback=lambda: ["fb"], setup=setup
+    ) == ["fb"]
+    with pytest.raises(SchemaDrift):
+        read_via_sqlite(db, _FINGERPRINT, _query, setup=setup)
+
+
+def test_read_via_sqlite_setup_non_sqlite_error_propagates(db):
+    # a BUG in the hook must propagate, never be masked as a fallback answer — the
+    # same rule the query callable already has.
+    def setup(c):
+        raise ValueError("hook bug")
+
+    with pytest.raises(ValueError, match="hook bug"):
+        read_via_sqlite(
+            db, _FINGERPRINT, _query, fallback=lambda: ["masked"], setup=setup
+        )
+
+
 def test_read_via_sqlite_missing_store_does_not_fall_back(tmp_path):
     # a genuinely-absent store surfaces loudly even WITH a fallback — it is not the
     # FDA/drift "store unavailable" signal the dual-backend degrades on (deliberate:

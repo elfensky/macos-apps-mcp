@@ -520,6 +520,7 @@ def read_via_sqlite(
     *,
     fallback: Callable[[], T] | None = None,
     immutable: bool = False,
+    setup: Callable[[sqlite3.Connection], None] | None = None,
 ) -> T:
     """Dual-backend read (#58): query a native sqlite store read-only, degrading to the
     adapter's AppleScript reader when the store is unavailable.
@@ -532,6 +533,13 @@ def read_via_sqlite(
     connection is thread-bound and closed here); ``fallback() -> T`` is the AppleScript
     path.
 
+    ``setup(conn)`` — optional connection preparation run after open, BEFORE the
+    fingerprint check (#201): an ATTACH or TEMP VIEW that must be in place for
+    verification and the read to see the store the adapter intends. The hook's
+    CONTENT belongs to the adapter — this helper stays store-agnostic — and a sqlite
+    error inside it degrades exactly like any other store-unavailable (fallback, or
+    the typed raise).
+
     Everything runs on the single native worker (serialization consistency). This is the
     ONE helper the sqlite read planes (#59/#60) build on — they add no new plumbing.
     """
@@ -540,6 +548,8 @@ def read_via_sqlite(
         try:
             conn = _open_sqlite_ro(path, immutable=immutable)
             try:
+                if setup is not None:
+                    setup(conn)
                 verify_sqlite_schema(conn, fingerprint)
                 return query(conn)
             except sqlite3.Error as e:

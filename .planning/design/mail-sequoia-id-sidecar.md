@@ -115,6 +115,25 @@ reporting, and the floor message must know which mode they are in even though th
 queries no longer care. (The join-swap variant remains a fallback if shadowing is
 ever judged too implicit; it was also prototyped and works.)
 
+**Implementation deviation (2026-09-05, PR-B): the view JOINS BACK to the real
+table** instead of projecting the sidecar alone. The spike's simple view shadowed
+the WHOLE table, and `build_sent_triage_query` (#192, `mail_awaiting_reply`'s fast
+path) joins on `message_global_data.message_id` — a column Sequoia DOES have (its
+17-column table is missing only `message_id_header`). Under the simple view that
+query would raise "no such column" and silently degrade to the slow AppleScript
+scan. The shipped view:
+
+```sql
+CREATE TEMP VIEW message_global_data AS
+SELECT g.ROWID AS ROWID, i.message_id_header, g.message_id
+FROM main.message_global_data AS g
+LEFT JOIN mid.global_ids AS i ON i.global_message_id = g.ROWID
+```
+
+Same semantics for every dedup/search/overview query (an unmapped gid yields a NULL
+header exactly like Tahoe's lazy backfill), a superset for the fingerprint, and
+`mail_awaiting_reply`'s index plane works on Sequoia too — rig-verified.
+
 ### Mode detection
 
 `_read_index` (from PR #200) grows a cached mode resolver riding the fingerprint
