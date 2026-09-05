@@ -751,19 +751,19 @@ def require_index_path() -> Path:
 # Device-verified absent on 15.6.1 and 15.7.9 (#199) — not drift, a platform floor.
 _MACOS_FLOOR = 26
 
+# Terse on purpose: this rides inside every doctor report on an affected machine,
+# and the whole report has a hard context budget (test_report_stays_under_token_
+# budget) — trim here before trimming anything else.
 _FLOOR_MESSAGE = (
     "Mail's Envelope Index on this macOS ({ver}) does not store the RFC822 "
     "Message-ID: message_global_data.message_id_header was added in macOS 26 "
-    "(Tahoe); macOS 15 (Sequoia) and earlier never had it (#199). The sqlite-backed "
-    "mail reads (mail_overview, mail_stats, mail_thread, filtered mail_search, ...) "
-    "need that column — and because only they emit the per-account folder urls the "
-    "write tools require, trash_mail/move_mail/update_mail_status are unreachable "
-    "too. Still working on this macOS: mail, mail_needs_response, and mail_search "
-    "with only a subject/from filter. This is a fixed platform floor, not schema "
-    "drift — do not update the fingerprint. The fix on THIS macOS: run "
-    "mail_index_ids once to build the Message-ID sidecar from the .emlx files on "
-    "disk (#201); the sqlite plane then works unchanged. Do not retry before that "
-    "build has run."
+    "(Tahoe); macOS 15 (Sequoia) and earlier never had it (#199). Without it the "
+    "sqlite mail reads (mail_overview, mail_stats, mail_thread, filtered "
+    "mail_search, ...) cannot answer, and only they emit the folder urls "
+    "trash_mail/move_mail need — a platform floor, not schema drift; do not "
+    "update the fingerprint. The fix: run mail_index_ids once to build the "
+    "Message-ID sidecar from the .emlx files on disk (#201); the sqlite plane "
+    "then works. Do not retry before that build has run."
 )
 
 
