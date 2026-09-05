@@ -756,11 +756,14 @@ _FLOOR_MESSAGE = (
     "Message-ID: message_global_data.message_id_header was added in macOS 26 "
     "(Tahoe); macOS 15 (Sequoia) and earlier never had it (#199). The sqlite-backed "
     "mail reads (mail_overview, mail_stats, mail_thread, filtered mail_search, ...) "
-    "need macOS 26+ — and because only they emit the per-account folder urls the "
+    "need that column — and because only they emit the per-account folder urls the "
     "write tools require, trash_mail/move_mail/update_mail_status are unreachable "
     "too. Still working on this macOS: mail, mail_needs_response, and mail_search "
     "with only a subject/from filter. This is a fixed platform floor, not schema "
-    "drift — do not retry, and do not update the fingerprint."
+    "drift — do not update the fingerprint. The fix on THIS macOS: run "
+    "mail_index_ids once to build the Message-ID sidecar from the .emlx files on "
+    "disk (#201); the sqlite plane then works unchanged. Do not retry before that "
+    "build has run."
 )
 
 
@@ -783,14 +786,173 @@ def _specialize_drift(e: SchemaDrift) -> SchemaDrift:
     return floor
 
 
+# --- store mode (#201): native column, sidecar shadow, or the #199 floor -------------
+
+# Cache key is (index path, sidecar-file-exists): the second half is what lets a
+# machine flip floor → sidecar the moment mail_index_ids finishes, with no process
+# restart — and a Tahoe store never re-probes just because a sidecar appeared.
+_MODE_CACHE: dict[tuple[str, bool], str] = {}
+
+# How many not-yet-harvested rows a READ will absorb inline before it stops paying
+# and reports staleness instead (~0.3 s for a small batch on a 2012 spinning disk;
+# past this, the build is mail_index_ids' job — a read must stay a read).
+_TOPUP_MAX_ROWS = 200
+
+# The last sidecar-mode read's staleness finding, if any — popped by the adapter via
+# take_staleness_note() right after its query returns. A module slot, not a return
+# value, because the note is born inside the connection-setup hook where no result
+# channel exists; the single native worker serializes the writers, and a mis-paired
+# pop across two concurrent mail reads would still attach a TRUE statement (the
+# staleness is a property of the store, not of one query).
+_STALENESS_NOTE: str | None = None
+
+
+def take_staleness_note() -> str | None:
+    """Pop the staleness note the last sidecar-mode read left (None when fresh)."""
+    global _STALENESS_NOTE
+    note, _STALENESS_NOTE = _STALENESS_NOTE, None
+    return note
+
+
+def _index_mode(path) -> str:
+    """``"native"`` | ``"sidecar"`` | ``"floor"`` for this Envelope Index, cached.
+
+    native: the store has message_id_header — Tahoe+; zero new behavior.
+    sidecar: pre-floor macOS, column absent, a built sidecar exists — reads get the
+    attach-and-shadow hook. floor: no hook; the fingerprint check raises the #199
+    floor message (now carrying the mail_index_ids remediation). Column absent on
+    macOS 26+ is REAL drift, not a mode — a sidecar must never mask it, so it also
+    resolves "floor" and the generic drift message surfaces."""
+    key = (str(path), mail_ids.sidecar_path().exists())
+    mode = _MODE_CACHE.get(key)
+    if mode is None:
+        mode = _detect_mode(path)
+        _MODE_CACHE[key] = mode
+    return mode
+
+
+def _detect_mode(path) -> str:
+    def probe(conn):
+        # Schema-qualified against main. so the probe can NEVER be answered by the
+        # shadow view (which satisfies the unqualified pragma by design).
+        cols = {
+            r[0].lower()
+            for r in conn.execute(
+                "SELECT name FROM pragma_table_info('message_global_data', 'main')"
+            )
+        }
+        return "message_id_header" in cols
+
+    if read_via_sqlite(path, {}, probe, immutable=False):
+        return "native"
+    major = platform.mac_ver()[0].split(".")[0]
+    # The sidecar stat runs AFTER the probe on purpose: existence is re-checked at
+    # the last moment so a sidecar that appeared while this detection was running
+    # (a just-finished mail_index_ids) is honored, never floored.
+    if (
+        major.isdigit()
+        and int(major) < _MACOS_FLOOR
+        and mail_ids.sidecar_path().exists()
+    ):
+        return "sidecar"
+    return "floor"
+
+
+# The shadow (#201, spike-verified): SQLite resolves unqualified names temp-first,
+# so this view stands in for Sequoia's column-less message_global_data in every
+# existing query AND in the unqualified pragma_table_info the fingerprint check
+# runs — zero SQL-builder changes, zero fingerprint variants. It joins back to the
+# REAL table (rather than projecting the sidecar alone) so the columns the plane
+# reads beyond the missing one — message_id, which the #192 sent-triage query joins
+# on — stay served from Mail's own data; only message_id_header comes from ours.
+_SHADOW_VIEW_SQL = """
+CREATE TEMP VIEW message_global_data AS
+SELECT g.ROWID              AS ROWID,
+       i.message_id_header  AS message_id_header,
+       g.message_id         AS message_id
+FROM main.message_global_data AS g
+LEFT JOIN mid.global_ids AS i ON i.global_message_id = g.ROWID
+"""
+
+
+def _sidecar_setup(conn, path) -> None:
+    """Sidecar mode's connection prep, run by ``read_via_sqlite`` before the
+    fingerprint check: bounded top-up first (the sidecar must not be attached while
+    being written), then ATTACH read-only and shadow. sqlite failures here degrade
+    exactly like any store-unavailable — runtime wraps them into SchemaDrift."""
+    side = mail_ids.sidecar_path()
+    _top_up_or_note(conn, side, path)
+    conn.execute("ATTACH DATABASE ? AS mid", (f"file:{side}?mode=ro",))
+    conn.execute(_SHADOW_VIEW_SQL)
+
+
+def _top_up_or_note(conn, side, path) -> None:
+    """Absorb ≤ ``_TOPUP_MAX_ROWS`` of new mail into the sidecar inline; past the
+    cap — or on a detected index rebuild — answer anyway and leave the staleness
+    note naming ``mail_index_ids`` (#156's honesty pattern: never silently stale)."""
+    global _STALENESS_NOTE
+    high_water = mail_ids.stored_high_water(side)
+    if high_water is None:
+        return  # no mark to measure against; the doctor coverage line reports it
+    (max_rowid,) = conn.execute(
+        "SELECT COALESCE(MAX(ROWID), 0) FROM messages WHERE deleted = 0"
+    ).fetchone()
+    if max_rowid < high_water:
+        _STALENESS_NOTE = (
+            "Mail's Envelope Index looks rebuilt (its row ids regressed below the "
+            "sidecar's high-water mark) — every Message-ID mapping is suspect until "
+            "mail_index_ids runs a full re-harvest. Answers may cite stale ids."
+        )
+        return
+    delta = max_rowid - high_water
+    if delta == 0:
+        return
+    if delta > _TOPUP_MAX_ROWS:
+        _STALENESS_NOTE = (
+            f"{delta} messages arrived since the Message-ID sidecar was last "
+            "harvested and are missing from sqlite-backed answers — run "
+            "mail_index_ids to catch up."
+        )
+        return
+    try:
+        mail_ids.top_up(
+            conn,
+            v_root=Path(path).parent.parent,
+            sidecar_db=side,
+            high_water=high_water,
+            new_high_water=max_rowid,
+        )
+    except Exception:  # opportunistic freshness must degrade, never kill a read
+        _STALENESS_NOTE = (
+            f"{delta} recent messages could not be absorbed into the Message-ID "
+            "sidecar and are missing from sqlite-backed answers — run "
+            "mail_index_ids."
+        )
+
+
 def _read_index(path, read, *, fallback=None):
     """The ONE ``read_via_sqlite`` wiring for the Envelope Index — every read below
-    goes through here so the #199 floor specialization can't be skipped by a new
-    call site. A fallback (when the caller passed one) still runs inside
-    ``read_via_sqlite`` before anything raises; only the raising path is rewritten."""
+    goes through here so the #199 floor specialization and the #201 sidecar mode
+    can't be skipped by a new call site. A fallback (when the caller passed one)
+    still runs inside ``read_via_sqlite`` before anything raises; only the raising
+    path is rewritten."""
+    setup = None
+    try:
+        if _index_mode(path) == "sidecar":
+            setup = lambda conn: _sidecar_setup(conn, path)  # noqa: E731
+    except NativeError:
+        # Detection could not open/read the store (FDA, missing file, corruption).
+        # Proceed hook-less: the main read hits the same wall and classifies it
+        # through the one degrade path — fallback, or the typed raise.
+        pass
     try:
         return read_via_sqlite(
-            path, HEADER_FINGERPRINT, read, fallback=fallback, immutable=False
+            path,
+            HEADER_FINGERPRINT,
+            read,
+            fallback=fallback,
+            immutable=False,
+            setup=setup,
         )
     except SchemaDrift as e:
         specialized = _specialize_drift(e)
@@ -812,13 +974,10 @@ def check_index_schema() -> str:
     path = envelope_index_path()
     if path is None:
         return "no_mail_data"
-    try:
-        _read_index(path, lambda conn: None)
-    except SchemaDrift as e:
-        if getattr(e, "platform_floor", False) and mail_ids.sidecar_path().exists():
-            return "sidecar"
-        raise
-    return "ok"
+    _read_index(path, lambda conn: None)
+    # In sidecar mode the shadow view satisfies the fingerprint, so the read above
+    # passes — the MODE says which plane answered, and doctor reports its coverage.
+    return "sidecar" if _index_mode(path) == "sidecar" else "ok"
 
 
 def _pointer_rows(sql, params, *, fallback=None) -> list[Pointer]:

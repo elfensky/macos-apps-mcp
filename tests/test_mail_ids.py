@@ -340,7 +340,8 @@ def test_check_index_schema_reports_sidecar_on_floor_with_sidecar(
     db = tmp_path / "Envelope Index"
     _fingerprint_index(db, message_id_header=False)
     side = tmp_path / "mail_ids.sqlite"
-    side.touch()
+    conn = mail_ids._connect(side)  # a real (schema-complete) sidecar, as built
+    conn.close()
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(mail_index.mail_ids, "sidecar_path", lambda: side)
     _mac_ver(monkeypatch, "15.7.9")
@@ -377,3 +378,108 @@ def test_check_index_schema_generic_drift_ignores_sidecar(tmp_path, monkeypatch)
     _mac_ver(monkeypatch, "26.1")
     with pytest.raises(SchemaDrift, match="likely changed the schema"):
         mail_index.check_index_schema()
+
+
+# --- #201 PR-B: the bounded read-time top-up + staleness honesty --------------------
+# End-to-end through the real adapter: a Sequoia-shaped store (reshaped by the same
+# conftest helper the two-mode battery uses), a real sidecar, real .emlx files.
+
+
+def _sidecar_rig(tmp_path, monkeypatch):
+    """(db, side, data_dir): the test_mail_search fixture store, Sequoia-reshaped,
+    with its harvested sidecar and a V10 tree ready for new messages to land in."""
+    from tests.conftest import sequoiaify_envelope
+    from tests.test_mail_search import ACCT_A, _fake_envelope
+
+    v10 = tmp_path / "V10"
+    db = v10 / "MailData" / "Envelope Index"
+    db.parent.mkdir(parents=True)
+    _fake_envelope(db)
+    side = tmp_path / "mail_ids.sqlite"
+    sequoiaify_envelope(db, side)
+    data = v10 / ACCT_A / "INBOX.mbox" / STORE / "Data" / "Messages"
+    data.mkdir(parents=True)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: side)
+    monkeypatch.setattr(
+        mail_index.platform, "mac_ver", lambda: ("15.7.9", ("", "", ""), "x86_64")
+    )
+    return db, side, data
+
+
+def _arrive(db, data, rowid, gid, subject_id, subject, mid):
+    """One new message lands after the harvest: an index row + its .emlx file."""
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO subjects VALUES (?, ?)", (subject_id, subject))
+    conn.execute("INSERT INTO message_global_data (ROWID) VALUES (?)", (gid,))
+    conn.execute(
+        "INSERT INTO messages VALUES (?,?,1,?,1,1700009000,1700009000,0,0,0,?)",
+        (rowid, subject_id, gid, gid),
+    )
+    conn.commit()
+    conn.close()
+    _write_emlx(data / f"{rowid}.emlx", mid)
+
+
+def test_read_time_top_up_absorbs_new_mail_inline(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    db, side, data = _sidecar_rig(tmp_path, monkeypatch)
+    _arrive(db, data, 200, 900, 90, "Fresh invoice", "<fresh@x>")
+    out = MailAdapter().search(subject="Fresh invoice")
+    # the delta was under the cap, so the read harvested BEFORE answering: the
+    # brand-new message is citable, no staleness note, and the mark advanced so
+    # the next read does no work.
+    assert [p["id"] for p in out["results"]] == ["<fresh@x>"]
+    assert "staleness" not in out
+    assert mail_ids.stored_high_water(side) == 200
+
+
+def test_read_past_the_cap_answers_and_reports_staleness(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    db, side, data = _sidecar_rig(tmp_path, monkeypatch)
+    _arrive(db, data, 200, 900, 90, "Fresh invoice", "<fresh@x>")
+    monkeypatch.setattr(mail_index, "_TOPUP_MAX_ROWS", 0)
+    out = MailAdapter().search(subject="Invoice")
+    # the answer still stands (old data served), the new message is honestly
+    # absent, and the note names the catch-up action — never silently stale.
+    assert out["results"]
+    assert "<fresh@x>" not in [p["id"] for p in out["results"]]
+    assert "mail_index_ids" in out["staleness"]
+    assert mail_ids.stored_high_water(side) < 200  # a read never half-harvests
+
+
+def test_index_rebuild_regression_reports_not_harvests(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    db, side, data = _sidecar_rig(tmp_path, monkeypatch)
+    conn = mail_ids._connect(side)
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('max_rowid_harvested', '99999')")
+    conn.commit()
+    conn.close()
+    out = MailAdapter().search(subject="Invoice")
+    assert out["results"]  # still answers
+    assert "rebuilt" in out["staleness"] and "mail_index_ids" in out["staleness"]
+
+
+def test_stats_and_duplicates_carry_the_staleness_note(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    db, side, data = _sidecar_rig(tmp_path, monkeypatch)
+    _arrive(db, data, 200, 900, 90, "Fresh invoice", "<fresh@x>")
+    monkeypatch.setattr(mail_index, "_TOPUP_MAX_ROWS", 0)
+    stats = MailAdapter().stats(days=365000)
+    assert "mail_index_ids" in stats["staleness"]
+    dups = MailAdapter().duplicates()
+    assert "mail_index_ids" in dups["staleness"]
+
+
+def test_fresh_sidecar_reads_carry_no_note(tmp_path, monkeypatch):
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    db, side, data = _sidecar_rig(tmp_path, monkeypatch)
+    out = MailAdapter().search(subject="Invoice")
+    assert out["results"] and "staleness" not in out
+    stats = MailAdapter().stats(days=365000)
+    assert "staleness" not in stats

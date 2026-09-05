@@ -17,10 +17,13 @@ fixture, which can't be used at session scope) makes the changes and undoes them
 per session.
 """
 
+import sqlite3
+from pathlib import Path
+
 import pytest
 
 from macos_apps_mcp import deploy, runtime
-from macos_apps_mcp.adapters import mail_addressing
+from macos_apps_mcp.adapters import mail_addressing, mail_ids, mail_index
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -51,6 +54,89 @@ def _reset_account_map_globals(monkeypatch):
     """
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_FAILURE_AT", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_mail_index_mode_globals(monkeypatch):
+    """Reset mail_index's #201 store-mode globals before every test — the same leak
+    class (and the same fix) as the account-map cache above: a mode cached while one
+    test's monkeypatched sidecar existed, or a staleness note a test's read left
+    unpopped, must never leak into the next test's assertions."""
+    monkeypatch.setattr(mail_index, "_MODE_CACHE", {})
+    monkeypatch.setattr(mail_index, "_STALENESS_NOTE", None)
+
+
+def sequoiaify_envelope(db: Path, side: Path) -> None:
+    """Reshape a test-built (native/Tahoe-shaped) Envelope Index into the SEQUOIA
+    shape — ``message_global_data`` keeps its rows and its ``message_id`` column but
+    loses ``message_id_header`` — and build the sidecar a real ``mail_index_ids``
+    harvest would have produced from it (mapping + high-water mark). Idempotent:
+    a store already reshaped (or one a test built deliberately broken) is left
+    alone. The #201 battery's whole point is that production code then serves the
+    SAME queries through mode detection + ATTACH + shadow view, unmodified."""
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(message_global_data)")}
+        if "message_id_header" not in cols:
+            return
+        rows = conn.execute(
+            "SELECT ROWID, message_id_header FROM message_global_data"
+            " WHERE message_id_header IS NOT NULL AND message_id_header <> ''"
+        ).fetchall()
+        (max_rowid,) = conn.execute(
+            "SELECT COALESCE(MAX(ROWID), 0) FROM messages"
+        ).fetchone()
+        conn.executescript(
+            "ALTER TABLE message_global_data RENAME TO mgd_native;"
+            "CREATE TABLE message_global_data("
+            "ROWID INTEGER PRIMARY KEY, message_id INTEGER);"
+            "INSERT INTO message_global_data(ROWID) SELECT ROWID FROM mgd_native;"
+            "DROP TABLE mgd_native;"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    sc = mail_ids._connect(side)  # the real schema, one source of truth
+    try:
+        sc.executemany("INSERT OR REPLACE INTO global_ids VALUES (?, ?)", rows)
+        sc.execute(
+            "INSERT OR REPLACE INTO meta VALUES ('max_rowid_harvested', ?)",
+            (str(max_rowid),),
+        )
+        sc.execute("INSERT OR REPLACE INTO meta VALUES ('built_at', 'test')")
+        sc.commit()
+    finally:
+        sc.close()
+
+
+@pytest.fixture(params=["native", "sidecar"])
+def envelope_mode(request, monkeypatch, tmp_path):
+    """Run a fake-envelope test in BOTH store modes (#201) — the structural proof
+    the sidecar is one code path, not two.
+
+    ``native``: the store the test builds (it carries message_id_header) is served
+    as-is. ``sidecar``: the store is reshaped at first open into the Sequoia shape
+    plus a sidecar file, and the REAL production path — mode detection, the
+    read-only ATTACH, the shadow TEMP VIEW — serves the identical assertions. The
+    reshape hooks ``runtime._open_sqlite_ro`` (the seam the #201 spike used) so it
+    runs AFTER the test finished building its fixture, whatever helpers it used."""
+    if request.param == "native":
+        return "native"
+    side = tmp_path / "mail_ids_sidecar.sqlite"
+    monkeypatch.setattr(mail_ids, "sidecar_path", lambda: side)
+    monkeypatch.setattr(
+        mail_index.platform, "mac_ver", lambda: ("15.7.9", ("", "", ""), "x86_64")
+    )
+    orig = runtime._open_sqlite_ro
+
+    def wrapped(path, *, immutable=False):
+        p = Path(path)
+        if p.name == "Envelope Index" and Path.home() not in p.parents:
+            sequoiaify_envelope(p, side)
+        return orig(path, immutable=immutable)
+
+    monkeypatch.setattr(runtime, "_open_sqlite_ro", wrapped)
+    return "sidecar"
 
 
 @pytest.fixture(autouse=True)
