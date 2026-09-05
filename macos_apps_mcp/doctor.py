@@ -26,7 +26,7 @@ from pathlib import Path
 import EventKit as EK
 
 from . import deploy
-from .adapters import mail_index
+from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .runtime import app_process_info, request_access_each, run_native, run_osascript
 
@@ -235,6 +235,14 @@ def _mail_index_surface() -> dict:
             "no_mail_data",
             "No Envelope Index found — open Mail once to create it.",
         )
+    if status == "sidecar":
+        # #201: a pre-Tahoe store served through the Message-ID sidecar. ok=True —
+        # the plane works — with coverage as remediation-free detail, because a
+        # partial or stale sidecar degrades the DETAIL, never the verdict (the reads
+        # themselves carry staleness honesty).
+        out = _surface("mail_index", "sqlite", True, "sidecar")
+        out["coverage"] = mail_ids.coverage_line(mail_index.require_index_path())
+        return out
     return _surface("mail_index", "sqlite", True, "ok")
 
 
