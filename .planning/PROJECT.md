@@ -29,6 +29,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - ✓ JSONL write audit trail + `audit()`; `free_busy`; Notes create/update with stable ids; Mail triage (needs-response / awaiting-reply) — 0.7.0
 - ✓ Music adapter — search / now-playing / additive playback — 0.8.0 (#69)
 - ✓ Mail complete as a mail-client API: addressing triple, recoverable destructive plane (locate → backup → log → act → receipt, `mail_undo`), mailbox hierarchy, status flags, trash, same- and cross-account dedupe, outgoing lifecycle (drafts / send / reply-all / forward), attachments, stats/export, bulk bodies, awaiting_reply on the index — 0.9.0 → 0.10.1
+- ✓ Mail's full sqlite plane on macOS 15 (Sequoia): a diagnosable floor names the missing `message_id_header` (#199, PR #200); a Message-ID sidecar harvested from `.emlx` headers restores it through a shadow view — the same queries, no second code path (#201, PRs #202/#203); staleness is computed per read (PR #204) — on `develop`, unreleased after 0.10.1
 - ✓ Device-verified Mail facts (`docs/mail-applescript-facts.md`) and the probe-first discipline: ten consecutive 0.9.x cuts had their premise revised on device before code was written
 
 ### Active
@@ -46,8 +47,12 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - [ ] `MACOS_APPS_READ_ONLY=1 uv run pytest` green (12 failures today); doctor tests no longer run live `pgrep`
 - [ ] Full device integration sweep (`uv run pytest -m integration`) green on the current OS
 
+**Mail fixes — email work comes before any new or additional feature (owner, 2026-09-24)**
+- [ ] A full 25-message `move_mail`/`trash_mail` batch and its dry run finish inside their timeout on a large IMAP mailbox, and a timeout still leaves a receipt (#206)
+- [ ] `create_draft` takes `from_address` and routes replies to `mail_reply`; a device probe settles what Mail does with an address no account owns (#208)
+
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
-- [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90)
+- [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
 - [ ] Reminders: delete + list management (#92); subtasks via the public `parentReminder` route, tags investigate-first and read-only if no public write exists (#91)
 - [ ] Notes: semantic search sidecar — decision first, then an optional `[semantic]` extra (#93)
 - [ ] Photos: settle osxphotos vs PhotoKit by running `uv add`; albums, bounded metadata, export to disk (#96)
@@ -55,7 +60,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 **Platform & distribution — let others use it, safely**
 - [ ] Per-adapter enable/disable (want Mail, not Photos) read at daemon start; a disabled adapter's tools are absent, `doctor` reports the active set
 - [ ] Localhost dashboard served by the daemon: grants/`doctor`, `usage`, audit trail, browsable recoverable-plane backups, adapter toggles; loopback-only (#126)
-- [ ] Distribution: README leads with `uvx` (#113), `[project.urls]` (#111), `.mcpb` per release + Homebrew cask for the notarized `.app` (#107), companion skill + Claude Code plugin whose `skills/` layout is also `npx skills`-installable (#106)
+- [ ] Distribution: README leads with `uvx` (#113), `[project.urls]` (#111), `.mcpb` per release + Homebrew cask for the notarized `.app` (#107), companion skill + Claude Code plugin whose `skills/` layout is also `npx skills`-installable (#106), the bundle builds on Intel Macs (#205)
 
 **Deferred to v2 (tracked in REQUIREMENTS.md):** Contacts depth (#94/#95) and Messages depth (#86–#88) — owner's call at the 2026-08-28 roadmap review; Safari bookmarks/reading list/history (#97); Maps, geocode, current position, Weather (#98–#100, low priority); user-preferences env context (#105); menubar companion (Swift `MenuBarExtra`, pure client of the daemon); network transport + auth + SSE bridge for Home Assistant (#127); alarms on reminders.
 
@@ -74,7 +79,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 - **Codebase map:** `.planning/codebase/` (2026-08-28) — ARCHITECTURE, STRUCTURE, STACK, INTEGRATIONS, CONVENTIONS, TESTING, CONCERNS. CONCERNS.md records the spiked review's findings with file:line evidence.
 - **Primary architecture sources:** `CLAUDE.md` ("Architecture (don't drift)"), `DESIGN.md`, `docs/DAEMON.md`, `docs/ROADMAP.md` (including the 2026-08-03 and 2026-08-13 review write-ups), `docs/mail-applescript-facts.md`.
-- **The 2026-08-28 spiked architecture review** (develop @ d9ac75f, 0.10.1): nine cards, each spiked in an isolated worktree with the unit suite (baseline 1196) + ruff run and the diff measured. Cards 1, 7, 5 are pure moves, byte-identical bodies, green; card 2 has a real precedent (`usage` shipped mis-classified; nine writes audit as `"write"`); card 3 found `query_duplicate_rows` (the #140 byte-identity gate) has never run through sqlite in a unit test; card 8 withdrawn on trial; card 9's wrapper withdrawn, replaced by a 25-line tripwire. Branches `spike/arch-review-{1,2,3,4,5,6,7,9}-*` exist locally, never pushed.
+- **The 2026-08-28 spiked architecture review** (develop @ d9ac75f, 0.10.1): nine cards, each spiked in an isolated worktree with the unit suite (baseline 1196) + ruff run and the diff measured. Cards 1, 7, 5 are pure moves, byte-identical bodies, green; card 2 has a real precedent (`usage` shipped mis-classified; nine writes audit as `"write"`); card 3 found `query_duplicate_rows` (the #140 byte-identity gate) has never run through sqlite in a unit test; card 8 withdrawn on trial; card 9's wrapper withdrawn, replaced by a 25-line tripwire. Branches `spike/arch-review-{1,2,3,4,5,6,7,9}-*` exist locally, never pushed. Since the review, 16 commits (the #199/#201 Sequoia plane) landed on `develop` and touch files every card changes — each card re-lands against current `develop`, not the spike base.
 - **Caller:** the life-cockpit Obsidian vault's Claude Code session; the mail-vs-vault debate (2026-08-02) established that citation *rendering* was never the gap — reads must carry `id + folder + account`.
 - **Landscape (2026-07-14 survey):** apple-mcp (3.1k★) archived; iMCP is the only maintained multi-app suite and ships no Mail/Notes/Photos/Safari. No surveyed server combines uniform bounded reads across Mail + Messages + Notes + Calendar + Reminders — that combination is this repo.
 - **Verification culture:** Mail writes are verified by running them and inspecting the resulting message; three reviews and a green suite once passed a forward that delivered empty mail and ate seven attachments. Device probing routinely overturns an issue's premise — the probe result is a valid deliverable.
@@ -97,6 +102,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Core value is safe writes, not read breadth | Reads that are slow or missing are gaps; an unsafe write is a failure the caller cannot recover from | — Pending |
 | Gate first: land the spiked review before any feature work | Cards 1/7/5 are green pure moves that rot if left; card 1 makes the whole suite fail-closed before server.py/runtime.py are reshaped; Contacts work would touch the same files | — Pending |
 | Existing nine adapters stable and full-featured before new domains | Owner's call 2026-08-28: "make sure the ones we have now are all working, stable, and as fully featured as possible" | — Pending |
+| Email work takes priority over new and additional features; Mail fixes run right after the gate (Phase 02.1) | Owner's call 2026-09-24. The gate still runs first: it is not a feature, and its card 4 rewrites `recoverable()`, the function #206 fixes — landing #206 first would fix it twice | — Pending |
 | Phase order: Gate → adapter depth → new domains → platform | Platform (#127 network transport, menubar) is the largest job and benefits from a settled registry/tier module | — Pending |
 | Contacts and Messages depth deferred to v2 | Owner's call at roadmap review 2026-08-28: v1 depth is Calendar/Reminders, Notes, Photos | — Pending |
 | Apps MCP, not a Mac-control MCP | Capture and system utilities (#101/#102) are out; Bash and the host already cover them | ✓ Good |
@@ -104,6 +110,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Home Assistant access (#127) deferred to v2, rescoped as SSE bridge + auth | HA's MCP Client is SSE-only; auth alone would not connect | — Pending |
 | #103 escape hatch out of scope | Bypasses typed safety; an external server covers the need | ✓ Good |
 | Spike branches are primary sources, not landing branches | Each cut re-lands by rebasing onto the previous PR; branches + worktrees deleted afterwards | — Pending |
+| New `mail_index` reads are written single — one `query_*` tested through the envelope fixture, no new `build_*` twin; old pairs collapse only when a cut already touches them (#180) | Checking answers through the real fingerprinted schema beats asserting SQL text; no dedicated refactor pass — nothing is broken, the win is interface width. Depends on the shared fixture (GATE-08) | — Pending |
 | `dry_run=True` on every destructive tool, enforced from the registry | Today `delete_event`/`delete_draft` default False and `delete_note` has none — three safety contracts for one class of call | — Pending |
 
 ## Evolution
@@ -124,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-28 after roadmap review*
+*Last updated: 2026-09-24 — open GitHub issues integrated (#205 → DIST-06, #180 → Key Decisions, #206/#208 → Phase 02.1, #207 → Phase 3), Sequoia plane recorded as Validated*

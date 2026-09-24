@@ -1,8 +1,15 @@
 ---
-gsd_state_version: '1.0'
+gsd_state_version: "1.0"
+current_phase: 1
+current_phase_name: Gate — Land the Spiked Architecture Cuts
 status: planning
+stopped_at: All open issues through #208 integrated (40/40 v1 requirements mapped across 7 phases); v2-deferred issues moved to one GitHub milestone
+last_updated: "2026-09-24T21:06:12.231Z"
+last_activity: 2026-09-24
+last_activity_desc: Phase 02.1 (Mail fixes, #206/#208) inserted after the gate so email comes before any feature phase; #207 added to Phase 3; #205 is DIST-06; #180 is a Key Decision; Sequoia plane recorded as Validated
+state_head: defc0bbbb82a27baa0a9e8de930faf3fa069ba36
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,16 +27,17 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 
 ## Current Position
 
-Phase: 1 of 6 (Gate — Land the Spiked Architecture Cuts)
+Phase: 1 of 7 (Gate — Land the Spiked Architecture Cuts)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-08-28 — Roadmap revised; Contacts and Messages depth deferred to v2, 33 v1 requirements mapped across 6 phases
+Last activity: 2026-09-24 — Phase 02.1 (Mail fixes, #206/#208) inserted after the gate so email comes before any feature phase; #207 added to Phase 3; #205 is DIST-06; #180 is a Key Decision; Sequoia plane recorded as Validated
 
 Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: —
 - Total execution time: 0 hours
@@ -41,6 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 **Recent Trend:**
+
 - Last 5 plans: —
 - Trend: —
 
@@ -58,6 +67,9 @@ Recent decisions affecting current work:
 - Spike branches (`spike/arch-review-*`) are primary sources, never landing branches — each cut re-lands by rebasing onto the previous PR.
 - `dry_run=True` on every destructive tool, enforced from the registration record (today `delete_event`/`delete_draft` default False, `delete_note` has none).
 - Contacts and Messages depth are v2, not v1 (owner, 2026-08-28 roadmap review) — the requirements stay tracked under `## v2 Requirements`, out of this milestone's phases.
+- Email work comes before any new or additional feature (owner, 2026-09-24). Mail fixes are Phase 02.1, right after the gate; the gate stays first because card 4 rewrites `recoverable()`, the function #206 fixes.
+- #205 (Intel build) is DIST-06 in Phase 6 but depends on nothing before it — it may land early as a `/gsd-quick` task.
+- The Sequoia plane (#199/#201) landed outside the phases as bug-driven work; it is recorded as Validated in PROJECT.md, not back-filled as a phase.
 - A probe that overturns an issue's premise is a valid deliverable — ten consecutive 0.9.x cuts were revised on device before code was written.
 
 ### Pending Todos
@@ -67,8 +79,17 @@ None yet.
 ### Blockers/Concerns
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
+- Phase 1 rebase risk: all `spike/arch-review-*` branches are 16 commits behind `develop`, and each one overlaps files the Sequoia plane changed (`doctor.py`, `server.py`, `runtime.py`, `contracts.py`, `mail.py`, `mail_index.py`, `tests/conftest.py`). Expect conflicts. Card 3's shared fixture must absorb `sequoiaify_envelope` and the sidecar.
+- `develop` carries unreleased work since v0.10.1 (#199/#201/#204). The installed daemon does not have it until a release build is installed; release timing stays the operator's call.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
+
+### Roadmap Evolution
+
+- Phase 1 edited: edited fields: success_criteria (5: fixture carries Sequoia shape, byte-identity baseline is pre-cut develop; 6: rebase onto current develop, 16 commits past the spike base)
+- Phase 6 edited: edited fields: requirements (+DIST-06), success_criteria (+6: Intel build, #205)
+- Phase 02.1 inserted after Phase 2: Mail fixes (#206 move/trash timeout + receipt, #208 create_draft from_address) — email before any feature phase (owner, 2026-09-24) (URGENT)
+- Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
 
 ## Deferred Items
 
@@ -80,6 +101,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-28
-Stopped at: ROADMAP.md revised to 6 phases (Contacts + Messages depth moved to v2); REQUIREMENTS.md traceability rewritten (33/33 mapped)
+Last session: 2026-09-24
+Stopped at: All open issues through #208 integrated (40/40 v1 requirements mapped across 7 phases); v2-deferred issues moved to one GitHub milestone
 Resume file: None

@@ -5,7 +5,7 @@
 
 ## v1 Requirements
 
-Requirements for this project. Each maps to roadmap phases. Order of areas = phase order (gate → adapter depth → platform/distribution). Contacts and Messages depth moved to v2 at the 2026-08-28 roadmap review.
+Requirements for this project. Each maps to roadmap phases. Order of areas = phase order (gate → Mail → adapter depth → platform/distribution). Contacts and Messages depth moved to v2 at the 2026-08-28 roadmap review.
 
 ### Gate — land the spiked architecture review, make the suite fail-closed
 
@@ -23,64 +23,74 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
 - [ ] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
 
+### Mail — email work comes before any new or additional feature (owner, 2026-09-24)
+
+- [ ] **MAIL-01**: A full batch within the documented cap (25) finishes on a large IMAP mailbox: the host timeout for `_MOVE`, `_TRASH` and every `_PRESENT` call scales with the batch size (per-message budget × ids), each script's `with timeout` backstop stays ≥ its host cap, and `mail_undo` of a 25-message receipt finishes; device-verified on a 9k+ message mailbox with the watchdog running (#206)
+- [ ] **MAIL-02**: A timeout inside `recoverable()` still leaves a receipt — a `done` record with the unfinished ids as `unknown`, and an error that names the receipt and the safe next steps (re-run the batch; `mail_undo(<receipt>)`), never the generic `NativeTimeout` text (#206)
+- [ ] **MAIL-03**: `create_draft` takes an optional `from_address`, applied the way `send_mail` applies it; the locator reports `from`; the docstring says a new draft is unthreaded and routes replies to `mail_reply`; device-verified with a non-default account, and `mail_reply` keeps the receiving account on a multi-account Mac (#208)
+- [ ] **MAIL-04**: A device probe settles what Mail does with a `from_address` that no account owns; the finding lands in `docs/mail-applescript-facts.md`; if Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and the outbound dry run still makes no native call (#208)
+
 ### Calendar
 
-- [ ] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write
-- [ ] **CAL-02**: Alarms on all-day and recurring all-day events fire on the right day in a non-UTC timezone (device-probed first, not fixed later)
-- [ ] **CAL-03**: User can create/update recurring events with `BYDAY` (incl. ordinals for monthly), `BYMONTHDAY`, `BYMONTH`; shapes EventKit cannot express are rejected loudly as today; accepted shapes are read back over six months and match RFC 5545 expansion
+- [ ] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write (#89)
+- [ ] **CAL-02**: Alarms on all-day and recurring all-day events fire on the right day in a non-UTC timezone (device-probed first, not fixed later) (#89)
+- [ ] **CAL-03**: User can create/update recurring events with `BYDAY` (incl. ordinals for monthly), `BYMONTHDAY`, `BYMONTH`; shapes EventKit cannot express are rejected loudly as today; accepted shapes are read back over six months and match RFC 5545 expansion (#90)
+- [ ] **CAL-04**: `events()` Pointers carry the owning calendar's id in `Pointer.folder` — the token `free_busy(calendars=…)`, `create_event` and `update_event` already take; `calendars()` maps ids to names; unit test on `_event_pointer` with a fake `calendar()` (#207)
 
 ### Reminders
 
-- [ ] **REM-01**: User can delete a reminder by id (`dry_run=True` default, verify-after-write, mirrors `delete_event`)
-- [ ] **REM-02**: User can create a reminder list
-- [ ] **REM-03**: User can read and create subtasks via the public `parentReminder` route (macOS 14+)
-- [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write
+- [ ] **REM-01**: User can delete a reminder by id (`dry_run=True` default, verify-after-write, mirrors `delete_event`) (#92)
+- [ ] **REM-02**: User can create a reminder list (#92)
+- [ ] **REM-03**: User can read and create subtasks via the public `parentReminder` route (macOS 14+) (#91)
+- [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write (#91)
+- [ ] **REM-06**: `reminders()` Pointers carry the owning list's id in `Pointer.folder` — same rule and test shape as CAL-04; `reminder_lists()` maps ids to names (#207)
 
 
 
 ### Notes
 
-- [ ] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code
-- [ ] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies
+- [ ] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code (#93)
+- [ ] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies (#93)
 
 ### Photos
 
-- [ ] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback
-- [ ] **PHO-02**: User can list albums as Pointers
-- [ ] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset)
-- [ ] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes)
+- [ ] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback (#96)
+- [ ] **PHO-02**: User can list albums as Pointers (#96)
+- [ ] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset) (#96)
+- [ ] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes) (#96)
 
 ### Platform
 
 - [ ] **PLAT-01**: Operator can enable/disable adapters per app (e.g. Mail on, Photos off) via a config setting read at daemon start; a disabled adapter's tools are absent, never registered-and-erroring — the same rule as the tiers; `doctor` reports the active set
-- [ ] **PLAT-02**: A localhost dashboard served by the daemon shows grants/`doctor`, `usage`, the audit trail, and the recoverable-plane backups (browsable recovery/history), and exposes the adapter toggles; loopback-only, no framework SPA
+- [ ] **PLAT-02**: A localhost dashboard served by the daemon shows grants/`doctor`, `usage`, the audit trail, and the recoverable-plane backups (browsable recovery/history), and exposes the adapter toggles; loopback-only, no framework SPA (#126)
 
 ### Distribution
 
-- [ ] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path
-- [ ] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog
-- [ ] **DIST-03**: Each release publishes a `.mcpb` bundle for one-click Claude Desktop install
-- [ ] **DIST-04**: The notarized `.app` installs via a Homebrew cask (`brew install --cask …`), with the staple-then-zip order preserved
+- [ ] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path (#113)
+- [ ] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog (#111)
+- [ ] **DIST-03**: Each release publishes a `.mcpb` bundle for one-click Claude Desktop install (#107)
+- [ ] **DIST-04**: The notarized `.app` installs via a Homebrew cask (`brew install --cask …`), with the staple-then-zip order preserved (#107)
 - [ ] **DIST-05**: A companion skill + Claude Code plugin live in-repo (`.claude-plugin/plugin.json`, `skills/<name>/SKILL.md`, `.mcp.json`) so `claude plugin install` wires skill + MCP server config in one step; the same `skills/` layout installs into other agents via `npx skills add elfensky/macos-apps-mcp`; the skill teaches the cockpit workflows (triage reads, pointer citation, draft-review) (#106)
+- [ ] **DIST-06**: `scripts/build_app.sh` builds the bundle on x86_64 (Intel) Macs — on x86_64 only, `cryptography<49` constrains the install (48.0.1, the last universal2 wheel); arm64 keeps current cryptography; the Intel bundle passes its env-free import smoke. Transitive and unused at runtime (`mcp → pyjwt[crypto] → cryptography`). Full Intel daemon deployment still needs a Developer-ID-signed build (#205)
 
 ## v2 Requirements
 
 Deferred. Tracked but not in the current roadmap.
 
 ### Contacts (deferred 2026-08-28 — owner's call at roadmap review)
-- **CON-01**: User can fetch a full, bounded contact card by id — all handles, addresses, birthday, organisation; the notes field is excluded by design (entitlement-gated, crashes updates)
-- **CON-02**: User can fetch their own card (`contacts_me`)
-- **CON-03**: User can update a contact by id (write tier, dry-runnable, audited, verify-after-write); native `CNContactStore` if the daemon's bundle identity is granted Contacts TCC (device spike), else the osascript update path — notes excluded either way
-- **CON-04**: Contact search reads the AddressBook sqlite store when Full Disk Access is present and falls back to AppleScript otherwise; the schema fingerprint covers every column the queries read; `doctor` reports which plane is active
+- **CON-01**: User can fetch a full, bounded contact card by id — all handles, addresses, birthday, organisation; the notes field is excluded by design (entitlement-gated, crashes updates) (#94)
+- **CON-02**: User can fetch their own card (`contacts_me`) (#94)
+- **CON-03**: User can update a contact by id (write tier, dry-runnable, audited, verify-after-write); native `CNContactStore` if the daemon's bundle identity is granted Contacts TCC (device spike), else the osascript update path — notes excluded either way (#94)
+- **CON-04**: Contact search reads the AddressBook sqlite store when Full Disk Access is present and falls back to AppleScript otherwise; the schema fingerprint covers every column the queries read; `doctor` reports which plane is active (#95)
 
 ### Messages (deferred 2026-08-28 — owner's call at roadmap review)
-- **MSG-01**: User can filter `messages_with` and `messages_search` by `since`/`until`
-- **MSG-02**: User can filter for unread incoming messages
-- **MSG-03**: Message Pointers are annotated with attachment name/type when present
-- **MSG-04**: User can search attachments (by contact, date, MIME) as bounded Pointers
-- **MSG-05**: User can save one attachment to disk by id (`mail_files` discipline: derived basename, allowlisted root, no silent overwrite, size cap; never inline bytes)
-- **MSG-06**: User can send an iMessage/SMS (outbound tier: registered only under `allow-send messages`, `dry_run=True` default, dry-run makes no native call); recipient is an id-addressed handle or `chat_id` — no fuzzy auto-pick; iMessage-vs-SMS routing and group chats device-verified like Mail's outbound lifecycle
-- **MSG-07**: User can check whether a handle is iMessage-reachable (ungated read)
+- **MSG-01**: User can filter `messages_with` and `messages_search` by `since`/`until` (#88)
+- **MSG-02**: User can filter for unread incoming messages (#88)
+- **MSG-03**: Message Pointers are annotated with attachment name/type when present (#87)
+- **MSG-04**: User can search attachments (by contact, date, MIME) as bounded Pointers (#87)
+- **MSG-05**: User can save one attachment to disk by id (`mail_files` discipline: derived basename, allowlisted root, no silent overwrite, size cap; never inline bytes) (#87)
+- **MSG-06**: User can send an iMessage/SMS (outbound tier: registered only under `allow-send messages`, `dry_run=True` default, dry-run makes no native call); recipient is an id-addressed handle or `chat_id` — no fuzzy auto-pick; iMessage-vs-SMS routing and group chats device-verified like Mail's outbound lifecycle (#86)
+- **MSG-07**: User can check whether a handle is iMessage-reachable (ungated read) (#86)
 
 ### Safari
 - **SAF-01**: Bookmarks + reading list as Pointers (Bookmarks.plist; reading list needs FDA) (#97)
@@ -97,6 +107,9 @@ Deferred. Tracked but not in the current roadmap.
 - **PLAT-04**: Menubar companion — Swift `MenuBarExtra`, pure client of the daemon (stats, recovery/history, adapter toggles); never a second TCC identity, never Python
 - **PLAT-05**: Network transport + auth for remote MCP clients — Tailscale-bound listener + bearer auth AND an SSE bridge (Home Assistant's MCP Client is SSE-only); dashboard/MCP route auth parity decided before code (#127)
 - **REM-05**: Alarms on reminders (same mechanism as CAL-01)
+
+### Mail
+- **MAIL-05**: Move/trash dry-run previews answered from the Envelope Index (message-id → mailbox url) with no Apple Events; the index can lag Mail, which is why #174's re-check exists (#206 follow-up)
 
 ## Out of Scope
 
@@ -135,13 +148,19 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-11 | Phase 2 | Pending |
 | GATE-12 | Phase 2 | Pending |
 | GATE-13 | Phase 1 | Pending |
+| MAIL-01 | Phase 02.1 | Pending |
+| MAIL-02 | Phase 02.1 | Pending |
+| MAIL-03 | Phase 02.1 | Pending |
+| MAIL-04 | Phase 02.1 | Pending |
 | CAL-01 | Phase 3 | Pending |
 | CAL-02 | Phase 3 | Pending |
 | CAL-03 | Phase 3 | Pending |
+| CAL-04 | Phase 3 | Pending |
 | REM-01 | Phase 3 | Pending |
 | REM-02 | Phase 3 | Pending |
 | REM-03 | Phase 3 | Pending |
 | REM-04 | Phase 3 | Pending |
+| REM-06 | Phase 3 | Pending |
 | NOTE-01 | Phase 4 | Pending |
 | NOTE-02 | Phase 4 | Pending |
 | PHO-01 | Phase 4 | Pending |
@@ -155,14 +174,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIST-03 | Phase 6 | Pending |
 | DIST-04 | Phase 6 | Pending |
 | DIST-05 | Phase 6 | Pending |
+| DIST-06 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 33 total
-- Mapped to phases: 33
+- v1 requirements: 40 total
+- Mapped to phases: 40
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 3: 7 · Phase 4: 6 · Phase 5: 2 · Phase 6: 5
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 9 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
+
+**Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-08-28 after roadmap revision (Contacts + Messages deferred to v2; 33/33 mapped across 6 phases)*
+*Last updated: 2026-09-24 — #206/#208 added as MAIL-01..04 (Phase 02.1, email before features), #207 as CAL-04/REM-06; 40/40 mapped across 7 phases*
