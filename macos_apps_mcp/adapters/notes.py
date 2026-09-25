@@ -761,12 +761,22 @@ class NotesAdapter:
             folder=data.folder,
         )
 
-    def update(self, ident: str, data: NoteData) -> Pointer:
+    def update(self, ident: str, data: NoteData, *, dry_run: bool = False) -> dict:
         """Full-replace a note's title+body by id; the id must survive (verified, #49).
 
         `data.folder` is REFUSED on update — moving a note between folders is not
         supported (a separate op if ever needed); silently ignoring it would let a
         caller believe the note moved. Body transport and verify match `create`.
+
+        `dry_run=True` (D-02) reads the note's CURRENT title (`_read_title_by_id`) and
+        body (`get_bodies`) and reports them against the new title/body SIZES — a read
+        is allowed in this preview (the "no native call" rule is for outbound sends,
+        not this local read), but it makes NO Notes write: `_UPDATE_NOTE` and
+        `body_file` never fire. An unknown id raises the same-shaped `ValueError` the
+        real update's verify step would eventually surface, so the preview can never
+        promise a write the real call would refuse. `notes.snapshot` is title-only
+        (#67), so this is the only before-state a full-replace update gets — reason
+        enough for it to be in the "removes or replaces content" class (GATE-05, D-04).
         """
         if not ident.strip():
             raise ValueError("update_note needs a note id")
@@ -775,6 +785,31 @@ class NotesAdapter:
                 "update_note cannot move a note between folders — omit `folder` "
                 "(the note stays where it is; only title/body are replaced)"
             )
+        if dry_run:
+            title = self._read_title_by_id(ident)
+            if title is None:
+                raise ValueError(f"update_note: unknown note id {ident!r}")
+            bodies = self.get_bodies([ident])
+            current_body = bodies[0]["body"] if bodies else ""
+            current: dict[str, object] = {
+                "title": clean_summary(title) or "(untitled note)",
+                "body_chars": len(current_body),
+            }
+            if "[truncated " in current_body or current_body.startswith(
+                "[not hydrated:"
+            ):
+                current["body_truncated"] = True
+            return {
+                "dry_run": True,
+                "would_update": {
+                    "id": ident,
+                    "current": current,
+                    "new": {
+                        "title": clean_summary(data.title) or "(untitled note)",
+                        "body_chars": len(data.body),
+                    },
+                },
+            }
         html_body = _compose_html(data.title, data.body)
         with runtime.body_file(html_body) as path:
             ident_after = runtime.run_osascript(_UPDATE_NOTE, ident, path).strip()
@@ -788,4 +823,4 @@ class NotesAdapter:
             id=ident_after,
             summary=clean_summary(data.title) or "(untitled note)",
             deeplink="",
-        )
+        ).as_dict()
