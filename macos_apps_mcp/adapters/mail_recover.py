@@ -404,10 +404,12 @@ def recoverable(
     envelope; ``act``, ``_backup`` and ``audit_write`` are never reached. ``present`` is
     now REQUIRED on a dry run — GATE-09 closed the bug where a caller-owned dry run
     (``dedupe_batch``) skipped its own read and previewed "planned" for targets nobody
-    had checked. Passing no ``present`` on a dry run raises ``TypeError`` naming the op;
-    a caller that truly has no read for this op must say so explicitly with
-    ``present=None``, which is then visible at the call site, not a default anyone
-    falls into by omission.
+    had checked. There is no opt-out: Python cannot tell an omitted keyword from an
+    explicit ``present=None``, so a missing ``present`` always raises ``TypeError``
+    naming the op, never silently falls back to an unread preview. An op with genuinely
+    no read for this batch calls ``preview()`` directly instead of going through
+    ``recoverable()`` — that is the one place ``present=None`` is a legitimate,
+    visible-at-the-call-site choice (see ``preview``'s docstring).
 
     ``destination`` is what undo needs to move a batch back FROM. Without it a receipt
     is not replayable, and says so.
@@ -428,8 +430,8 @@ def recoverable(
             raise TypeError(
                 f"recoverable({op!r}, dry_run=True) needs `present` — a dry run reads "
                 "presence itself now; it cannot report a target as planned or present "
-                "when nobody checked. Pass `present=None` explicitly if this op truly "
-                "has no read."
+                "when nobody checked. There is no opt-out here: call `preview()` "
+                "directly (with `present=None`) if this op truly has no read."
             )
         return preview(op, items, destination=destination, present=present)
     # Locating exists to serve exactly two consumers — the file backup, and the lossy
