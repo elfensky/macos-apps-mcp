@@ -42,6 +42,14 @@ class ToolRecord:
     audit_verb: str | None  # audit-log "op" for a write; None for a read
     notice: bool  # untrusted-data notice (#53) rides the result
     backup_notice: bool  # #163 storage advisory rides the result
+    # GATE-05 (D-04): "removes or replaces content" — already the UNION with the
+    # delete_* prefix rule by the time it lands here (_tool composes it before
+    # calling add()), so a tool merely NAMED delete_* is in the class even when its
+    # own call site forgets to say so. Never read this field alone to decide
+    # membership from scratch; registry.removes_content_tools() and the D-04 test
+    # both re-apply the prefix rule on top of it, on purpose (a builder bug must not
+    # silently hide a delete_* tool from the fail-closed check).
+    removes_content: bool
     snapshot: Snapshotter | None  # before-state source for an id-addressed write
     open_world: bool  # MAY reach off-machine without being outbound-by-design
     registered: bool  # False when a gate (READ_ONLY / ALLOW_SEND) skipped it
@@ -127,6 +135,17 @@ def no_notice() -> frozenset[str]:
 
 def backup_notice_tools() -> frozenset[str]:
     return frozenset(n for n, r in TOOLS.items() if r.backup_notice)
+
+
+def removes_content_tools() -> frozenset[str]:
+    """Every ALL-records (registered or not) tool that "removes or replaces
+    content" (GATE-05, D-04) — the class the fail-closed dry-run-default test walks.
+    Iterates every record, not just registered ones: a gated-off delete_* tool must
+    still default dry_run=True on its underlying function, so it is correct the
+    instant a gate reopens it."""
+    return frozenset(
+        n for n, r in TOOLS.items() if r.removes_content or n.startswith("delete_")
+    )
 
 
 def by_adapter(adapter: str) -> frozenset[str]:

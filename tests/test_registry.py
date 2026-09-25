@@ -212,6 +212,7 @@ def test_duplicate_registration_raises():
         audit_verb=None,
         notice=True,
         backup_notice=False,
+        removes_content=False,
         snapshot=None,
         open_world=False,
         registered=True,
