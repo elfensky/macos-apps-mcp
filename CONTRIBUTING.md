@@ -34,17 +34,18 @@ Commits follow conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, 
 ## Branching & releases
 
 - **`develop`** is the trunk — all history lives here. Branch features off it
-  (`feature/<desc>`, `refactor/<desc>`) and PR back with **rebase-and-merge** so
-  `develop` stays linear.
+  (`feature/<desc>`, `refactor/<desc>`) in a worktree under `.worktrees/` — never in
+  the main checkout, see [AGENTS.md](AGENTS.md) ("Worktrees — one lane, always") —
+  and PR back with **rebase-and-merge** so `develop` stays linear.
 - **`main`** is release-only: one merge commit per release, its tree equal to
   `develop`'s release-point tree and its second parent the `develop` commit it was
   cut from. Never commit directly to `main`. `git log --first-parent main` shows the
   release timeline. Releases are annotated tags on `main`.
-- **Cut a release:** bump the version + dated `CHANGELOG.md` section on `develop`,
-  then build the `main` release commit (`git commit-tree`, tree from `develop`'s tip,
-  parents `[previous main commit, develop tip]`), tag it `vX.Y.Z`, and push `main` —
-  which triggers the TestPyPI publish. Promote to PyPI via the `publish.yml`
-  `workflow_dispatch` (`target=pypi`).
+- **Cut a release:** bump the version + dated `CHANGELOG.md` section by PR to
+  `develop`, then merge a PR `develop` → `main` with a merge commit, tag that commit
+  `vX.Y.Z` and push the tag. The merge to `main` triggers the TestPyPI publish.
+  Promote to PyPI via the `publish.yml` `workflow_dispatch` (`target=pypi`). Full
+  procedure: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Non-negotiable invariants
 - **All EventKit / native access goes through `runtime.run_native`** (one serialized worker, `max_workers=1`). Never widen the executor; never touch `EKEventStore` from another thread.

@@ -106,6 +106,7 @@ def read_result(
     cap: int | None = None,
     plane: str | None = None,
     coverage: str | None = None,
+    staleness: str | None = None,
 ) -> dict:
     """The ONE wire shape for a BOUNDED read (#156): ``{results, truncated?, plane?,
     coverage?}``. Lives here next to ``deletion_result`` for the same reason — "what
@@ -130,6 +131,10 @@ def read_result(
     - ``coverage``  present when an empty/short answer is explained by an index that
       does not cover the whole store, so "no matches" is not mistaken for "nothing
       exists".
+    - ``staleness``  present when the store the read answered from is known to LAG
+      the truth (#201: a Message-ID sidecar whose harvest is behind Mail's index) —
+      the answer stands, but recent items may be missing and the note names the
+      catch-up action.
 
     Pointers are serialized through ``as_dict`` here, so a tool stays a one-line
     delegation and the adapter keeps deciding what it actually answered.
@@ -142,6 +147,8 @@ def read_result(
         out["plane"] = plane
     if coverage is not None:
         out["coverage"] = coverage
+    if staleness is not None:
+        out["staleness"] = staleness
     return out
 
 

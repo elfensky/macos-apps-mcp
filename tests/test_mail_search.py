@@ -11,6 +11,13 @@ from macos_apps_mcp.adapters import mail_index
 from macos_apps_mcp.adapters.mail import MAX_MAILS, MailAdapter
 from macos_apps_mcp.errors import NativeError
 
+# #201 PR-B: the WHOLE battery runs twice — once against the native (Tahoe-shaped)
+# store each test builds, and once with that store reshaped to the Sequoia shape
+# (message_global_data WITHOUT message_id_header) plus a Message-ID sidecar, served
+# through the real mode-detection / ATTACH / shadow-view path. Identical assertions
+# in both runs are the structural proof this is ONE code path, not two.
+pytestmark = pytest.mark.usefixtures("envelope_mode")
+
 # Real account UUIDs, not placeholders: _resolve_account short-circuits on the
 # 8-4-4-4-12 shape precisely so a UUID filter never has to ask Mail (and so never
 # launches it), and a fixture with `AAAA` in it would test the osascript path by

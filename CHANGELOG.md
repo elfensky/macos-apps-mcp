@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-25 — Sequoia mail plane
+
 ### Added
 
 - **A recoverable destructive plane for Mail** (`adapters/mail_recover.py`, #159). Every

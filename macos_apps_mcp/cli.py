@@ -15,6 +15,7 @@ _ROLES = (
     "uninstall-agent",
     "allow-send",
     "dedupe-mail",
+    "index-mail-ids",
 )
 
 
@@ -57,6 +58,15 @@ def main() -> None:
         from . import dedupe
 
         dedupe.dedupe_mail(args[1:])
+    elif role == "index-mail-ids":
+        # The initial Message-ID sidecar build (#201) — the mail_index_ids tool's
+        # CLI twin, following the dedupe-mail precedent: a potentially minutes-long
+        # first build is a job a human starts.
+        from .adapters import mail_ids, mail_index
+
+        stats = mail_ids.build(mail_index.require_index_path())
+        for k, v in stats.items():
+            print(f"{k}: {v}")
     else:
         print(f"unknown role {role!r}; one of: {', '.join(_ROLES)}", file=sys.stderr)
         raise SystemExit(2)

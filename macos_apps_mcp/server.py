@@ -636,6 +636,28 @@ def mail_index_bodies(rebuild: bool = False) -> dict:
     return _mail.index_bodies(rebuild=rebuild)
 
 
+# READ TIER ON PURPOSE — same rationale as mail_index_bodies directly above: the only
+# thing this writes is OUR sidecar in OUR state dir, and demoting it would let
+# MACOS_APPS_READ_ONLY freeze the READ surface it exists to enable.
+@_read_tool
+def mail_index_ids(rebuild: bool = False) -> dict:
+    """Build/refresh the Message-ID sidecar that enables the sqlite mail plane on
+    macOS 15 (Sequoia) and earlier (#201). Those systems' Envelope Index never stored
+    the RFC822 Message-ID (#199); this harvests it headers-only from the .emlx files
+    at rest into this server's own sidecar — never launches Mail, never writes in
+    Mail's data. On macOS 26+ the index has the column natively and this build is
+    unnecessary. Safe to re-run: a re-run harvests only what is missing and retries
+    messages whose files had not been downloaded yet; rebuild=True starts from
+    scratch. A full first build reads every message's headers — about a minute per
+    35k messages on a slow disk. Returns {harvested, mapped, total_ids, coverage,
+    skipped_no_file, skipped_no_message_id, rows_without_local_store,
+    high_water_rowid, index_rebuilt}. `coverage` is the number that matters:
+    messages it could not map stay uncitable, exactly as they would be on macOS 26
+    until Mail backfills its own column. Read-only for Mail; needs Full Disk Access
+    (it reads .emlx at rest), NOT Automation."""
+    return _mail.index_ids(rebuild=rebuild)
+
+
 @_read_tool
 def mail_stats(days: int = 30, account: str = "") -> dict:
     """Mail volume, read ratio and top senders over the last `days` (Full Disk Access).

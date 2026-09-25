@@ -15,12 +15,9 @@ Merge commits before that point are historical, not the convention.
 
 ## Feature work
 
-```sh
-git checkout -b feat/<topic> develop
-# … work, commit …
-gh pr create --base develop
-gh pr merge <N> --rebase --delete-branch
-```
+Every change — the release bump included — is made in its own worktree under `.worktrees/` and
+reaches `develop` by a PR; the procedure is in [AGENTS.md](../AGENTS.md) ("Worktrees — one lane,
+always"). The main checkout never branches or commits.
 
 Rebase-merge, always — `--merge` would put a bubble on the trunk, `--squash` would collapse
 commits whose messages are written to stand alone.
@@ -34,10 +31,14 @@ reporting the wrong version).
 - `pyproject.toml` → `version = "X.Y.Z"`
 - `packaging/Info.plist` → `CFBundleShortVersionString`
 
+Make the bump in a worktree (`.worktrees/release-X.Y.Z`, branch `chore/release-X.Y.Z`) and land it
+on `develop` by PR like any other change:
+
 ```sh
 uv run pytest tests/test_packaging.py
 git commit -am "chore(release): X.Y.Z — <milestone name>"
-git push origin develop
+git push -u origin HEAD && gh pr create --base develop --fill
+gh pr checks --watch --required && gh pr merge --rebase --delete-branch
 ```
 
 **2. Verify develop is green** — the tree you are about to release, not one from earlier:
@@ -48,18 +49,20 @@ MACOS_APPS_ALLOW_SEND=mail uv run pytest
 uv run ruff check . && uv run ruff format --check .
 ```
 
-**3. Merge to main and tag.** `--no-ff` is required: the merge commit *is* the release marker, and
-the tag points at it.
+**3. Merge to main and tag.** The release cut is a PR `develop` → `main`, merged with a merge
+commit: the merge commit *is* the release marker, and the tag points at it. The `main` ruleset
+allows only that merge method — a rebase-merge would rewrite the SHAs and fork `main` from
+`develop`. Never pass `--delete-branch` here: the head branch is `develop`.
 
 ```sh
-git checkout main && git pull
-git merge --no-ff develop -m "Release vX.Y.Z — <milestone name>"
-git tag -a vX.Y.Z -m "vX.Y.Z — <milestone name>"
-git push origin main --follow-tags
-git checkout develop
+gh pr create --base main --head develop --title "Release vX.Y.Z — <milestone name>" --body ""
+gh pr checks --watch --required && gh pr merge --merge --subject "Release vX.Y.Z — <milestone name>"
+git fetch -q origin
+git tag -a vX.Y.Z origin/main -m "vX.Y.Z — <milestone name>"
+git push origin vX.Y.Z
 ```
 
-Pushing main triggers **TestPyPI** automatically. Production PyPI is a deliberate manual step —
+Merging to main triggers **TestPyPI** automatically. Production PyPI is a deliberate manual step —
 `workflow_dispatch` with `target=pypi` — because PyPI uploads are permanent. Auth is Trusted
 Publishing (OIDC); there are no stored tokens.
 
@@ -95,7 +98,7 @@ not close a milestone just because a same-numbered release went out.
 - [ ] Version bumped in `pyproject.toml` **and** `packaging/Info.plist`
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
-- [ ] Merged to `main` with `--no-ff`, tagged `vX.Y.Z`, pushed with `--follow-tags`
+- [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha
