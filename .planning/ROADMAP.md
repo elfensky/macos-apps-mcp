@@ -54,12 +54,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. Mail's plane holds under the new seam: `query_*` executors run through the shared `tests/envelope.py` fixture (schema carrying `m.size`, `message_references` and every other column read, `HEADER_FINGERPRINT` covering them; the fixture carries both the native shape and the Sequoia shape — `sequoiaify_envelope` plus the #201 sidecar), `recoverable(...)` runs its own preflight so `dedupe_batch(dry_run=True)` cannot report "planned" for unchecked targets and a dry run without a stated `present` is an error, the script-timeout tripwire passes with `_DEDUPE` fixed — verified on a scratch mailbox with the watchdog running, dry-run envelopes and osascript argv byte-identical to `develop` before the cut (not 0.10.1: #201 changed `mail.py` after the tag).
   6. The cuts land 1 → 7 → 5 → 2 by rebasing each onto the previous PR (Mail-scoped 3/4/9 in parallel); after cards 5 and 2 a rebuilt, restarted daemon answers `doctor().version` with the new version and one outbound dry run still reports gated correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted. The first card rebases onto current `develop`: the spikes are 16 commits behind, and the #199/#201 Sequoia plane changed `doctor.py`, `server.py`, `runtime.py`, `contracts.py`, `mail.py`, `mail_index.py` and `tests/conftest.py` — every card touches at least one of them.
 
-**Plans**: 14 plans in 11 waves
+**Plans**: 1/14 plans executed in 11 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Pre-gate release v0.11.0: bump PR, owner-gated cut + tag, notarized build, daemon install, doctor proof (D-05)
+- [x] 01-01-PLAN.md — Pre-gate release v0.11.0: bump PR, owner-gated cut + tag, notarized build, daemon install, doctor proof (D-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -201,7 +201,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Gate — Land the Spiked Architecture Cuts | 0/14 | Planned | - |
+| 1. Gate — Land the Spiked Architecture Cuts | 1/14 | In Progress|  |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 0/TBD | Not started | - |
 | 02.1. Mail Fixes (INSERTED) | 0/TBD | Not started | - |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
