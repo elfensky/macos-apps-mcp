@@ -119,6 +119,7 @@ def _tool(
     audit: str | None = None,
     notice: bool = True,
     backup_notice: bool = False,
+    removes_content: bool = False,
     snapshot: Snapshotter | None = None,
     open_world: bool = False,
     guard: bool = True,
@@ -133,7 +134,9 @@ def _tool(
     back from ``registry.TOOLS``: ``audit`` (the audit-log verb — derived from the
     create/update/delete/complete prefix, REQUIRED otherwise, never a silent
     ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — read per
-    call by ``notices.UntrustedDataNotice``), ``snapshot`` (the
+    call by ``notices.UntrustedDataNotice``), ``removes_content`` (GATE-05, D-04 —
+    "removes or replaces content"; a ``delete_*``-named tool joins this class
+    automatically even when the call site forgets to say so), ``snapshot`` (the
     adapter answering ``snapshot(id)`` for before-state, #67), ``open_world``,
     ``permission`` (the grant(s) the docstring must name), ``guard`` (False = no
     native call, so no ``NativeError`` -> ``ToolError`` wrap — ping/now/usage).
@@ -168,6 +171,7 @@ def _tool(
                 audit_verb=registry.derive_audit_verb(name, tier, audit),
                 notice=notice,
                 backup_notice=backup_notice,
+                removes_content=removes_content or name.startswith("delete_"),
                 snapshot=snapshot,
                 open_world=open_world,
                 registered=registered,
@@ -699,10 +703,11 @@ def drafts() -> dict:
 
 
 @_write_tool(snapshot=_mail, adapter="mail", permission="Automation")
-def delete_draft(id: str, dry_run: bool = False) -> dict:
-    """Delete one Mail draft by its message-id (from drafts()). `dry_run=True` previews
-    the draft that WOULD be deleted (pointer, no mutation). Destructive but LOCAL — this
-    deletes an unsent draft, it never sends. Needs Automation access for Mail."""
+def delete_draft(id: str, dry_run: bool = True) -> dict:
+    """Delete one Mail draft by its message-id (from drafts()). `dry_run` DEFAULTS TO
+    TRUE — previews the draft that WOULD be deleted (pointer, no mutation); pass
+    `dry_run=false` to delete. Destructive but LOCAL — this deletes an unsent draft, it
+    never sends. Needs Automation access for Mail."""
     return _mail.delete_draft(id, dry_run=dry_run)
 
 
@@ -728,6 +733,7 @@ def create_mailbox(name: str, account: str) -> dict:
     adapter="mail",
     permission=("Automation", "Full Disk Access"),
     backup_notice=True,
+    removes_content=True,
 )
 def move_mail(
     ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
@@ -761,6 +767,7 @@ def move_mail(
     adapter="mail",
     permission=("Automation", "Full Disk Access"),
     backup_notice=True,
+    removes_content=True,
 )
 def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
@@ -812,6 +819,7 @@ def mail_duplicates(limit: int = 25) -> dict:
     adapter="mail",
     permission=("Automation", "Full Disk Access"),
     backup_notice=True,
+    removes_content=True,
 )
 def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
@@ -1174,22 +1182,21 @@ def update_event(
 
 
 @_write_tool(snapshot=_calendar, adapter="calendar", permission="EventKit")
-def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dict:
+def delete_event(id: str, span: str | None = None, dry_run: bool = True) -> dict:
     """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
     'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
-    for single events. `dry_run=True` previews the event that WOULD be deleted (pointer,
-    no mutation) — call it first to confirm the target before the real delete.
+    for single events. `dry_run` DEFAULTS TO TRUE — previews the event that WOULD be
+    deleted (pointer, no mutation); pass `dry_run=false` to delete.
     Destructive; needs EventKit (Calendar) access. `id` from events."""
     return _calendar.delete_event(id, span=span, dry_run=dry_run)
 
 
 @_write_tool(snapshot=_notes, adapter="notes", permission="Automation")
-def delete_note(
-    id: str, expect_title: str | None = None, dry_run: bool = False
-) -> dict:
+def delete_note(id: str, expect_title: str | None = None, dry_run: bool = True) -> dict:
     """Delete a note by id → Recently Deleted (recoverable ~30 days). Destructive.
     Pass expect_title to verify the target before deleting (content-verify first).
-    `dry_run=True` previews the note that WOULD be deleted (pointer, no mutation).
+    `dry_run` DEFAULTS TO TRUE — previews the note that WOULD be deleted (pointer, no
+    mutation); pass `dry_run=false` to delete.
     Needs Automation access for Notes. `id` from notes / notes_all."""
     return _notes.delete(id, expect_title, dry_run=dry_run)
 
