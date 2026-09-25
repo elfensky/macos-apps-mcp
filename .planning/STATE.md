@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: 01
-current_phase_name: gate-land-the-spiked-architecture-cuts
+current_phase_name: Gate — Land the Spiked Architecture Cuts
 status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-09-25T10:15:53.349Z"
-last_activity: 2026-09-24
-last_activity_desc: Phase 02.1 (Mail fixes,
-state_head: e9ede6c631e81e81b546d0e51964c6343fb54156
+stopped_at: Completed 01-01-PLAN.md — v0.11.0 cut, notarized, installed and proven
+last_updated: "2026-09-25T11:41:17.956Z"
+last_activity: 2026-09-25
+last_activity_desc: Phase 01 execution started
+state_head: 8682676079a6a70e283e52d04baa7f41d9636dcb
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 14
-  completed_plans: 0
+  completed_plans: 1
 ---
 
 # Project State
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 1 — Gate: land the spiked architecture cuts
+**Current focus:** Phase 01 — Gate — Land the Spiked Architecture Cuts
 
 ## Current Position
 
-Phase: 01 (gate-land-the-spiked-architecture-cuts) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
+Phase: 01 (Gate — Land the Spiked Architecture Cuts) — EXECUTING
+Plan: 2 of 14
 Status: Ready to execute
-Last activity: 2026-09-24 — Phase 02.1 (Mail fixes, #206/#208) inserted after the gate so email comes before any feature phase; #207 added to Phase 3; #205 is DIST-06; #180 is a Key Decision; Sequoia plane recorded as Validated
+Last activity: 2026-09-25 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -54,6 +54,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 11min | 3 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -71,6 +76,8 @@ Recent decisions affecting current work:
 - #205 (Intel build) is DIST-06 in Phase 6 but depends on nothing before it — it may land early as a `/gsd-quick` task.
 - The Sequoia plane (#199/#201) landed outside the phases as bug-driven work; it is recorded as Validated in PROJECT.md, not back-filled as a phase.
 - A probe that overturns an issue's premise is a valid deliverable — ten consecutive 0.9.x cuts were revised on device before code was written.
+- [Phase 01]: Release cut: PR develop→main merged with --merge (never rebase, never --delete-branch since head=develop); tag the merge commit; build only in a detached tag worktree; re-zip after stapling.
+- [Phase 01]: One-off daemon proofs live at .worktrees/.daemon_probe.py (git-ignored), reused across plans 01-10 and 01-14 instead of rewritten per plan.
 
 ### Pending Todos
 
@@ -101,6 +108,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T22:11:04.894Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-gate-land-the-spiked-architecture-cuts/01-CONTEXT.md
+Last session: 2026-09-25T11:41:17.935Z
+Stopped at: Completed 01-01-PLAN.md — v0.11.0 cut, notarized, installed and proven
+Resume file: None
