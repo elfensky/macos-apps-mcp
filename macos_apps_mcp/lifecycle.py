@@ -5,7 +5,7 @@ re-launching Mail.app forever (patrickfreyer #58, python-sdk #526). We watch our
 parent pid and hard-exit on reparent; on every exit path we also terminate any
 in-flight osascript child via runtime's child registry (the AppleScript
 ``with timeout`` in each template is the backstop for when we can't). Installed by
-the server entry point, NOT runtime.bootstrap(), so importing a module or running
+the server entry point, NOT eventkit.bootstrap(), so importing a module or running
 unit tests never starts a watcher or grabs SIGTERM.
 """
 

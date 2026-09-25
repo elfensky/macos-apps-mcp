@@ -45,7 +45,8 @@ native data-plane adapter, so clean module boundaries are load-bearing.
 macos_apps_mcp/
   server.py        # FastMCP app: @mcp.tool() registrations = thin dispatch to adapters
   contracts.py     # Pointer + PointerSource Protocol (reads); typed write dataclasses
-  runtime.py       # the single serialized EventKit worker thread + native-call dispatch
+  runtime.py       # the single serialized native worker thread + osascript/sqlite dispatch
+  eventkit.py      # EKEventStore, NSDate/RRULE coercion, TCC consent — on runtime's worker
   errors.py        # pure NativeError taxonomy + write-policy helpers (no native imports)
   text.py          # pure text hygiene: control-strip, bounded truncation, match/verify norm
   audit.py         # write-audit JSONL trail + per-tool usage tally (storage, schema, middleware)

@@ -392,3 +392,47 @@ def test_body_file_deletes_on_exception():
     except RuntimeError:
         pass
     assert not os.path.exists(path)  # deleted even when the script raises
+
+
+# --- GATE-02: runtime's public surface is exactly the native door -------------------
+
+
+def test_runtime_public_surface_is_the_native_door(monkeypatch):
+    # The public names runtime defines: callables whose __module__ is this module,
+    # plus the logger `log` — excludes imported modules/functions and anything
+    # starting with "_". A card-7 regression (a moved name left behind, or a new
+    # public name added without updating eventkit.py) fails this test immediately.
+    #
+    # `monkeypatch` here is the SAME function-scoped fixture instance the autouse
+    # `_no_real_osascript` seam lock (conftest.py) already used to patch
+    # run_osascript/body_file/tracked_run to `_refuse` — undo() restores the real
+    # bindings so this introspects the module's actual surface, not the test-time fake.
+    monkeypatch.undo()
+    import inspect
+
+    public = set()
+    for name, val in vars(runtime).items():
+        if name.startswith("_"):
+            continue
+        if name == "log":
+            public.add(name)
+            continue
+        if (
+            inspect.isfunction(val)
+            and getattr(val, "__module__", None) == "macos_apps_mcp.runtime"
+        ):
+            public.add(name)
+    assert public == {
+        "run_native",
+        "on_worker",
+        "app_process_info",
+        "terminate_children",
+        "tracked_run",
+        "run_osascript",
+        "body_file",
+        "verify_sqlite_schema",
+        "read_via_sqlite",
+        "mac_region",
+        "log",
+    }
+    assert not hasattr(runtime, "EK")
