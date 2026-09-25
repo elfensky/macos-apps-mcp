@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters.notes import (
     MAX_BODIES,
     MAX_NOTES,
@@ -91,7 +92,8 @@ def test_delete_rejects_whitespace():
 def test_delete_passes_id_and_title(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.notes.run_osascript",
+        runtime,
+        "run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
     NotesAdapter().delete("N-1", expect_title="Milk")
@@ -101,7 +103,8 @@ def test_delete_passes_id_and_title(monkeypatch):
 def test_delete_without_title_passes_only_id(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.notes.run_osascript",
+        runtime,
+        "run_osascript",
         lambda script, *args: calls.append(args) or "",
     )
     out = NotesAdapter().delete("N-1")
@@ -113,7 +116,7 @@ def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
     # #52: a hydrated body is control-stripped but keeps its line/tab structure (it is
     # legitimately multi-line — unlike a one-line summary, it must not be flattened).
     raw = "N-1\x1fLine1\nLine2\x00\tend\x1e"
-    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: raw)
     out = NotesAdapter().get_bodies(["N-1"])
     assert out == [{"id": "N-1", "body": "Line1\nLine2\tend"}]
 
@@ -125,7 +128,7 @@ def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
 
     huge = "z" * (BODY_HARD_MAX + 1)
     raw = f"N-1\x1f{huge}\x1eN-2\x1fok body\x1e"
-    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", lambda *a: raw)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: raw)
     out = NotesAdapter().get_bodies(["N-1", "N-2"])
     assert out[0]["id"] == "N-1" and out[0]["body"].startswith("[not hydrated:")
     assert out[1] == {"id": "N-2", "body": "ok body"}
@@ -143,7 +146,7 @@ def test_delete_dry_run_reads_title_and_deletes_nothing(monkeypatch):
         calls.append((script, args))
         return "Groceries"  # the preview script returns the live title
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     out = NotesAdapter().delete("N-1", dry_run=True)
     # C5d: the adapter owns the deletion envelope — tools pass it through
     assert out["dry_run"] is True
@@ -161,7 +164,8 @@ def test_delete_dry_run_delegates_expect_title_guard_to_applescript(monkeypatch)
 
     calls = []
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.notes.run_osascript",
+        runtime,
+        "run_osascript",
         lambda script, *a: calls.append((script, a)) or "Groceries",
     )
     NotesAdapter().delete("N-1", expect_title="groceries", dry_run=True)
@@ -183,7 +187,7 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
         scripts.append(script)
         raise NativeError("osascript failed: note title does not match expect_title")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.notes.run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     with pytest.raises(NativeError, match="does not match expect_title"):
         NotesAdapter().delete("N-1", expect_title="Wrong", dry_run=True)
     assert _DELETE not in scripts  # a mismatch previews nothing and deletes nothing
@@ -375,7 +379,7 @@ def test_get_all_fallback_caps_at_max_notes(tmp_path, monkeypatch):
         f"x-coredata://S/ICNote/p{i}{US}iCloud / Notes{US}N{i}{RS}"
         for i in range(MAX_NOTES + 10)
     )
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
     assert len(NotesAdapter().get_all()) == MAX_NOTES
 
 
@@ -474,7 +478,7 @@ def test_search_fallback_enumerates_and_folds(tmp_path, monkeypatch):
         f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Café résumé{RS}"
         f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Other{RS}"
     )
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_pointers("cafe resume")
     assert [p.id for p in ptrs] == ["x-coredata://S/ICNote/p1"]
 
@@ -495,7 +499,7 @@ def test_search_fallback_ignores_untitled_placeholder(tmp_path, monkeypatch):
         f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}{RS}"  # untitled (empty title)
         f"x-coredata://S/ICNote/p2{US}iCloud / Notes{US}Shopping{RS}"
     )
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
     assert NotesAdapter().get_pointers("note") == []  # placeholder must not match
     assert NotesAdapter().get_pointers("untitled") == []
 
@@ -511,7 +515,7 @@ def test_schema_drift_falls_back_to_applescript(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
     canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}From AppleScript{RS}"
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
     ptrs = NotesAdapter().get_all()
     assert [p.summary for p in ptrs] == ["From AppleScript"]  # the fallback ran
     assert ptrs[0].folder == "iCloud / Notes"
@@ -524,7 +528,7 @@ def test_missing_fda_falls_back_to_applescript(notestore, monkeypatch):
     os.chmod(notestore, 0o000)
     try:
         canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Fallback{RS}"
-        monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: canned)
+        monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
         ptrs = NotesAdapter().get_all()
         assert [p.summary for p in ptrs] == ["Fallback"]
     finally:
@@ -601,7 +605,7 @@ def test_get_bodies_gap_fills_undecodable_via_applescript(notestore, monkeypatch
     # gap-filled via AppleScript, so it is NOT silently dropped.
     pid = "x-coredata://STORE-UUID/ICNote/p5"
     monkeypatch.setattr(
-        notes_mod, "run_osascript", lambda *a: f"{pid}\x1ffrom applescript\x1e"
+        runtime, "run_osascript", lambda *a: f"{pid}\x1ffrom applescript\x1e"
     )
     out = NotesAdapter().get_bodies([pid])
     assert out == [{"id": pid, "body": "from applescript"}]
@@ -617,9 +621,7 @@ def test_get_bodies_store_unavailable_falls_back_whole_batch(tmp_path, monkeypat
     conn.commit()
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
-    monkeypatch.setattr(
-        notes_mod, "run_osascript", lambda *a: "N-1\x1ffallback body\x1e"
-    )
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: "N-1\x1ffallback body\x1e")
     out = NotesAdapter().get_bodies(["N-1"])
     assert out == [{"id": "N-1", "body": "fallback body"}]
 
@@ -628,7 +630,7 @@ def test_get_bodies_foreign_uuid_id_not_mis_attributed(notestore, monkeypatch):
     # a stale/foreign id whose pN collides with a local note must NOT get that local
     # note's body — the store UUID must match. Here AppleScript resolves nothing → the
     # foreign id is simply absent (never the local p3 body).
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: "")
     out = NotesAdapter().get_bodies(["x-coredata://OTHER-UUID/ICNote/p3"])
     assert out == []  # not [{'…OTHER…/p3', 'Milk, eggs, bread — …'}]
 
@@ -640,7 +642,7 @@ def test_get_bodies_gap_fill_failure_keeps_sqlite_bodies(notestore, monkeypatch)
     def boom(*a):
         raise AutomationDenied("Automation not granted")
 
-    monkeypatch.setattr(notes_mod, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     # p3 decodes via sqlite (ZICNOTEDATA 99); p5 has no body row → gap-fill → raises →
     # suppressed, so p3 still comes back.
     out = NotesAdapter().get_bodies(
@@ -667,12 +669,12 @@ def test_body_table_drift_keeps_enumeration_working(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     monkeypatch.setattr(notes_mod, "NOTESTORE", path)
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")  # inert for get_all
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: "")  # inert for get_all
     ids = {p.id for p in NotesAdapter().get_all()}  # sqlite still serves enumeration
     assert "x-coredata://STORE-UUID/ICNote/p3" in ids
     # get_bodies drifts (needs ZICNOTEDATA) → AppleScript fallback
     monkeypatch.setattr(
-        notes_mod,
+        runtime,
         "run_osascript",
         lambda *a: "x-coredata://STORE-UUID/ICNote/p3\x1ffallback body\x1e",
     )
@@ -803,12 +805,12 @@ def test_applescript_title_unknown_id_returns_none(monkeypatch):
     # the AppleScript fallback honors _read_title_by_id's None-if-not-found contract:
     # _TITLE_BY_ID returns "" for an unknown/stale id → None here (like the sqlite
     # path), never a raise — so snapshot() stays Pointer|None on the no-FDA path too.
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: "")
     assert NotesAdapter()._applescript_title("x-coredata://S/ICNote/p999") is None
 
 
 def test_applescript_title_found(monkeypatch):
-    monkeypatch.setattr(notes_mod, "run_osascript", lambda *a: "Hello")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: "Hello")
     assert NotesAdapter()._applescript_title("x-coredata://S/ICNote/p1") == "Hello"
 
 
@@ -818,11 +820,19 @@ def test_update_refuses_folder(monkeypatch):
     def boom(*a, **kw):
         raise AssertionError("no osascript call may fire when folder is refused")
 
-    monkeypatch.setattr(notes_mod, "run_osascript", boom)
+    monkeypatch.setattr(runtime, "run_osascript", boom)
     with pytest.raises(ValueError, match="cannot move a note"):
         NotesAdapter().update(
             "x-coredata://S/ICNote/p1", NoteData(title="T", folder="Work")
         )
+
+
+def test_create_without_fakes_is_refused():
+    # GATE-01 end-to-end proof: notes' write path reaches the qualified seam
+    # (runtime.body_file / runtime.run_osascript), so an unfaked unit test hits the
+    # conftest lock instead of writing a real tempfile / spawning a real osascript.
+    with pytest.raises(AssertionError, match="body_file|run_osascript"):
+        NotesAdapter().create(NoteData(title="t"))
 
 
 def test_parse_all_absent_title_and_folder_fall_back():

@@ -9,8 +9,8 @@ is slow — a cold search takes ~20s); user input via argv (no injection).
 
 from __future__ import annotations
 
+from .. import runtime
 from ..contracts import Pointer
-from ..runtime import run_osascript
 from ..text import (
     STRIP_FRAMING,
     Field,
@@ -61,4 +61,4 @@ class PhotosAdapter:
         q = query.strip()
         if not q:
             raise ValueError("photos read needs a search string (got an empty query)")
-        return _parse(run_osascript(_SEARCH, q))[:MAX_PHOTOS]
+        return _parse(runtime.run_osascript(_SEARCH, q))[:MAX_PHOTOS]
