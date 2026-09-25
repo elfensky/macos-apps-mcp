@@ -17,6 +17,8 @@ batch that exactly one copy survives.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from macos_apps_mcp import dedupe, runtime
@@ -25,10 +27,28 @@ from macos_apps_mcp.adapters import mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
 from macos_apps_mcp.errors import NativeError
 from macos_apps_mcp.text import RS, US
+from tests.envelope import SCHEMA, Envelope
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 BOX = f"imap://{ACCT}/Travel"
 TRASH = f"imap://{ACCT}/Trash"
+
+
+@pytest.fixture
+def blank_envelope(tmp_path, monkeypatch, envelope_mode):
+    """Like ``fake_envelope`` (tests/conftest.py), but a SCHEMA-only store with no
+    seed_base rows: this file's stubs-turned-real-queries need exact control over
+    row counts (GATE-08's "route the store-compensating stubs through the fixture"),
+    and layering onto seed_base's own canonical duplicates would shift them. Still
+    parametrized over envelope_mode, so these queries get real native+sidecar
+    coverage too."""
+    db = tmp_path / "Envelope Index"
+    conn = sqlite3.connect(db)
+    conn.executescript(SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    return Envelope(db)
 
 
 @pytest.fixture
@@ -314,26 +334,28 @@ def test_cross_account_plan_leaves_same_account_copies_to_140():
     assert plan["skipped"] == []
 
 
-def test_cross_account_pass_speaks_mails_id_spelling_not_sqlites(monkeypatch):
+def test_cross_account_pass_speaks_mails_id_spelling_not_sqlites(
+    monkeypatch, blank_envelope
+):
     # The index stores `<a@b>`; AppleScript's `message id` reports `a@b`. Feeding the
     # bracketed form downstream does NOT fail loudly — the deletes match nothing and
     # every keeper reads as missing. Caught on device, so it is pinned here.
-    rows = [
-        {
-            "message_id": "<a@x>",
-            "rowid": 1,
-            "account": KEEP,
-            "mailbox_url": f"imap://{KEEP}/Archive",
-        },
-        {
-            "message_id": "<a@x>",
-            "rowid": 2,
-            "account": OTHER,
-            "mailbox_url": f"imap://{OTHER}/Archive",
-        },
-    ]
-    monkeypatch.setattr(mail_index, "query_cross_account_rows", lambda: rows)
-    monkeypatch.setattr(mail_index, "query_cross_account_summary", lambda: [])
+    #
+    # A real cross-account duplicate (GATE-08): one Message-ID, one copy under KEEP,
+    # one under OTHER — query_cross_account_rows() runs for real over this store,
+    # not a stub standing in for it.
+    mb_keep = blank_envelope.add_mailbox(f"imap://{KEEP}/Archive")
+    mb_other = blank_envelope.add_mailbox(f"imap://{OTHER}/Archive")
+    blank_envelope.execute("INSERT INTO subjects VALUES (1,'Duplicate')")
+    blank_envelope.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES (1,'<a@x>')"
+    )
+    blank_envelope.add_message(
+        ROWID=1, subject=1, global_message_id=1, mailbox=mb_keep, deleted=0
+    )
+    blank_envelope.add_message(
+        ROWID=2, subject=1, global_message_id=1, mailbox=mb_other, deleted=0
+    )
     monkeypatch.setattr(mail_index, "body_fingerprints", lambda ids: {1: "h", 2: "h"})
     seen = {}
 
@@ -458,23 +480,30 @@ def test_no_pruning_code_exists_anywhere_in_the_plane():
 # --- the report tool (#140) ----------------------------------------------------------
 
 
-def test_mail_duplicates_reports_and_points_at_the_cli(monkeypatch):
-    monkeypatch.setattr(
-        mail_index,
-        "query_duplicate_summary",
-        lambda: [{"mailbox_url": BOX, "total": 10, "distinct_": 4, "redundant": 6}],
+def test_mail_duplicates_reports_and_points_at_the_cli(blank_envelope):
+    # A real duplicate set in ONE mailbox, one account (GATE-08): query_duplicate_
+    # summary/offenders/cross_account_summary all run for real over this store —
+    # <a@x> x3 (the worst offender), <b@x> x2, <c@x> x2, <d@x> x2: total=9,
+    # distinct=4, redundant=5. One account only, so cross_account is empty by
+    # construction, same as the canned `[]` this test used to stub.
+    mb = blank_envelope.add_mailbox(BOX)
+    blank_envelope.execute(
+        "INSERT INTO subjects VALUES (1,'hi'),(2,'b subj'),(3,'c subj'),(4,'d subj')"
     )
-    monkeypatch.setattr(
-        mail_index,
-        "query_duplicate_offenders",
-        lambda limit: [
-            {"mailbox_url": BOX, "message_id": "<a@x>", "subject": "hi", "copies": 3}
-        ],
+    blank_envelope.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES"
+        " (1,'<a@x>'),(2,'<b@x>'),(3,'<c@x>'),(4,'<d@x>')"
     )
-    monkeypatch.setattr(mail_index, "query_cross_account_summary", lambda: [])
+    for gid, subject, copies in [(1, 1, 3), (2, 2, 2), (3, 3, 2), (4, 4, 2)]:
+        for _ in range(copies):
+            blank_envelope.add_message(
+                subject=subject, global_message_id=gid, mailbox=mb, deleted=0
+            )
     out = MailAdapter().duplicates()
-    assert out["redundant"] == 6
+    assert out["redundant"] == 5
     assert out["worst"][0]["id"] == "a@x"  # bare, citable
+    assert out["worst"][0]["copies"] == 3
+    assert out["cross_account"] == []
     assert "dedupe-mail" in out["note"]
 
 
