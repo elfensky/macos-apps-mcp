@@ -253,10 +253,12 @@ body-transport helper.
 ```python
 # WRONG — a copy in this module's namespace escapes the conftest lock
 from ..runtime import tracked_run
+
 proc = tracked_run(["shortcuts", "list"], timeout=10.0)
 
 # RIGHT — qualified, one patch point for every test
 from .. import runtime
+
 proc = runtime.tracked_run(["shortcuts", "list"], timeout=10.0)
 ```
 `[VERIFIED: macos_apps_mcp/adapters/shortcuts.py:21]` current develop still has
@@ -309,10 +311,15 @@ def _presence(src: tuple[str, str]):
     """The plane's `present` read for one source mailbox."""
     return lambda targets: _present_ids(src, [t.id for t in targets])
 
+
 # move_mail / trash_mail — same 6-line dry-run branch DELETED from each caller,
 # folded into recoverable() itself:
 return mail_recover.recoverable(
-    "move", targets, act, dry_run=dry_run, present=_presence(src),
+    "move",
+    targets,
+    act,
+    dry_run=dry_run,
+    present=_presence(src),
     destination=to_mailbox,
 )
 
@@ -321,8 +328,13 @@ return mail_recover.recoverable(
 # "planned" per target and says nobody looked (no Apple Event) — this is the
 # explicit-None escape hatch, not a silent gap.
 return mail_recover.recoverable(
-    "dedupe", targets, act, dry_run=dry_run, present=None,
-    destination=trash, backup=False,
+    "dedupe",
+    targets,
+    act,
+    dry_run=dry_run,
+    present=None,
+    destination=trash,
+    backup=False,
 )
 ```
 `[VERIFIED: macos_apps_mcp/adapters/mail.py:1478-1479]` current develop's `dedupe_batch`

@@ -98,14 +98,27 @@ dataclass field.
 ```python
 # BEFORE (calendar.py:23-33)
 from ..runtime import (
-    container_id, epoch_nsdate, from_nsdate, persisted_recurrence_signature,
-    recurrence_signature, run_native, store, to_nsdate, to_recurrence_rule,
+    container_id,
+    epoch_nsdate,
+    from_nsdate,
+    persisted_recurrence_signature,
+    recurrence_signature,
+    run_native,
+    store,
+    to_nsdate,
+    to_recurrence_rule,
 )
 
 # AFTER — run_native stays a runtime import; everything else moves to eventkit
 from ..eventkit import (
-    container_id, epoch_nsdate, from_nsdate, persisted_recurrence_signature,
-    recurrence_signature, store, to_nsdate, to_recurrence_rule,
+    container_id,
+    epoch_nsdate,
+    from_nsdate,
+    persisted_recurrence_signature,
+    recurrence_signature,
+    store,
+    to_nsdate,
+    to_recurrence_rule,
 )
 from ..runtime import run_native
 ```
@@ -372,8 +385,17 @@ these from `tests.conftest` rather than re-implementing the Sequoia-shape conver
 ```python
 HEADER_FINGERPRINT: dict[str, set[str]] = {
     "messages": {
-        "ROWID", "subject", "sender", "global_message_id", "mailbox",
-        "date_received", "date_sent", "read", "flagged", "deleted", "conversation_id",
+        "ROWID",
+        "subject",
+        "sender",
+        "global_message_id",
+        "mailbox",
+        "date_received",
+        "date_sent",
+        "read",
+        "flagged",
+        "deleted",
+        "conversation_id",
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
@@ -413,7 +435,9 @@ def preview(op: str, targets, *, destination: str | None = None) -> dict:
     _check_op(op)
     items = check_batch(targets)
     out: dict = {
-        "dry_run": True, "op": op, "count": len(items),
+        "dry_run": True,
+        "op": op,
+        "count": len(items),
         "would_affect": [t.as_dict() for t in items],
     }
     if destination is not None:
@@ -424,8 +448,13 @@ def preview(op: str, targets, *, destination: str | None = None) -> dict:
 (`macos_apps_mcp/adapters/mail_recover.py:365-396`, full docstring read):
 ```python
 def recoverable(
-    op: str, targets, act, *,
-    destination: str | None = None, backup: bool = True, allow_lossy: bool = False,
+    op: str,
+    targets,
+    act,
+    *,
+    destination: str | None = None,
+    backup: bool = True,
+    allow_lossy: bool = False,
 ) -> dict:
     """**backup → log → act**, then report what actually happened. ..."""
     _check_op(op)
@@ -587,6 +616,7 @@ update.
 ```python
 # contacts.py:16, photos.py:13, safari.py:11, music.py:16
 from ..runtime import run_osascript
+
 # messages.py:23
 from ..runtime import mac_region, read_via_sqlite, run_osascript
 ```
@@ -691,6 +721,7 @@ larger module count (`>= 9` for adapters alone).
 `messages.py`, `music.py`, `notes.py`, `shortcuts.py` (7 files, verified this session).
 ```python
 from .. import runtime
+
 ...
 runtime.run_osascript(...)
 ```
