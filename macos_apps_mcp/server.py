@@ -1273,7 +1273,7 @@ def set_mode(mode: str, on: bool) -> dict:
 # holds them (it also reads them per call, so ordering is belt-and-suspenders).
 mcp.add_middleware(
     AuditMiddleware(
-        write_tools=registry.write_tools(), snapshot_sources=registry.snapshot_sources()
+        audit_verbs=registry.audit_verbs(), snapshot_sources=registry.snapshot_sources()
     )
 )
 

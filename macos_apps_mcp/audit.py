@@ -5,14 +5,18 @@ Three parts, one seam:
   never raises: auditing must not fail a user's write);
 - **record schema** — what an audit envelope looks like (op, truncated args,
   before/after pointers);
-- **AuditMiddleware** — the central seam: logs an envelope for EVERY write tool, with
-  before-state captured only for id-addressed update/delete/complete tools. Adapters
-  hold no audit logic; before-state comes through the ``Snapshotter`` Protocol
-  (contracts.py). The middleware ACCEPTS its write-tool set and snapshot sources at
-  construction — dependencies accepted, not created — so tests build one with fakes
-  instead of patching server globals. server.py wires it after tool registration, with
-  registries its decorators populated (the middleware also reads them per call, so
-  wiring order can never silently drop coverage).
+- **AuditMiddleware** — the central seam: logs an envelope for EVERY tool named in its
+  audit-verb map, with before-state captured only for id-addressed update/delete/
+  complete tools. Adapters hold no audit logic; before-state comes through the
+  ``Snapshotter`` Protocol (contracts.py). The middleware ACCEPTS its audit-verb map
+  and snapshot sources at construction — dependencies accepted, not created — so tests
+  build one with fakes instead of patching server globals. GATE-06: a write is a KEY
+  of ``audit_verbs``, so a write cannot be tracked without a verb — there is no
+  generic ``"write"`` fallback (the former ``_audit_op`` prefix table this replaces).
+  ``registry.py`` (server.py's one registration record per tool) fills the map at
+  registration; this middleware only reads it, per call. server.py wires it after
+  tool registration, with the registry its decorators populated (the middleware also
+  reads it per call, so wiring order can never silently drop coverage).
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -182,24 +186,6 @@ def usage_report(registered: Iterable[str]) -> dict:
 # --- record schema -----------------------------------------------------------------
 
 
-def _audit_op(tool: str) -> str:
-    for prefix in ("create", "update", "delete"):
-        if tool.startswith(prefix):
-            return prefix
-    return {
-        "complete_reminder": "complete",
-        "run_shortcut": "action",
-        "safari_open": "open",
-        "mail_reply": "reply",
-        # outbound — distinct from the generic "write" so the audit log is filterable
-        # for "what actually left this machine" (M3 review; the log is one of the
-        # three things carrying consent for a send).
-        "send_mail": "send",
-        "reply_all": "send",
-        "forward_mail": "send",
-    }.get(tool, "write")
-
-
 def _audit_args(args: dict) -> dict:
     # truncate long string values so a big note body can't bloat the log
     return {
@@ -232,16 +218,19 @@ class AuditMiddleware(Middleware):
     """Append an audit record for every write; capture before-state on update/delete
     (#67). Central seam — adapters hold no audit logic. All failures are swallowed.
 
-    ``write_tools`` and ``snapshot_sources`` are registries owned by the caller
-    (server.py's tool decorators fill them during registration, before it wires this
-    middleware); the middleware reads them per call, so construction order can't
-    break it either way.
+    ``audit_verbs`` (a tool name -> its audit-log verb) and ``snapshot_sources`` are
+    registries owned by the caller (``registry.py`` fills them during registration,
+    via server.py's ``_tool`` decorator, before it wires this middleware); the
+    middleware reads them per call, so construction order can't break it either way.
+    A tool is a write IFF it is a key of ``audit_verbs`` — the map both selects what
+    gets logged and states under which verb (GATE-06: no separate write-tool set, and
+    no generic ``"write"`` fallback for a verb the caller forgot to state).
     """
 
     def __init__(
-        self, write_tools: set[str], snapshot_sources: dict[str, Snapshotter]
+        self, audit_verbs: Mapping[str, str], snapshot_sources: dict[str, Snapshotter]
     ) -> None:
-        self._write_tools = write_tools
+        self._audit_verbs = audit_verbs
         self._snapshot_sources = snapshot_sources
 
     async def on_call_tool(self, context, call_next):
@@ -264,14 +253,14 @@ class AuditMiddleware(Middleware):
         # before-state is what makes mail_undo and the audit log trustworthy; it does
         # not get cheapened for a spawn. Revisit only if a batch write lands here.
         result = await call_next(context)
-        if tool in self._write_tools and not result.is_error:
+        if tool in self._audit_verbs and not result.is_error:
             try:
                 after = _audit_after(result)
                 audit_write(
                     {
                         "ts": datetime.now().isoformat(timespec="seconds"),
                         "tool": tool,
-                        "op": _audit_op(tool),
+                        "op": self._audit_verbs[tool],
                         "args": _audit_args(args),
                         "target_id": args.get("id") or (after or {}).get("id"),
                         "before": before,
