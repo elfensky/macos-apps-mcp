@@ -111,11 +111,13 @@ def test_audit_op_labels_send_tools_distinctly_from_write():
     assert registry.TOOLS["send_mail"].audit_verb == "send"
     assert registry.TOOLS["reply_all"].audit_verb == "send"
     assert registry.TOOLS["forward_mail"].audit_verb == "send"
-    # unrelated tools are unaffected by the new mapping.
-    verbs = registry.audit_verbs()
-    assert verbs["mail_reply"] == "reply"
-    assert verbs["create_event"] == "create"
-    assert verbs["delete_note"] == "delete"
+    # unrelated tools are unaffected by the new mapping — read straight off the
+    # record. registry.audit_verbs() filters to registered=True, and this fact
+    # (the DERIVED verb) holds regardless of MACOS_APPS_READ_ONLY gating a write
+    # tool off; that filtering is exercised separately (test_registry.py).
+    assert registry.TOOLS["mail_reply"].audit_verb == "reply"
+    assert registry.TOOLS["create_event"].audit_verb == "create"
+    assert registry.TOOLS["delete_note"].audit_verb == "delete"
     # ping is not a write — it carries no audit verb at all.
-    assert "ping" not in verbs
+    assert "ping" not in registry.audit_verbs()
     assert registry.TOOLS["ping"].audit_verb is None
