@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from macos_apps_mcp import doctor, runtime, server
+from macos_apps_mcp import doctor, runtime, tiers
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def _no_live_process_probe(monkeypatch):
 # set before import registers the send tools). The gate-ON half of every claim is
 # pinned by test_gate_on_dispatch.py's subprocess; skipping here loses nothing.
 _gate_off_only = pytest.mark.skipif(
-    bool(server._SEND_REGISTERED),
+    bool(tiers._SEND_REGISTERED),
     reason="valid only in a gate-off process (see test_gate_on_dispatch.py)",
 )
 
@@ -160,11 +160,9 @@ def test_outbound_status_splits_registered_from_configured(monkeypatch):
     # third key, `capable`, was read by nothing and is gone — _SEND_ADAPTERS serves
     # anyone who needs it. The non-empty `registered` case is pinned by the gate-on
     # subprocess in test_gate_on_dispatch.py, the only process where the gate is on.
-    from macos_apps_mcp import server
-
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
-    st = server.outbound_status()
+    st = tiers.outbound_status()
     assert set(st) == {"registered", "configured"}
     assert st["registered"] == []  # the import-time gate was off in this process
     assert st["configured"] == ["mail"]
@@ -229,8 +227,7 @@ def test_the_daemon_outbound_gate_reads_the_toggle_from_argv_alone(
 ):
     """The end the bug actually broke: with no env var at all, argv=daemon and a toggle
     saying `mail`, the gate must be ON."""
-    import macos_apps_mcp.server as srv
-    from macos_apps_mcp import deploy
+    from macos_apps_mcp import deploy, tiers
 
     monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
@@ -240,11 +237,11 @@ def test_the_daemon_outbound_gate_reads_the_toggle_from_argv_alone(
     monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", toggle)
 
     monkeypatch.setattr("sys.argv", ["macos_apps_mcp"])
-    assert srv._allow_send("mail") is False  # stdio: env var is the whole story
+    assert tiers.allow_send("mail") is False  # stdio: env var is the whole story
     monkeypatch.setattr("sys.argv", ["macos_apps_mcp", "daemon"])
-    assert srv._allow_send("mail") is True
-    assert srv._allow_send("messages") is False  # named adapters only
+    assert tiers.allow_send("mail") is True
+    assert tiers.allow_send("messages") is False  # named adapters only
 
     # READ_ONLY still wins unconditionally
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
-    assert srv._allow_send("mail") is False
+    assert tiers.allow_send("mail") is False

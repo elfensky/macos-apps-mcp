@@ -25,7 +25,7 @@ from pathlib import Path
 
 import EventKit as EK
 
-from . import deploy, runtime
+from . import deploy, runtime, tiers
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
@@ -296,13 +296,11 @@ def _build_stamp() -> str:
 
 
 def _outbound_state() -> dict[str, list[str]]:
-    """``server.outbound_status()`` — registered vs configured outbound adapters
-    (#130, C6). Imported LOCALLY: ``server.py`` does ``from .doctor import diagnose``
-    at module level, so a module-level `import server` here would be circular — this
-    is the one place doctor.py reaches into server.py, and it does so lazily."""
-    from . import server
-
-    return server.outbound_status()
+    """``tiers.outbound_status()`` — registered vs configured outbound adapters
+    (#130, C6). doctor.py imports down into tiers.py, never up into server.py — the
+    former lazy reach-in into the server module (a local import inside this very
+    function) is gone (GATE-03)."""
+    return tiers.outbound_status()
 
 
 def _tcc_note(reasons: dict[str, str | None]) -> str:
