@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from macos_apps_mcp.adapters import safari as safari_mod
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters.safari import (
     MAX_TABS,
     SafariAdapter,
@@ -61,7 +61,7 @@ def test_normalize_url_rejects_app_scheme():
 def test_get_tabs_caps_at_max_tabs(monkeypatch):
     # a tab hoarder's windows must not land unbounded in the model's context.
     canned = "".join(f"https://x.com/{i}{US}Page {i}{RS}" for i in range(MAX_TABS + 10))
-    monkeypatch.setattr(safari_mod, "run_osascript", lambda *a: canned)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
     assert len(SafariAdapter().get_tabs()) == MAX_TABS
 
 

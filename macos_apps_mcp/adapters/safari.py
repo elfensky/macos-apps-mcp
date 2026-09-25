@@ -7,8 +7,8 @@ via argv (no injection). Pointers, not page content.
 
 from __future__ import annotations
 
+from .. import runtime
 from ..contracts import Pointer
-from ..runtime import run_osascript
 from ..text import STRIP_FRAMING, Field, clean_summary, parse_framed
 
 MAX_TABS = 50  # cap a tab hoarder's windows; a listing tool, not an export
@@ -90,10 +90,10 @@ class SafariAdapter:
 
         ponytail: post-fetch slice — push the cap into the AppleScript repeat (exit
         repeat past MAX_TABS, cf. contacts) if enumeration itself ever gets slow."""
-        return _parse(run_osascript(_TABS))[:MAX_TABS]
+        return _parse(runtime.run_osascript(_TABS))[:MAX_TABS]
 
     def open_url(self, url: str) -> Pointer:
         """Open ``url`` in a new Safari tab (a new window if none is open)."""
         u = _normalize_url(url)
-        run_osascript(_OPEN, u)
+        runtime.run_osascript(_OPEN, u)
         return Pointer(id=u, summary=clean_summary(f"opened {u}"), deeplink=u)
