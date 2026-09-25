@@ -1,12 +1,12 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T13:50:00.000Z",
+  "timestamp": "2026-09-25T15:30:00.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
-  "plan": "01-08 (wave 5 of 11, owner device session)",
+  "plan": "01-10 (wave 7 of 11, dev-build daemon swap)",
   "task": 1,
-  "total_tasks": 3,
+  "total_tasks": 2,
   "status": "checkpoint",
   "completed_tasks": [
     {
@@ -37,7 +37,7 @@
       "id": "01-05",
       "name": "Card 4: recoverable() owns preflight",
       "status": "done",
-      "commit": "PR #215 open, CI green, review clean, head 9cc4fe5, NOT merged"
+      "commit": "3ba1c9a 0e13eb6 799355c via PR #215 (merged in 01-08)"
     },
     {
       "id": "01-06",
@@ -50,17 +50,29 @@
       "name": "Card 3: shared envelope fixture",
       "status": "done",
       "commit": "1978bdd..26550d3 via PR #217"
+    },
+    {
+      "id": "01-08",
+      "name": "Owner device session",
+      "status": "done",
+      "commit": "card 7 EventKit 7/7; card 4 verified then merged via PR #215 (799355c)"
+    },
+    {
+      "id": "01-09",
+      "name": "Card 5: tier policy",
+      "status": "done",
+      "commit": "c7a9e88 a978551 bd6fe53 via PR #218"
     }
   ],
   "remaining_tasks": [
     {
-      "id": "01-08",
-      "name": "Owner device session: card 7 integration + card 4 scratch mailbox, then merge card 4 (wave 5)",
+      "id": "01-10",
+      "name": "Dev-build daemon swap after card 5 (wave 7)",
       "status": "checkpoint — Task 1 blocking-human go"
     },
     {
-      "id": "01-09..01-14",
-      "name": "Card 5, dev-build check, card 2 A/B/C, final dev-build check (waves 6-11)",
+      "id": "01-11..01-14",
+      "name": "Card 2 A/B/C, final dev-build check and spike cleanup (waves 8-11)",
       "status": "not_started"
     }
   ],
@@ -68,13 +80,8 @@
   "async_jobs": [],
   "human_actions_pending": [
     {
-      "action": "Run /mcp in each Claude Code session, then doctor(): expect version 0.11.0, build f52e9d5",
-      "context": "Plan 01-01 human-check after daemon reinstall",
-      "blocking": false
-    },
-    {
-      "action": "Answer 01-08 Task 1: run-now or later. On run-now, stay at the Mac for TCC prompts and watch Mail.",
-      "context": "D-08 stops 2 and 3",
+      "action": "Answer 01-10 Task 1: swap-now or later. On swap-now, reconnect every Claude Code session with /mcp afterwards.",
+      "context": "D-08 stop 4, first half",
       "blocking": true
     }
   ],
@@ -112,6 +119,6 @@
     "?? .planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/ (another session)",
     "?? .planning/state.json (another session)"
   ],
-  "next_action": "Owner answers 01-08 Task 1. On run-now: /gsd-execute-phase 1, which dispatches 01-08 with the go recorded.",
-  "context_notes": "Local develop is 5 .planning commits ahead of origin/develop, not pushed. Sync with `git pull --rebase --autostash`. Lanes: .worktrees/gate-card-4-recoverable-preflight (locked, 9cc4fe5, pushed), .worktrees/baseline-v0.11.0 (detached at v0.11.0, keep for 01-08), .worktrees/.daemon_probe.py (keep for 01-10/01-14). Pending todo: stale runtime.from_nsdate docstring in adapters/messages.py."
+  "next_action": "Owner answers 01-10 Task 1. On swap-now: /gsd-execute-phase 1, which dispatches 01-10 with the go recorded.",
+  "context_notes": "Local develop carries unpushed .planning commits only. Sync with `git pull --rebase --autostash`. .worktrees/ holds only .daemon_probe.py (keep for 01-10/01-14). The isolation sentinel expires: re-run `dispatch-isolation --force-isolation none` before every dispatch. Pending todo: stale runtime.from_nsdate docstring in adapters/messages.py."
 }
