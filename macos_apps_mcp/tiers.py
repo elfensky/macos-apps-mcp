@@ -2,8 +2,8 @@
 
 read → write (``@_write_tool``/``@_additive_tool``, skipped by ``read_only()``) →
 outbound (``@_send_tool``, admitted only when ``allow_send(adapter)`` says so).
-Consumers import DOWN into this module (``server.py``, ``doctor.py``) — nothing
-here imports ``server`` or ``doctor``.
+Consumers import DOWN into this module (``server.py``, ``doctor.py``, ``registry.py``)
+— nothing here imports ``server``, ``doctor`` or ``registry``.
 
 Registration happens at package import (tools are defined at module level in
 ``server.py``), so every gate below reads a PROCESS-START fact — an environment
@@ -11,11 +11,10 @@ variable, argv — never a flag set later in ``daemon.serve()``. Setting
 ``MACOS_APPS_READ_ONLY``/``MACOS_APPS_ALLOW_SEND`` after the process has already
 imported ``server`` has no effect; they must be set before launch.
 
-The outbound ledger below (``_SEND_ADAPTERS``, ``_SEND_REGISTERED``,
-``admit_send``, ``outbound_status``) is PROVISIONAL: card 2 (the one
-registration record per tool, GATE-04) makes ``registry.py`` the sole ledger
-owner and this module goes back to holding only the pure gate predicates
-(``read_only``, ``allow_send``).
+Card 2 (GATE-04, RESEARCH Pitfall 3): the provisional outbound-capability tracking
+that used to live here is gone — ``registry.py`` is the sole ledger owner now
+(``registry.outbound_status()``, a view over the send records already sitting in
+``registry.TOOLS``). This module holds only the pure gate predicates.
 """
 
 from __future__ import annotations
@@ -68,45 +67,3 @@ def allow_send(adapter: str) -> bool:
     if val in ("1", "true", "yes", "all"):
         return True
     return adapter in {p.strip() for p in val.split(",") if p.strip()}
-
-
-# --- provisional outbound ledger (card 2 deletes this block, see module docstring) ---
-
-# Every adapter name a `@_send_tool(...)` call below names (#130) — DERIVED at
-# registration, never hand-maintained (the `_SNAPSHOT_SOURCES` rule): a new outbound
-# adapter can't silently miss `doctor()`'s report by forgetting a second edit. Recorded
-# BEFORE the gate check, so it lists every adapter CAPABLE of sending, not just the ones
-# currently enabled — which is what makes doctor able to say "mail: off".
-_SEND_ADAPTERS: set[str] = set()
-
-# Adapters whose send tools actually GOT registered — the gate as it stood at import.
-# `allow_send` re-reads env + toggle per call, so after `allow-send` flips the toggle
-# without a daemon restart the two diverge; outbound_status() surfaces that (C6).
-_SEND_REGISTERED: set[str] = set()
-
-
-def admit_send(adapter: str) -> bool:
-    """Records send capability for ``adapter``, then answers the registration gate
-    (True = the tool should register) and records admission when it does. Replaces
-    the two inline set updates ``server.py``'s ``_send_tool`` used to do itself."""
-    _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
-    if not allow_send(adapter):
-        return False
-    _SEND_REGISTERED.add(adapter)  # the gate was ON when this tool registered
-    return True
-
-
-def outbound_status() -> dict[str, list[str]]:
-    """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
-    whose tools actually got registered at import; ``configured`` = what the env/toggle
-    enables RIGHT NOW. They diverge when ``macos-apps-mcp allow-send`` writes the toggle
-    but the daemon keeps running (deploy's "no daemon restarted" branch) — doctor
-    reports the delta as ``outbound_pending`` with a restart directive.
-
-    A third key, ``capable`` (= every adapter a ``@_send_tool`` names), was carried here
-    and read by nothing; ``_SEND_ADAPTERS`` is right there for whoever needs it. Add it
-    back when a second send adapter gives it a job."""
-    return {
-        "registered": sorted(_SEND_REGISTERED),
-        "configured": sorted(a for a in _SEND_ADAPTERS if allow_send(a)),
-    }

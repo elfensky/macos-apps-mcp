@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from . import tiers
 from .contracts import Snapshotter
 
 Tier = Literal["read", "additive", "destructive", "send"]
@@ -130,3 +131,25 @@ def backup_notice_tools() -> frozenset[str]:
 
 def by_adapter(adapter: str) -> frozenset[str]:
     return frozenset(n for n, r in TOOLS.items() if r.adapter == adapter)
+
+
+def outbound_status() -> dict[str, list[str]]:
+    """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
+    whose send tools actually got registered at import; ``configured`` = what the
+    env/toggle enables RIGHT NOW. They diverge when ``macos-apps-mcp allow-send``
+    writes the toggle but the daemon keeps running (deploy's "no daemon restarted"
+    branch) — doctor reports the delta as ``outbound_pending`` with a restart
+    directive.
+
+    Card 2 (GATE-04, RESEARCH Pitfall 3): this is now the ONE outbound ledger — a view
+    over the send records already sitting in ``TOOLS``, not a second hand-maintained
+    set. ``tiers.py`` keeps only the pure gate predicates (``read_only``,
+    ``allow_send``); this is the sole caller doctor and the tests read."""
+    send_adapters = {r.adapter for r in TOOLS.values() if r.tier == "send"}
+    registered = {
+        r.adapter for r in TOOLS.values() if r.tier == "send" and r.registered
+    }
+    return {
+        "registered": sorted(registered),
+        "configured": sorted(a for a in send_adapters if tiers.allow_send(a)),
+    }

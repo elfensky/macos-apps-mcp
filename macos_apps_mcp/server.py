@@ -127,13 +127,13 @@ def _tool(
 
     ``tier`` decides the gate (read: always registered; additive/destructive:
     skipped under ``tiers.read_only()``; send: registered only when
-    ``tiers.admit_send(adapter)`` says so) and the MCP annotations
+    ``tiers.allow_send(adapter)`` says so) and the MCP annotations
     (``registry.ToolRecord.annotations``). Everything else the middlewares, doctor and
     the tests used to keep in hand-maintained name sets is stated here ONCE and read
     back from ``registry.TOOLS``: ``audit`` (the audit-log verb — derived from the
     create/update/delete/complete prefix, REQUIRED otherwise, never a silent
-    ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — carried on
-    the record for the eventual registry-driven notice middleware), ``snapshot`` (the
+    ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — read per
+    call by ``notices.UntrustedDataNotice``), ``snapshot`` (the
     adapter answering ``snapshot(id)`` for before-state, #67), ``open_world``,
     ``permission`` (the grant(s) the docstring must name), ``guard`` (False = no
     native call, so no ``NativeError`` -> ``ToolError`` wrap — ping/now/usage).
@@ -154,7 +154,7 @@ def _tool(
                 # paragraph whether or not the tool registers (tests read it either
                 # way).
                 f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
-            registered = tiers.admit_send(adapter)
+            registered = tiers.allow_send(adapter)
         elif tier == "read":
             registered = True
         else:

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import EventKit as EK
 
-from . import deploy, runtime, tiers
+from . import deploy, registry, runtime
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
@@ -296,11 +296,13 @@ def _build_stamp() -> str:
 
 
 def _outbound_state() -> dict[str, list[str]]:
-    """``tiers.outbound_status()`` — registered vs configured outbound adapters
-    (#130, C6). doctor.py imports down into tiers.py, never up into server.py — the
+    """``registry.outbound_status()`` — registered vs configured outbound adapters
+    (#130, C6). doctor.py imports down into registry.py, never up into server.py — the
     former lazy reach-in into the server module (a local import inside this very
-    function) is gone (GATE-03)."""
-    return tiers.outbound_status()
+    function) is gone (GATE-03). Card 2 (GATE-04, RESEARCH Pitfall 3): the registry is
+    the ONE outbound ledger now — this used to read ``tiers.outbound_status()``, a
+    provisional second ledger card 5 introduced before ``registry.py`` existed."""
+    return registry.outbound_status()
 
 
 def _tcc_note(reasons: dict[str, str | None]) -> str:
