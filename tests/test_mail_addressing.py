@@ -87,46 +87,47 @@ def test_resolve_with_a_bad_folder_fails_at_the_boundary(monkeypatch):
         ma.resolve("<a@b>", folder="archive")
 
 
-def test_resolve_id_only_goes_through_the_message_ids_filter(monkeypatch):
-    seen = {}
-
-    def fake(**kw):
-        seen.update(kw)
-        return [
-            Pointer(
-                id="<a@b>",
-                summary="s",
-                deeplink="message://x",
-                folder=_SPAM_URL,
-                account=_ACCT,
-            )
-        ]
-
-    monkeypatch.setattr(ma.mail_index, "query_search", fake)
-    target = ma.resolve("a@b")
+def test_resolve_id_only_goes_through_the_message_ids_filter(blank_envelope):
     # the id crosses into the index in the STORED (bracketed) form, or it matches
-    # nothing at all
-    assert seen["message_ids"] == ["<a@b>"]
-    assert seen["limit"] == 1
+    # nothing at all — proven here by seeding the STORED form and resolving the
+    # BARE one; a second, unrelated id in the same store proves the filter really
+    # narrows rather than resolving by luck (only one row exists anyway).
+    mb = blank_envelope.add_mailbox(_SPAM_URL)
+    blank_envelope.execute("INSERT INTO subjects VALUES (1,'s'),(2,'other')")
+    blank_envelope.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES"
+        " (1,'<a@b>'),(2,'<other@x>')"
+    )
+    blank_envelope.add_message(subject=1, global_message_id=1, mailbox=mb, deleted=0)
+    blank_envelope.add_message(subject=2, global_message_id=2, mailbox=mb, deleted=0)
+    target = ma.resolve("a@b")
     assert (target.id, target.folder, target.account) == ("a@b", _SPAM_URL, _ACCT)
 
 
-def test_resolve_id_only_narrows_by_account_when_asked(monkeypatch):
-    seen = {}
+def test_resolve_id_only_narrows_by_account_when_asked(blank_envelope):
+    # the SAME Message-ID filed under two accounts — account= must pick the row
+    # under the NAMED account, not whichever one the dedup rank prefers.
+    other_acct = "BBBBBBBB-1111-2222-3333-444444444444"
+    mb_mine = blank_envelope.add_mailbox(_SPAM_URL)
+    mb_other = blank_envelope.add_mailbox(f"imap://{other_acct}/INBOX")
+    blank_envelope.execute("INSERT INTO subjects VALUES (1,'s')")
+    blank_envelope.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES (1,'<a@b>')"
+    )
+    blank_envelope.add_message(
+        subject=1, global_message_id=1, mailbox=mb_mine, deleted=0
+    )
+    blank_envelope.add_message(
+        subject=1, global_message_id=1, mailbox=mb_other, deleted=0
+    )
+    target = ma.resolve("a@b", account=_ACCT)
+    assert (target.folder, target.account) == (_SPAM_URL, _ACCT)
 
-    def fake(**kw):
-        seen.update(kw)
-        return [Pointer(id="<a@b>", summary="s", deeplink="d", folder=_SPAM_URL)]
 
-    monkeypatch.setattr(ma.mail_index, "query_search", fake)
-    ma.resolve("a@b", account=_ACCT)
-    assert seen["account"] == _ACCT  # a UUID resolves without contacting Mail
-
-
-def test_resolve_unknown_id_raises_rather_than_answering_nothing(monkeypatch):
+def test_resolve_unknown_id_raises_rather_than_answering_nothing(blank_envelope):
     # A stored citation that no longer resolves is exactly what a caller must be told
     # about — an empty answer here reads as "the message is fine, it just has no body".
-    monkeypatch.setattr(ma.mail_index, "query_search", lambda **kw: [])
+    # blank_envelope carries no rows at all, so any id is genuinely absent.
     with pytest.raises(NativeError, match="no message with id 'gone@x'"):
         ma.resolve("<gone@x>")
 
@@ -139,18 +140,35 @@ def test_resolve_rejects_an_empty_id(monkeypatch):
         ma.resolve("  ")
 
 
-def test_resolve_takes_the_ranked_copy_the_rest_of_the_project_cites(monkeypatch):
+def test_resolve_takes_the_ranked_copy_the_rest_of_the_project_cites(blank_envelope):
     # "Exactly one target" is not a tie-break invented here: query_search dedups by
-    # Message-ID and hands back the ranked winner, so resolve() cannot be ambiguous by
-    # construction. This pins that it consumes the FIRST (only) row rather than
-    # re-ranking on its own.
-    monkeypatch.setattr(
-        ma.mail_index,
-        "query_search",
-        lambda **kw: [
-            Pointer(id="<a@b>", summary="s", deeplink="d", folder="imap://X/INBOX"),
-            Pointer(id="<a@b>", summary="s", deeplink="d", folder="imap://X/Trash"),
-        ],
+    # Message-ID and hands back the ranked winner, so resolve() cannot be ambiguous
+    # by construction — a real store can never answer TWO Pointers for one id (the
+    # shape the previous stub asserted against), so this is re-expressed as the
+    # real-shape case: the SAME Message-ID filed in two mailboxes of one account,
+    # one of them Trash (demoted) and one INBOX (never demoted) — resolve() must
+    # consume the RANKED winner, not merely the first row a query happens to emit.
+    mb_inbox = blank_envelope.add_mailbox("imap://X/INBOX")
+    mb_trash = blank_envelope.add_mailbox("imap://X/Trash")
+    blank_envelope.execute("INSERT INTO subjects VALUES (1,'s')")
+    blank_envelope.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES (1,'<a@b>')"
+    )
+    # Trash's row is NEWER (would win on recency alone) — proves the rank, not the
+    # date, decides the winner.
+    blank_envelope.add_message(
+        subject=1,
+        global_message_id=1,
+        mailbox=mb_trash,
+        date_received=200,
+        deleted=0,
+    )
+    blank_envelope.add_message(
+        subject=1,
+        global_message_id=1,
+        mailbox=mb_inbox,
+        date_received=100,
+        deleted=0,
     )
     assert ma.resolve("a@b").folder == "imap://X/INBOX"
 
@@ -158,12 +176,21 @@ def test_resolve_takes_the_ranked_copy_the_rest_of_the_project_cites(monkeypatch
 # --- the adapter consumes it ---------------------------------------------------------
 
 
-def test_get_body_with_no_mailbox_resolves_the_id_first(monkeypatch):
-    monkeypatch.setattr(
-        ma.mail_index,
-        "query_search",
-        lambda **kw: [Pointer(id="<a@b>", summary="s", deeplink="d", folder=_SPAM_URL)],
+def _seed_one_message(env, mailbox_url_str: str, header: str = "<a@b>") -> int:
+    """One message, alone in its own mailbox — the smallest store that resolve()
+    can address by id. Returns the mailbox's ROWID."""
+    mb = env.add_mailbox(mailbox_url_str)
+    env.execute("INSERT INTO subjects VALUES (1,'s')")
+    env.execute(
+        "INSERT INTO message_global_data (ROWID, message_id_header) VALUES (1,?)",
+        (header,),
     )
+    env.add_message(subject=1, global_message_id=1, mailbox=mb, deleted=0)
+    return mb
+
+
+def test_get_body_with_no_mailbox_resolves_the_id_first(monkeypatch, blank_envelope):
+    _seed_one_message(blank_envelope, _SPAM_URL)
     seen = {}
 
     def fake(script, *argv):
@@ -176,12 +203,10 @@ def test_get_body_with_no_mailbox_resolves_the_id_first(monkeypatch):
     assert seen["argv"] == ("a@b", _ACCT, "[Gmail]/Spam")
 
 
-def test_attachments_by_id_addresses_one_message_and_makes_no_cap_claim(monkeypatch):
-    monkeypatch.setattr(
-        ma.mail_index,
-        "query_search",
-        lambda **kw: [Pointer(id="<a@b>", summary="s", deeplink="d", folder=_SPAM_URL)],
-    )
+def test_attachments_by_id_addresses_one_message_and_makes_no_cap_claim(
+    monkeypatch, blank_envelope
+):
+    _seed_one_message(blank_envelope, _SPAM_URL)
     seen = {}
 
     def fake(script, *argv):
@@ -236,33 +261,35 @@ def test_read_result_carries_plane_and_coverage_when_given():
     assert out == {"results": [], "plane": "applescript-inbox", "coverage": "1 of 2"}
 
 
-def test_resolve_mailbox_matches_a_round_trip_url_exactly(monkeypatch):
+def test_resolve_mailbox_matches_a_round_trip_url_exactly(blank_envelope):
     # Every mail read returns `folder` as a url and documents it as the token to pass
     # back verbatim — but a url is never a substring of a bare mailbox PATH, so
     # mail_search(mailbox=<that folder>) matched zero rows and read as "empty mailbox".
     a, b = "AAAA-1", "BBBB-2"
-    urls = [f"imap://{a}/INBOX", f"imap://{b}/INBOX", f"imap://{a}/Archive"]
-    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+    for url in (f"imap://{a}/INBOX", f"imap://{b}/INBOX", f"imap://{a}/Archive"):
+        blank_envelope.add_mailbox(url)
     assert ma.resolve_mailbox(f"imap://{a}/INBOX") == [f"imap://{a}/INBOX"]
 
 
-def test_resolve_mailbox_url_match_survives_a_percent_encoding_difference(monkeypatch):
+def test_resolve_mailbox_url_match_survives_a_percent_encoding_difference(
+    blank_envelope,
+):
     # create_mailbox synthesises `.../Social & SEO`; Mail re-spells it
     # `Social%20&%20SEO` once it syncs. Not byte-equal, one mailbox — both resolve.
     stored = "imap://AAAA-1/Social%20&%20SEO"
-    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: [stored])
+    blank_envelope.add_mailbox(stored)
     assert ma.resolve_mailbox("imap://AAAA-1/Social & SEO") == [stored]
     assert ma.resolve_mailbox(stored) == [stored]
 
 
-def test_resolve_mailbox_url_does_not_match_the_same_path_elsewhere(monkeypatch):
+def test_resolve_mailbox_url_does_not_match_the_same_path_elsewhere(blank_envelope):
     # the account segment is half the address — a url must not resolve across accounts
-    urls = ["imap://AAAA-1/INBOX", "imap://BBBB-2/INBOX"]
-    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+    blank_envelope.add_mailbox("imap://AAAA-1/INBOX")
+    blank_envelope.add_mailbox("imap://BBBB-2/INBOX")
     assert ma.resolve_mailbox("imap://CCCC-3/INBOX") == []
 
 
-def test_resolve_mailbox_still_substring_matches_a_plain_name(monkeypatch):
-    urls = ["imap://AAAA-1/Junk%20E-mail", "imap://AAAA-1/INBOX"]
-    monkeypatch.setattr(ma.mail_index, "query_mailbox_urls", lambda: urls)
+def test_resolve_mailbox_still_substring_matches_a_plain_name(blank_envelope):
+    blank_envelope.add_mailbox("imap://AAAA-1/Junk%20E-mail")
+    blank_envelope.add_mailbox("imap://AAAA-1/INBOX")
     assert ma.resolve_mailbox("junk") == ["imap://AAAA-1/Junk%20E-mail"]

@@ -17,8 +17,6 @@ batch that exactly one copy survives.
 
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 
 from macos_apps_mcp import dedupe, runtime
@@ -27,28 +25,10 @@ from macos_apps_mcp.adapters import mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
 from macos_apps_mcp.errors import NativeError
 from macos_apps_mcp.text import RS, US
-from tests.envelope import SCHEMA, Envelope
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 BOX = f"imap://{ACCT}/Travel"
 TRASH = f"imap://{ACCT}/Trash"
-
-
-@pytest.fixture
-def blank_envelope(tmp_path, monkeypatch, envelope_mode):
-    """Like ``fake_envelope`` (tests/conftest.py), but a SCHEMA-only store with no
-    seed_base rows: this file's stubs-turned-real-queries need exact control over
-    row counts (GATE-08's "route the store-compensating stubs through the fixture"),
-    and layering onto seed_base's own canonical duplicates would shift them. Still
-    parametrized over envelope_mode, so these queries get real native+sidecar
-    coverage too."""
-    db = tmp_path / "Envelope Index"
-    conn = sqlite3.connect(db)
-    conn.executescript(SCHEMA)
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
-    return Envelope(db)
 
 
 @pytest.fixture

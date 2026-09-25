@@ -8,6 +8,7 @@ by up to 3.6x on a real store, the same margin ``mail_overview`` was fixed for).
 
 from __future__ import annotations
 
+import itertools
 import time
 
 import pytest
@@ -158,24 +159,53 @@ def test_save_script_enforces_the_cap_and_the_ambiguous_name():
 # --- #85: statistics -----------------------------------------------------------------
 
 
-def _row(sender="a@x", url=_BOX, read=1, flagged=0, doc=0, when=None):
-    return {
-        "sender": sender,
-        "mailbox_url": url,
-        "is_read": read,
-        "flagged": flagged,
-        "has_document": doc,
-        "date_received": when if when is not None else int(time.time()),
-    }
+_next_addr_id = itertools.count(1)
 
 
-def test_stats_reports_a_compact_aggregate(monkeypatch):
-    rows = (
-        [_row("boss@corp.com", read=0) for _ in range(3)]
-        + [_row("news@corp.com", doc=1, flagged=1) for _ in range(2)]
-        + [_row("solo@corp.com", url=f"imap://{_ACCT}/Archive")]
+def _seed_message(
+    env, *, sender_addr, mailbox, read=1, flagged=0, has_doc=False, when=None
+):
+    """One message for the stats window: a fresh address + message row, each with
+    its own ROWID (no message_global_data row at all — the fallback dedup key
+    ``rowid:<ROWID>`` keeps every seeded row its own distinct group, matching what
+    the old canned stub's rows always represented: already-deduped, one-per-message
+    aggregates)."""
+    addr_id = next(_next_addr_id)
+    env.execute(
+        "INSERT INTO addresses (ROWID, address) VALUES (?, ?)", (addr_id, sender_addr)
     )
-    monkeypatch.setattr(mail_index, "query_stats_rows", lambda since, acct: rows)
+    msg_id = env.add_message(
+        sender=addr_id,
+        mailbox=mailbox,
+        date_received=when if when is not None else int(time.time()),
+        read=read,
+        flagged=flagged,
+        deleted=0,
+    )
+    if has_doc:
+        env.execute(
+            "INSERT INTO attachments (message, name) VALUES (?, 'report.pdf')",
+            (msg_id,),
+        )
+    return msg_id
+
+
+def test_stats_reports_a_compact_aggregate(blank_envelope):
+    inbox = blank_envelope.add_mailbox(_BOX)
+    archive = blank_envelope.add_mailbox(f"imap://{_ACCT}/Archive")
+    for _ in range(3):
+        _seed_message(
+            blank_envelope, sender_addr="boss@corp.com", mailbox=inbox, read=0
+        )
+    for _ in range(2):
+        _seed_message(
+            blank_envelope,
+            sender_addr="news@corp.com",
+            mailbox=inbox,
+            flagged=1,
+            has_doc=True,
+        )
+    _seed_message(blank_envelope, sender_addr="solo@corp.com", mailbox=archive)
     out = mail.MailAdapter().stats(days=10)
     assert out["messages"] == 6
     assert out["unread"] == 3
@@ -190,33 +220,38 @@ def test_stats_reports_a_compact_aggregate(monkeypatch):
     assert out["top_mailboxes"][0]["account"] == _ACCT
 
 
-def test_stats_top_lists_are_token_bounded(monkeypatch):
-    rows = [_row(f"s{i}@x", url=f"imap://{_ACCT}/box{i}") for i in range(50)]
-    monkeypatch.setattr(mail_index, "query_stats_rows", lambda since, acct: rows)
+def test_stats_top_lists_are_token_bounded(blank_envelope):
+    for i in range(50):
+        mb = blank_envelope.add_mailbox(f"imap://{_ACCT}/box{i}")
+        _seed_message(blank_envelope, sender_addr=f"s{i}@x", mailbox=mb)
     out = mail.MailAdapter().stats()
     assert len(out["top_senders"]) == 10
     assert len(out["top_mailboxes"]) == 10
 
 
-def test_stats_empty_window_reports_none_not_a_fake_ratio(monkeypatch):
-    monkeypatch.setattr(mail_index, "query_stats_rows", lambda since, acct: [])
+def test_stats_empty_window_reports_none_not_a_fake_ratio(blank_envelope):
     out = mail.MailAdapter().stats()
     assert out["messages"] == 0
     assert out["read_ratio"] is None  # not 1.0 — nothing was read, nothing arrived
     assert out["busiest_day"] is None
 
 
-def test_stats_window_is_applied_and_the_account_passed_through(monkeypatch):
-    seen = {}
-
-    def fake(since, acct):
-        seen["since"], seen["acct"] = since, acct
-        return []
-
-    monkeypatch.setattr(mail_index, "query_stats_rows", fake)
-    mail.MailAdapter().stats(days=7, account=_ACCT)
-    assert abs(seen["since"] - (int(time.time()) - 7 * 86400)) < 5
-    assert seen["acct"] == _ACCT
+def test_stats_window_is_applied_and_the_account_passed_through(blank_envelope):
+    now = int(time.time())
+    mine = blank_envelope.add_mailbox(_BOX)
+    other_acct = "BBBBBBBB-1111-2222-3333-444444444444"
+    other = blank_envelope.add_mailbox(f"imap://{other_acct}/INBOX")
+    # within the 7-day window, this account -> counted
+    _seed_message(blank_envelope, sender_addr="in@x", mailbox=mine, when=now)
+    # older than the window -> excluded
+    _seed_message(
+        blank_envelope, sender_addr="old@x", mailbox=mine, when=now - 8 * 86400
+    )
+    # within the window but a DIFFERENT account -> excluded by the account filter
+    _seed_message(blank_envelope, sender_addr="other@x", mailbox=other, when=now)
+    out = mail.MailAdapter().stats(days=7, account=_ACCT)
+    assert out["messages"] == 1
+    assert out["top_senders"] == [{"address": "in@x", "messages": 1}]
 
 
 def test_stats_rejects_a_nonpositive_window():

@@ -24,7 +24,7 @@ import pytest
 
 from macos_apps_mcp import deploy, runtime
 from macos_apps_mcp.adapters import mail_addressing, mail_ids, mail_index
-from tests.envelope import Envelope, seed_base
+from tests.envelope import SCHEMA, Envelope, seed_base
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -172,6 +172,22 @@ def fake_envelope(tmp_path, monkeypatch, envelope_mode):
     store."""
     db = tmp_path / "Envelope Index"
     seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    return Envelope(db)
+
+
+@pytest.fixture
+def blank_envelope(tmp_path, monkeypatch, envelope_mode):
+    """Like ``fake_envelope``, but a SCHEMA-only store with no ``seed_base`` rows —
+    for a test that needs exact control over row counts (an arithmetic assertion,
+    or a specific url list) that layering onto the canonical seed would shift.
+    Still parametrized over ``envelope_mode``, so these queries get real
+    native+sidecar coverage too."""
+    db = tmp_path / "Envelope Index"
+    conn = sqlite3.connect(db)
+    conn.executescript(SCHEMA)
+    conn.commit()
+    conn.close()
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     return Envelope(db)
 
