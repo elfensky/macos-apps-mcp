@@ -6,6 +6,17 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dry-run defaults are correct by construction (GATE-05).** `delete_event`,
+  `delete_draft` and `delete_note` now default to `dry_run=true` — a bare call
+  previews instead of deleting; pass `dry_run=false` to act. `update_note` gains
+  `dry_run` (default `true`) with a current-vs-new title/body-size preview that reads
+  Notes but writes nothing; pass `dry_run=false` to overwrite. A registry test fails
+  closed for any tool that removes or replaces content and does not default
+  `dry_run=true`, including a bare `delete_*`-named tool whose own registration call
+  forgot to say so.
+
 ## [0.11.0] - 2026-09-25 — Sequoia mail plane
 
 ### Added

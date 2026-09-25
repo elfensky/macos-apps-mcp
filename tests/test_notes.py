@@ -856,7 +856,9 @@ def _refuse_write_calls(monkeypatch):
 
     def _no_write_template(template, *a, **kw):
         if template == notes_mod._UPDATE_NOTE:
-            raise AssertionError("update's dry run must not call the _UPDATE_NOTE template")
+            raise AssertionError(
+                "update's dry run must not call the _UPDATE_NOTE template"
+            )
         return ""
 
     def _no_body_file(*a, **kw):

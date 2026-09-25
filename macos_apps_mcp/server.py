@@ -1214,16 +1214,26 @@ def create_note(
     return _notes.create(NoteData(title=title, body=body, folder=folder)).as_dict()
 
 
-@_write_tool(snapshot=_notes, adapter="notes", permission="Automation")
+@_write_tool(
+    snapshot=_notes, adapter="notes", permission="Automation", removes_content=True
+)
 def update_note(
-    id: str, title: str, body: str = "", folder: str | None = None
-) -> dict[str, str]:
+    id: str,
+    title: str,
+    body: str = "",
+    folder: str | None = None,
+    dry_run: bool = True,
+) -> dict:
     """Update a note by id (full-replace title+body); the stable id is preserved and
-    verified (#49). `title`/`body` plaintext (escaped). `folder` must be omitted —
-    update cannot move a note between folders and refuses a non-None folder loudly.
+    verified (#49). `dry_run` DEFAULTS TO TRUE — previews the CURRENT title and body
+    size against the NEW ones (reads Notes; makes no write); pass `dry_run=false` to
+    overwrite. `title`/`body` plaintext (escaped). `folder` must be omitted — update
+    cannot move a note between folders and refuses a non-None folder loudly.
     Side effect (full-replace update); needs Automation access for Notes. `id` from
     notes / notes_all / create_note."""
-    return _notes.update(id, NoteData(title=title, body=body, folder=folder)).as_dict()
+    return _notes.update(
+        id, NoteData(title=title, body=body, folder=folder), dry_run=dry_run
+    )
 
 
 @_additive_tool(adapter="contacts", permission="Automation")
