@@ -14,6 +14,7 @@ from fastmcp.tools.tool import ToolResult
 from mcp.types import TextContent
 
 import macos_apps_mcp.server as srv
+import macos_apps_mcp.tiers as tiers
 from macos_apps_mcp.contracts import (
     CLEAR_RECURRENCE,
     CalendarEventData,
@@ -567,18 +568,18 @@ def test_create_event_rejects_empty_start():
 @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "Yes"])
 def test_read_only_truthy(monkeypatch, val):
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", val)
-    assert srv._read_only() is True
+    assert tiers.read_only() is True
 
 
 @pytest.mark.parametrize("val", ["", "0", "no", "false", "off"])
 def test_read_only_falsy(monkeypatch, val):
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", val)
-    assert srv._read_only() is False
+    assert tiers.read_only() is False
 
 
 def test_read_only_unset_is_false(monkeypatch):
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
-    assert srv._read_only() is False
+    assert tiers.read_only() is False
 
 
 @pytest.mark.parametrize(
@@ -602,27 +603,27 @@ def test_read_only_unset_is_false(monkeypatch):
 def test_allow_send_parse(monkeypatch, val, want):
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", val)
-    assert srv._allow_send("mail") is want
+    assert tiers.allow_send("mail") is want
 
 
 def test_allow_send_unset_is_false(monkeypatch):
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
-    assert srv._allow_send("mail") is False
+    assert tiers.allow_send("mail") is False
 
 
 def test_read_only_beats_allow_send(monkeypatch):
     # READ_ONLY is the safe-deploy guard — a send tier cannot punch through it.
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "all")
-    assert srv._allow_send("mail") is False
+    assert tiers.allow_send("mail") is False
 
 
 def test_allow_send_is_per_adapter(monkeypatch):
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
-    assert srv._allow_send("mail") is True
-    assert srv._allow_send("messages") is False
+    assert tiers.allow_send("mail") is True
+    assert tiers.allow_send("messages") is False
 
 
 def test_send_annotations_are_destructive_and_open_world():

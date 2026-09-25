@@ -7,14 +7,13 @@ register reads only (the destructive write tools are skipped) — a safe-deploy 
 from __future__ import annotations
 
 import functools
-import os
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from mcp.types import TextContent
 
-from . import deploy
+from . import tiers
 from .adapters import mail_recover
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
@@ -56,51 +55,6 @@ _photos = PhotosAdapter()
 _messages = MessagesAdapter()
 _shortcuts = ShortcutsAdapter()
 _music = MusicAdapter()
-
-
-def _read_only() -> bool:
-    """True when MACOS_APPS_READ_ONLY is set; writes are then not registered.
-
-    Reads the environment on every call. The write decorators below consult it at
-    registration time — which is module import, since tools are defined at module
-    level — so set the variable before launching the server process.
-    """
-    val = os.environ.get("MACOS_APPS_READ_ONLY", "").strip().lower()
-    return val in ("1", "true", "yes")
-
-
-def _allow_send(adapter: str) -> bool:
-    """True when OUTBOUND is enabled for ``adapter`` (#104).
-
-    ``MACOS_APPS_ALLOW_SEND`` is unset by default — "never sends" stays the default,
-    but absence is a GATE, not a ceiling. ``1``/``true``/``yes``/``all`` enable every
-    adapter; a comma list (``mail,messages``) enables named ones, so a user can accept
-    Mail send (reviewable, leaves a Sent record) while refusing iMessage send (instant,
-    social, no undo). ``MACOS_APPS_READ_ONLY`` wins unconditionally — it is the
-    safe-deploy guard. Read at registration time, like ``_read_only()``: set it before
-    launching the server.
-
-    Under the DAEMON only, an unset env var falls back to the persisted toggle
-    (``macos-apps-mcp allow-send mail``) — no env var can reach a launchd-run daemon
-    from a client config (#130), so on-disk state is the only way to opt in there. In
-    stdio mode the env var is reachable and is the whole story, which also keeps the
-    test suite hermetic: it never reads this machine's toggle file.
-
-    "Am I the daemon?" goes through ``deploy.is_daemon_role()``, which reads argv —
-    NOT the ``MACOS_APPS_MCP_ROLE`` env var alone. That var is set by ``daemon.serve()``
-    long after ``macos_apps_mcp/__init__.py`` has already imported this module and run
-    every registration, so reading it here meant the daemon's outbound tier could never
-    register no matter what the toggle said. See that function.
-    """
-    if _read_only():
-        return False
-    val = os.environ.get("MACOS_APPS_ALLOW_SEND", "")
-    if not val and deploy.is_daemon_role():
-        val = deploy.allow_send_file()
-    val = val.strip().lower()
-    if val in ("1", "true", "yes", "all"):
-        return True
-    return adapter in {p.strip() for p in val.split(",") if p.strip()}
 
 
 def _guard(fn):
@@ -173,7 +127,7 @@ def _write_tool(
     without being outbound-by-design; the send tier stays ``_send_tool`` (C6c)."""
 
     def deco(f):
-        if _read_only():
+        if tiers.read_only():
             return f
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
@@ -189,23 +143,10 @@ def _write_tool(
 def _additive_tool(fn):
     """Register a write that only ADDS a new item (create/open) — not read-only, but not
     destructive (#57). Also skipped in read-only mode."""
-    if _read_only():
+    if tiers.read_only():
         return fn
     _WRITE_TOOLS.add(fn.__name__)
     return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
-
-
-# Every adapter name a `@_send_tool(...)` call below names (#130) — DERIVED at
-# registration, never hand-maintained (the `_SNAPSHOT_SOURCES` rule): a new outbound
-# adapter can't silently miss `doctor()`'s report by forgetting a second edit. Recorded
-# BEFORE the gate check, so it lists every adapter CAPABLE of sending, not just the ones
-# currently enabled — which is what makes doctor able to say "mail: off".
-_SEND_ADAPTERS: set[str] = set()
-
-# Adapters whose send tools actually GOT registered — the gate as it stood at import.
-# `_allow_send` re-reads env + toggle per call, so after `allow-send` flips the toggle
-# without a daemon restart the two diverge; outbound_status() surfaces that (C6).
-_SEND_REGISTERED: set[str] = set()
 
 
 # The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
@@ -230,36 +171,18 @@ def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
     before-state capture."""
 
     def deco(f):
-        _SEND_ADAPTERS.add(adapter)  # capability, not state — before the gate check
         if adapter == "mail":
             # #179: composed before the gate check, so __doc__ carries the #133
             # paragraph whether or not the tool registers (tests read it either way).
             f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
-        if not _allow_send(adapter):
+        if not tiers.admit_send(adapter):
             return f
-        _SEND_REGISTERED.add(adapter)  # the gate was ON when this tool registered
         _WRITE_TOOLS.add(f.__name__)
         if snapshot is not None:
             _SNAPSHOT_SOURCES[f.__name__] = snapshot
         return mcp.tool(annotations=_SEND_ANNOTATIONS)(_guard(f))
 
     return deco
-
-
-def outbound_status() -> dict[str, list[str]]:
-    """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
-    whose tools actually got registered at import; ``configured`` = what the env/toggle
-    enables RIGHT NOW. They diverge when ``macos-apps-mcp allow-send`` writes the toggle
-    but the daemon keeps running (deploy's "no daemon restarted" branch) — doctor
-    reports the delta as ``outbound_pending`` with a restart directive.
-
-    A third key, ``capable`` (= every adapter a ``@_send_tool`` names), was carried here
-    and read by nothing; ``_SEND_ADAPTERS`` is right there for whoever needs it. Add it
-    back when a second send adapter gives it a job."""
-    return {
-        "registered": sorted(_SEND_REGISTERED),
-        "configured": sorted(a for a in _SEND_ADAPTERS if _allow_send(a)),
-    }
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------

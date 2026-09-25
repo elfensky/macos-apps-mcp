@@ -294,7 +294,7 @@ def test_allow_send_gate_ignores_xdg_state_home(tmp_path):
 def test_allow_send_file_reaches_the_gate_only_under_the_daemon(tmp_path, monkeypatch):
     """The persisted toggle exists because env cannot reach the launchd daemon — a
     stdio server (and every test run) must stay driven by the env var alone."""
-    from macos_apps_mcp import server
+    from macos_apps_mcp import tiers
 
     monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "allow_send")
     (tmp_path / "allow_send").write_text("mail")
@@ -302,11 +302,11 @@ def test_allow_send_file_reaches_the_gate_only_under_the_daemon(tmp_path, monkey
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
 
     monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
-    assert server._allow_send("mail") is False
+    assert tiers.allow_send("mail") is False
 
     monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
-    assert server._allow_send("mail") is True
+    assert tiers.allow_send("mail") is True
 
     # READ_ONLY still wins unconditionally (#104)
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
-    assert server._allow_send("mail") is False
+    assert tiers.allow_send("mail") is False

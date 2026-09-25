@@ -29,9 +29,10 @@ def test_gate_on_registers_the_three_send_tools():
     # daemon that sending is OFF while send_mail is live.
     code = (
         "import asyncio, json, macos_apps_mcp.server as srv; "
+        "import macos_apps_mcp.tiers as tiers; "
         "print(json.dumps({"
         "'tools': sorted(t.name for t in asyncio.run(srv.mcp.list_tools())), "
-        "'outbound': srv.outbound_status()}))"
+        "'outbound': tiers.outbound_status()}))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code],

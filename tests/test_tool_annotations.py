@@ -13,6 +13,7 @@ import inspect
 from fastmcp import Client
 
 import macos_apps_mcp.server as srv
+import macos_apps_mcp.tiers as tiers
 
 # Writes that only ADD a new item (create/open) — not read-only, but not destructive.
 _ADDITIVE_TOOLS = frozenset(
@@ -206,6 +207,7 @@ def test_every_tool_docstring_states_permission_and_is_nontrivial():
 
 def test_every_write_tool_is_audit_classified():
     import macos_apps_mcp.server as srv
+    import macos_apps_mcp.tiers as tiers
 
     # writes with no id-addressed before-state: creates + non-id actions
     envelope_only = {
@@ -229,7 +231,7 @@ def test_every_write_tool_is_audit_classified():
         "set_volume",
         "set_mode",
     }
-    if srv._allow_send("mail"):
+    if tiers.allow_send("mail"):
         envelope_only |= {"send_mail", "reply_all", "forward_mail"}
     assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS
 
@@ -284,7 +286,7 @@ def test_send_tools_registered_only_when_gate_is_on():
     # `MACOS_APPS_ALLOW_SEND=mail uv run pytest` must exercise and pass.
     live = {t.name for t in _tools()}
     send_tools = {"send_mail", "reply_all", "forward_mail"}
-    if srv._allow_send("mail"):
+    if tiers.allow_send("mail"):
         assert send_tools <= live
     else:
         assert not (send_tools & live)
