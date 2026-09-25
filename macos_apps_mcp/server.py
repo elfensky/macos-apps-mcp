@@ -270,21 +270,21 @@ async def usage() -> dict:
     return usage_report({t.name for t in await mcp.list_tools()})
 
 
-@_read_tool
+@_read_tool(adapter="reminders", permission="EventKit")
 def reminders(due: str = "today") -> list[dict[str, str]]:
     """List reminders as pointers. `due`: today | overdue | this-week | a list name.
     Read-only; needs EventKit (Reminders) access. Hydrate none — pointers only."""
     return [p.as_dict() for p in _reminders.get_pointers(due)]
 
 
-@_read_tool
+@_read_tool(adapter="calendar", permission="EventKit")
 def events(when: str = "today") -> list[dict[str, str]]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD.
     Read-only; needs EventKit (Calendar) access."""
     return [p.as_dict() for p in _calendar.get_pointers(when)]
 
 
-@_read_tool
+@_read_tool(adapter="calendar", permission="EventKit")
 def free_busy(start: str, end: str, calendars: list[str] | None = None) -> dict:
     """Availability in a window: merged busy intervals + free gaps. `start`/`end` are
     ISO-8601 datetimes (naive local, e.g. 2026-07-20T09:00:00); `calendars` optional
@@ -293,28 +293,28 @@ def free_busy(start: str, end: str, calendars: list[str] | None = None) -> dict:
     return _calendar.get_free_busy(start, end, calendars)
 
 
-@_read_tool
+@_read_tool(adapter="reminders", permission="EventKit")
 def reminder_lists() -> list[dict[str, str]]:
     """List reminder lists as pointers (id + name); use a name to target writes.
     Read-only; needs EventKit (Reminders) access. See create_reminder to write."""
     return [p.as_dict() for p in _reminders.get_lists()]
 
 
-@_read_tool
+@_read_tool(adapter="calendar", permission="EventKit")
 def calendars() -> list[dict[str, str]]:
     """List calendars as pointers (id + name); use a name to target writes.
     Read-only; needs EventKit (Calendar) access. See create_event to write."""
     return [p.as_dict() for p in _calendar.get_calendars()]
 
 
-@_read_tool
+@_read_tool(adapter="contacts", permission="Automation")
 def contacts(name: str) -> list[dict[str, str]]:
     """Find contacts by name (substring). Returns pointers (id + name/org).
     Read-only; needs Automation access for Contacts. See create_contact to write."""
     return [p.as_dict() for p in _contacts.get_pointers(name)]
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def mail(query: str) -> dict:
     """Search the Mail inbox by subject OR sender substring. Pointers: id = the stable
     RFC822 message-id, summary = subject — sender, deeplink = a message:// URL,
@@ -326,7 +326,7 @@ def mail(query: str) -> dict:
     return _mail.inbox_search(query)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def mail_body(id: str, mailbox: str = "") -> str:
     """Full plaintext body of one message by id (bounded + truncation-marked).
 
@@ -342,7 +342,7 @@ def mail_body(id: str, mailbox: str = "") -> str:
     return _mail.get_body(id, mailbox)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_bodies(ids: list[str]) -> dict:
     """Plaintext bodies for up to 20 message ids in ONE call — the bulk read behind
     "catch me up on this thread". Opt-in and bounded: reading a thread stays
@@ -362,7 +362,7 @@ def mail_bodies(ids: list[str]) -> dict:
     return _mail.get_bodies(ids)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def mail_attachments(mailbox: str = "", query: str = "", message_id: str = "") -> dict:
     """List attachments on messages in a Mail mailbox, or on ONE message (Automation).
 
@@ -387,7 +387,7 @@ def mail_attachments(mailbox: str = "", query: str = "", message_id: str = "") -
     return _mail.list_attachments(mailbox, query, message_id)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def mail_needs_response() -> dict:
     """Inbox messages that likely need your response, ranked with a machine-readable
     `reason` (flagged / unread-direct / unanswered-direct). Heuristic over headers +
@@ -400,7 +400,7 @@ def mail_needs_response() -> dict:
     return _mail.get_needs_response()
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def mail_awaiting_reply(days: int = 3) -> dict:
     """Messages YOU sent more than `days` ago (1–365, default 3) with no reply, ranked
     oldest-first, reason `awaiting-reply`. Uses real In-Reply-To/References threading. A
@@ -414,7 +414,7 @@ def mail_awaiting_reply(days: int = 3) -> dict:
     return _mail.get_awaiting_reply(days)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission=("Full Disk Access", "Automation"))
 def mail_search(
     subject: str = "",
     from_: str = "",
@@ -473,7 +473,7 @@ def mail_search(
     )
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_thread(id: str, limit: int = 100, snippets: bool = False) -> dict:
     """Every message in the conversation containing `id`, oldest-first — the transcript,
     including messages YOU sent. Deduped: a message filed in several mailboxes appears
@@ -492,7 +492,7 @@ def mail_thread(id: str, limit: int = 100, snippets: bool = False) -> dict:
     return _mail.thread(id, limit, snippets)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission=("Full Disk Access", "Automation"))
 def mail_overview() -> list[dict]:
     """Every mailbox with its message total and unread count, unread-first — the triage
     entry point ("what's unread where?"). Rows are {account, account_id, mailbox,
@@ -519,7 +519,7 @@ def mail_overview() -> list[dict]:
 # MACOS_APPS_READ_ONLY, which is the actual regression: that flag is a safe-deploy guard
 # against mutating the user's data, and it would instead freeze body search at whatever
 # the sidecar last held — degrading the READ surface the flag exists to protect.
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_index_bodies(rebuild: bool = False) -> dict:
     """Build/refresh the opt-in FTS body index used by mail_search(body=…). Reads every
     .emlx file at rest, `.partial` ones included (never launches Mail, never writes in
@@ -544,7 +544,7 @@ def mail_index_bodies(rebuild: bool = False) -> dict:
 # READ TIER ON PURPOSE — same rationale as mail_index_bodies directly above: the only
 # thing this writes is OUR sidecar in OUR state dir, and demoting it would let
 # MACOS_APPS_READ_ONLY freeze the READ surface it exists to enable.
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_index_ids(rebuild: bool = False) -> dict:
     """Build/refresh the Message-ID sidecar that enables the sqlite mail plane on
     macOS 15 (Sequoia) and earlier (#201). Those systems' Envelope Index never stored
@@ -563,7 +563,7 @@ def mail_index_ids(rebuild: bool = False) -> dict:
     return _mail.index_ids(rebuild=rebuild)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_stats(days: int = 30, account: str = "") -> dict:
     """Mail volume, read ratio and top senders over the last `days` (Full Disk Access).
 
@@ -581,7 +581,7 @@ def mail_stats(days: int = 30, account: str = "") -> dict:
     return _mail.stats(days=days, account=account)
 
 
-@_additive_tool(audit="export")
+@_additive_tool(audit="export", adapter="mail", permission="Full Disk Access")
 def export_mail(ids: str, dest_dir: str) -> dict:
     """Write messages out as importable .eml files (Full Disk Access).
 
@@ -602,7 +602,9 @@ def export_mail(ids: str, dest_dir: str) -> dict:
     return _mail.export(ids, dest_dir)
 
 
-@_additive_tool(audit="save")
+@_additive_tool(
+    audit="save", adapter="mail", permission=("Automation", "Full Disk Access")
+)
 def save_mail_attachment(
     message_id: str,
     dest_dir: str,
@@ -637,7 +639,7 @@ def save_mail_attachment(
     )
 
 
-@_additive_tool
+@_additive_tool(adapter="mail", permission="Automation")
 def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
     its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
@@ -657,7 +659,7 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     return _mail.create_draft(to, subject, body)
 
 
-@_additive_tool(audit="reply")
+@_additive_tool(audit="reply", adapter="mail", permission="Automation")
 def mail_reply(
     message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
 ) -> dict:
@@ -682,7 +684,7 @@ def mail_reply(
     return _mail.reply(message_id, mailbox, reply_body, include_quote)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Automation")
 def drafts() -> dict:
     """List Mail drafts, newest mailbox order. Returns {results, truncated?};
     `truncated` means the 25 cap was reached. Each record is a citable pointer (id,
@@ -696,7 +698,7 @@ def drafts() -> dict:
     return _mail.list_drafts()
 
 
-@_write_tool(snapshot=_mail)
+@_write_tool(snapshot=_mail, adapter="mail", permission="Automation")
 def delete_draft(id: str, dry_run: bool = False) -> dict:
     """Delete one Mail draft by its message-id (from drafts()). `dry_run=True` previews
     the draft that WOULD be deleted (pointer, no mutation). Destructive but LOCAL — this
@@ -704,7 +706,7 @@ def delete_draft(id: str, dry_run: bool = False) -> dict:
     return _mail.delete_draft(id, dry_run=dry_run)
 
 
-@_additive_tool
+@_additive_tool(adapter="mail", permission=("Automation", "Full Disk Access"))
 def create_mailbox(name: str, account: str) -> dict:
     """Create a Mail mailbox (folder) under one account. `name` may contain "/" to nest
     ("Projects/2026") — missing parents are created for you. `account` is a display name
@@ -721,7 +723,9 @@ def create_mailbox(name: str, account: str) -> dict:
     return _mail.create_mailbox(name, account)
 
 
-@_write_tool(audit="move")
+@_write_tool(
+    audit="move", adapter="mail", permission=("Automation", "Full Disk Access")
+)
 def move_mail(
     ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
 ) -> dict:
@@ -749,7 +753,9 @@ def move_mail(
     return _mail.move_mail(ids, from_mailbox, to_mailbox, dry_run=dry_run)
 
 
-@_write_tool(audit="trash")
+@_write_tool(
+    audit="trash", adapter="mail", permission=("Automation", "Full Disk Access")
+)
 def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
 
@@ -775,7 +781,7 @@ def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     return _mail.trash_mail(ids, mailbox, dry_run=dry_run)
 
 
-@_read_tool
+@_read_tool(adapter="mail", permission="Full Disk Access")
 def mail_duplicates(limit: int = 25) -> dict:
     """Where Mail is storing redundant copies of the same message — a REPORT, read-only.
 
@@ -795,7 +801,9 @@ def mail_duplicates(limit: int = 25) -> dict:
     return _mail.duplicates(limit)
 
 
-@_write_tool(audit="undo")
+@_write_tool(
+    audit="undo", adapter="mail", permission=("Automation", "Full Disk Access")
+)
 def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
     result, or from `audit`). A move is undone by moving the messages back to the exact
@@ -810,7 +818,7 @@ def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     return _mail.undo(receipt, dry_run=dry_run)
 
 
-@_write_tool
+@_write_tool(adapter="mail", permission="Automation")
 def update_mail_status(
     ids: str,
     mailbox: str = "",
@@ -843,7 +851,7 @@ def update_mail_status(
     )
 
 
-@_send_tool("mail")
+@_send_tool("mail", permission="Automation")
 def send_mail(
     to: str = "",
     subject: str = "",
@@ -894,7 +902,7 @@ def send_mail(
     )
 
 
-@_send_tool("mail")
+@_send_tool("mail", permission="Automation")
 def reply_all(
     message_id: str,
     mailbox: str,
@@ -914,7 +922,7 @@ def reply_all(
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
-@_send_tool("mail")
+@_send_tool("mail", permission="Automation")
 def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -> dict:
     """Forward a message and SEND it — this leaves your machine.
 
@@ -931,7 +939,7 @@ def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -
     return _mail.forward(message_id, mailbox, to, dry_run=dry_run)
 
 
-@_read_tool
+@_read_tool(adapter="notes", permission="Automation")
 def notes(title: str) -> list[dict[str, str]]:
     """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
     path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to
@@ -940,7 +948,7 @@ def notes(title: str) -> list[dict[str, str]]:
     return [p.as_dict() for p in _notes.get_pointers(title)]
 
 
-@_read_tool
+@_read_tool(adapter="notes", permission="Automation")
 def notes_all() -> list[dict[str, str]]:
     """List the 25 newest notes as pointers (id + "Account / Folder" + snippet),
     excluding Recently Deleted. Read-only. Fast path reads NoteStore.sqlite (needs Full
@@ -949,7 +957,7 @@ def notes_all() -> list[dict[str, str]]:
     return [p.as_dict() for p in _notes.get_all()]
 
 
-@_read_tool
+@_read_tool(adapter="notes", permission="Automation")
 def note_bodies(ids: list[str]) -> list[dict[str, str]]:
     """Hydrate plaintext bodies for up to 50 note ids (opt-in; search stays
     pointer-only). Returns [{"id", "body"}]; unknown ids are silently skipped.
@@ -957,14 +965,14 @@ def note_bodies(ids: list[str]) -> list[dict[str, str]]:
     return _notes.get_bodies(ids)
 
 
-@_read_tool
+@_read_tool(adapter="safari", permission="Automation")
 def safari_tabs() -> list[dict[str, str]]:
     """List open Safari tabs as pointers (url + title). Bounded to 50.
     Read-only; needs Automation access for Safari. See safari_open to open a URL."""
     return [p.as_dict() for p in _safari.get_tabs()]
 
 
-@_read_tool
+@_read_tool(adapter="music", permission="Automation")
 def music_search(query: str = "") -> list[dict[str, str]]:
     """Search the Music library + playlists as pointers. `query` optional
     name/artist/album substring (empty lists all, bounded). Read-only; needs Automation
@@ -972,28 +980,28 @@ def music_search(query: str = "") -> list[dict[str, str]]:
     return [p.as_dict() for p in _music.get_pointers(query)]
 
 
-@_read_tool
+@_read_tool(adapter="music", permission="Automation")
 def now_playing() -> dict:
     """Current Music player state + track (name/artist/album/id/position/duration), or
     {"state": "stopped"}. Read-only; needs Automation access for Music."""
     return _music.now_playing()
 
 
-@_read_tool
+@_read_tool(adapter="photos", permission="Automation")
 def photos(query: str) -> list[dict[str, str]]:
     """Search Photos (filename, place, date). Returns pointers (id + filename).
     Read-only; needs Automation access for Photos."""
     return [p.as_dict() for p in _photos.get_pointers(query)]
 
 
-@_read_tool
+@_read_tool(adapter="messages", permission="Automation")
 def messages_chats() -> list[dict[str, str]]:
     """List Messages conversations (id + name). No content; sending isn't supported.
     Read-only; needs Automation access for Messages."""
     return [p.as_dict() for p in _messages.get_chats()]
 
 
-@_read_tool
+@_read_tool(adapter="messages", permission="Full Disk Access")
 def messages_search(query: str, limit: int = 40) -> list[dict[str, str]]:
     """Search Messages by text content (chat.db, read-only), newest first. Pointers:
     id=message guid, summary=`[date] sender: snippet`. Needs Full Disk Access (raises a
@@ -1001,7 +1009,7 @@ def messages_search(query: str, limit: int = 40) -> list[dict[str, str]]:
     return [p.as_dict() for p in _messages.search_messages(query, limit)]
 
 
-@_read_tool
+@_read_tool(adapter="messages", permission="Full Disk Access")
 def messages_with(
     contact: str, country: str = "", limit: int = 40
 ) -> list[dict[str, str]]:
@@ -1014,7 +1022,7 @@ def messages_with(
     ]
 
 
-@_read_tool
+@_read_tool(adapter="messages", permission="Full Disk Access")
 def message_body(id: str) -> str:
     """Full text of one Message by id (chat.db, read-only). Decodes the attributedBody
     typedstream when message.text is NULL (the modern norm); returns "" for a message
@@ -1023,7 +1031,7 @@ def message_body(id: str) -> str:
     return _messages.message_body(id)
 
 
-@_read_tool
+@_read_tool(adapter="shortcuts", permission="Shortcuts CLI")
 def shortcuts(name: str = "") -> list[dict[str, str]]:
     """List/search Shortcuts by name (empty lists all). Pointers: id = the shortcut's
     stable UUID (survives renames), summary = name, deeplink = shortcuts://run-shortcut.
@@ -1031,7 +1039,7 @@ def shortcuts(name: str = "") -> list[dict[str, str]]:
     return [p.as_dict() for p in _shortcuts.get_pointers(name)]
 
 
-@_additive_tool
+@_additive_tool(adapter="reminders", permission="EventKit")
 def create_reminder(
     title: str,
     due: str | None = None,
@@ -1058,7 +1066,7 @@ def create_reminder(
     return _reminders.create_reminder(data).as_dict()
 
 
-@_write_tool(snapshot=_reminders)
+@_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
 def update_reminder(
     id: str,
     title: str,
@@ -1087,14 +1095,14 @@ def update_reminder(
     return _reminders.update_reminder(id, data).as_dict()
 
 
-@_write_tool(snapshot=_reminders)
+@_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
 def complete_reminder(id: str) -> dict[str, str]:
     """Mark a reminder complete by id.
     Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
     return _reminders.complete_reminder(id).as_dict()
 
 
-@_additive_tool
+@_additive_tool(adapter="calendar", permission="EventKit")
 def create_event(
     title: str,
     start: str,
@@ -1124,7 +1132,7 @@ def create_event(
     return _calendar.create_event(data).as_dict()
 
 
-@_write_tool(snapshot=_calendar)
+@_write_tool(snapshot=_calendar, adapter="calendar", permission="EventKit")
 def update_event(
     id: str,
     title: str,
@@ -1156,7 +1164,7 @@ def update_event(
     return _calendar.update_event(id, data, span=span).as_dict()
 
 
-@_write_tool(snapshot=_calendar)
+@_write_tool(snapshot=_calendar, adapter="calendar", permission="EventKit")
 def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dict:
     """Delete a calendar event by id. `span` REQUIRED if the target is recurring:
     'this-event' (only this occurrence) or 'future-events' (this + all later); ignored
@@ -1166,7 +1174,7 @@ def delete_event(id: str, span: str | None = None, dry_run: bool = False) -> dic
     return _calendar.delete_event(id, span=span, dry_run=dry_run)
 
 
-@_write_tool(snapshot=_notes)
+@_write_tool(snapshot=_notes, adapter="notes", permission="Automation")
 def delete_note(
     id: str, expect_title: str | None = None, dry_run: bool = False
 ) -> dict:
@@ -1177,7 +1185,7 @@ def delete_note(
     return _notes.delete(id, expect_title, dry_run=dry_run)
 
 
-@_additive_tool
+@_additive_tool(adapter="notes", permission="Automation")
 def create_note(
     title: str, body: str = "", folder: str | None = None
 ) -> dict[str, str]:
@@ -1190,7 +1198,7 @@ def create_note(
     return _notes.create(NoteData(title=title, body=body, folder=folder)).as_dict()
 
 
-@_write_tool(snapshot=_notes)
+@_write_tool(snapshot=_notes, adapter="notes", permission="Automation")
 def update_note(
     id: str, title: str, body: str = "", folder: str | None = None
 ) -> dict[str, str]:
@@ -1202,7 +1210,7 @@ def update_note(
     return _notes.update(id, NoteData(title=title, body=body, folder=folder)).as_dict()
 
 
-@_additive_tool
+@_additive_tool(adapter="contacts", permission="Automation")
 def create_contact(
     given_name: str,
     family_name: str | None = None,
@@ -1216,7 +1224,9 @@ def create_contact(
     return _contacts.create_contact(data).as_dict()
 
 
-@_write_tool(open_world=True, audit="action")
+@_write_tool(
+    open_world=True, audit="action", adapter="shortcuts", permission="Shortcuts CLI"
+)
 def run_shortcut(
     name: str, input_text: str | None = None, dry_run: bool = False
 ) -> dict[str, str]:
@@ -1229,14 +1239,14 @@ def run_shortcut(
     return _shortcuts.run_shortcut(name, input_text, dry_run=dry_run).as_dict()
 
 
-@_additive_tool(audit="open")
+@_additive_tool(audit="open", adapter="safari", permission="Automation")
 def safari_open(url: str) -> dict[str, str]:
     """Open a URL in a new Safari tab; adds https:// if no scheme (http/https only).
     Side effect (opens a tab); needs Automation access for Safari. See safari_tabs."""
     return _safari.open_url(url).as_dict()
 
 
-@_additive_tool(audit="control")
+@_additive_tool(audit="control", adapter="music", permission="Automation")
 def music_control(action: str) -> dict:
     """Control Music playback: action in play|pause|playpause|next|previous. Additive,
     reversible player-state change; needs Automation access for Music. Returns the
@@ -1244,7 +1254,7 @@ def music_control(action: str) -> dict:
     return _music.control(action)
 
 
-@_additive_tool(audit="play")
+@_additive_tool(audit="play", adapter="music", permission="Automation")
 def play_playlist(id: str) -> dict:
     """Play a Music playlist by its persistent id (from music_search). Additive,
     reversible; needs Automation access for Music. Returns the resulting now-playing
@@ -1252,14 +1262,14 @@ def play_playlist(id: str) -> dict:
     return _music.play_playlist(id)
 
 
-@_additive_tool(audit="set")
+@_additive_tool(audit="set", adapter="music", permission="Automation")
 def set_volume(level: int) -> dict:
     """Set the Music app sound volume (0–100). Additive, reversible; needs Automation
     access for Music. Returns the resulting now-playing state."""
     return _music.set_volume(level)
 
 
-@_additive_tool(audit="set")
+@_additive_tool(audit="set", adapter="music", permission="Automation")
 def set_mode(mode: str, on: bool) -> dict:
     """Set Music shuffle or repeat: mode in shuffle|repeat, on=true/false (repeat
     on→all, off→off). Additive, reversible; needs Automation access for Music. Returns
