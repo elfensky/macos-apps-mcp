@@ -844,3 +844,95 @@ def test_parse_all_absent_title_and_folder_fall_back():
     ptrs = _parse_all(f"x-coredata://S/ICNote/p3{US}missing value{US}missing value{RS}")
     assert ptrs[0].summary == "(untitled note)"
     assert "missing value" not in ptrs[0].as_dict().get("folder", "")
+
+
+# --- D-02: update()'s read-only dry-run preview ---------------------------------------
+
+
+def _refuse_write_calls(monkeypatch):
+    """Guard both native write seams: dry_run must reach neither. A read fallback
+    (run_osascript for a title/body gap-fill) is allowed through as a harmless empty
+    result — only the WRITE template (_UPDATE_NOTE) is forbidden."""
+
+    def _no_write_template(template, *a, **kw):
+        if template == notes_mod._UPDATE_NOTE:
+            raise AssertionError("update's dry run must not call the _UPDATE_NOTE template")
+        return ""
+
+    def _no_body_file(*a, **kw):
+        raise AssertionError("update's dry run must not call runtime.body_file")
+
+    monkeypatch.setattr(runtime, "run_osascript", _no_write_template)
+    monkeypatch.setattr(runtime, "body_file", _no_body_file)
+
+
+def test_update_dry_run_returns_would_update_preview_and_writes_nothing(
+    notestore, monkeypatch
+):
+    _refuse_write_calls(monkeypatch)
+    out = NotesAdapter().update(
+        "x-coredata://STORE-UUID/ICNote/p3",
+        NoteData(title="New Title", body="New body text"),
+        dry_run=True,
+    )
+    assert out == {
+        "dry_run": True,
+        "would_update": {
+            "id": "x-coredata://STORE-UUID/ICNote/p3",
+            "current": {
+                "title": "Milk",
+                "body_chars": len("Milk, eggs, bread — the full note body"),
+            },
+            "new": {"title": "New Title", "body_chars": len("New body text")},
+        },
+    }
+
+
+def test_update_dry_run_flags_a_truncated_current_body(tmp_path, monkeypatch):
+    big_body = "A" * 5000  # over text.BODY_MAX (4000) — clean_body truncates + marks
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite", bodies={99: big_body, 98: "Secret full body"}
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    _refuse_write_calls(monkeypatch)
+    out = NotesAdapter().update(
+        "x-coredata://STORE-UUID/ICNote/p3",
+        NoteData(title="New", body="short"),
+        dry_run=True,
+    )
+    assert out["would_update"]["current"]["body_truncated"] is True
+
+
+def test_update_dry_run_no_truncation_notice_when_body_fits(notestore, monkeypatch):
+    _refuse_write_calls(monkeypatch)
+    out = NotesAdapter().update(
+        "x-coredata://STORE-UUID/ICNote/p3",
+        NoteData(title="New", body="short"),
+        dry_run=True,
+    )
+    assert "body_truncated" not in out["would_update"]["current"]
+
+
+def test_update_dry_run_unknown_id_raises_naming_the_id(notestore, monkeypatch):
+    _refuse_write_calls(monkeypatch)
+    ident = "x-coredata://STORE-UUID/ICNote/p999"
+    with pytest.raises(ValueError, match=ident):
+        NotesAdapter().update(ident, NoteData(title="New"), dry_run=True)
+
+
+def test_update_dry_run_refuses_folder_before_any_native_call(monkeypatch):
+    def boom(*a, **kw):
+        raise AssertionError("no native call may fire when folder is refused")
+
+    monkeypatch.setattr(runtime, "run_osascript", boom)
+    with pytest.raises(ValueError, match="cannot move a note"):
+        NotesAdapter().update(
+            "x-coredata://S/ICNote/p1",
+            NoteData(title="T", folder="Work"),
+            dry_run=True,
+        )
+
+
+def test_update_dry_run_rejects_empty_id():
+    with pytest.raises(ValueError, match="needs a note id"):
+        NotesAdapter().update("   ", NoteData(title="T"), dry_run=True)
