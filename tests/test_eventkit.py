@@ -185,3 +185,18 @@ def test_bootstrap_is_nonfatal_on_denied_surface(monkeypatch):
 
     monkeypatch.setattr(ek, "_request_one", deny)
     ek.bootstrap()  # returns without raising despite every surface being denied
+
+
+# --- GATE-02: eventkit owns no executor; runtime's stays max_workers=1 --------------
+
+
+def test_eventkit_owns_no_executor():
+    from concurrent.futures import ThreadPoolExecutor
+
+    import macos_apps_mcp.eventkit as ek
+    from macos_apps_mcp import runtime
+
+    assert not any(
+        isinstance(getattr(ek, name), ThreadPoolExecutor) for name in vars(ek)
+    )
+    assert runtime._executor._max_workers == 1

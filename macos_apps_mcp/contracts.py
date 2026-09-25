@@ -341,7 +341,7 @@ class Recurrence:
     """A repeat rule — the FREQ/INTERVAL/COUNT/UNTIL subset of RFC 5545.
 
     Pure data: the EventKit ``EKRecurrenceRule`` mapping lives in
-    ``runtime.to_recurrence_rule``, so this module stays free of native imports.
+    ``eventkit.to_recurrence_rule``, so this module stays free of native imports.
     """
 
     frequency: Frequency
