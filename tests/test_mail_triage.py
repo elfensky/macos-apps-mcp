@@ -11,6 +11,7 @@ from macos_apps_mcp.adapters.mail_triage import (
     _parse_triage_records,
     _referenced_ids,
 )
+from tests.envelope import ACCT_A
 
 ME = {"me@x.com"}
 
@@ -237,45 +238,115 @@ def test_scans_pass_the_triage_timeout(monkeypatch):
 # --- #192: awaiting_reply reads the Envelope Index, not Mail --------------------------
 
 
-def _index_row(**kw):
-    base = {
-        "mid": "<s1@x>",
-        "subject": "Proposal",
-        "date_sent": 0,  # overridden per test via secs_ago math
-        "rowid": 1,
-        "answered": 0,
-        "to_addrs": ["Bob@Y.com"],
-    }
-    base.update(kw)
-    return base
+def _seed_sent_triage(env) -> int:
+    """Four candidates in a real Sent mailbox, served through the widened schema
+    (GATE-08): an overdue unanswered send, an overdue send answered by an INBOX
+    reply (via ``message_references``), a too-recent send, and a header-less send
+    (no ``message_global_data`` row at all — the executor's LEFT JOIN answers
+    NULL, same as a message Mail never stamped a Message-ID onto). Returns the
+    epoch every ``date_sent``/``date_received`` is relative to."""
+    now = 1_787_000_000
+    sent_mb = env.add_mailbox(f"imap://{ACCT_A}/Sent%20Messages")
+    env.execute("INSERT INTO subjects VALUES (200,'Old proposal')")
+    env.execute("INSERT INTO subjects VALUES (201,'Answered proposal')")
+    env.execute("INSERT INTO subjects VALUES (202,'Fresh proposal')")
+    env.execute("INSERT INTO subjects VALUES (203,'No header')")
+    env.execute(
+        "INSERT INTO message_global_data (ROWID, message_id, message_id_header)"
+        " VALUES (300, 500, '<old@x.com>')"
+    )
+    env.execute(
+        "INSERT INTO message_global_data (ROWID, message_id, message_id_header)"
+        " VALUES (301, 501, '<answered@x.com>')"
+    )
+    env.execute(
+        "INSERT INTO message_global_data (ROWID, message_id, message_id_header)"
+        " VALUES (302, 502, '<fresh@x.com>')"
+    )
+    # 503 (header-less) gets NO message_global_data row — the executor's LEFT
+    # JOIN on messages.message_id answers NULL, same as Mail never stamping one.
+    env.add_message(
+        ROWID=600,
+        subject=200,
+        mailbox=sent_mb,
+        message_id=500,
+        date_sent=now - 5 * 86400,
+        date_received=now - 5 * 86400,
+        deleted=0,
+    )
+    env.add_message(
+        ROWID=601,
+        subject=201,
+        mailbox=sent_mb,
+        message_id=501,
+        date_sent=now - 6 * 86400,
+        date_received=now - 6 * 86400,
+        deleted=0,
+    )
+    env.add_message(
+        ROWID=602,
+        subject=202,
+        mailbox=sent_mb,
+        message_id=502,
+        date_sent=now - 3600,
+        date_received=now - 3600,
+        deleted=0,
+    )
+    env.add_message(
+        ROWID=603,
+        subject=203,
+        mailbox=sent_mb,
+        message_id=503,
+        date_sent=now - 9 * 86400,
+        date_received=now - 9 * 86400,
+        deleted=0,
+    )
+    # the reply, in ACCT_A's own INBOX (mailbox ROWID 1, from seed_base), citing
+    # the "answered" send's messages.message_id (501) via message_references.
+    env.add_message(
+        ROWID=604,
+        mailbox=1,
+        message_id=0,
+        date_sent=now - 5 * 86400,
+        date_received=now - 5 * 86400,
+        deleted=0,
+    )
+    env.execute("INSERT INTO message_references (message, reference) VALUES (604, 501)")
+    env.execute("INSERT INTO addresses VALUES (50,'Bob@Y.com',NULL)")
+    env.execute(
+        "INSERT INTO recipients (message, address, type, position)"
+        " VALUES (600, 50, 0, 0)"
+    )
+    return now
 
 
-def test_awaiting_reply_classifies_index_rows(monkeypatch):
+def test_awaiting_reply_classifies_index_rows(monkeypatch, fake_envelope):
     import time as _time
 
     from macos_apps_mcp.adapters import mail_triage
 
-    now = 1_787_000_000
+    now = _seed_sent_triage(fake_envelope)
     monkeypatch.setattr(_time, "time", lambda: now)
-    rows = [
-        _index_row(mid="<old@x>", date_sent=now - 5 * 86400),  # overdue, unanswered
-        _index_row(mid="<answered@x>", date_sent=now - 6 * 86400, answered=1),
-        _index_row(mid="<fresh@x>", date_sent=now - 3600),  # too recent
-        _index_row(mid=None, date_sent=now - 9 * 86400),  # no stored header -> skipped
-    ]
-    seen = {}
-    monkeypatch.setattr(
-        mail_triage.mail_index,
-        "query_sent_triage",
-        lambda limit: seen.setdefault("limit", limit) and rows or rows,
-    )
     out = mail_triage.awaiting_reply(3, 25)
-    assert seen["limit"] == mail_triage.SENT_SCAN
-    assert [p.id for p in out] == ["<old@x>"]
+    assert [p.id for p in out] == ["<old@x.com>"]
     assert out[0].reason == "awaiting-reply"
     assert out[0].folder == "sent"
     # recipient addresses are lowercased on the way in, same as the AppleScript path
     assert "bob@y.com" in out[0].summary
+
+
+def test_sent_triage_executor_reads_the_fixture(fake_envelope):
+    # The tracer proof (GATE-08): the widened schema serves query_sent_triage
+    # directly, against real sqlite, in BOTH store shapes (fake_envelope depends
+    # on envelope_mode) — not a stub standing in for the executor.
+    from macos_apps_mcp.adapters import mail_index
+
+    _seed_sent_triage(fake_envelope)
+    rows = {r["mid"]: r for r in mail_index.query_sent_triage(25)}
+    assert set(rows) == {"<old@x.com>", "<answered@x.com>", "<fresh@x.com>", None}
+    assert rows["<answered@x.com>"]["answered"] == 1
+    assert rows["<old@x.com>"]["answered"] == 0
+    assert rows["<old@x.com>"]["to_addrs"] == ["Bob@Y.com"]
 
 
 def test_awaiting_reply_falls_back_to_applescript_without_index(monkeypatch):

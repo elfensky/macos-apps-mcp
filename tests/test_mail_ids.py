@@ -389,12 +389,12 @@ def _sidecar_rig(tmp_path, monkeypatch):
     """(db, side, data_dir): the test_mail_search fixture store, Sequoia-reshaped,
     with its harvested sidecar and a V10 tree ready for new messages to land in."""
     from tests.conftest import sequoiaify_envelope
-    from tests.test_mail_search import ACCT_A, _fake_envelope
+    from tests.envelope import ACCT_A, seed_base
 
     v10 = tmp_path / "V10"
     db = v10 / "MailData" / "Envelope Index"
     db.parent.mkdir(parents=True)
-    _fake_envelope(db)
+    seed_base(db)
     side = tmp_path / "mail_ids.sqlite"
     sequoiaify_envelope(db, side)
     data = v10 / ACCT_A / "INBOX.mbox" / STORE / "Data" / "Messages"
@@ -413,7 +413,8 @@ def _arrive(db, data, rowid, gid, subject_id, subject, mid):
     conn.execute("INSERT INTO subjects VALUES (?, ?)", (subject_id, subject))
     conn.execute("INSERT INTO message_global_data (ROWID) VALUES (?)", (gid,))
     conn.execute(
-        "INSERT INTO messages VALUES (?,?,1,?,1,1700009000,1700009000,0,0,0,?)",
+        "INSERT INTO messages"
+        " VALUES (?,?,1,?,1,1700009000,1700009000,0,0,0,?,0,0,NULL)",
         (rowid, subject_id, gid, gid),
     )
     conn.commit()
