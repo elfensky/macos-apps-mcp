@@ -11,9 +11,9 @@ the script, so a name or id can't break out of the AppleScript.
 
 from __future__ import annotations
 
+from .. import runtime
 from ..contracts import ContactData, Pointer
 from ..errors import VerificationFailed, verify_persisted
-from ..runtime import run_osascript
 from ..text import US, Field, clean_summary, norm_text, parse_framed
 
 MAX_CONTACTS = 50  # cap a broad name match
@@ -173,14 +173,15 @@ class ContactsAdapter:
         if not name:
             raise ValueError("contacts read needs a name to match (got an empty query)")
         # AppleScript caps at MAX_CONTACTS; the slice is a cheap backstop on its output.
-        return _parse(run_osascript(_SEARCH, name, str(MAX_CONTACTS)))[:MAX_CONTACTS]
+        raw = runtime.run_osascript(_SEARCH, name, str(MAX_CONTACTS))
+        return _parse(raw)[:MAX_CONTACTS]
 
     def create_contact(self, data: ContactData) -> Pointer:
-        ident = run_osascript(
+        ident = runtime.run_osascript(
             _CREATE, data.given_name, data.family_name or "", data.organization or ""
         ).strip()
         # Re-read by the id we're about to return — never trust the create's echo (#49).
-        _verify_contact(run_osascript(_VERIFY, ident), ident, data)
+        _verify_contact(runtime.run_osascript(_VERIFY, ident), ident, data)
         full = f"{data.given_name} {data.family_name or ''}"
         return Pointer(
             id=ident,

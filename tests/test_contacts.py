@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters.contacts import (
     MAX_CONTACTS,
     ContactsAdapter,
@@ -26,7 +27,7 @@ def test_get_pointers_passes_cap_into_applescript(monkeypatch):
         seen["args"] = args
         return ""  # no matches; we only care about the call shape
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.contacts.run_osascript", fake)
+    monkeypatch.setattr(runtime, "run_osascript", fake)
     ContactsAdapter().get_pointers("jane")
     assert seen["args"] == ("jane", str(MAX_CONTACTS))
 
