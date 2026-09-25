@@ -356,8 +356,22 @@ def test_update_event_builds_typed_payload(monkeypatch):
 def test_delete_event_dispatches(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
-    out = srv.delete_event("E-1")
+    out = srv.delete_event("E-1", dry_run=False)  # GATE-05 (D-01): default is now True
     assert fake.calls[0] == ("delete_event", "E-1", None) and out == {"deleted": "E-1"}
+
+
+def test_delete_event_bare_call_previews(monkeypatch):
+    # GATE-05 (D-01): a bare call (no dry_run) now previews — the default flipped.
+    calls = []
+
+    class _Cal:
+        def delete_event(self, ident, span=None, dry_run=False):
+            calls.append((ident, span, dry_run))
+            return {"dry_run": True, "would_delete": {}}
+
+    monkeypatch.setattr(srv, "_calendar", _Cal())
+    srv.delete_event("E-1")
+    assert calls == [("E-1", None, True)]
 
 
 def test_update_event_passes_span(monkeypatch):
@@ -690,9 +704,36 @@ def test_delete_note_dispatches(monkeypatch):
 
     fake = _FakeNotes()
     monkeypatch.setattr(srv, "_notes", fake)
-    out = srv.delete_note("N-1", expect_title="Milk")
+    # GATE-05 (D-01): dry_run now defaults True — pass False to expect a real delete.
+    out = srv.delete_note("N-1", expect_title="Milk", dry_run=False)
     assert fake.calls == [("N-1", "Milk")]
     assert out == {"deleted": "N-1"}
+
+
+def test_delete_note_bare_call_previews(monkeypatch):
+    calls = []
+
+    class _Notes:
+        def delete(self, ident, expect_title=None, dry_run=False):
+            calls.append((ident, expect_title, dry_run))
+            return {"dry_run": True, "would_delete": {}}
+
+    monkeypatch.setattr(srv, "_notes", _Notes())
+    srv.delete_note("N-1")
+    assert calls == [("N-1", None, True)]
+
+
+def test_delete_draft_bare_call_previews(monkeypatch):
+    calls = []
+
+    class _Mail:
+        def delete_draft(self, ident, dry_run=False):
+            calls.append((ident, dry_run))
+            return {"dry_run": True, "would_delete": {}}
+
+    monkeypatch.setattr(srv, "_mail", _Mail())
+    srv.delete_draft("a@b")
+    assert calls == [("a@b", True)]
 
 
 def test_create_note_tool_dispatches(monkeypatch):
@@ -981,8 +1022,9 @@ def test_delete_event_dry_run_dispatches_and_passes_envelope_through(monkeypatch
     assert out == envelope
 
 
-def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypatch):
-    # guard the default path: no dry_run -> the mutating adapter call, {"deleted": id}.
+def test_delete_event_explicit_dry_run_false_mutates_and_reports_deleted(monkeypatch):
+    # GATE-05 (D-01): the bare call now previews (see test_delete_event_bare_call_
+    # previews) — guard the EXPLICIT dry_run=False path, the only one that mutates.
     calls = []
 
     class _Cal:
@@ -991,7 +1033,7 @@ def test_delete_event_without_dry_run_still_mutates_and_reports_deleted(monkeypa
             return {"deleted": ident}
 
     monkeypatch.setattr(srv, "_calendar", _Cal())
-    assert srv.delete_event("E-1") == {"deleted": "E-1"}
+    assert srv.delete_event("E-1", dry_run=False) == {"deleted": "E-1"}
     assert calls == [("E-1", None, False)]
 
 
