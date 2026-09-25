@@ -18,6 +18,7 @@ import sys
 import pytest
 from fastmcp import Client
 
+import macos_apps_mcp.audit as au
 import macos_apps_mcp.registry as reg
 import macos_apps_mcp.server as srv
 import macos_apps_mcp.tiers as tiers
@@ -136,3 +137,36 @@ def test_gate06_verbs():
     }
     for name, verb in want.items():
         assert reg.TOOLS[name].audit_verb == verb, name
+
+
+def test_every_registered_write_has_its_own_verb():
+    for name, r in reg.TOOLS.items():
+        if r.is_write and r.registered:
+            assert r.audit_verb, name
+            assert r.audit_verb != "write", name
+
+
+def test_audit_op_is_gone():
+    assert not hasattr(au, "_audit_op")
+
+
+def test_create_contact_is_logged_with_its_verb(monkeypatch):
+    from macos_apps_mcp.contracts import ContactData, Pointer
+
+    class _FakeContacts:
+        def create_contact(self, data: ContactData) -> Pointer:
+            return Pointer(id="C-9", summary="s", deeplink="d")
+
+    monkeypatch.setattr(srv, "_contacts", _FakeContacts())
+    records = []
+    monkeypatch.setattr(au, "audit_write", records.append)
+    monkeypatch.setattr(au, "usage_log", lambda tool: None)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("create_contact", {"given_name": "Jane"})
+
+    asyncio.run(_run())
+    assert len(records) == 1
+    assert records[0]["tool"] == "create_contact"
+    assert records[0]["op"] == "create"

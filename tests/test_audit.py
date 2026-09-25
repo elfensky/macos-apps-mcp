@@ -103,13 +103,19 @@ def test_audit_read_bounded(tmp_path, monkeypatch):
 
 def test_audit_op_labels_send_tools_distinctly_from_write():
     # M3 review: the three outbound tools must be filterable in the audit log for
-    # "what actually left this machine" — not lumped into the generic "write" bucket
-    # a create/update/delete fallback would otherwise assign them.
-    assert au._audit_op("send_mail") == "send"
-    assert au._audit_op("reply_all") == "send"
-    assert au._audit_op("forward_mail") == "send"
+    # "what actually left this machine" — not lumped into a generic "write" bucket.
+    # GATE-06: the verb is now a per-tool FACT on registry.TOOLS, not re-derived from
+    # the tool name at audit time (au._audit_op is gone — see test_audit_op_is_gone).
+    import macos_apps_mcp.registry as registry
+
+    assert registry.TOOLS["send_mail"].audit_verb == "send"
+    assert registry.TOOLS["reply_all"].audit_verb == "send"
+    assert registry.TOOLS["forward_mail"].audit_verb == "send"
     # unrelated tools are unaffected by the new mapping.
-    assert au._audit_op("mail_reply") == "reply"
-    assert au._audit_op("create_event") == "create"
-    assert au._audit_op("delete_note") == "delete"
-    assert au._audit_op("ping") == "write"
+    verbs = registry.audit_verbs()
+    assert verbs["mail_reply"] == "reply"
+    assert verbs["create_event"] == "create"
+    assert verbs["delete_note"] == "delete"
+    # ping is not a write — it carries no audit verb at all.
+    assert "ping" not in verbs
+    assert registry.TOOLS["ping"].audit_verb is None

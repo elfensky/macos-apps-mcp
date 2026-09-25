@@ -1,8 +1,10 @@
 """Unit tests for AuditMiddleware — envelope + before-state, failure isolation.
 
-The middleware accepts its write-tool set and snapshot sources at construction
-(the Snapshotter seam, contracts.py) — so these tests build one with fakes instead
-of patching server globals.
+The middleware accepts its audit-verb map and snapshot sources at construction (the
+Snapshotter seam, contracts.py) — so these tests build one with fakes instead of
+patching server globals. GATE-06: a write is a KEY of ``audit_verbs`` — the map IS
+the write-tool set, and the verb rides with it — so a write cannot be tracked
+without a verb (no ``_audit_op`` fallback).
 """
 
 from __future__ import annotations
@@ -13,12 +15,13 @@ from types import SimpleNamespace
 import macos_apps_mcp.audit as au
 from macos_apps_mcp.contracts import Pointer, Snapshotter
 
-_WRITES = {"create_event", "update_event"}
+_AUDIT_VERBS = {"create_event": "create", "update_event": "update"}
 
 
-def _mw(snapshot_sources=None):
+def _mw(snapshot_sources=None, audit_verbs=None):
     return au.AuditMiddleware(
-        write_tools=_WRITES, snapshot_sources=snapshot_sources or {}
+        audit_verbs=_AUDIT_VERBS if audit_verbs is None else audit_verbs,
+        snapshot_sources=snapshot_sources or {},
     )
 
 
@@ -44,6 +47,17 @@ def _capture(monkeypatch):
     monkeypatch.setattr(au, "audit_write", records.append)
     monkeypatch.setattr(au, "usage_log", lambda tool: None)  # keep tests hermetic
     return records
+
+
+def test_op_comes_from_the_verb_map(monkeypatch):
+    # GATE-06: the verb is a per-tool FACT stated once at registration and read back
+    # from the map — not re-derived from the tool name at audit time.
+    records = _capture(monkeypatch)
+    mw = _mw(audit_verbs={"t": "move"})
+    _run(mw, _ctx("t", {}), _Result({"id": "X-1"}))
+    assert records[0]["op"] == "move"
+    _run(mw, _ctx("untracked", {}), _Result({"id": "X-2"}))
+    assert len(records) == 1  # a tool not in the map is never logged
 
 
 def test_create_logs_envelope_no_before(monkeypatch):
