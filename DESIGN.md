@@ -32,7 +32,8 @@ native data-plane adapter, so clean module boundaries are load-bearing.
 - **`Pointer(id, summary, deeplink)` IS the cockpit's citation grammar** (`[src:: system:id]` + an
   open-in-app deeplink) — pointers-not-payload by construction, which structurally avoids the archived
   flagship's context-bloat bug.
-- **EventKit on one dedicated, serialized worker thread** (`runtime.py`). `EKEventStore` has thread
+- **EventKit on one dedicated, serialized worker thread** (`runtime.py` owns the worker;
+  `eventkit.py` owns the store and every EventKit-typed call). `EKEventStore` has thread
   affinity and TCC auth must be handled on a consistent thread; a generic multi-worker pool risks
   affinity bugs and a hung first-permission call. Create the store on a single
   `ThreadPoolExecutor(max_workers=1)` at startup; serialize every EventKit call through it.
