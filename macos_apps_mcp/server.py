@@ -724,7 +724,10 @@ def create_mailbox(name: str, account: str) -> dict:
 
 
 @_write_tool(
-    audit="move", adapter="mail", permission=("Automation", "Full Disk Access")
+    audit="move",
+    adapter="mail",
+    permission=("Automation", "Full Disk Access"),
+    backup_notice=True,
 )
 def move_mail(
     ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
@@ -754,7 +757,10 @@ def move_mail(
 
 
 @_write_tool(
-    audit="trash", adapter="mail", permission=("Automation", "Full Disk Access")
+    audit="trash",
+    adapter="mail",
+    permission=("Automation", "Full Disk Access"),
+    backup_notice=True,
 )
 def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
@@ -802,7 +808,10 @@ def mail_duplicates(limit: int = 25) -> dict:
 
 
 @_write_tool(
-    audit="undo", adapter="mail", permission=("Automation", "Full Disk Access")
+    audit="undo",
+    adapter="mail",
+    permission=("Automation", "Full Disk Access"),
+    backup_notice=True,
 )
 def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
