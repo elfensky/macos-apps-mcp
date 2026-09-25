@@ -10,10 +10,12 @@ tools CONTEXT.md names.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
@@ -334,3 +336,80 @@ def test_create_contact_is_logged_with_its_verb(monkeypatch):
     assert len(records) == 1
     assert records[0]["tool"] == "create_contact"
     assert records[0]["op"] == "create"
+
+
+# --- GATE-05 (D-04): dry-run defaults are correct by construction ---------------------
+
+
+def _dry_run_offenders(records):
+    """The fail-closed rule itself, factored out so both the real-registry test and
+    its own proof (fed synthetic records) call the identical check. A tool is an
+    offender if its dispatched ``fn`` has no ``dry_run`` parameter at all, or has one
+    whose default is not exactly ``True``. Returns the SORTED list of offender names
+    — the D-04 test's failure message must name every offender, not only the first."""
+    offenders = []
+    for name, rec in records:
+        param = inspect.signature(rec.fn).parameters.get("dry_run")
+        if param is None or param.default is not True:
+            offenders.append(name)
+    return sorted(offenders)
+
+
+def test_content_removing_tools_default_to_dry_run():
+    # GATE-05 (D-04): every tool in the "removes or replaces content" class defaults
+    # dry_run=True. The selection deliberately repeats the delete_* prefix rule
+    # ALONGSIDE reading removes_content — so a bug in the registry builder (which is
+    # supposed to fold the prefix into removes_content itself) cannot silently drop a
+    # delete_* tool from this check.
+    selected = [
+        (n, r)
+        for n, r in reg.TOOLS.items()
+        if r.removes_content or n.startswith("delete_")
+    ]
+    offenders = _dry_run_offenders(selected)
+    assert offenders == [], f"tools missing a dry_run=True default: {offenders}"
+
+
+def test_dry_run_rule_catches_offenders():
+    # The rule's own fail-closed proof — fed two synthetic records directly, never by
+    # registering a fake tool through the live server.
+    def _no_dry_run_param():
+        pass
+
+    def _dry_run_defaults_false(dry_run=False):
+        pass
+
+    fake_records = [
+        ("delete_x", SimpleNamespace(fn=_dry_run_defaults_false)),
+        ("delete_y", SimpleNamespace(fn=_no_dry_run_param)),
+    ]
+    assert _dry_run_offenders(fake_records) == ["delete_x", "delete_y"]
+
+
+def test_removes_content_class_is_exactly_the_named_tools():
+    # D-03/D-04: the class today (before Task 2 adds update_note) is exactly the six
+    # tools CONTEXT.md names — no more, no fewer.
+    assert reg.removes_content_tools() == frozenset(
+        {
+            "delete_event",
+            "delete_draft",
+            "delete_note",
+            "move_mail",
+            "trash_mail",
+            "mail_undo",
+        }
+    )
+
+
+def test_unrelated_write_tools_are_not_in_the_removes_content_class():
+    # D-03: these keep their current (non-dry-run-defaulting) signatures and must
+    # never join the class.
+    excluded = reg.removes_content_tools()
+    for name in (
+        "update_event",
+        "update_reminder",
+        "complete_reminder",
+        "update_mail_status",
+        "run_shortcut",
+    ):
+        assert name not in excluded, name
