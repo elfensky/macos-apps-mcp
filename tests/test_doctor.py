@@ -91,7 +91,7 @@ def test_eventkit_request_routes_request_access_each_through_run_native(monkeypa
 
 def test_automation_unprobed_when_request_false(monkeypatch):
     # The no-prompt guarantee: with request=False we never send an Apple event.
-    monkeypatch.setattr(doc, "run_osascript", _boom_osascript)
+    monkeypatch.setattr(runtime, "run_osascript", _boom_osascript)
     surfaces = doc._automation_surfaces(request=False)
     assert [s["surface"] for s in surfaces] == [
         "mail",
@@ -110,7 +110,7 @@ def test_automation_surfaces_carry_process_line(monkeypatch):
     # #183: pid + uptime answer "did the force-quit actually restart Mail?" — a UI
     # quit once left a 37-minute-old wedged process alive. Reported even unprobed
     # (request=False): a ps read is not an Apple Event and needs no TCC.
-    monkeypatch.setattr(doc, "run_osascript", _boom_osascript)
+    monkeypatch.setattr(runtime, "run_osascript", _boom_osascript)
     monkeypatch.setattr(
         doc,
         "app_process_info",
@@ -127,7 +127,7 @@ def test_automation_surfaces_carry_process_line(monkeypatch):
 
 
 def test_automation_probe_ok(monkeypatch):
-    monkeypatch.setattr(doc, "run_osascript", lambda *a, **k: "AppName")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a, **k: "AppName")
     surfaces = doc._automation_surfaces(request=True)
     assert all(s["ok"] is True and s["status"] == "ok" for s in surfaces)
 
@@ -136,7 +136,7 @@ def test_automation_probe_denied_carries_directive(monkeypatch):
     def denied(*a, **k):
         raise AutomationDenied("grant Automation in System Settings, then restart")
 
-    monkeypatch.setattr(doc, "run_osascript", denied)
+    monkeypatch.setattr(runtime, "run_osascript", denied)
     surfaces = doc._automation_surfaces(request=True)
     assert all(
         s["ok"] is False and s["status"] == "automation_denied" for s in surfaces
@@ -148,7 +148,7 @@ def test_automation_probe_app_not_running_is_reported_not_raised(monkeypatch):
     def not_running(*a, **k):
         raise AppNotRunning("open the app, then try again")
 
-    monkeypatch.setattr(doc, "run_osascript", not_running)
+    monkeypatch.setattr(runtime, "run_osascript", not_running)
     surfaces = doc._automation_surfaces(request=True)  # must not raise
     assert all(s["status"] == "app_not_running" for s in surfaces)
 
@@ -268,7 +268,7 @@ def test_summary_names_mail_index_drift(monkeypatch, tmp_path):
 
 def _all_granted(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 3)
-    monkeypatch.setattr(doc, "run_osascript", lambda *a, **k: "AppName")
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a, **k: "AppName")
     monkeypatch.setattr(doc.shutil, "which", lambda _: "/usr/bin/shortcuts")
     probe = tmp_path / "TCC.db"
     probe.write_bytes(b"x")
@@ -353,7 +353,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
         raise SchemaDrift(doc.mail_index._FLOOR_MESSAGE.format(ver="15.7.9"))
 
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)
-    monkeypatch.setattr(doc, "run_osascript", denied_automation)
+    monkeypatch.setattr(runtime, "run_osascript", denied_automation)
     monkeypatch.setattr(doc.shutil, "which", lambda _: None)
     monkeypatch.setattr(doc, "open", denied_open, raising=False)
     monkeypatch.setattr(doc.mail_index, "check_index_schema", floor_drift)

@@ -25,10 +25,10 @@ from pathlib import Path
 
 import EventKit as EK
 
-from . import deploy
+from . import deploy, runtime
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
-from .runtime import app_process_info, request_access_each, run_native, run_osascript
+from .runtime import app_process_info, request_access_each, run_native
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
@@ -164,7 +164,7 @@ def _automation_surfaces(request: bool) -> list[dict]:
             )
         else:
             try:
-                run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
+                runtime.run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
                 out.append(_surface(name, "automation", True, "ok"))
             except NativeError as e:
                 # #47 already fingerprinted it (automation_denied / app_not_running /
