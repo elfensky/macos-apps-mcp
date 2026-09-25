@@ -25,14 +25,14 @@ def test_gate_on_registers_the_three_send_tools():
     # C6a rides along here because this is the ONLY process where the gate is on:
     # outbound_status()["registered"] must report mail. Every in-process test sees the
     # gate off and can only assert the empty set, so without this the ON path is
-    # unpinned — drop `_SEND_REGISTERED.add` and doctor tells a correctly-configured
-    # daemon that sending is OFF while send_mail is live.
+    # unpinned — drop the registered=True on the send record and doctor tells a
+    # correctly-configured daemon that sending is OFF while send_mail is live.
     code = (
         "import asyncio, json, macos_apps_mcp.server as srv; "
-        "import macos_apps_mcp.tiers as tiers; "
+        "import macos_apps_mcp.registry as registry; "
         "print(json.dumps({"
         "'tools': sorted(t.name for t in asyncio.run(srv.mcp.list_tools())), "
-        "'outbound': tiers.outbound_status()}))"
+        "'outbound': registry.outbound_status()}))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code],

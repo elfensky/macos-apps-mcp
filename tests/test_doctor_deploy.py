@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from macos_apps_mcp import doctor, runtime, tiers
+from macos_apps_mcp import doctor, registry, runtime, tiers
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def _no_live_process_probe(monkeypatch):
 # set before import registers the send tools). The gate-ON half of every claim is
 # pinned by test_gate_on_dispatch.py's subprocess; skipping here loses nothing.
 _gate_off_only = pytest.mark.skipif(
-    bool(tiers._SEND_REGISTERED),
+    bool(registry.outbound_status()["registered"]),
     reason="valid only in a gate-off process (see test_gate_on_dispatch.py)",
 )
 
@@ -156,13 +156,14 @@ def test_deployment_section_outbound_off_when_read_only(monkeypatch):
 @_gate_off_only
 def test_outbound_status_splits_registered_from_configured(monkeypatch):
     # C6: the two truths that can DISAGREE. registered = gate state at import (off in
-    # this process); configured = what the env/toggle enables RIGHT NOW. The former
-    # third key, `capable`, was read by nothing and is gone — _SEND_ADAPTERS serves
-    # anyone who needs it. The non-empty `registered` case is pinned by the gate-on
-    # subprocess in test_gate_on_dispatch.py, the only process where the gate is on.
+    # this process); configured = what the env/toggle enables RIGHT NOW. registry.py
+    # is the ONE outbound ledger now (card 2, GATE-04, RESEARCH Pitfall 3) — a view
+    # over the send records, not tiers.py's former provisional set. The non-empty
+    # `registered` case is pinned by the gate-on subprocess in test_gate_on_dispatch.py,
+    # the only process where the gate is on.
     monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
-    st = tiers.outbound_status()
+    st = registry.outbound_status()
     assert set(st) == {"registered", "configured"}
     assert st["registered"] == []  # the import-time gate was off in this process
     assert st["configured"] == ["mail"]
@@ -227,7 +228,7 @@ def test_the_daemon_outbound_gate_reads_the_toggle_from_argv_alone(
 ):
     """The end the bug actually broke: with no env var at all, argv=daemon and a toggle
     saying `mail`, the gate must be ON."""
-    from macos_apps_mcp import deploy, tiers
+    from macos_apps_mcp import deploy
 
     monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
     monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
