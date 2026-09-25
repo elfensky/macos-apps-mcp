@@ -20,17 +20,17 @@ from ..errors import (
     resolve_container,
     verify_persisted,
 )
-from ..runtime import (
+from ..eventkit import (
     container_id,
     epoch_nsdate,
     from_nsdate,
     persisted_recurrence_signature,
     recurrence_signature,
-    run_native,
     store,
     to_nsdate,
     to_recurrence_rule,
 )
+from ..runtime import run_native
 from ..text import clean_summary, norm_text
 
 

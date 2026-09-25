@@ -18,18 +18,18 @@ from ..errors import (
     resolve_container,
     verify_persisted,
 )
-from ..runtime import (
+from ..eventkit import (
     container_id,
     due_components,
     persisted_recurrence_signature,
     recurrence_signature,
     rrule_text,
-    run_native,
     run_native_async,
     store,
     to_nsdate,
     to_recurrence_rule,
 )
+from ..runtime import run_native
 from ..text import clean_summary, fold_text, norm_text
 
 # A fetch has no user interaction, so the GCD callback should arrive quickly. Bound the
