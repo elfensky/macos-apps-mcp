@@ -28,7 +28,7 @@ from . import deploy
 def read_only() -> bool:
     """True when MACOS_APPS_READ_ONLY is set; writes are then not registered.
 
-    Reads the environment on every call. The write decorators consult it at
+    Reads the environment on every call. The write decorators below consult it at
     registration time — which is module import, since tools are defined at module
     level — so set the variable before launching the server process.
     """
