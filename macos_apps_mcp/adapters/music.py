@@ -12,8 +12,8 @@ Apple Event, so it scales past a small library.
 
 from __future__ import annotations
 
+from .. import runtime
 from ..contracts import Pointer
-from ..runtime import run_osascript
 from ..text import (
     STRIP_FRAMING,
     US,
@@ -214,7 +214,7 @@ class MusicAdapter:
         only fold-away chars must not become a truthy " " and filter to space-containing
         names — an empty query means "list all".
         """
-        parsed = _parse_search(run_osascript(_SEARCH))
+        parsed = _parse_search(runtime.run_osascript(_SEARCH))
         q = fold_text(query).strip()
         if q:
             parsed = [(p, key) for p, key in parsed if q in key]
@@ -222,7 +222,7 @@ class MusicAdapter:
 
     def now_playing(self) -> dict:
         """Current player state + track, or {"state": "stopped"}."""
-        return _parse_now_playing(run_osascript(_NOW_PLAYING))
+        return _parse_now_playing(runtime.run_osascript(_NOW_PLAYING))
 
     # ponytail: each action does one extra osascript round-trip (now_playing) to return
     # a useful resulting state. Fine — actions are interactive, not a hot loop. Return a
@@ -235,7 +235,7 @@ class MusicAdapter:
                 f"unknown music action {action!r}; expected one of "
                 f"{', '.join(_ACTIONS)}"
             )
-        run_osascript(_CONTROL, action)
+        runtime.run_osascript(_CONTROL, action)
         return self.now_playing()
 
     def play_playlist(self, ident: str) -> dict:
@@ -245,14 +245,14 @@ class MusicAdapter:
             raise ValueError(
                 "play_playlist needs a playlist id (got empty); call music_search"
             )
-        run_osascript(_PLAY_PLAYLIST, ident)
+        runtime.run_osascript(_PLAY_PLAYLIST, ident)
         return self.now_playing()
 
     def set_volume(self, level: int) -> dict:
         """Set the Music app sound volume (0–100)."""
         if not 0 <= level <= 100:
             raise ValueError(f"volume must be 0–100; got {level}")
-        run_osascript(_SET_VOLUME, str(level))
+        runtime.run_osascript(_SET_VOLUME, str(level))
         return self.now_playing()
 
     def set_mode(self, mode: str, on: bool) -> dict:
@@ -262,5 +262,5 @@ class MusicAdapter:
             raise ValueError(
                 f"unknown mode {mode!r}; expected one of {', '.join(_MODES)}"
             )
-        run_osascript(_SET_MODE, mode, "1" if on else "0")
+        runtime.run_osascript(_SET_MODE, mode, "1" if on else "0")
         return self.now_playing()

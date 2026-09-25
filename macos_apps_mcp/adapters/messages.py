@@ -19,8 +19,9 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from .. import runtime
 from ..contracts import Pointer
-from ..runtime import mac_region, read_via_sqlite, run_osascript
+from ..runtime import mac_region, read_via_sqlite
 from ..text import (
     STRIP_FRAMING,
     Field,
@@ -289,7 +290,7 @@ def _parse(raw: str) -> list[Pointer]:
 class MessagesAdapter:
     def get_chats(self) -> list[Pointer]:
         """List Messages conversations (id + name) via osascript. No content, no FDA."""
-        return _parse(run_osascript(_CHATS))[:MAX_CHATS]
+        return _parse(runtime.run_osascript(_CHATS))[:MAX_CHATS]
 
     def search_messages(self, query: str, limit: int = MAX_MESSAGES) -> list[Pointer]:
         """Search message content (chat.db, read-only), newest first. Snippet Pointers.
