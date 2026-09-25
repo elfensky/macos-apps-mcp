@@ -11,8 +11,8 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 - [x] **GATE-01**: A unit test that forgets to fake the native seam raises instead of dialing a real app, for every adapter, `doctor`, and `shortcuts` (`run_osascript`, `body_file`, `tracked_run` all locked once in conftest; tripwire globs `adapters/*.py` + `doctor.py`)
 - [x] **GATE-02**: `runtime.py` exposes only the native door (~10 public names); the EventKit cluster (store, NSDate/RRULE coercion, TCC request, `run_native_async`) lives in its own module that Calendar/Reminders import by one name; bodies byte-identical; device proof `-m integration -k "request_access or create_event or create_reminder"`
-- [ ] **GATE-03**: Tier policy (`read_only`, `allow_send`, `admit_send`, `outbound_status`, env grammar, consent file, role) lives in its own module below `server`, `doctor`, `deploy`; `doctor` no longer imports `server` (no import cycle in the package); the untrusted-data notice middleware lives beside audit, not in `server`
-- [ ] **GATE-04**: Every tool is registered through one record (tier, adapter, permission, audit verb, notice policy); annotations, gates, guard, snapshot registry, notice exemption, audit verb and the tests' expectations are all derived from it; gated-off tools are still recorded pre-gate (never derived from FastMCP `Tool` objects)
+- [x] **GATE-03**: Tier policy (`read_only`, `allow_send`, `admit_send`, `outbound_status`, env grammar, consent file, role) lives in its own module below `server`, `doctor`, `deploy`; `doctor` no longer imports `server` (no import cycle in the package); the untrusted-data notice middleware lives beside audit, not in `server`
+- [x] **GATE-04**: Every tool is registered through one record (tier, adapter, permission, audit verb, notice policy); annotations, gates, guard, snapshot registry, notice exemption, audit verb and the tests' expectations are all derived from it; gated-off tools are still recorded pre-gate (never derived from FastMCP `Tool` objects)
 - [ ] **GATE-05**: Every destructive tool defaults `dry_run=True` (`delete_event`, `delete_draft`, `delete_note` gain it), enforced by a registry test that fails when a new destructive tool omits it
 - [x] **GATE-06**: Writes audit under their own verb — `trash_mail`, `move_mail`, `mail_undo`, `export_mail`, `save_mail_attachment`, `music_control`, `play_playlist`, `set_mode`, `set_volume`, `create_contact` no longer log as bare `"write"` / unlogged
 - [ ] **GATE-07**: `MACOS_APPS_READ_ONLY=1 uv run pytest` passes (12 failures on develop today)
@@ -137,8 +137,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | GATE-01 | Phase 1 | Complete |
 | GATE-02 | Phase 1 | Complete |
-| GATE-03 | Phase 1 | Pending |
-| GATE-04 | Phase 1 | Pending |
+| GATE-03 | Phase 1 | Complete |
+| GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Pending |
 | GATE-06 | Phase 1 | Complete |
 | GATE-07 | Phase 2 | Pending |

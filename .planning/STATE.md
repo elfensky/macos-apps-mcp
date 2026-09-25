@@ -4,8 +4,8 @@ milestone: v0.11.0
 current_phase: 01
 current_phase_name: Gate — Land the Spiked Architecture Cuts
 status: executing
-stopped_at: "Wave 8 complete — card 2 part A on lane refactor/gate-card-2-registration-record; next: plan 01-12 (card 2 part B)"
-last_updated: "2026-09-25T20:46:43.000Z"
+stopped_at: "Wave 9 complete — card 2 part B on lane refactor/gate-card-2-registration-record; next: plan 01-13 (card 2 part C + the card-2 PR)"
+last_updated: "2026-09-25T21:13:24.000Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 01 execution started
 state_head: aa412da1317e06e9fb2317f363c54f1a164a09de
@@ -13,7 +13,7 @@ progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 14
-  completed_plans: 11
+  completed_plans: 12
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 01 (Gate — Land the Spiked Architecture Cuts) — EXECUTING
-Plan: 12 of 14
+Plan: 13 of 14
 Status: Ready to execute
-Last activity: 2026-09-25 — Wave 8 done: 01-11 card 2 part A (registry + audit verbs), GATE-06 ticked
+Last activity: 2026-09-25 — Wave 9 done: 01-12 card 2 part B (one outbound ledger in registry), GATE-03 and GATE-04 ticked
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -110,5 +110,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-25T11:41:17.935Z
-Stopped at: Wave 8 done (11/14). Next: plan 01-12, card 2 part B, same lane
+Stopped at: Wave 9 done (12/14). Next: plan 01-13, card 2 part C + PR, same lane
 Resume file: None
