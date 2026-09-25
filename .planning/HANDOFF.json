@@ -110,6 +110,11 @@
       "decision": "Root pin bound to the plan's lane path; isolation forced to none via dispatch-isolation --force-isolation none",
       "rationale": "The stock pin fails in a linked worktree; the isolation guard hook refuses dispatch while the sentinel says harness-worktree",
       "phase": "01"
+    },
+    {
+      "decision": "Never dispatch 01-10/01-14 in harness-worktree mode",
+      "rationale": "A worktree agent's git and Write calls are confined to its own worktree; the 2026-09-25 attempt stopped before building, daemon untouched",
+      "phase": "01"
     }
   ],
   "uncommitted_files": [
