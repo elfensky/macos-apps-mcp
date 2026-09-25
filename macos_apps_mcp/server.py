@@ -11,7 +11,7 @@ import functools
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from . import notices, tiers
+from . import notices, registry, tiers
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -97,59 +97,10 @@ _SEND_ANNOTATIONS = {
     "openWorldHint": True,
 }
 
-# Names of every registered write tool (#67) — populated by _write_tool/_additive_tool
-# below, in the non-read-only branch only (writes aren't registered in read-only mode).
-_WRITE_TOOLS: set[str] = set()
-
-# Which adapter answers snapshot(id) for each id-addressed write tool (#67) — DERIVED
-# at registration (`@_write_tool(snapshot=…)`), never hand-maintained, so a new write
-# tool can't silently miss before-state capture. Consumed by AuditMiddleware.
-_SNAPSHOT_SOURCES: dict[str, Snapshotter] = {}
-
-
-def _read_tool(fn):
-    """Register a read tool, wrapped so typed native failures surface as directives.
-    Annotated read-only (#57)."""
-    return mcp.tool(annotations=_READ_ANNOTATIONS)(_guard(fn))
-
-
-def _write_tool(
-    fn=None, *, snapshot: Snapshotter | None = None, open_world: bool = False
-):
-    """Register a write that modifies/overwrites/deletes existing state — skipped in
-    read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57).
-    ``snapshot``: the adapter answering ``snapshot(id)`` for audit before-state — pass
-    it on every id-addressed update/delete/complete tool (#67). ``open_world``: the
-    tool MAY reach beyond this machine (run_shortcut — a shortcut can call a webhook)
-    without being outbound-by-design; the send tier stays ``_send_tool`` (C6c)."""
-
-    def deco(f):
-        if tiers.read_only():
-            return f
-        _WRITE_TOOLS.add(f.__name__)
-        if snapshot is not None:
-            _SNAPSHOT_SOURCES[f.__name__] = snapshot
-        ann = _DESTRUCTIVE_ANNOTATIONS
-        if open_world:
-            ann = {**ann, "openWorldHint": True}
-        return mcp.tool(annotations=ann)(_guard(f))
-
-    return deco(fn) if fn is not None else deco
-
-
-def _additive_tool(fn):
-    """Register a write that only ADDS a new item (create/open) — not read-only, but not
-    destructive (#57). Also skipped in read-only mode."""
-    if tiers.read_only():
-        return fn
-    _WRITE_TOOLS.add(fn.__name__)
-    return mcp.tool(annotations=_ADDITIVE_ANNOTATIONS)(_guard(fn))
-
-
 # The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
 # that is genuinely byte-identical across every mail send tool (the folder-VERBATIM /
 # FDA / truncated wordings are hand-tuned per tool and stay in place). Composed into
-# each mail send tool's __doc__ at registration by _send_tool below, so a wording fix
+# each mail send tool's __doc__ at registration by _tool below, so a wording fix
 # is a one-site edit; test_send_tools_document_the_unsuppressable_autosave pins that
 # every send tool carries it.
 _MAIL_AUTOSAVE_DOC = """
@@ -160,26 +111,111 @@ it — so a successful send still litters. Remove it with `drafts()` +
 `delete_draft()`. A dry run constructs nothing and so leaves nothing."""
 
 
-def _send_tool(adapter: str, *, snapshot: Snapshotter | None = None):
+def _tool(
+    tier: registry.Tier,
+    *,
+    adapter: str | None = None,
+    permission: str | tuple[str, ...] = (),
+    audit: str | None = None,
+    notice: bool = True,
+    backup_notice: bool = False,
+    snapshot: Snapshotter | None = None,
+    open_world: bool = False,
+    guard: bool = True,
+):
+    """THE registration decorator (GATE-04) — one ``registry.ToolRecord`` per tool.
+
+    ``tier`` decides the gate (read: always registered; additive/destructive:
+    skipped under ``tiers.read_only()``; send: registered only when
+    ``tiers.admit_send(adapter)`` says so) and the MCP annotations
+    (``registry.ToolRecord.annotations``). Everything else the middlewares, doctor and
+    the tests used to keep in hand-maintained name sets is stated here ONCE and read
+    back from ``registry.TOOLS``: ``audit`` (the audit-log verb — derived from the
+    create/update/delete/complete prefix, REQUIRED otherwise, never a silent
+    ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — carried on
+    the record for the eventual registry-driven notice middleware), ``snapshot`` (the
+    adapter answering ``snapshot(id)`` for before-state, #67), ``open_world``,
+    ``permission`` (the grant(s) the docstring must name), ``guard`` (False = no
+    native call, so no ``NativeError`` -> ``ToolError`` wrap — ping/now/usage).
+
+    A gated-off tool still gets a record (``registered=False``) — that is what lets
+    doctor say "mail: off" and lets the tests see the whole surface either way — and the
+    decorator hands back the plain function, so it stays callable in-process.
+    """
+    perm = (permission,) if isinstance(permission, str) else tuple(permission)
+
+    def deco(f):
+        name = f.__name__
+        if tier == "send":
+            if adapter is None:
+                raise TypeError(f"{name}: a send tool must name its adapter")
+            if adapter == "mail":
+                # #179: composed before the gate check, so __doc__ carries the #133
+                # paragraph whether or not the tool registers (tests read it either
+                # way).
+                f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
+            registered = tiers.admit_send(adapter)
+        elif tier == "read":
+            registered = True
+        else:
+            registered = not tiers.read_only()
+        rec = registry.add(
+            registry.ToolRecord(
+                name=name,
+                tier=tier,
+                adapter=adapter,
+                permission=perm,
+                audit_verb=registry.derive_audit_verb(name, tier, audit),
+                notice=notice,
+                backup_notice=backup_notice,
+                snapshot=snapshot,
+                open_world=open_world,
+                registered=registered,
+                fn=f,
+            )
+        )
+        if not registered:
+            return f
+        return mcp.tool(annotations=rec.annotations)(_guard(f) if guard else f)
+
+    return deco
+
+
+# Thin aliases (CONTEXT.md's "Card 2 decorator names" discretion) — the four names
+# every tool body below already uses, each exactly ``_tool(<tier>, ...)`` so no call
+# site below has to change shape, only add ``audit=`` where the name has no
+# create/update/delete/complete prefix.
+def _read_tool(fn=None, **kw):
+    """Register a read tool, wrapped so typed native failures surface as directives.
+    Annotated read-only (#57)."""
+    return _tool("read", **kw)(fn) if fn is not None else _tool("read", **kw)
+
+
+def _write_tool(fn=None, **kw):
+    """Register a write that modifies/overwrites/deletes existing state — skipped in
+    read-only mode (safe-deploy guard). Annotated not-read-only + destructive (#57).
+    ``snapshot``: the adapter answering ``snapshot(id)`` for audit before-state — pass
+    it on every id-addressed update/delete/complete tool (#67). ``open_world``: the
+    tool MAY reach beyond this machine (run_shortcut — a shortcut can call a webhook)
+    without being outbound-by-design; the send tier stays ``_send_tool`` (C6c)."""
+    return (
+        _tool("destructive", **kw)(fn) if fn is not None else _tool("destructive", **kw)
+    )
+
+
+def _additive_tool(fn=None, **kw):
+    """Register a write that only ADDS a new item (create/open) — not read-only, but not
+    destructive (#57). Also skipped in read-only mode."""
+    return _tool("additive", **kw)(fn) if fn is not None else _tool("additive", **kw)
+
+
+def _send_tool(adapter: str, **kw):
     """Register an OUTBOUND tool — absent unless MACOS_APPS_ALLOW_SEND names ``adapter``
     (#104). Annotated destructive + open-world (#57). ``snapshot``: as on
     ``_write_tool``, the adapter answering ``snapshot(id)`` for audit before-state on an
     id-addressed send (#67) — unused today, kept so #86/#84 cannot silently skip
     before-state capture."""
-
-    def deco(f):
-        if adapter == "mail":
-            # #179: composed before the gate check, so __doc__ carries the #133
-            # paragraph whether or not the tool registers (tests read it either way).
-            f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
-        if not tiers.admit_send(adapter):
-            return f
-        _WRITE_TOOLS.add(f.__name__)
-        if snapshot is not None:
-            _SNAPSHOT_SOURCES[f.__name__] = snapshot
-        return mcp.tool(annotations=_SEND_ANNOTATIONS)(_guard(f))
-
-    return deco
+    return _tool("send", adapter=adapter, **kw)
 
 
 # --- untrusted-data notice (#53) -----------------------------------------------------
@@ -189,13 +225,13 @@ mcp.add_middleware(notices.UntrustedDataNotice())
 
 
 # no native call → registered without _guard (but still read-only-annotated, #57)
-@mcp.tool(annotations=_READ_ANNOTATIONS)
+@_read_tool(guard=False, notice=False)
 def ping() -> str:
     """Health check — confirms macos-apps-mcp is alive. No permission needed."""
     return "macos-apps-mcp ok"
 
 
-@_read_tool
+@_read_tool(notice=False)
 def doctor(request: bool = False) -> dict:
     """Diagnose per-surface macOS permissions + health with exact remediation.
 
@@ -205,7 +241,7 @@ def doctor(request: bool = False) -> dict:
     return diagnose(request=request)
 
 
-@mcp.tool(annotations=_READ_ANNOTATIONS)
+@_read_tool(guard=False, notice=False)
 def now() -> dict:
     """Current local date, time, timezone, UTC offset, weekday. No permission needed.
 
@@ -225,7 +261,7 @@ def audit(since: str | None = None) -> list[dict]:
     return audit_read(since)
 
 
-@mcp.tool(annotations=_READ_ANNOTATIONS)
+@_read_tool(guard=False, notice=False)
 async def usage() -> dict:
     """Per-tool call frequency, for pruning rarely/never-used tools. Returns `tools`
     (each `{tool, count, first, last}`, busiest first), `never_used` (registered tools
@@ -545,7 +581,7 @@ def mail_stats(days: int = 30, account: str = "") -> dict:
     return _mail.stats(days=days, account=account)
 
 
-@_additive_tool
+@_additive_tool(audit="export")
 def export_mail(ids: str, dest_dir: str) -> dict:
     """Write messages out as importable .eml files (Full Disk Access).
 
@@ -566,7 +602,7 @@ def export_mail(ids: str, dest_dir: str) -> dict:
     return _mail.export(ids, dest_dir)
 
 
-@_additive_tool
+@_additive_tool(audit="save")
 def save_mail_attachment(
     message_id: str,
     dest_dir: str,
@@ -621,7 +657,7 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     return _mail.create_draft(to, subject, body)
 
 
-@_additive_tool
+@_additive_tool(audit="reply")
 def mail_reply(
     message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
 ) -> dict:
@@ -685,7 +721,7 @@ def create_mailbox(name: str, account: str) -> dict:
     return _mail.create_mailbox(name, account)
 
 
-@_write_tool
+@_write_tool(audit="move")
 def move_mail(
     ids: str, from_mailbox: str, to_mailbox: str, dry_run: bool = True
 ) -> dict:
@@ -713,7 +749,7 @@ def move_mail(
     return _mail.move_mail(ids, from_mailbox, to_mailbox, dry_run=dry_run)
 
 
-@_write_tool
+@_write_tool(audit="trash")
 def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     """Move Mail messages to Trash — soft delete, and the ONLY delete there is.
 
@@ -759,7 +795,7 @@ def mail_duplicates(limit: int = 25) -> dict:
     return _mail.duplicates(limit)
 
 
-@_write_tool
+@_write_tool(audit="undo")
 def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     """Undo one recoverable Mail operation by its `receipt` id (from `move_mail`'s
     result, or from `audit`). A move is undone by moving the messages back to the exact
@@ -1180,7 +1216,7 @@ def create_contact(
     return _contacts.create_contact(data).as_dict()
 
 
-@_write_tool(open_world=True)
+@_write_tool(open_world=True, audit="action")
 def run_shortcut(
     name: str, input_text: str | None = None, dry_run: bool = False
 ) -> dict[str, str]:
@@ -1193,14 +1229,14 @@ def run_shortcut(
     return _shortcuts.run_shortcut(name, input_text, dry_run=dry_run).as_dict()
 
 
-@_additive_tool
+@_additive_tool(audit="open")
 def safari_open(url: str) -> dict[str, str]:
     """Open a URL in a new Safari tab; adds https:// if no scheme (http/https only).
     Side effect (opens a tab); needs Automation access for Safari. See safari_tabs."""
     return _safari.open_url(url).as_dict()
 
 
-@_additive_tool
+@_additive_tool(audit="control")
 def music_control(action: str) -> dict:
     """Control Music playback: action in play|pause|playpause|next|previous. Additive,
     reversible player-state change; needs Automation access for Music. Returns the
@@ -1208,7 +1244,7 @@ def music_control(action: str) -> dict:
     return _music.control(action)
 
 
-@_additive_tool
+@_additive_tool(audit="play")
 def play_playlist(id: str) -> dict:
     """Play a Music playlist by its persistent id (from music_search). Additive,
     reversible; needs Automation access for Music. Returns the resulting now-playing
@@ -1216,14 +1252,14 @@ def play_playlist(id: str) -> dict:
     return _music.play_playlist(id)
 
 
-@_additive_tool
+@_additive_tool(audit="set")
 def set_volume(level: int) -> dict:
     """Set the Music app sound volume (0–100). Additive, reversible; needs Automation
     access for Music. Returns the resulting now-playing state."""
     return _music.set_volume(level)
 
 
-@_additive_tool
+@_additive_tool(audit="set")
 def set_mode(mode: str, on: bool) -> dict:
     """Set Music shuffle or repeat: mode in shuffle|repeat, on=true/false (repeat
     on→all, off→off). Additive, reversible; needs Automation access for Music. Returns
@@ -1236,7 +1272,9 @@ def set_mode(mode: str, on: bool) -> dict:
 # defined, so the registries the decorators populate are complete before the middleware
 # holds them (it also reads them per call, so ordering is belt-and-suspenders).
 mcp.add_middleware(
-    AuditMiddleware(write_tools=_WRITE_TOOLS, snapshot_sources=_SNAPSHOT_SOURCES)
+    AuditMiddleware(
+        write_tools=registry.write_tools(), snapshot_sources=registry.snapshot_sources()
+    )
 )
 
 

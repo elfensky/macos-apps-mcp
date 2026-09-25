@@ -149,8 +149,9 @@ def test_audit_write_failure_never_propagates(monkeypatch):
 def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
     # #67 deepening: the tool→adapter map is DERIVED at registration
     # (@_write_tool(snapshot=…)), and every registered source satisfies the declared
-    # Snapshotter Protocol — no duck-typed method, no hand-maintained dict.
-    import macos_apps_mcp.server as srv
+    # Snapshotter Protocol — no duck-typed method, no hand-maintained dict. GATE-04:
+    # the registry (not a hand-maintained server.py set) is the one record now.
+    import macos_apps_mcp.registry as registry
 
     expected = {
         "update_event",
@@ -161,8 +162,9 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
         "delete_note",
         "delete_draft",
     }
-    assert set(srv._SNAPSHOT_SOURCES) == expected
-    for source in srv._SNAPSHOT_SOURCES.values():
+    snapshot_sources = registry.snapshot_sources()
+    assert set(snapshot_sources) == expected
+    for source in snapshot_sources.values():
         assert isinstance(source, Snapshotter)
     # every snapshot-capable tool is also a registered write tool
-    assert set(srv._SNAPSHOT_SOURCES) <= srv._WRITE_TOOLS
+    assert set(snapshot_sources) <= registry.write_tools()
