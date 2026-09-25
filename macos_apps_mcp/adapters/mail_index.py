@@ -23,6 +23,16 @@ from . import mail_ids, mailbox_url
 # The Envelope Index tables + the exact columns we read/filter on. A macOS schema move
 # that renames/drops any of these trips SchemaDrift → AppleScript fallback (never a
 # mis-parsed Pointer). Mirrors notes._FINGERPRINT.
+#
+# Widened by GATE-08 (card 3) beyond what the original fixture's own docstring
+# admitted was out of scope: messages.size (build_duplicate_rows_query's byte-identity
+# gate), messages.message_id / message_global_data.message_id (the internal id
+# build_sent_triage_query joins the sent-triage scan on — NOT global_message_id),
+# messages.subject_prefix (the "Re:"/"Fwd:" prefix the same scan reads),
+# recipients.type/position (the To-list hydration for that scan), and the whole
+# message_references table (the References-graph EXISTS the "answered?" check runs).
+# A coverage test (tests/test_mail_index.py) pins every column here against what the
+# build_*_query functions actually read — add NO column no executor reads.
 HEADER_FINGERPRINT: dict[str, set[str]] = {
     "messages": {
         "ROWID",
@@ -36,16 +46,21 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
         "flagged",
         "deleted",
         "conversation_id",
+        "size",
+        "message_id",
+        "subject_prefix",
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
     "mailboxes": {"ROWID", "url"},
-    "message_global_data": {"ROWID", "message_id_header"},
-    "recipients": {"message", "address"},
+    "message_global_data": {"ROWID", "message_id_header", "message_id"},
+    "recipients": {"message", "address", "type", "position"},
     # conversation_id: Mail's own threading key (five dedicated indexes on it),
     # read by build_thread_query. attachments: backs has_attachments — an indexed
     # EXISTS, never a per-message AppleScript probe.
     "attachments": {"ROWID", "message", "name"},
+    # Mail's own References graph — build_sent_triage_query's "answered?" EXISTS.
+    "message_references": {"message", "reference"},
 }
 
 

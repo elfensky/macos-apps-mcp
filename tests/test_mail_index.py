@@ -481,14 +481,19 @@ def _fingerprint_index(path, *, message_id_header=True, subjects_table=True):
         CREATE TABLE messages(
             ROWID INTEGER PRIMARY KEY, subject INT, sender INT, global_message_id INT,
             mailbox INT, date_received INT, date_sent INT, read INT, flagged INT,
-            deleted INT, conversation_id INT);
+            deleted INT, conversation_id INT, size INT, message_id INT,
+            subject_prefix TEXT);
         {subjects}
         CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
         CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
         CREATE TABLE message_global_data(
             ROWID INTEGER PRIMARY KEY, message_id INTEGER{header_col});
-        CREATE TABLE recipients(ROWID INTEGER PRIMARY KEY, message INT, address INT);
+        CREATE TABLE recipients(
+            ROWID INTEGER PRIMARY KEY, message INT, address INT,
+            type INT, position INT);
         CREATE TABLE attachments(ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
+        CREATE TABLE message_references(
+            ROWID INTEGER PRIMARY KEY, message INT, reference INT);
         """
     )
     c.commit()
@@ -647,7 +652,8 @@ def test_sidecar_mode_serves_the_native_fingerprint_and_queries(tmp_path, monkey
         INSERT INTO subjects VALUES (1, 'Invoice 42');
         INSERT INTO mailboxes VALUES (1, 'imap://A/INBOX');
         INSERT INTO message_global_data (ROWID) VALUES (100);
-        INSERT INTO messages VALUES (10,1,NULL,100,1,1700000000,1700000000,0,0,0,7);
+        INSERT INTO messages
+            VALUES (10,1,NULL,100,1,1700000000,1700000000,0,0,0,7,0,0,NULL);
         """
     )
     conn.commit()
@@ -712,9 +718,7 @@ _SQL_KEYWORDS = {
 _ALIAS_RE = re.compile(
     r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?"
 )
-_COLUMN_REF_RE = re.compile(
-    r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)"
-)
+_COLUMN_REF_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
 def _alias_table_map(sql: str) -> dict[str, str]:
@@ -746,9 +750,7 @@ def _every_build_query_sql() -> dict[str, str]:
         "build_message_location_query": mail_index.build_message_location_query(
             ["<a@b>"]
         )[0],
-        "build_duplicate_summary_query": mail_index.build_duplicate_summary_query()[
-            0
-        ],
+        "build_duplicate_summary_query": mail_index.build_duplicate_summary_query()[0],
         "build_duplicate_offenders_query": (
             mail_index.build_duplicate_offenders_query(5)[0]
         ),
@@ -763,9 +765,9 @@ def _every_build_query_sql() -> dict[str, str]:
         ),
         "build_trash_query": mail_index.build_trash_query("ACCT")[0],
         "build_sent_triage_query": mail_index.build_sent_triage_query(5)[0],
-        "build_sent_recipients_query": mail_index.build_sent_recipients_query(
-            [1, 2]
-        )[0],
+        "build_sent_recipients_query": mail_index.build_sent_recipients_query([1, 2])[
+            0
+        ],
         "build_local_account_query": mail_index.build_local_account_query()[0],
         "build_stats_query": mail_index.build_stats_query(0)[0],
         "build_overview_query": mail_index.build_overview_query()[0],
@@ -798,3 +800,79 @@ def test_fingerprint_coverage_parse_is_not_vacuous():
                 found.add((table, column))
     assert ("messages", "size") in found
     assert ("message_references", "reference") in found
+
+
+def test_every_executor_is_empty_on_a_rowless_store(
+    tmp_path, monkeypatch, envelope_mode
+):
+    # A schema-only store (tests.envelope.SCHEMA, no rows at all) in BOTH shapes —
+    # GATE-08's empty edge. Every query_* answers its empty value, never SchemaDrift:
+    # an empty store is a real, valid state (a fresh Mail install), not drift.
+    from tests.envelope import SCHEMA
+
+    db = tmp_path / "Envelope Index"
+    conn = sqlite3.connect(db)
+    conn.executescript(SCHEMA)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+
+    assert mail_index.query_search(subject="x") == []
+    assert mail_index.query_mailbox_urls() == []
+    assert mail_index.query_thread("<a@b>", limit=5) == []
+    assert mail_index.query_overview_rows() == []
+    assert mail_index.query_message_locations(["<a@b>"]) == []
+    assert mail_index.query_sent_triage(5) == []
+    assert mail_index.query_stats_rows(0) == []
+    assert mail_index.query_duplicate_summary() == []
+    assert mail_index.query_duplicate_offenders(5) == []
+    assert mail_index.query_duplicate_rows("imap://A/INBOX") == []
+    assert mail_index.query_cross_account_summary() == []
+    assert mail_index.query_cross_account_rows() == []
+    assert mail_index.query_trash_url("ACCT") is None
+    assert mail_index.query_local_account_url() is None
+
+
+def test_sequoiaify_is_idempotent_and_keeps_message_id(tmp_path):
+    # GATE-08's idempotency edge, and the sequoiaify_envelope fix this card makes:
+    # message_global_data.message_id (build_sent_triage_query's join key) must
+    # survive the reshape — the earlier version copied ROWID only, silently
+    # NULLing every row's message_id out.
+    from tests.conftest import sequoiaify_envelope
+    from tests.envelope import Envelope, seed_base
+
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    env = Envelope(db)
+    env.execute("UPDATE message_global_data SET message_id = 999 WHERE ROWID = 1")
+    side = tmp_path / "mail_ids.sqlite"
+
+    sequoiaify_envelope(db, side)
+    conn = sqlite3.connect(db)
+    row = conn.execute(
+        "SELECT message_id FROM message_global_data WHERE ROWID = 1"
+    ).fetchone()
+    conn.close()
+    assert row == (999,), "message_id must survive the reshape, not null out"
+
+    conn = sqlite3.connect(db)
+    schema_before = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'message_global_data'"
+    ).fetchone()
+    rows_before = conn.execute(
+        "SELECT ROWID, message_id FROM message_global_data ORDER BY ROWID"
+    ).fetchall()
+    conn.close()
+
+    sequoiaify_envelope(db, side)  # a store already reshaped is left alone
+
+    conn = sqlite3.connect(db)
+    schema_after = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'message_global_data'"
+    ).fetchone()
+    rows_after = conn.execute(
+        "SELECT ROWID, message_id FROM message_global_data ORDER BY ROWID"
+    ).fetchall()
+    conn.close()
+    assert schema_after == schema_before
+    assert rows_after == rows_before
