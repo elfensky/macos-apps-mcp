@@ -761,6 +761,35 @@ class NotesAdapter:
             folder=data.folder,
         )
 
+    def _update_preview(self, ident: str, data: NoteData) -> dict:
+        """The D-02 read-only preview body for ``update``'s ``dry_run=True`` path —
+        split out so the public method stays a thin dispatch between the two paths.
+        Reads the current title/body via the sqlite-primary planes (a read IS allowed
+        in this preview); an unknown id raises the same-shaped ``ValueError`` the real
+        update's verify step would eventually surface."""
+        title = self._read_title_by_id(ident)
+        if title is None:
+            raise ValueError(f"update_note: unknown note id {ident!r}")
+        bodies = self.get_bodies([ident])
+        current_body = bodies[0]["body"] if bodies else ""
+        current: dict[str, object] = {
+            "title": clean_summary(title) or "(untitled note)",
+            "body_chars": len(current_body),
+        }
+        if "[truncated " in current_body or current_body.startswith("[not hydrated:"):
+            current["body_truncated"] = True
+        return {
+            "dry_run": True,
+            "would_update": {
+                "id": ident,
+                "current": current,
+                "new": {
+                    "title": clean_summary(data.title) or "(untitled note)",
+                    "body_chars": len(data.body),
+                },
+            },
+        }
+
     def update(self, ident: str, data: NoteData, *, dry_run: bool = False) -> dict:
         """Full-replace a note's title+body by id; the id must survive (verified, #49).
 
@@ -786,30 +815,7 @@ class NotesAdapter:
                 "(the note stays where it is; only title/body are replaced)"
             )
         if dry_run:
-            title = self._read_title_by_id(ident)
-            if title is None:
-                raise ValueError(f"update_note: unknown note id {ident!r}")
-            bodies = self.get_bodies([ident])
-            current_body = bodies[0]["body"] if bodies else ""
-            current: dict[str, object] = {
-                "title": clean_summary(title) or "(untitled note)",
-                "body_chars": len(current_body),
-            }
-            if "[truncated " in current_body or current_body.startswith(
-                "[not hydrated:"
-            ):
-                current["body_truncated"] = True
-            return {
-                "dry_run": True,
-                "would_update": {
-                    "id": ident,
-                    "current": current,
-                    "new": {
-                        "title": clean_summary(data.title) or "(untitled note)",
-                        "body_chars": len(data.body),
-                    },
-                },
-            }
+            return self._update_preview(ident, data)
         html_body = _compose_html(data.title, data.body)
         with runtime.body_file(html_body) as path:
             ident_after = runtime.run_osascript(_UPDATE_NOTE, ident, path).strip()
