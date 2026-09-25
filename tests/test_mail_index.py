@@ -802,6 +802,23 @@ def test_fingerprint_coverage_parse_is_not_vacuous():
     assert ("message_references", "reference") in found
 
 
+def test_duplicate_rows_executor_reads_the_fixture(fake_envelope):
+    # The tracer proof for query_duplicate_rows (GATE-08, mirrors
+    # test_sent_triage_executor_reads_the_fixture in test_mail_triage.py):
+    # seed_base's own <dup@ex.com> pair (ROWIDs 13, 14, both in ACCT_B/Travel) is
+    # exactly the byte-identity gate's shape a real store produces — same
+    # Message-ID, same mailbox, real size/date_sent columns — served correctly,
+    # in the SAME row order, in BOTH store shapes (fake_envelope depends on
+    # envelope_mode).
+    from tests.envelope import ACCT_B
+
+    rows = mail_index.query_duplicate_rows(f"imap://{ACCT_B}/Travel")
+    assert [r["rowid"] for r in rows] == [13, 14]
+    assert {r["message_id"] for r in rows} == {"<dup@ex.com>"}
+    assert all(r["size"] == 0 for r in rows)
+    assert all(r["date_sent"] == 1700001000 for r in rows)
+
+
 def test_every_executor_is_empty_on_a_rowless_store(
     tmp_path, monkeypatch, envelope_mode
 ):
