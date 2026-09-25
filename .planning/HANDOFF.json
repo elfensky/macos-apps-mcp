@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T21:45:36.000Z",
+  "timestamp": "2026-09-25T23:48:15.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
@@ -95,15 +95,11 @@
       "status": "not_started"
     }
   ],
-  "blockers": [],
-  "async_jobs": [],
-  "human_actions_pending": [
-    {
-      "action": "Reconnect every Claude Code session with /mcp; doctor() should show build bd6fe53 2026-09-25T19:39:50Z",
-      "context": "Plan 01-10 human-check after the dev-build swap",
-      "blocking": false
-    }
+  "blockers": [
+    "The 2026-09-25/26 orchestrator session is Toyota-locked: gsd-tools.cjs is blocked, so the isolation sentinel cannot be renewed and the Agent isolation guard refuses sequential dispatch. Resume in a NEW chat."
   ],
+  "async_jobs": [],
+  "human_actions_pending": [],
   "decisions": [
     {
       "decision": "Isolation mode none (sequential dispatch from the main checkout); every plan makes its own .worktrees/<slug> lane",
@@ -138,6 +134,11 @@
     {
       "decision": "01-10 Task 2 ran in the orchestrator session by owner choice",
       "rationale": "Toyota lock blocked sentinel renewal; worktree-isolated executors cannot reach the main repo",
+      "phase": "01"
+    },
+    {
+      "decision": "01-14 Task 1 (blocking-human) answered by the owner: swap-and-clean",
+      "rationale": "Owner answer on 2026-09-26 in the orchestrator session; inventory then: 11 local spike branches, 0 on origin, 9 spike worktrees all clean. The next session passes this answer to the 01-14 executor and does not ask again.",
       "phase": "01"
     }
   ],
