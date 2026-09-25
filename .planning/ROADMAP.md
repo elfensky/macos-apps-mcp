@@ -57,19 +57,51 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 14 plans in 11 waves
 
 Plans:
+**Wave 1**
+
 - [ ] 01-01-PLAN.md — Pre-gate release v0.11.0: bump PR, owner-gated cut + tag, notarized build, daemon install, doctor proof (D-05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 01-02-PLAN.md — Card 1a: conftest locks run_osascript/body_file/tracked_run at runtime; shortcuts qualified; doctor tests off live pgrep
 - [ ] 01-03-PLAN.md — Card 9: backstop ≥ host-cap tripwire over every osascript call site; `_DEDUPE` backstop 900 s; landed
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 01-04-PLAN.md — Card 1b: every adapter + doctor reach the seam qualified; tripwire widened to adapters/*.py + doctor.py; card 1 landed
 - [ ] 01-05-PLAN.md — Card 4: `recoverable()` owns the dry-run read; v0.11.0 byte-identity baseline; check_batch text; PR open
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 01-06-PLAN.md — Card 7: EventKit cluster to `eventkit.py`; runtime = 11-name native door; landed
 - [ ] 01-07-PLAN.md — Card 3: shared `tests/envelope.py` fixture in both shapes; HEADER_FINGERPRINT coverage test; landed
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 01-08-PLAN.md — Device session: card 7 EventKit proof; card 4 scratch-mailbox verification with the watchdog; card 4 merged
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 01-09-PLAN.md — Card 5: `tiers.py` + `notices.py`; doctor's server reach-in removed; layering test; landed
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 01-10-PLAN.md — Dev-build daemon check after card 5 (D-06)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 01-11-PLAN.md — Card 2a: one `_tool` registration record; audit verbs from the record; `_audit_op` removed
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 01-12-PLAN.md — Card 2b: adapter/permission/notice facts on the record; registry becomes the one outbound ledger
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 01-13-PLAN.md — Card 2c: D-01/D-02 dry-run defaults, D-04 fail-closed registry test, CHANGELOG; card 2 landed
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 01-14-PLAN.md — Dev-build daemon check after card 2; landing order recorded; spike branches and worktrees deleted (D-09)
 
 ### Phase 2: Gate Close — Fail-Closed Suite and Device Sweep
