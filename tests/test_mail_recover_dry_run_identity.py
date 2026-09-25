@@ -21,6 +21,7 @@ import pytest
 
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_index, mail_recover
+from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import RS, US
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
@@ -178,6 +179,70 @@ def test_move_dry_run_is_byte_identical(wired):
     ad, calls = wired
     _same(ad.move_mail("<a@x>,b@x,c@x", INBOX, ARCHIVE), "move_dry", old)
     _same(calls, "move_dry_calls", old)
+
+
+def test_trash_dry_run_is_byte_identical(wired):
+    old = _old()
+    ad, calls = wired
+    _same(ad.trash_mail("<a@x>,b@x,c@x", BOX), "trash_dry", old)
+    _same(calls, "trash_dry_calls", old)
+
+
+def test_undo_dry_run_is_byte_identical(wired):
+    old = _old()
+    ad, calls = wired
+    moved = ad.move_mail("a@x", INBOX, ARCHIVE, dry_run=False)
+    calls.clear()
+    _same(ad.undo(moved["receipt"]), "undo_dry", old)
+    _same(calls, "undo_dry_calls", old)
+
+
+def test_dedupe_dry_run_reads_presence(wired):
+    # THE one intended delta (CONTEXT.md "Card 4 baseline"): the baseline's dedupe dry
+    # run made no call and previewed "planned" for both ids — the exact GATE-09 bug.
+    # The new dry run reads presence like move/trash and reports what the read found.
+    old = _old()
+    ad, calls = wired
+    assert old["dedupe_dry_calls"] == []
+    assert [t["status"] for t in old["dedupe_dry"]["would_affect"]] == [
+        "planned",
+        "planned",
+    ]
+    out = ad.dedupe_batch("<a@x>,b@x", BOX)
+    assert len(calls) == 1
+    assert calls[0]["script"] == "_PRESENT"
+    assert [t["status"] for t in out["would_affect"]] == ["present", "missing"]
+    # everything ELSE about the envelope is unchanged from the baseline shape
+    assert out["op"] == old["dedupe_dry"]["op"]
+    assert out["destination"] == old["dedupe_dry"]["destination"]
+    assert out["count"] == old["dedupe_dry"]["count"]
+
+
+def test_cap_and_empty_batch_errors(wired):
+    old = _old()
+    ad, calls = wired
+    # the empty-batch text is untouched by this plan — pinned to the baseline
+    with pytest.raises(ValueError) as e:
+        ad.move_mail("", INBOX, ARCHIVE)
+    assert f"{type(e.value).__name__}: {e.value}" == old["move_0"]
+    with pytest.raises(BatchTooLarge) as e:
+        ad.export(",".join(f"m{i}@x" for i in range(26)), "x")
+    assert f"{type(e.value).__name__}: {e.value}" == old["export_26"]
+    with pytest.raises(ValueError) as e:
+        ad.export("", "x")
+    assert f"{type(e.value).__name__}: {e.value}" == old["export_0"]
+    # the CAP text changed (GATE-10 small fix): new wording, not the baseline's
+    with pytest.raises(BatchTooLarge) as e:
+        ad.move_mail(",".join(f"m{i}@x" for i in range(26)), INBOX, ARCHIVE)
+    assert "not overridable" in str(e.value)
+    assert "backed up" not in str(e.value)
+    assert str(e.value) != old["move_26"].split(": ", 1)[1]
+    with pytest.raises(BatchTooLarge) as e:
+        ad.trash_mail(",".join(f"m{i}@x" for i in range(26)), BOX)
+    assert "not overridable" in str(e.value)
+    assert "backed up" not in str(e.value)
+    assert str(e.value) != old["trash_26"].split(": ", 1)[1]
+    assert calls == [] == old["cap_calls"]
 
 
 # --- behavior tests (Task 1, plan's <behavior> list) ----------------------------------

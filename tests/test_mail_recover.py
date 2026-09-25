@@ -88,6 +88,15 @@ def test_empty_batch_is_a_caller_bug_not_a_quiet_success():
         mail_recover.check_batch([])
 
 
+def test_batch_cap_text_claims_no_backup():
+    # update_status calls check_batch too and never backs anything up (GATE-10) — the
+    # refusal must not promise a universal guarantee this module cannot keep.
+    with pytest.raises(BatchTooLarge) as e:
+        mail_recover.check_batch([_target(f"m{i}@x") for i in range(26)])
+    assert "not overridable" in str(e.value)
+    assert "backed up" not in str(e.value)
+
+
 # --- locate --------------------------------------------------------------------------
 
 

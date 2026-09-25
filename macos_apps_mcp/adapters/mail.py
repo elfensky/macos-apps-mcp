@@ -1473,6 +1473,12 @@ class MailAdapter:
         un-truncated action log still records every id, its mailbox and its receipt,
         which is what makes the pass auditable and undoable while Trash holds the
         losers.
+
+        A dry run now reads presence through AppleScript too (GATE-09, one bounded
+        ``_PRESENT`` call over the batch — capped like every id-addressed write here):
+        it can no longer report "planned" for ids nobody checked, the same preflight
+        ``move_mail``/``trash_mail`` get. The CLI (#140/#153) only ever calls this with
+        ``dry_run=False``, so that caller's behaviour is unchanged.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -1491,8 +1497,6 @@ class MailAdapter:
         targets = [
             mail_recover.Target(id=mid, folder=mailbox, account=account) for mid in mids
         ]
-        if dry_run:
-            return mail_recover.preview("dedupe", targets, destination=trash)
         dst = mail_addressing.mailbox_args(trash)
 
         def act(located):
@@ -1513,7 +1517,13 @@ class MailAdapter:
             }
 
         return mail_recover.recoverable(
-            "dedupe", targets, act, destination=trash, backup=False
+            "dedupe",
+            targets,
+            act,
+            dry_run=dry_run,
+            present=_presence(src),
+            destination=trash,
+            backup=False,
         )
 
     def undo(self, receipt_id: str, dry_run: bool = True) -> dict:

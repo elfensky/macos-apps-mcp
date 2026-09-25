@@ -153,9 +153,8 @@ def check_batch(targets) -> list[Target]:
         raise BatchTooLarge(
             f"this operation would affect {len(items)} messages but the safety cap is "
             f"{MAX_TARGETS}, and it is not overridable — it bounds how much one call "
-            "can touch, not what gets backed up (some callers here never back "
-            "anything up). Split the batch and re-issue. Do not retry the same "
-            "oversized batch unchanged."
+            "can touch. Split the batch and re-issue. Do not retry the same oversized "
+            "batch unchanged."
         )
     return items
 
