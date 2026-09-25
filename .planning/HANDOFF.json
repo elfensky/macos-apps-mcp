@@ -1,10 +1,10 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T20:46:58.000Z",
+  "timestamp": "2026-09-25T21:13:24.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
-  "plan": "01-12 (wave 9 of 11, card 2 part B)",
+  "plan": "01-13 (wave 10 of 11, card 2 part C + PR)",
   "task": 0,
   "total_tasks": 3,
   "status": "paused",
@@ -74,12 +74,18 @@
       "name": "Card 2 part A: registry + audit verbs from the record",
       "status": "done",
       "commit": "32af203 44bb96b 9bf35f6 on lane refactor/gate-card-2-registration-record (pushed, no PR until 01-13)"
+    },
+    {
+      "id": "01-12",
+      "name": "Card 2 part B: adapter/permission on records, notice from record, registry is the one outbound ledger",
+      "status": "done",
+      "commit": "4d2bd87 1df35ae 5fd28ae 60d953c db3219c on lane refactor/gate-card-2-registration-record (pushed)"
     }
   ],
   "remaining_tasks": [
     {
-      "id": "01-12..01-13",
-      "name": "Card 2 B/C (waves 9-10), same lane",
+      "id": "01-13",
+      "name": "Card 2 part C + the card-2 PR (wave 10), same lane; also fix the 2 READ_ONLY failures card 2 added",
       "status": "not_started"
     },
     {
