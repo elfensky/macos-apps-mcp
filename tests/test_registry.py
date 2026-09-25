@@ -317,6 +317,12 @@ def test_every_other_tool_names_its_adapter():
         assert r.adapter is not None, f"{name}: no adapter= declared"
 
 
+@pytest.mark.skipif(
+    tiers.read_only(),
+    reason="create_contact is additive — unregistered under MACOS_APPS_READ_ONLY, "
+    "so the live MCP Client cannot call it (GATE-07 is Phase 2's concern, not this "
+    "test's; this test is about the verb, not about registration gating)",
+)
 def test_create_contact_is_logged_with_its_verb(monkeypatch):
     from macos_apps_mcp.contracts import ContactData, Pointer
 
