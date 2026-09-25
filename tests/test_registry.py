@@ -281,6 +281,14 @@ def test_permission_reproduces_the_develop_era_hand_map():
     assert got == want
 
 
+def test_no_notice_and_backup_notice_reproduce_the_hand_sets():
+    # Card 2 Task 2 (GATE-04): the notice exemption and the #163 backup advisory used
+    # to be notices.py's own hand-maintained NO_NOTICE_TOOLS/_BACKUP_NOTICE_TOOLS sets.
+    # They are registry-derived views now — this pins the same develop-era facts.
+    assert reg.no_notice() == {"ping", "now", "doctor", "usage"}
+    assert reg.backup_notice_tools() == {"move_mail", "trash_mail", "mail_undo"}
+
+
 def test_meta_tools_have_no_adapter_permission_or_notice():
     # ping/now/doctor/usage make no native call and return no user-store content — no
     # adapter, no permission, and exempt from the untrusted-data notice. audit DOES
