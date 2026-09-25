@@ -1,3 +1,4 @@
+import re
 import sqlite3
 
 import pytest
@@ -671,3 +672,129 @@ def test_floor_message_names_mail_index_ids(tmp_path, monkeypatch):
     monkeypatch.setattr(mail_ids, "sidecar_path", lambda: tmp_path / "absent.sqlite")
     with pytest.raises(SchemaDrift, match="mail_index_ids"):
         mail_index._read_index(db, lambda conn: None)
+
+
+# --- HEADER_FINGERPRINT coverage (GATE-08) --------------------------------------------
+# The fingerprint must cover every column a query_* executor actually reads, so a real
+# store missing one surfaces as typed SchemaDrift, never a mis-parsed Pointer. Parsed
+# from the GENERATED SQL text (not the Python source): every FROM/JOIN binds an alias
+# to a table, every alias.column reference is resolved through that binding, and a
+# table the binding can't resolve to a HEADER_FINGERPRINT key (a CTE name like `sent`,
+# or a subquery) is skipped BY RULE — never by a hardcoded skip-list.
+
+_SQL_KEYWORDS = {
+    "on",
+    "where",
+    "order",
+    "group",
+    "limit",
+    "having",
+    "and",
+    "or",
+    "left",
+    "inner",
+    "join",
+    "select",
+    "as",
+    "by",
+    "with",
+    "union",
+    "not",
+    "null",
+    "exists",
+    "case",
+    "when",
+    "then",
+    "else",
+    "end",
+}
+
+_ALIAS_RE = re.compile(
+    r"\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?"
+)
+_COLUMN_REF_RE = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def _alias_table_map(sql: str) -> dict[str, str]:
+    """{alias: table} for every FROM/JOIN in one query's SQL text. An aliasless
+    ``FROM sent`` (a CTE reference) maps ``sent`` to itself, which is exactly what
+    makes it resolve to "not a HEADER_FINGERPRINT table" downstream."""
+    out: dict[str, str] = {}
+    for table, alias in _ALIAS_RE.findall(sql):
+        if not alias or alias.lower() in _SQL_KEYWORDS:
+            alias = table
+        out[alias] = table
+    return out
+
+
+def _alias_column_refs(sql: str) -> set[tuple[str, str]]:
+    """{(alias, column)} for every ``alias.column`` reference in the SQL text."""
+    return set(_COLUMN_REF_RE.findall(sql))
+
+
+def _every_build_query_sql() -> dict[str, str]:
+    """One representative call per ``build_*_query`` in mail_index — the coverage
+    test's whole input set. Arguments are dummy but representative enough to reach
+    every branch that shows up in the final SQL text (e.g. no optional filter is
+    omitted from the base queries; the base queries don't gate their column list on
+    filter presence)."""
+    return {
+        "build_header_query": mail_index.build_header_query(subject="x", limit=5)[0],
+        "build_thread_query": mail_index.build_thread_query("<a@b>", limit=5)[0],
+        "build_message_location_query": mail_index.build_message_location_query(
+            ["<a@b>"]
+        )[0],
+        "build_duplicate_summary_query": mail_index.build_duplicate_summary_query()[
+            0
+        ],
+        "build_duplicate_offenders_query": (
+            mail_index.build_duplicate_offenders_query(5)[0]
+        ),
+        "build_duplicate_rows_query": mail_index.build_duplicate_rows_query(
+            "imap://A/INBOX"
+        )[0],
+        "build_cross_account_summary_query": (
+            mail_index.build_cross_account_summary_query()[0]
+        ),
+        "build_cross_account_rows_query": (
+            mail_index.build_cross_account_rows_query()[0]
+        ),
+        "build_trash_query": mail_index.build_trash_query("ACCT")[0],
+        "build_sent_triage_query": mail_index.build_sent_triage_query(5)[0],
+        "build_sent_recipients_query": mail_index.build_sent_recipients_query(
+            [1, 2]
+        )[0],
+        "build_local_account_query": mail_index.build_local_account_query()[0],
+        "build_stats_query": mail_index.build_stats_query(0)[0],
+        "build_overview_query": mail_index.build_overview_query()[0],
+    }
+
+
+def test_header_fingerprint_covers_every_column_an_executor_reads():
+    for name, sql in _every_build_query_sql().items():
+        alias_table = _alias_table_map(sql)
+        for alias, column in _alias_column_refs(sql):
+            table = alias_table.get(alias)
+            if table is None or table not in mail_index.HEADER_FINGERPRINT:
+                continue  # a CTE/subquery alias — not a fingerprinted table, by rule
+            assert column in mail_index.HEADER_FINGERPRINT[table], (
+                f"{name}: {table}.{column} (via alias {alias!r}) is read but is "
+                "not in HEADER_FINGERPRINT — a real store missing it would "
+                "mis-parse instead of raising SchemaDrift"
+            )
+
+
+def test_fingerprint_coverage_parse_is_not_vacuous():
+    # Sanity on the parser itself: an empty/broken parse would make the coverage
+    # test above pass vacuously (no refs found == nothing to fail on).
+    found: set[tuple[str, str]] = set()
+    for sql in _every_build_query_sql().values():
+        alias_table = _alias_table_map(sql)
+        for alias, column in _alias_column_refs(sql):
+            table = alias_table.get(alias)
+            if table:
+                found.add((table, column))
+    assert ("messages", "size") in found
+    assert ("message_references", "reference") in found
