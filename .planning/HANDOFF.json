@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T15:30:00.000Z",
+  "timestamp": "2026-09-25T19:43:39.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
-  "plan": "01-10 (wave 7 of 11, dev-build daemon swap)",
-  "task": 1,
-  "total_tasks": 2,
-  "status": "checkpoint",
+  "plan": "01-11 (wave 8 of 11, card 2 part A)",
+  "task": 0,
+  "total_tasks": 3,
+  "status": "paused",
   "completed_tasks": [
     {
       "id": "01-01",
@@ -62,17 +62,23 @@
       "name": "Card 5: tier policy",
       "status": "done",
       "commit": "c7a9e88 a978551 bd6fe53 via PR #218"
+    },
+    {
+      "id": "01-10",
+      "name": "Dev-build daemon swap after card 5",
+      "status": "done",
+      "commit": "no commit; installed dev build bd6fe53, probe passed"
     }
   ],
   "remaining_tasks": [
     {
-      "id": "01-10",
-      "name": "Dev-build daemon swap after card 5 (wave 7)",
-      "status": "checkpoint — Task 1 blocking-human go"
+      "id": "01-11..01-13",
+      "name": "Card 2 A/B/C (waves 8-10)",
+      "status": "not_started"
     },
     {
-      "id": "01-11..01-14",
-      "name": "Card 2 A/B/C, final dev-build check and spike cleanup (waves 8-11)",
+      "id": "01-14",
+      "name": "Final dev-build check (owner stop) and spike cleanup (wave 11)",
       "status": "not_started"
     }
   ],
@@ -80,9 +86,9 @@
   "async_jobs": [],
   "human_actions_pending": [
     {
-      "action": "Answer 01-10 Task 1: swap-now or later. On swap-now, reconnect every Claude Code session with /mcp afterwards.",
-      "context": "D-08 stop 4, first half",
-      "blocking": true
+      "action": "Reconnect every Claude Code session with /mcp; doctor() should show build bd6fe53 2026-09-25T19:39:50Z",
+      "context": "Plan 01-10 human-check after the dev-build swap",
+      "blocking": false
     }
   ],
   "decisions": [
@@ -115,6 +121,11 @@
       "decision": "Never dispatch 01-10/01-14 in harness-worktree mode",
       "rationale": "A worktree agent's git and Write calls are confined to its own worktree; the 2026-09-25 attempt stopped before building, daemon untouched",
       "phase": "01"
+    },
+    {
+      "decision": "01-10 Task 2 ran in the orchestrator session by owner choice",
+      "rationale": "Toyota lock blocked sentinel renewal; worktree-isolated executors cannot reach the main repo",
+      "phase": "01"
     }
   ],
   "uncommitted_files": [
@@ -124,6 +135,6 @@
     "?? .planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/ (another session)",
     "?? .planning/state.json (another session)"
   ],
-  "next_action": "Owner answers 01-10 Task 1. On swap-now: /gsd-execute-phase 1, which dispatches 01-10 with the go recorded.",
-  "context_notes": "Local develop carries unpushed .planning commits only. Sync with `git pull --rebase --autostash`. .worktrees/ holds only .daemon_probe.py (keep for 01-10/01-14). The isolation sentinel expires: re-run `dispatch-isolation --force-isolation none` before every dispatch. Pending todo: stale runtime.from_nsdate docstring in adapters/messages.py."
+  "next_action": "In a NEW chat (not resumed): /gsd-execute-phase 1 — dispatches wave 8 (01-11).",
+  "context_notes": "Local develop carries unpushed .planning commits only. Sync with `git pull --rebase --autostash`. .worktrees/ holds only .daemon_probe.py (keep for 01-14). The isolation sentinel expires: re-run `dispatch-isolation --force-isolation none` before every dispatch. Pending todo: stale runtime.from_nsdate docstring in adapters/messages.py. A byte-identical backup of the v0.11.0 app sits in the 2026-09-25 session scratchpad (backup-v0.11.0-f52e9d5)."
 }

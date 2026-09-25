@@ -4,8 +4,8 @@ milestone: v0.11.0
 current_phase: 01
 current_phase_name: Gate — Land the Spiked Architecture Cuts
 status: executing
-stopped_at: "Wave 6 complete — waiting on the owner go for plan 01-10 (dev-build daemon swap)"
-last_updated: "2026-09-25T15:06:25.924Z"
+stopped_at: "Wave 7 complete — dev-build daemon bd6fe53 installed; next: plan 01-11 (card 2 part A) in a new chat"
+last_updated: "2026-09-25T19:43:39.000Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 01 execution started
 state_head: aa412da1317e06e9fb2317f363c54f1a164a09de
@@ -13,7 +13,7 @@ progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 14
-  completed_plans: 9
+  completed_plans: 10
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 01 (Gate — Land the Spiked Architecture Cuts) — EXECUTING
-Plan: 10 of 14
+Plan: 11 of 14
 Status: Ready to execute
 Last activity: 2026-09-25 — Phase 01 execution started
 
@@ -81,6 +81,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
+- The installed daemon bundle's code seal breaks after first launch: the daemon's Python writes `__pycache__/*.pyc` into the signed `Contents/lib`. Nothing fails today (launch and TCC use the main executable's signature). Fix in `scripts/build_app.sh`: precompile `.pyc` before signing, or run the interpreter with `-B`. Found in plan 01-10.
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
 ### Blockers/Concerns
@@ -109,5 +110,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-25T11:41:17.935Z
-Stopped at: Wave 6 done (9/14). Next: plan 01-10, dev-build daemon swap (blocking-human go at Task 1)
+Stopped at: Wave 7 done (10/14). Next: plan 01-11, card 2 part A — dispatch from a NEW chat (this one is Toyota-locked)
 Resume file: None
