@@ -1,0 +1,129 @@
+{
+ "_source": "v0.11.0",
+ "move_dry": {
+  "dry_run": true,
+  "op": "move",
+  "count": 3,
+  "would_affect": [
+   {
+    "id": "a@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/INBOX",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "present"
+   },
+   {
+    "id": "b@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/INBOX",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "missing"
+   },
+   {
+    "id": "c@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/INBOX",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "ERROR boom"
+   }
+  ],
+  "destination": "imap://AAAAAAAA-1111-2222-3333-444444444444/Archive"
+ },
+ "move_dry_calls": [
+  {
+   "script": "_PRESENT",
+   "args": [
+    "AAAAAAAA-1111-2222-3333-444444444444",
+    "INBOX",
+    "a@x\u001fb@x\u001fc@x"
+   ],
+   "kwargs": {}
+  }
+ ],
+ "trash_dry": {
+  "dry_run": true,
+  "op": "trash",
+  "count": 3,
+  "would_affect": [
+   {
+    "id": "a@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Travel",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "present"
+   },
+   {
+    "id": "b@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Travel",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "missing"
+   },
+   {
+    "id": "c@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Travel",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "ERROR boom"
+   }
+  ],
+  "destination": "imap://AAAAAAAA-1111-2222-3333-444444444444/Trash"
+ },
+ "trash_dry_calls": [
+  {
+   "script": "_PRESENT",
+   "args": [
+    "AAAAAAAA-1111-2222-3333-444444444444",
+    "Travel",
+    "a@x\u001fb@x\u001fc@x"
+   ],
+   "kwargs": {}
+  }
+ ],
+ "dedupe_dry": {
+  "dry_run": true,
+  "op": "dedupe",
+  "count": 2,
+  "would_affect": [
+   {
+    "id": "a@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Travel",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "planned"
+   },
+   {
+    "id": "b@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Travel",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "planned"
+   }
+  ],
+  "destination": "imap://AAAAAAAA-1111-2222-3333-444444444444/Trash"
+ },
+ "dedupe_dry_calls": [],
+ "undo_dry": {
+  "dry_run": true,
+  "op": "move",
+  "count": 1,
+  "would_affect": [
+   {
+    "id": "a@x",
+    "folder": "imap://AAAAAAAA-1111-2222-3333-444444444444/Archive",
+    "account": "AAAAAAAA-1111-2222-3333-444444444444",
+    "status": "present"
+   }
+  ],
+  "destination": "imap://AAAAAAAA-1111-2222-3333-444444444444/INBOX"
+ },
+ "undo_dry_calls": [
+  {
+   "script": "_PRESENT",
+   "args": [
+    "AAAAAAAA-1111-2222-3333-444444444444",
+    "Archive",
+    "a@x"
+   ],
+   "kwargs": {}
+  }
+ ],
+ "move_26": "BatchTooLarge: this operation would affect 26 messages but the safety cap is 25, and it is not overridable \u2014 every target is backed up to disk before anything moves. Split the batch and re-issue. Do not retry the same oversized batch unchanged.",
+ "trash_26": "BatchTooLarge: this operation would affect 26 messages but the safety cap is 25, and it is not overridable \u2014 every target is backed up to disk before anything moves. Split the batch and re-issue. Do not retry the same oversized batch unchanged.",
+ "move_0": "ValueError: this operation needs at least one message id (none were given)",
+ "export_26": "BatchTooLarge: export_mail takes at most 25 ids at a time (got 26). Split the batch and re-issue.",
+ "export_0": "ValueError: export_mail needs at least one message id",
+ "cap_calls": []
+}
