@@ -1,13 +1,17 @@
-"""#176: the mail adapters reach the native seam QUALIFIED — ``runtime.run_osascript``.
+"""#176/GATE-01: every adapter + doctor reach the native seam QUALIFIED —
+``runtime.run_osascript`` / ``runtime.body_file`` / ``runtime.tracked_run``.
 
-``from ..runtime import run_osascript`` lands a *copy* of the seam in the importing
-module's namespace, so a test has to fake it once per module — and a forgotten module
-fails OPEN: the call spawns osascript against real Mail (that is #160, where a send
-tool did exactly that). Qualified calls mean one patch point, ``runtime``, however many
-modules the mail adapter splits into.
+``from ..runtime import run_osascript`` (etc.) lands a *copy* of the seam in the
+importing module's namespace, so a test has to fake it once per module — and a
+forgotten module fails OPEN: the call spawns osascript against real Mail (that is
+#160, where a send tool did exactly that) or a real ``tracked_run`` subprocess.
+Qualified calls mean one patch point, ``runtime``, however many modules the codebase
+splits into. The runtime half of the lock — a unit test that forgets to fake a seam
+raises instead of reaching a live app — lives in ``tests/conftest.py``'s autouse
+``_no_real_osascript`` fixture; the self-tests below prove it fires.
 
-Every ``adapters/mail*.py`` is covered, so the modules #178 splits out inherit the rule
-without anyone remembering to add them here.
+Every ``adapters/*.py`` (except ``__init__.py``) plus ``doctor.py`` is covered, so a
+NEW module inherits the rule without anyone remembering to add it here (card 1).
 """
 
 from __future__ import annotations
@@ -19,16 +23,16 @@ import pytest
 
 from macos_apps_mcp import runtime
 
-_SEAM = frozenset({"run_osascript", "body_file"})
-_MAIL_MODULES = sorted(
-    (pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters").glob(
-        "mail*.py"
-    )
+_SEAM = frozenset({"run_osascript", "body_file", "tracked_run"})
+_ADAPTERS_DIR = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters"
+_NATIVE_MODULES = sorted(
+    [p for p in _ADAPTERS_DIR.glob("*.py") if p.name != "__init__.py"]
+    + [_ADAPTERS_DIR.parent / "doctor.py"]
 )
 
 
-@pytest.mark.parametrize("path", _MAIL_MODULES, ids=lambda p: p.name)
-def test_mail_module_does_not_import_the_seam_by_name(path):
+@pytest.mark.parametrize("path", _NATIVE_MODULES, ids=lambda p: p.name)
+def test_native_module_does_not_import_the_seam_by_name(path):
     tree = ast.parse(path.read_text(), filename=str(path))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("runtime"):
@@ -40,9 +44,14 @@ def test_mail_module_does_not_import_the_seam_by_name(path):
             )
 
 
-def test_the_tripwire_sees_the_mail_modules():
-    # A glob that matches nothing would make every assertion above vacuous.
-    assert len(_MAIL_MODULES) >= 3
+def test_the_tripwire_sees_the_native_modules():
+    # A glob that matches nothing (or too few) would make every assertion above
+    # vacuous — assert it actually sees the whole native plane, doctor.py and
+    # shortcuts.py included (GATE-01 empty edge).
+    assert len(_NATIVE_MODULES) >= 10
+    names = {p.name for p in _NATIVE_MODULES}
+    assert "doctor.py" in names
+    assert "shortcuts.py" in names
 
 
 # --- runtime lock self-tests (GATE-01, #176 runtime half) -----------------------------
