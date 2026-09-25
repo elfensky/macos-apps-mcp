@@ -12,6 +12,7 @@ import inspect
 
 from fastmcp import Client
 
+import macos_apps_mcp.registry as registry
 import macos_apps_mcp.server as srv
 import macos_apps_mcp.tiers as tiers
 
@@ -206,7 +207,6 @@ def test_every_tool_docstring_states_permission_and_is_nontrivial():
 
 
 def test_every_write_tool_is_audit_classified():
-    import macos_apps_mcp.server as srv
     import macos_apps_mcp.tiers as tiers
 
     # writes with no id-addressed before-state: creates + non-id actions
@@ -233,7 +233,7 @@ def test_every_write_tool_is_audit_classified():
     }
     if tiers.allow_send("mail"):
         envelope_only |= {"send_mail", "reply_all", "forward_mail"}
-    assert set(srv._SNAPSHOT_SOURCES) | envelope_only == srv._WRITE_TOOLS
+    assert set(registry.snapshot_sources()) | envelope_only == registry.write_tools()
 
 
 # #159: a destructive MAIL write either rides the recoverable plane (backup → log →

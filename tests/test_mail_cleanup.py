@@ -488,10 +488,10 @@ def test_mail_duplicates_reports_and_points_at_the_cli(blank_envelope):
 
 
 def test_mail_duplicates_is_registered_read_only():
-    import macos_apps_mcp.server as srv
+    import macos_apps_mcp.registry as registry
 
-    assert "mail_duplicates" not in srv._WRITE_TOOLS
-    assert "trash_mail" in srv._WRITE_TOOLS
+    assert "mail_duplicates" not in registry.write_tools()
+    assert "trash_mail" in registry.write_tools()
 
 
 def test_dedupe_is_cli_only_and_never_an_mcp_tool():
