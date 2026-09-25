@@ -155,7 +155,10 @@ def serve() -> None:
     """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
     One MCP session per client connection (fork resolution, spec)."""
     os.environ["MACOS_APPS_MCP_ROLE"] = (
-        "daemon"  # before server import (doctor reads it)
+        # Registration already ran when the package was first imported, and the
+        # outbound gate reads argv (deploy.is_daemon_role()), not this variable —
+        # setting it here is for embedders/tests only, not the gate itself.
+        "daemon"
     )
     from .server import mcp  # late: importing server pulls the adapter tree
 
