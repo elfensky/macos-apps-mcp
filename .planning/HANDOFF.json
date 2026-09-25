@@ -1,39 +1,109 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T12:10:09.458Z",
+  "timestamp": "2026-09-25T13:50:00.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
-  "plan": "01-04 + 01-05 (wave 3 of 11, parallel)",
-  "task": 3,
+  "plan": "01-08 (wave 5 of 11, owner device session)",
+  "task": 1,
   "total_tasks": 3,
-  "status": "paused",
+  "status": "checkpoint",
   "completed_tasks": [
-    {"id": "01-01", "name": "Cut release v0.11.0 and install daemon", "status": "done", "commit": "e3c3b8f (SUMMARY); release f52e9d5, tag v0.11.0, PRs #211 #212"},
-    {"id": "01-02", "name": "Card 1 part A: runtime seam lock", "status": "done", "commit": "407ed42 (SUMMARY); lane commits rebased to fcde18b 6c902a4 767e344"},
-    {"id": "01-03", "name": "Card 9: timeout tripwire + _DEDUPE 900s", "status": "done", "commit": "407ed42 (SUMMARY); merged 0cfc0f0 36624be via PR #213"},
-    {"id": "01-04", "name": "Card 1 part B + land card 1", "status": "in_progress", "progress": "Tasks 1-2 done, Task 3 code done (26b13ed), lane rebased on origin/develop and pushed, PR #214 open, CI check pass. Not done: local triple re-run, code-review pass, merge, lane cleanup, journal, SUMMARY."},
-    {"id": "01-05", "name": "Card 4: recoverable() owns preflight", "status": "in_progress", "progress": "Tasks 1-2 committed in lane (2649218, 30f6ded), baseline json from v0.11.0 captured. Not done: Task 3 (push, open PR, CI, review — NOT merge), SUMMARY."}
+    {
+      "id": "01-01",
+      "name": "Cut release v0.11.0 and install daemon",
+      "status": "done",
+      "commit": "release f52e9d5, tag v0.11.0, PRs #211 #212"
+    },
+    {
+      "id": "01-02",
+      "name": "Card 1 part A: runtime seam lock",
+      "status": "done",
+      "commit": "dbcb326 1266f33 bfbb0ec on develop via PR #214"
+    },
+    {
+      "id": "01-03",
+      "name": "Card 9: timeout tripwire + _DEDUPE 900s",
+      "status": "done",
+      "commit": "0cfc0f0 36624be via PR #213"
+    },
+    {
+      "id": "01-04",
+      "name": "Card 1 part B + land card 1",
+      "status": "done",
+      "commit": "b5d8ece d6dd31d 7a3194b via PR #214"
+    },
+    {
+      "id": "01-05",
+      "name": "Card 4: recoverable() owns preflight",
+      "status": "done",
+      "commit": "PR #215 open, CI green, review clean, head 9cc4fe5, NOT merged"
+    },
+    {
+      "id": "01-06",
+      "name": "Card 7: runtime.py split",
+      "status": "done",
+      "commit": "32d0f20 0603bb5 8627aa8 via PR #216"
+    },
+    {
+      "id": "01-07",
+      "name": "Card 3: shared envelope fixture",
+      "status": "done",
+      "commit": "1978bdd..26550d3 via PR #217"
+    }
   ],
   "remaining_tasks": [
-    {"id": "01-04", "name": "Finish Task 3: verify, review, merge PR #214, clean lane, journal, SUMMARY", "status": "in_progress"},
-    {"id": "01-05", "name": "Task 3: open card-4 PR, CI green, review clean, NOT merged", "status": "not_started"},
-    {"id": "01-06", "name": "Card 7: runtime.py split (wave 4)", "status": "not_started"},
-    {"id": "01-07", "name": "Card 3: shared envelope fixture (wave 4)", "status": "not_started"},
-    {"id": "01-08", "name": "Owner device session: card 7 integration + card 4 scratch mailbox, then merge card 4 (wave 5)", "status": "not_started"},
-    {"id": "01-09..01-14", "name": "Card 5, dev-build check, card 2 A/B/C, final dev-build check (waves 6-11)", "status": "not_started"}
+    {
+      "id": "01-08",
+      "name": "Owner device session: card 7 integration + card 4 scratch mailbox, then merge card 4 (wave 5)",
+      "status": "checkpoint — Task 1 blocking-human go"
+    },
+    {
+      "id": "01-09..01-14",
+      "name": "Card 5, dev-build check, card 2 A/B/C, final dev-build check (waves 6-11)",
+      "status": "not_started"
+    }
   ],
   "blockers": [],
   "async_jobs": [],
   "human_actions_pending": [
-    {"action": "Run /mcp in each Claude Code session, then doctor(): expect version 0.11.0, build f52e9d5", "context": "Plan 01-01 human-check after daemon reinstall", "blocking": false},
-    {"action": "Device session at plan 01-08: card 7 integration run + card 4 scratch-mailbox check with the Mail watchdog", "context": "D-08 stops 2 and 3", "blocking": true}
+    {
+      "action": "Run /mcp in each Claude Code session, then doctor(): expect version 0.11.0, build f52e9d5",
+      "context": "Plan 01-01 human-check after daemon reinstall",
+      "blocking": false
+    },
+    {
+      "action": "Answer 01-08 Task 1: run-now or later. On run-now, stay at the Mac for TCC prompts and watch Mail.",
+      "context": "D-08 stops 2 and 3",
+      "blocking": true
+    }
   ],
   "decisions": [
-    {"decision": "Isolation mode none (sequential dispatch from the main checkout); every plan makes its own .worktrees/<slug> lane", "rationale": "Plans encode the repo lane rule; harness worktrees would nest lanes and delete .worktrees/.daemon_probe.py that 01-10/01-14 reuse", "phase": "01"},
-    {"decision": "Same-wave plans run in parallel; executors write SUMMARY uncommitted and never touch STATE/ROADMAP/REQUIREMENTS; orchestrator commits tracking after each wave", "rationale": "Plans in waves 2-4 share no files and work in separate lanes; only shared .planning writes could race", "phase": "01"},
-    {"decision": "Requirements are ticked only at their LAST plan: GATE-01=01-04, GATE-08=01-07, GATE-02/09=01-08, GATE-10=01-09, GATE-06=01-11, GATE-03/04=01-12, GATE-05=01-13, GATE-13=01-14", "rationale": "Executor for 01-01 ticked GATE-13 early; reverted", "phase": "01"},
-    {"decision": "Owner answered cut-now at 01-01 Task 2", "rationale": "Owner, 2026-09-25", "phase": "01"}
+    {
+      "decision": "Isolation mode none (sequential dispatch from the main checkout); every plan makes its own .worktrees/<slug> lane",
+      "rationale": "Plans encode the repo lane rule; harness worktrees would nest lanes and delete .worktrees/.daemon_probe.py that 01-10/01-14 reuse",
+      "phase": "01"
+    },
+    {
+      "decision": "Same-wave plans run in parallel; executors write SUMMARY uncommitted and never touch STATE/ROADMAP/REQUIREMENTS; orchestrator commits tracking after each wave",
+      "rationale": "Plans in waves 2-4 share no files and work in separate lanes; only shared .planning writes could race",
+      "phase": "01"
+    },
+    {
+      "decision": "Requirements are ticked only at their LAST plan: GATE-01=01-04, GATE-08=01-07, GATE-02/09=01-08, GATE-10=01-09, GATE-06=01-11, GATE-03/04=01-12, GATE-05=01-13, GATE-13=01-14",
+      "rationale": "Executor for 01-01 ticked GATE-13 early; reverted",
+      "phase": "01"
+    },
+    {
+      "decision": "Owner answered cut-now at 01-01 Task 2",
+      "rationale": "Owner, 2026-09-25",
+      "phase": "01"
+    },
+    {
+      "decision": "Root pin bound to the plan's lane path; isolation forced to none via dispatch-isolation --force-isolation none",
+      "rationale": "The stock pin fails in a linked worktree; the isolation guard hook refuses dispatch while the sentinel says harness-worktree",
+      "phase": "01"
+    }
   ],
   "uncommitted_files": [
     " M .planning/config.json (workflow._auto_chain_active=false, written by execute-phase)",
@@ -42,6 +112,6 @@
     "?? .planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/ (another session)",
     "?? .planning/state.json (another session)"
   ],
-  "next_action": "/gsd-execute-phase 1 — it skips 01-01..01-03 (SUMMARY present) and re-dispatches 01-04 and 01-05; tell each executor to RESUME from the lane state recorded here, not to create a new lane",
-  "context_notes": "Local develop is 2 planning commits ahead of origin/develop (e3c3b8f, 407ed42), not pushed. Sync the main checkout with `git pull --rebase --autostash`, never plain ff-only. Lanes: .worktrees/gate-card-1-native-seam (locked, 26b13ed, pushed), .worktrees/gate-card-4-recoverable-preflight (locked, 30f6ded, not pushed), .worktrees/baseline-v0.11.0 (detached at v0.11.0, keep for 01-08), .worktrees/.daemon_probe.py (keep for 01-10/01-14)."
+  "next_action": "Owner answers 01-08 Task 1. On run-now: /gsd-execute-phase 1, which dispatches 01-08 with the go recorded.",
+  "context_notes": "Local develop is 5 .planning commits ahead of origin/develop, not pushed. Sync with `git pull --rebase --autostash`. Lanes: .worktrees/gate-card-4-recoverable-preflight (locked, 9cc4fe5, pushed), .worktrees/baseline-v0.11.0 (detached at v0.11.0, keep for 01-08), .worktrees/.daemon_probe.py (keep for 01-10/01-14). Pending todo: stale runtime.from_nsdate docstring in adapters/messages.py."
 }
