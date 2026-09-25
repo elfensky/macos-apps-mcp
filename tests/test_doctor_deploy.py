@@ -1,6 +1,22 @@
+import subprocess
+
 import pytest
 
-from macos_apps_mcp import doctor, server
+from macos_apps_mcp import doctor, runtime, server
+
+
+@pytest.fixture(autouse=True)
+def _no_live_process_probe(monkeypatch):
+    """doctor.diagnose() always computes the automation surfaces' process line via
+    runtime.app_process_info -> runtime.tracked_run (pgrep + ps), even with the
+    default request=False (#183). Fake it to a normal "not running" result so no
+    live pgrep/ps runs (GATE-01) — the conftest lock would otherwise refuse it."""
+
+    def _fake_pgrep_or_ps(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(runtime, "tracked_run", _fake_pgrep_or_ps)
+
 
 # Four tests below assert "the import-time gate was off in this process" — false by
 # construction under the RELEASING checklist's gated run (MACOS_APPS_ALLOW_SEND=mail

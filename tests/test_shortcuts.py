@@ -22,12 +22,13 @@ from macos_apps_mcp.adapters.shortcuts import (
     _run_pointer,
 )
 from macos_apps_mcp.contracts import Pointer
+from macos_apps_mcp.runtime import tracked_run as _real_tracked_run
 
 _UUID = "40AE7C31-B301-4488-889D-44DB6E8FF542"
 
 
 def _fake_run(monkeypatch, *, returncode=0, stdout="", stderr=""):
-    """Swap shortcuts.tracked_run for a fake; return a dict capturing the call.
+    """Swap runtime.tracked_run for a fake; return a dict capturing the call.
 
     Mirrors ``shortcuts run --output-path <file>``: the fake writes ``stdout`` to that
     path on success, so the adapter reads the result back like the CLI delivers it.
@@ -41,7 +42,7 @@ def _fake_run(monkeypatch, *, returncode=0, stdout="", stderr=""):
                 f.write(stdout)
         return subprocess.CompletedProcess(cmd, returncode, "", stderr)
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", fake)
     return seen
 
 
@@ -160,7 +161,7 @@ def test_run_shortcut_tolerates_directory_output(monkeypatch):
         os.mkdir(cmd[cmd.index("--output-path") + 1])
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", fake)
     assert ShortcutsAdapter().run_shortcut("Folder").summary == "ran Folder"
 
 
@@ -182,7 +183,7 @@ def test_run_shortcut_dry_run_runs_nothing(monkeypatch):
     def boom(*a, **kw):
         raise AssertionError("dry_run must not invoke the shortcuts CLI")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", boom)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", boom)
     p = ShortcutsAdapter().run_shortcut("Weather", dry_run=True)
     assert p.id == "Weather"
     assert "would run" in p.summary.lower() and "Weather" in p.summary
@@ -206,7 +207,7 @@ def test_run_shortcut_dry_run_uuid_resolves_the_name_but_never_runs(monkeypatch)
         assert cmd[:2] != ["shortcuts", "run"], "dry_run must never RUN a shortcut"
         return _Proc()
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", record)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", record)
     p = ShortcutsAdapter().run_shortcut(uuid, dry_run=True)
     assert p.id == uuid
     assert "Morning Routine" in p.summary  # resolved, not echoed back as the UUID
@@ -263,7 +264,7 @@ def test_get_pointers_uses_show_identifiers_and_maps_uuid(monkeypatch):
         out = f"Driving Mode ({_UUID})\nTrack water ({u2})\n"
         return subprocess.CompletedProcess(cmd, 0, out, "")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", fake)
     ptrs = ShortcutsAdapter().get_pointers("driving")  # filters by NAME
     assert "--show-identifiers" in seen["cmd"]
     assert len(ptrs) == 1
@@ -286,7 +287,7 @@ def test_run_shortcut_by_uuid_resolves_name_for_citation(monkeypatch):
             return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, 0, f"Driving Mode ({_UUID})\n", "")
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", fake)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", fake)
     p = ShortcutsAdapter().run_shortcut(_UUID)
     run_cmd = next(c for c in calls if "run" in c)
     assert _UUID in run_cmd and p.id == _UUID  # ran by the UUID, id is the UUID
@@ -315,7 +316,7 @@ def test_run_shortcut_hostile_name_is_a_single_argv_element(monkeypatch):
 
 def test_get_pointers_nonzero_raises_native_error(monkeypatch):
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.shortcuts.tracked_run",
+        "macos_apps_mcp.runtime.tracked_run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "boom"),
     )
     from macos_apps_mcp.errors import NativeError
@@ -328,7 +329,7 @@ def test_get_pointers_timeout_raises_native_timeout(monkeypatch):
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 10)
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", boom)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", boom)
     from macos_apps_mcp.errors import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
@@ -339,7 +340,7 @@ def test_run_shortcut_timeout_raises_native_timeout(monkeypatch):
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 30)
 
-    monkeypatch.setattr("macos_apps_mcp.adapters.shortcuts.tracked_run", boom)
+    monkeypatch.setattr("macos_apps_mcp.runtime.tracked_run", boom)
     from macos_apps_mcp.errors import NativeTimeout
 
     with pytest.raises(NativeTimeout, match="didn't finish"):
@@ -349,7 +350,7 @@ def test_run_shortcut_timeout_raises_native_timeout(monkeypatch):
 def test_get_pointers_no_shell(monkeypatch):
     seen = {}
     monkeypatch.setattr(
-        "macos_apps_mcp.adapters.shortcuts.tracked_run",
+        "macos_apps_mcp.runtime.tracked_run",
         lambda cmd, **kw: (
             seen.update(cmd=cmd, kw=kw) or subprocess.CompletedProcess(cmd, 0, "", "")
         ),
@@ -362,17 +363,30 @@ def test_get_pointers_no_shell(monkeypatch):
 
 
 def test_shortcuts_spawns_through_runtime_seam():
-    # shortcuts.py must not grow its own subprocess path: its spawner IS runtime's
-    # tracked_run, so shortcut children land in the registry terminate_children drains.
+    # shortcuts.py must not grow its own subprocess path: it reaches tracked_run
+    # qualified (runtime.tracked_run), so shortcut children land in the registry
+    # terminate_children drains — and a forgotten fake is refused (GATE-01), not
+    # silently allowed to run for real.
     from macos_apps_mcp import runtime
     from macos_apps_mcp.adapters import shortcuts
 
-    assert shortcuts.tracked_run is runtime.tracked_run
+    assert shortcuts.runtime is runtime
+    assert not hasattr(shortcuts, "tracked_run")
+
+
+def test_unfaked_tracked_run_is_refused():
+    # end-to-end tracer proof (GATE-01): adapter -> runtime seam -> conftest lock.
+    # No monkeypatch of tracked_run at all — the autouse _no_real_osascript fixture
+    # must refuse it before any real `shortcuts` CLI process is spawned.
+    with pytest.raises(AssertionError, match="tracked_run"):
+        ShortcutsAdapter().get_pointers("x")
 
 
 def test_tracked_run_registers_child_while_running(monkeypatch):
     # the whole point of the seam: mid-flight, the child is visible to
-    # terminate_children (exit paths, #56); once done, it's deregistered.
+    # terminate_children (exit paths, #56); once done, it's deregistered. Calls the
+    # real tracked_run bound at module import (_real_tracked_run) — runtime.tracked_run
+    # itself is refused by the autouse conftest lock in this unit test.
     from macos_apps_mcp import runtime
 
     tracked_during: list[bool] = []
@@ -387,7 +401,7 @@ def test_tracked_run_registers_child_while_running(monkeypatch):
 
     fake = FakeProc()
     monkeypatch.setattr(runtime.subprocess, "Popen", lambda *a, **k: fake)
-    proc = runtime.tracked_run(["shortcuts", "list"], timeout=1.0)
+    proc = _real_tracked_run(["shortcuts", "list"], timeout=1.0)
     assert tracked_during == [True]
     with runtime._children_lock:
         assert fake not in runtime._children
@@ -397,6 +411,7 @@ def test_tracked_run_registers_child_while_running(monkeypatch):
 def test_tracked_run_kills_reaps_and_reraises_on_timeout(monkeypatch):
     # run(timeout=) parity: on expiry the child is killed, reaped (no zombie), the
     # registry is drained, and TimeoutExpired propagates for the caller to translate.
+    # Calls the real tracked_run bound at module import — see note above.
     from macos_apps_mcp import runtime
 
     events: list[str] = []
@@ -417,7 +432,7 @@ def test_tracked_run_kills_reaps_and_reraises_on_timeout(monkeypatch):
     fake = FakeProc()
     monkeypatch.setattr(runtime.subprocess, "Popen", lambda *a, **k: fake)
     with pytest.raises(subprocess.TimeoutExpired):
-        runtime.tracked_run(["shortcuts", "list"], timeout=0.1)
+        _real_tracked_run(["shortcuts", "list"], timeout=0.1)
     assert events == ["timeout", "kill", "reap"]
     with runtime._children_lock:
         assert fake not in runtime._children
