@@ -143,22 +143,22 @@ def envelope_mode(request, monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def _no_real_osascript(request, monkeypatch):
     """Fail CLOSED on the native seam: a unit test that forgets to fake it raises
-    instead of spawning osascript or running a real subprocess against a live app
-    (#176, GATE-01).
+    instead of spawning osascript, writing a real tempfile, or running a real
+    subprocess against a live app (#176, GATE-01).
 
-    Covers two seam names so far — ``run_osascript``, ``tracked_run`` — and only
-    reaches code that calls each one qualified (``runtime.<seam>``); adapters still
-    holding a module-global copy are unaffected. A test's own
+    Covers all three seam names — ``run_osascript``, ``body_file``, ``tracked_run`` —
+    and only reaches code that calls each one qualified (``runtime.<seam>``); adapters
+    still holding a module-global copy are unaffected. A test's own
     ``monkeypatch.setattr(runtime, <seam>, ...)`` simply overrides this fixture (last
     write wins), and a seam's own self-tests bind the real function at test-module
     import time instead (the ``tests/test_runtime.py`` convention for
-    ``run_osascript``). Integration tests (``-m integration``) must reach real apps,
-    so they are exempt.
+    ``run_osascript``/``body_file``). Integration tests (``-m integration``) must
+    reach real apps, so they are exempt.
     """
     if "integration" in request.keywords:
         return
 
-    for seam in ("run_osascript", "tracked_run"):
+    for seam in ("run_osascript", "body_file", "tracked_run"):
 
         def _refuse(*_args, _seam=seam, **_kwargs):
             raise AssertionError(

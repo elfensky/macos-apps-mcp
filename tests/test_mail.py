@@ -24,6 +24,7 @@ from macos_apps_mcp.adapters.mail import (
 )
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import BatchTooLarge
+from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
 
 
@@ -269,6 +270,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
         return f"Jane <j@x.com>\x1f2026-07-01\x1f{huge}"
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "thanks", include_quote=True)
     assert out["created"] is True
 
@@ -382,6 +384,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
         return "Jane\x07 <j@x.com>\x1f2026-07-01\x1foriginal body"
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     header_line = next(
         line for line in bodies[0].splitlines() if line.startswith("On ")
@@ -407,6 +410,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
         return ""
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
@@ -435,6 +439,7 @@ def test_reply_without_quote_omits_original(monkeypatch):
         raise AssertionError("_ORIGINAL should not run when include_quote=False")
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     mail.MailAdapter().reply("<abc@x>", "inbox", "just this", include_quote=False)
     assert bodies and bodies[0] == "just this"
     assert ">" not in bodies[0]
@@ -456,6 +461,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
         return "missing value"
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
     assert out["created"] is True
     assert bodies[0] == "my reply"  # no quote appended
@@ -473,6 +479,7 @@ def test_reply_cleans_up_tempfile(monkeypatch):
         return ""
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile is removed
     mail.MailAdapter().reply("<abc@x>", "inbox", "body", include_quote=False)
     assert paths and not os.path.exists(paths[0])
 
@@ -573,6 +580,7 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
     # instead of firing a real osascript send into Mail.app under a plain
     # `uv run pytest`.
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
 
     injected_to = "alice@corp.com\u001fexfil@evil.tld"
     preview = mail.MailAdapter().send(injected_to, "Hi", "body")
@@ -640,6 +648,7 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
         return "3"
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
     out = mail.MailAdapter().send(
         "a@b.com,e@f.com",
         "Hi",
@@ -721,6 +730,7 @@ def test_send_still_reports_sent_when_outbox_count_fails(monkeypatch):
         raise NativeError("timeout counting outbox")
 
     _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
     out = mail.MailAdapter().send("a@b.com", "Hi", "body", dry_run=False)
     assert out["sent"] is True
     assert out["outbox_pending"] is None
