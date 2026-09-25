@@ -15,12 +15,20 @@ import pytest
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_drafts
 from macos_apps_mcp.adapters.mail_drafts import _CREATE_DRAFT
+from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
 
 
 def _patch_run(monkeypatch, fake):
     """Fake the AppleScript boundary — ONE seam, whatever the module (#176)."""
     monkeypatch.setattr(runtime, "run_osascript", fake)
+
+
+def _use_real_body_file(monkeypatch):
+    """These tests assert real tempfile semantics (content on disk, cleanup after the
+    call) — restore the real seam explicitly, per test, over the conftest lock
+    (GATE-01). Never a module-wide exemption."""
+    monkeypatch.setattr(runtime, "body_file", _real_body_file)
 
 
 # --- create_draft (#62/#43/#44) -------------------------------------------------------
@@ -52,6 +60,7 @@ def test_create_draft_passes_body_via_tempfile(monkeypatch, tmp_path):
         return ""
 
     monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", fake)
+    _use_real_body_file(monkeypatch)
     mail.MailAdapter().create_draft("bob@x.com", "Hi", "multi\nline © body")
     assert captured["script"] is _CREATE_DRAFT
     assert captured["args"][0] == "bob@x.com" and captured["args"][1] == "Hi"
@@ -66,6 +75,7 @@ def test_create_draft_cleans_up_tempfile(monkeypatch):
         "macos_apps_mcp.runtime.run_osascript",
         lambda script, *a: paths.append(a[2]) or "",
     )
+    _use_real_body_file(monkeypatch)
     mail.MailAdapter().create_draft("bob@x.com", "Hi", "body")
     assert paths and not os.path.exists(paths[0])  # cleaned up
 
@@ -82,6 +92,7 @@ def test_create_draft_returns_locator_dict(monkeypatch):
     # resolve by it) — the note must point at that recovery path, not claim drafts
     # are permanently unaddressable.
     monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", lambda *a: "")
+    _use_real_body_file(monkeypatch)
     out = mail.MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert out["created"] is True
     assert out["mailbox"] == "Drafts"
@@ -124,6 +135,7 @@ def test_create_draft_propagates_error_and_cleans_tempfile(monkeypatch):
         raise RuntimeError("osascript failed")
 
     monkeypatch.setattr("macos_apps_mcp.runtime.run_osascript", boom)
+    _use_real_body_file(monkeypatch)
     with pytest.raises(RuntimeError, match="osascript failed"):
         mail.MailAdapter().create_draft("x@example.com", "Hi", "body")
     assert not os.path.exists(seen["path"])  # tempfile cleaned up despite the error

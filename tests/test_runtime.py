@@ -32,6 +32,7 @@ from macos_apps_mcp.errors import (
 from macos_apps_mcp.runtime import (
     _classify_osascript_failure,
     _require_full_access,
+    body_file,
     due_components,
     epoch_nsdate,
     from_nsdate,
@@ -550,8 +551,6 @@ def test_terminate_children_ignores_an_already_dead_child():
 def test_body_file_roundtrips_and_deletes():
     import os
 
-    from macos_apps_mcp.runtime import body_file
-
     with body_file("héllo\nworld") as path, open(path, encoding="utf-8") as f:
         assert f.read() == "héllo\nworld"
     assert not os.path.exists(path)  # deleted on exit
@@ -559,8 +558,6 @@ def test_body_file_roundtrips_and_deletes():
 
 def test_body_file_deletes_on_exception():
     import os
-
-    from macos_apps_mcp.runtime import body_file
 
     try:
         with body_file("x") as path:
