@@ -41,8 +41,8 @@ from .contracts import (
 )
 from .doctor import diagnose
 from .errors import NativeError
+from .eventkit import bootstrap
 from .lifecycle import install_lifecycle_guards
-from .runtime import bootstrap
 
 mcp = FastMCP("macos-apps-mcp")
 

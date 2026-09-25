@@ -28,7 +28,8 @@ import EventKit as EK
 from . import deploy, runtime
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
-from .runtime import app_process_info, request_access_each, run_native
+from .eventkit import request_access_each
+from .runtime import app_process_info, run_native
 
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new

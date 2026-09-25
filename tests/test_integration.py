@@ -16,7 +16,8 @@ import time
 import EventKit as EK
 import pytest
 
-from macos_apps_mcp.runtime import request_access, run_native, store
+from macos_apps_mcp.eventkit import request_access, store
+from macos_apps_mcp.runtime import run_native
 
 # Every test in this module touches real EventKit/TCC — mark them all at module level
 # so a forgotten per-test decorator can never leak a live test into CI.
@@ -241,7 +242,7 @@ def test_recurring_event_update_targets_one_occurrence(created):
 
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
     from macos_apps_mcp.contracts import CalendarEventData
-    from macos_apps_mcp.runtime import to_nsdate
+    from macos_apps_mcp.eventkit import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -314,7 +315,7 @@ def test_recurring_update_omitted_span_raises_and_does_not_write(created):
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
     from macos_apps_mcp.contracts import CalendarEventData
     from macos_apps_mcp.errors import SpanRequired
-    from macos_apps_mcp.runtime import to_nsdate
+    from macos_apps_mcp.eventkit import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
@@ -375,7 +376,7 @@ def test_recurring_update_future_events_propagates(created):
 
     from macos_apps_mcp.adapters.calendar import CalendarAdapter
     from macos_apps_mcp.contracts import CalendarEventData
-    from macos_apps_mcp.runtime import to_nsdate
+    from macos_apps_mcp.eventkit import to_nsdate
 
     run_native(request_access)
     a = CalendarAdapter()
