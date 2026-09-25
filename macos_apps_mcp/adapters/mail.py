@@ -512,7 +512,7 @@ on run argv
   set AppleScript's text item delimiters to ""
   set out to ""
   set acted to {}
-  with timeout of 600 seconds
+  with timeout of 900 seconds
   tell application "Mail"
     -- FIRST PASS: delete. Verification is a SECOND pass below, deliberately — `delete`
     -- is asynchronous on both sides (§5c), so checking each message right after its own
