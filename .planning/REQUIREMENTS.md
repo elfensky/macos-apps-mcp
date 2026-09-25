@@ -9,7 +9,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Gate — land the spiked architecture review, make the suite fail-closed
 
-- [ ] **GATE-01**: A unit test that forgets to fake the native seam raises instead of dialing a real app, for every adapter, `doctor`, and `shortcuts` (`run_osascript`, `body_file`, `tracked_run` all locked once in conftest; tripwire globs `adapters/*.py` + `doctor.py`)
+- [x] **GATE-01**: A unit test that forgets to fake the native seam raises instead of dialing a real app, for every adapter, `doctor`, and `shortcuts` (`run_osascript`, `body_file`, `tracked_run` all locked once in conftest; tripwire globs `adapters/*.py` + `doctor.py`)
 - [ ] **GATE-02**: `runtime.py` exposes only the native door (~10 public names); the EventKit cluster (store, NSDate/RRULE coercion, TCC request, `run_native_async`) lives in its own module that Calendar/Reminders import by one name; bodies byte-identical; device proof `-m integration -k "request_access or create_event or create_reminder"`
 - [ ] **GATE-03**: Tier policy (`read_only`, `allow_send`, `admit_send`, `outbound_status`, env grammar, consent file, role) lives in its own module below `server`, `doctor`, `deploy`; `doctor` no longer imports `server` (no import cycle in the package); the untrusted-data notice middleware lives beside audit, not in `server`
 - [ ] **GATE-04**: Every tool is registered through one record (tier, adapter, permission, audit verb, notice policy); annotations, gates, guard, snapshot registry, notice exemption, audit verb and the tests' expectations are all derived from it; gated-off tools are still recorded pre-gate (never derived from FastMCP `Tool` objects)
@@ -135,7 +135,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GATE-01 | Phase 1 | Pending |
+| GATE-01 | Phase 1 | Complete |
 | GATE-02 | Phase 1 | Pending |
 | GATE-03 | Phase 1 | Pending |
 | GATE-04 | Phase 1 | Pending |
