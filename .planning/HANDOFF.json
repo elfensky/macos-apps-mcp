@@ -1,10 +1,10 @@
 {
   "version": "1.0",
-  "timestamp": "2026-09-25T21:13:24.000Z",
+  "timestamp": "2026-09-25T21:45:36.000Z",
   "phase": "01",
   "phase_name": "Gate — Land the Spiked Architecture Cuts",
   "phase_dir": ".planning/phases/01-gate-land-the-spiked-architecture-cuts",
-  "plan": "01-13 (wave 10 of 11, card 2 part C + PR)",
+  "plan": "01-14 (wave 11 of 11, owner stop: daemon swap + spike cleanup)",
   "task": 0,
   "total_tasks": 3,
   "status": "paused",
@@ -80,14 +80,15 @@
       "name": "Card 2 part B: adapter/permission on records, notice from record, registry is the one outbound ledger",
       "status": "done",
       "commit": "4d2bd87 1df35ae 5fd28ae 60d953c db3219c on lane refactor/gate-card-2-registration-record (pushed)"
+    },
+    {
+      "id": "01-13",
+      "name": "Card 2 part C: dry-run defaults by construction; card 2 landed",
+      "status": "done",
+      "commit": "PR #219 rebase-merged, develop 8885ad0"
     }
   ],
   "remaining_tasks": [
-    {
-      "id": "01-13",
-      "name": "Card 2 part C + the card-2 PR (wave 10), same lane; also fix the 2 READ_ONLY failures card 2 added",
-      "status": "not_started"
-    },
     {
       "id": "01-14",
       "name": "Final dev-build check (owner stop) and spike cleanup (wave 11)",
