@@ -388,13 +388,16 @@ def test_dry_run_rule_catches_offenders():
 
 
 def test_removes_content_class_is_exactly_the_named_tools():
-    # D-03/D-04: the class today (before Task 2 adds update_note) is exactly the six
-    # tools CONTEXT.md names — no more, no fewer.
+    # D-02/D-03/D-04: exactly the seven tools CONTEXT.md names — no more, no fewer.
+    # update_note joins here (D-02): a full-replace write with no recoverable
+    # before-state (notes.snapshot is title-only) is exactly the "removes or
+    # replaces content" class D-04 exists to catch.
     assert reg.removes_content_tools() == frozenset(
         {
             "delete_event",
             "delete_draft",
             "delete_note",
+            "update_note",
             "move_mail",
             "trash_mail",
             "mail_undo",

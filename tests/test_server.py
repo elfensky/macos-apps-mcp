@@ -68,9 +68,18 @@ class _FakeSource:
         self.queries.append(("create", data.title, data.body, data.folder))
         return Pointer(id="x-coredata://S/ICNote/p9", summary=data.title, deeplink="")
 
-    def update(self, ident, data):
+    def update(self, ident, data, *, dry_run=False):
         self.queries.append(("update", ident, data.title, data.body))
-        return Pointer(id=ident, summary=data.title, deeplink="")
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_update": {
+                    "id": ident,
+                    "current": {"title": "Old", "body_chars": 3},
+                    "new": {"title": data.title, "body_chars": len(data.body)},
+                },
+            }
+        return {"id": ident, "summary": data.title, "deeplink": ""}
 
 
 def test_server_constructs():
@@ -745,11 +754,27 @@ def test_create_note_tool_dispatches(monkeypatch):
 
 
 def test_update_note_tool_dispatches(monkeypatch):
+    # GATE-05 (D-02): dry_run now defaults True — pass False to expect the real update.
+    fake = _FakeSource()
+    monkeypatch.setattr(srv, "_notes", fake)
+    out = srv.update_note("x-coredata://S/ICNote/p1", "New", "Body", dry_run=False)
+    assert fake.queries == [("update", "x-coredata://S/ICNote/p1", "New", "Body")]
+    assert out == {"id": "x-coredata://S/ICNote/p1", "summary": "New", "deeplink": ""}
+
+
+def test_update_note_bare_call_previews(monkeypatch):
     fake = _FakeSource()
     monkeypatch.setattr(srv, "_notes", fake)
     out = srv.update_note("x-coredata://S/ICNote/p1", "New", "Body")
     assert fake.queries == [("update", "x-coredata://S/ICNote/p1", "New", "Body")]
-    assert out == {"id": "x-coredata://S/ICNote/p1", "summary": "New", "deeplink": ""}
+    assert out == {
+        "dry_run": True,
+        "would_update": {
+            "id": "x-coredata://S/ICNote/p1",
+            "current": {"title": "Old", "body_chars": 3},
+            "new": {"title": "New", "body_chars": 4},
+        },
+    }
 
 
 # --- errors-as-results: the dispatch seam converts typed native failures (#47) --------
