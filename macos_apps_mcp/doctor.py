@@ -296,12 +296,13 @@ def _build_stamp() -> str:
 
 
 def _outbound_state() -> dict[str, list[str]]:
-    """``registry.outbound_status()`` — registered vs configured outbound adapters
-    (#130, C6). doctor.py imports down into registry.py, never up into server.py — the
-    former lazy reach-in into the server module (a local import inside this very
-    function) is gone (GATE-03). Card 2 (GATE-04, RESEARCH Pitfall 3): the registry is
-    the ONE outbound ledger now — this used to read ``tiers.outbound_status()``, a
-    provisional second ledger card 5 introduced before ``registry.py`` existed."""
+    """The registered vs configured outbound adapters (#130, C6), read from the
+    registration record. doctor.py imports down into registry.py, never up into
+    server.py — the former lazy reach-in into the server module (a local import
+    inside this very function) is gone (GATE-03). Card 2 (GATE-04, RESEARCH
+    Pitfall 3): the registry is the ONE outbound ledger now — this used to read a
+    provisional second ledger in ``tiers.py`` that card 5 introduced before
+    ``registry.py`` existed."""
     return registry.outbound_status()
 
 
