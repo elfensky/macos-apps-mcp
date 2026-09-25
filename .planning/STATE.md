@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: 01
 current_phase_name: Gate — Land the Spiked Architecture Cuts
 status: executing
-stopped_at: Completed 01-01-PLAN.md — v0.11.0 cut, notarized, installed and proven
-last_updated: "2026-09-25T13:00:30.407Z"
+stopped_at: "Wave 4 complete — waiting on the owner go for plan 01-08 (device session)"
+last_updated: "2026-09-25T13:44:50.324Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 01 execution started
-state_head: 326cfc1232adb90ee187f70ecc2da6a89fa33084
+state_head: 9bcad4eb21fa5ce016870d9f3b72b597d85dafbf
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 14
-  completed_plans: 5
+  completed_plans: 7
 ---
 
 # Project State
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 01 (Gate — Land the Spiked Architecture Cuts) — EXECUTING
-Plan: 6 of 14
+Plan: 8 of 14
 Status: Ready to execute
 Last activity: 2026-09-25 — Phase 01 execution started
 
@@ -81,7 +81,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
 ### Blockers/Concerns
 
@@ -109,5 +109,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-25T11:41:17.935Z
-Stopped at: Completed 01-01-PLAN.md — v0.11.0 cut, notarized, installed and proven
+Stopped at: Wave 4 done (7/14). Next: plan 01-08, owner device session (blocking-human go at Task 1)
 Resume file: None

@@ -16,7 +16,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **GATE-05**: Every destructive tool defaults `dry_run=True` (`delete_event`, `delete_draft`, `delete_note` gain it), enforced by a registry test that fails when a new destructive tool omits it
 - [ ] **GATE-06**: Writes audit under their own verb — `trash_mail`, `move_mail`, `mail_undo`, `export_mail`, `save_mail_attachment`, `music_control`, `play_playlist`, `set_mode`, `set_volume`, `create_contact` no longer log as bare `"write"` / unlogged
 - [ ] **GATE-07**: `MACOS_APPS_READ_ONLY=1 uv run pytest` passes (12 failures on develop today)
-- [ ] **GATE-08**: `_fake_envelope` is a shared fixture (`tests/envelope.py`) whose schema carries every column any `query_*` executor reads (incl. `m.size`, `message_references`); Mail tests that stubbed `query_*` only to compensate for a missing store go through the fixture; `HEADER_FINGERPRINT` covers those columns so a real store missing them surfaces as drift, not a query-time error
+- [x] **GATE-08**: `_fake_envelope` is a shared fixture (`tests/envelope.py`) whose schema carries every column any `query_*` executor reads (incl. `m.size`, `message_references`); Mail tests that stubbed `query_*` only to compensate for a missing store go through the fixture; `HEADER_FINGERPRINT` covers those columns so a real store missing them surfaces as drift, not a query-time error
 - [ ] **GATE-09**: The recoverable destructive plane runs its own preflight — `recoverable(op, targets, act, *, dry_run, present)` performs check_batch → present → preview; a dry run without a stated `present` is an error; `dedupe_batch(dry_run=True)` can no longer report "planned" for targets it never checked; device-verified on a scratch mailbox with the Mail watchdog running, dry-run envelopes and osascript argv byte-identical to before
 - [ ] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
 - [ ] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
@@ -142,7 +142,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-05 | Phase 1 | Pending |
 | GATE-06 | Phase 1 | Pending |
 | GATE-07 | Phase 2 | Pending |
-| GATE-08 | Phase 1 | Pending |
+| GATE-08 | Phase 1 | Complete |
 | GATE-09 | Phase 1 | Pending |
 | GATE-10 | Phase 1 | Pending |
 | GATE-11 | Phase 2 | Pending |
