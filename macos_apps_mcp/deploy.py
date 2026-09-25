@@ -289,7 +289,7 @@ def is_daemon_role() -> bool:
 
 
 def allow_send_file() -> str:
-    """The persisted outbound opt-in (``""`` when absent) — see server._allow_send."""
+    """The persisted outbound opt-in (``""`` when absent) — see tiers.allow_send."""
     try:
         return _ALLOW_SEND_FILE.read_text()
     except OSError:

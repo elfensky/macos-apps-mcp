@@ -13,6 +13,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import ToolResult
 from mcp.types import TextContent
 
+import macos_apps_mcp.notices as notices
 import macos_apps_mcp.server as srv
 import macos_apps_mcp.tiers as tiers
 from macos_apps_mcp.contracts import (
@@ -818,7 +819,7 @@ def test_optional_datetime_parse_error_names_the_field(monkeypatch):
 def test_no_notice_exempts_exactly_the_meta_tools():
     # usage carries only tool-call counts — no user-store content — so it is exempt.
     # audit is deliberately NOT exempt: entries embed (truncated) user-store args.
-    assert {"ping", "now", "doctor", "usage"} == srv._NO_NOTICE
+    assert {"ping", "now", "doctor", "usage"} == notices.NO_NOTICE_TOOLS
 
 
 def test_untrusted_notice_covers_every_registered_tool_except_meta():
@@ -829,7 +830,7 @@ def test_untrusted_notice_covers_every_registered_tool_except_meta():
     async def _run():
         async with Client(srv.mcp) as c:
             names = [t.name for t in await c.list_tools()]
-        mw = srv.UntrustedDataNotice()
+        mw = notices.UntrustedDataNotice()
         out = {}
         for name in names:
             ctx = SimpleNamespace(message=SimpleNamespace(name=name))
@@ -842,13 +843,13 @@ def test_untrusted_notice_covers_every_registered_tool_except_meta():
 
     names, out = asyncio.run(_run())
     assert names, "no tools registered"
-    assert set(names) >= srv._NO_NOTICE  # the exempt tools really exist
+    assert set(names) >= notices.NO_NOTICE_TOOLS  # the exempt tools really exist
     for name in names:
         first = out[name][0].text
-        if name in srv._NO_NOTICE:
+        if name in notices.NO_NOTICE_TOOLS:
             assert first == "payload", f"{name} must be exempt from the notice"
         else:
-            assert first == srv.UNTRUSTED_NOTICE, f"{name} is missing the notice"
+            assert first == notices.UNTRUSTED_NOTICE, f"{name} is missing the notice"
 
 
 def test_untrusted_notice_end_to_end_and_leaves_data_intact(monkeypatch):
@@ -863,9 +864,9 @@ def test_untrusted_notice_end_to_end_and_leaves_data_intact(monkeypatch):
             )
 
     reminders_res, now_res = asyncio.run(_run())
-    assert reminders_res.content[0].text == srv.UNTRUSTED_NOTICE
+    assert reminders_res.content[0].text == notices.UNTRUSTED_NOTICE
     assert reminders_res.data == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
-    assert now_res.content[0].text != srv.UNTRUSTED_NOTICE  # meta tool exempt
+    assert now_res.content[0].text != notices.UNTRUSTED_NOTICE  # meta tool exempt
 
 
 def test_untrusted_notice_is_one_block_not_per_item(monkeypatch):
@@ -881,10 +882,10 @@ def test_untrusted_notice_is_one_block_not_per_item(monkeypatch):
             return await c.call_tool("reminders", {"due": "today"})
 
     res = asyncio.run(_run())
-    notices = [
-        b for b in res.content if getattr(b, "text", None) == srv.UNTRUSTED_NOTICE
+    notice_blocks = [
+        b for b in res.content if getattr(b, "text", None) == notices.UNTRUSTED_NOTICE
     ]
-    assert len(notices) == 1 and res.content[0].text == srv.UNTRUSTED_NOTICE
+    assert len(notice_blocks) == 1 and res.content[0].text == notices.UNTRUSTED_NOTICE
 
 
 def test_untrusted_notice_not_added_to_error_results(monkeypatch):
@@ -902,7 +903,7 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
                 await c.call_tool("reminders", {"due": "today"})
             return str(exc.value)
 
-    assert srv.UNTRUSTED_NOTICE not in asyncio.run(_run())
+    assert notices.UNTRUSTED_NOTICE not in asyncio.run(_run())
 
 
 # --- dry_run dispatch (#54) ----------------------------------------------------------
