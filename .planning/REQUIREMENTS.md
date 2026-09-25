@@ -18,7 +18,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **GATE-07**: `MACOS_APPS_READ_ONLY=1 uv run pytest` passes (12 failures on develop today)
 - [x] **GATE-08**: `_fake_envelope` is a shared fixture (`tests/envelope.py`) whose schema carries every column any `query_*` executor reads (incl. `m.size`, `message_references`); Mail tests that stubbed `query_*` only to compensate for a missing store go through the fixture; `HEADER_FINGERPRINT` covers those columns so a real store missing them surfaces as drift, not a query-time error
 - [x] **GATE-09**: The recoverable destructive plane runs its own preflight — `recoverable(op, targets, act, *, dry_run, present)` performs check_batch → present → preview; a dry run without a stated `present` is an error; `dedupe_batch(dry_run=True)` can no longer report "planned" for targets it never checked; device-verified on a scratch mailbox with the Mail watchdog running, dry-run envelopes and osascript argv byte-identical to before
-- [ ] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
+- [x] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
 - [ ] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
 - [ ] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
 - [ ] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
@@ -144,7 +144,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-07 | Phase 2 | Pending |
 | GATE-08 | Phase 1 | Complete |
 | GATE-09 | Phase 1 | Complete |
-| GATE-10 | Phase 1 | Pending |
+| GATE-10 | Phase 1 | Complete |
 | GATE-11 | Phase 2 | Pending |
 | GATE-12 | Phase 2 | Pending |
 | GATE-13 | Phase 1 | Pending |
