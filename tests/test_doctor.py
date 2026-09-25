@@ -5,16 +5,34 @@ EventKit, osascript, or TCC is touched. One @integration test exercises the real
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
 import macos_apps_mcp.doctor as doc
+from macos_apps_mcp import runtime
 from macos_apps_mcp.errors import (
     AppNotRunning,
     AutomationDenied,
     FullDiskAccessDenied,
     SchemaDrift,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_process_probe(monkeypatch):
+    """doctor's automation surfaces read every app's process line via
+    ``runtime.app_process_info`` -> ``runtime.tracked_run`` (pgrep + ps), even with
+    request=False (#183). The conftest lock refuses tracked_run outright; here it's
+    faked instead of refused, so ``app_process_info`` gets a normal "not running"
+    result (returncode 1, empty stdout) and no live pgrep/ps ever runs (GATE-01). A
+    test that patches ``doc.app_process_info`` directly bypasses this fake entirely
+    and keeps working unchanged."""
+
+    def _fake_pgrep_or_ps(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(runtime, "tracked_run", _fake_pgrep_or_ps)
 
 
 def _boom_osascript(*args, **kwargs):

@@ -16,9 +16,9 @@ import re
 import subprocess
 import tempfile
 
+from .. import runtime
 from ..contracts import Pointer
 from ..errors import NativeError, NativeTimeout
-from ..runtime import tracked_run
 from ..text import clean_summary, fold_text, sanitize_line
 
 MAX_SHORTCUTS = 100
@@ -46,7 +46,7 @@ def _list_entries() -> list[tuple[str, str | None]]:
     ``NativeError`` on a non-zero exit. Spawned via ``tracked_run`` so the child sits
     in runtime's #56 registry and exit-path cleanup can terminate it."""
     try:
-        proc = tracked_run(
+        proc = runtime.tracked_run(
             ["shortcuts", "list", "--show-identifiers"], timeout=_TIMEOUT
         )
     except subprocess.TimeoutExpired as e:
@@ -172,7 +172,7 @@ class ShortcutsAdapter:
                 # tracked_run (not subprocess.run): the child sits in runtime's #56
                 # registry, so an exit path (atexit / SIGTERM / orphan watcher) can
                 # terminate an in-flight `shortcuts run` instead of orphaning it.
-                proc = tracked_run(
+                proc = runtime.tracked_run(
                     cmd,
                     input=input_text,
                     errors="replace",
