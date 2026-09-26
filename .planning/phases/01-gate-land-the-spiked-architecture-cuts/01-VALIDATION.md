@@ -3,9 +3,9 @@ phase: "1"
 slug: "gate-land-the-spiked-architecture-cuts"
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: "2026-09-25"
 ---
 
@@ -44,17 +44,17 @@ Seeded from RESEARCH.md §Validation Architecture. The planner fills task IDs; t
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 01-02 T1, 01-04 T1–T3 | 01-02, 01-04 | 2, 3 | GATE-01 | T-1-05, T-1-10 | A test that forgets the seam fake raises; no real Apple Event; tripwire over every `adapters/*.py` + `doctor.py` | unit | `uv run pytest tests/test_native_seam.py -v` | ✅ (widen) | ⬜ pending |
-| 01-02 T1, T2 | 01-02 | 2 | GATE-01 | T-1-05 | `body_file` / `tracked_run` locked at runtime (conftest), lock self-tests | unit | `uv run pytest tests/test_native_seam.py tests/test_shortcuts.py -v` | ❌ W0 (01-02) | ⬜ pending |
-| 01-06 T1, T2 | 01-06 | 4 | GATE-02 | T-1-15, T-1-16 | `runtime` 11 public names; EventKit in `eventkit.py`; one worker | unit | `uv run pytest tests/test_runtime.py tests/test_eventkit.py -v` | ⚠️ new file (01-06) | ⬜ pending |
-| 01-09 T1, T2; 01-12 T3 | 01-09, 01-12 | 6, 9 | GATE-03 | T-1-25, T-1-27 | `doctor` imports no `server`; nothing below server imports server; tier gate unchanged; one ledger | unit | `uv run pytest tests/test_import_layers.py tests/test_doctor_deploy.py tests/test_server.py tests/test_deploy.py tests/test_gate_on_dispatch.py -v` | ❌ W0 (layering test, 01-09) | ⬜ pending |
-| 01-11 T1; 01-12 T1–T3 | 01-11, 01-12 | 8, 9 | GATE-04 | T-1-31, T-1-34 | One record drives annotations/gates/guard/snapshot/notice/verb/ledger; gated-off tools recorded | unit | `uv run pytest tests/test_registry.py tests/test_tool_annotations.py -v` | ⚠️ new file (01-11) | ⬜ pending |
-| 01-13 T1, T2 | 01-13 | 10 | GATE-05 | T-1-37, T-1-38 | Removes-content class defaults `dry_run=True`; `delete_*` caught fail-closed; update_note preview writes nothing | unit | `uv run pytest tests/test_registry.py tests/test_notes.py tests/test_server.py -v` | ❌ W0 (01-13) | ⬜ pending |
-| 01-11 T1, T2 | 01-11 | 8 | GATE-06 | T-1-32 | Every write logs its own verb; `_audit_op` removed; create_contact logged | unit | `uv run pytest tests/test_audit.py tests/test_audit_middleware.py tests/test_registry.py -v` | ✅ (extend) | ⬜ pending |
-| 01-07 T1–T3 | 01-07 | 4 | GATE-08 | T-1-18, T-1-19 | `HEADER_FINGERPRINT` covers every read column; fixture runs both shapes | unit | `uv run pytest tests/test_mail_search.py tests/test_mail_triage.py tests/test_mail_cleanup.py tests/test_mail_index.py tests/test_mail_ids.py -v` | ❌ W0 (coverage test, 01-07) | ⬜ pending |
-| 01-05 T1, T2 | 01-05 | 3 | GATE-09 | T-1-12, T-1-13 | `recoverable()` preflight; no "planned" for unchecked targets; move/trash/undo dry runs byte-identical to v0.11.0 | unit | `uv run pytest tests/test_mail_recover.py tests/test_mail_recover_dry_run_identity.py tests/test_mail.py -v` | ⚠️ new file (01-05) | ⬜ pending |
-| 01-03 T1; 01-05 T2; 01-09 T2 | 01-03, 01-05, 01-09 | 2, 3, 6 | GATE-10 | T-1-08 | Script backstop ≥ host cap at every call site; `_DEDUPE` fixed; honest refusal text; stale comment gone | unit | `uv run pytest tests/test_applescript_timeout.py -v` | ❌ W0 (in existing file, 01-03) | ⬜ pending |
-| 01-01 T1 | 01-01 | 1 | GATE-13 | T-1-01 | Two-file version bump matches | unit | `uv run pytest tests/test_packaging.py -v` | ✅ | ⬜ pending |
+| 01-02 T1, 01-04 T1–T3 | 01-02, 01-04 | 2, 3 | GATE-01 | T-1-05, T-1-10 | A test that forgets the seam fake raises; no real Apple Event; tripwire over every `adapters/*.py` + `doctor.py` | unit | `uv run pytest tests/test_native_seam.py -v` | ✅ | ✅ green |
+| 01-02 T1, T2 | 01-02 | 2 | GATE-01 | T-1-05 | `body_file` / `tracked_run` locked at runtime (conftest), lock self-tests | unit | `uv run pytest tests/test_native_seam.py tests/test_shortcuts.py -v` | ✅ | ✅ green |
+| 01-06 T1, T2 | 01-06 | 4 | GATE-02 | T-1-15, T-1-16 | `runtime` 11 public names; EventKit in `eventkit.py`; one worker | unit | `uv run pytest tests/test_runtime.py tests/test_eventkit.py -v` | ✅ | ✅ green |
+| 01-09 T1, T2; 01-12 T3 | 01-09, 01-12 | 6, 9 | GATE-03 | T-1-25, T-1-27 | `doctor` imports no `server`; nothing below server imports server; tier gate unchanged; one ledger | unit | `uv run pytest tests/test_import_layers.py tests/test_doctor_deploy.py tests/test_server.py tests/test_deploy.py tests/test_gate_on_dispatch.py -v` | ✅ | ✅ green |
+| 01-11 T1; 01-12 T1–T3 | 01-11, 01-12 | 8, 9 | GATE-04 | T-1-31, T-1-34 | One record drives annotations/gates/guard/snapshot/notice/verb/ledger; gated-off tools recorded | unit | `uv run pytest tests/test_registry.py tests/test_tool_annotations.py -v` | ✅ | ✅ green |
+| 01-13 T1, T2 | 01-13 | 10 | GATE-05 | T-1-37, T-1-38 | Removes-content class defaults `dry_run=True`; `delete_*` caught fail-closed; update_note preview writes nothing | unit | `uv run pytest tests/test_registry.py tests/test_notes.py tests/test_server.py -v` | ✅ | ✅ green |
+| 01-11 T1, T2 | 01-11 | 8 | GATE-06 | T-1-32 | Every write logs its own verb; `_audit_op` removed; create_contact logged | unit | `uv run pytest tests/test_audit.py tests/test_audit_middleware.py tests/test_registry.py -v` | ✅ | ✅ green |
+| 01-07 T1–T3 | 01-07 | 4 | GATE-08 | T-1-18, T-1-19 | `HEADER_FINGERPRINT` covers every read column; fixture runs both shapes | unit | `uv run pytest tests/test_mail_search.py tests/test_mail_triage.py tests/test_mail_cleanup.py tests/test_mail_index.py tests/test_mail_ids.py -v` | ✅ | ✅ green |
+| 01-05 T1, T2 | 01-05 | 3 | GATE-09 | T-1-12, T-1-13 | `recoverable()` preflight; no "planned" for unchecked targets; move/trash/undo dry runs byte-identical to v0.11.0 | unit | `uv run pytest tests/test_mail_recover.py tests/test_mail_recover_dry_run_identity.py tests/test_mail.py -v` | ✅ | ✅ green |
+| 01-03 T1; 01-05 T2; 01-09 T2 | 01-03, 01-05, 01-09 | 2, 3, 6 | GATE-10 | T-1-08 | Script backstop ≥ host cap at every call site; `_DEDUPE` fixed; honest refusal text; stale comment gone | unit | `uv run pytest tests/test_applescript_timeout.py -v` | ✅ | ✅ green |
+| 01-01 T1 | 01-01 | 1 | GATE-13 | T-1-01 | Two-file version bump matches | unit | `uv run pytest tests/test_packaging.py -v` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -62,12 +62,12 @@ Seeded from RESEARCH.md §Validation Architecture. The planner fills task IDs; t
 
 ## Wave 0 Requirements
 
-- [ ] `tests/conftest.py` — lock `body_file` and `tracked_run`, not only `run_osascript` (RESEARCH Pitfall 1) — plan 01-02 T1/T2
-- [ ] `tests/test_native_seam.py` — tripwire over every `adapters/*.py` + `doctor.py` — plan 01-04 T3
-- [ ] `HEADER_FINGERPRINT` coverage test (RESEARCH Pitfall 2) — plan 01-07 T2, in `tests/test_mail_index.py`
-- [ ] Registry test for the D-04 fail-closed `delete_*` dry-run-default rule — plan 01-13 T1, in `tests/test_registry.py`
-- [ ] Layering test: nothing below `server` imports `server` (the measured lazy-import graph keeps the entry-point chain server → deploy → daemon → server, so a blanket "no cycle" test would be false) — plan 01-09 T1, `tests/test_import_layers.py`
-- [ ] GATE-10 tripwire (RESEARCH Pitfall 5) — plan 01-03 T1, added to the existing `tests/test_applescript_timeout.py` (the #56 template test's home) instead of a new `tests/test_timeout_tripwire.py`
+- [x] `tests/conftest.py` — lock `body_file` and `tracked_run`, not only `run_osascript` (RESEARCH Pitfall 1) — plan 01-02 T1/T2
+- [x] `tests/test_native_seam.py` — tripwire over every `adapters/*.py` + `doctor.py` — plan 01-04 T3
+- [x] `HEADER_FINGERPRINT` coverage test (RESEARCH Pitfall 2) — plan 01-07 T2, in `tests/test_mail_index.py`
+- [x] Registry test for the D-04 fail-closed `delete_*` dry-run-default rule — plan 01-13 T1, in `tests/test_registry.py`
+- [x] Layering test: nothing below `server` imports `server` (the measured lazy-import graph keeps the entry-point chain server → deploy → daemon → server, so a blanket "no cycle" test would be false) — plan 01-09 T1, `tests/test_import_layers.py`
+- [x] GATE-10 tripwire (RESEARCH Pitfall 5) — plan 01-03 T1, added to the existing `tests/test_applescript_timeout.py` (the #56 template test's home) instead of a new `tests/test_timeout_tripwire.py`
 
 ---
 
@@ -84,11 +84,23 @@ Seeded from RESEARCH.md §Validation Architecture. The planner fills task IDs; t
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-09-26
+
+---
+
+## Validation Audit 2026-09-26
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+All 11 per-task commands run green against `8885ad0`+docs (`uv run pytest <files>`; 26 + 65 + 59 + 143 + 24 + 200 + 37 + 318 + 184 + 53 + 5 passed). Each Wave 0 test is present and targets its behavior: conftest locks all three seams; `test_native_seam.py` tripwire + raise proofs; `test_mail_index.py` HEADER_FINGERPRINT coverage; `test_registry.py::test_content_removing_tools_default_to_dry_run`; `test_import_layers.py::test_nothing_below_server_imports_server`; `test_applescript_timeout.py::test_every_call_site_backstop_covers_host_cap`. Manual-only rows stay manual; their device evidence is in 01-08, 01-10 and 01-14 SUMMARY and 01-UAT test 1.
