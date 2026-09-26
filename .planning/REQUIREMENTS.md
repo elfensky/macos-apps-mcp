@@ -21,7 +21,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
 - [ ] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
 - [ ] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
-- [ ] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
+- [x] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
 
 ### Mail — email work comes before any new or additional feature (owner, 2026-09-24)
 
@@ -147,7 +147,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-10 | Phase 1 | Complete |
 | GATE-11 | Phase 2 | Pending |
 | GATE-12 | Phase 2 | Pending |
-| GATE-13 | Phase 1 | Pending |
+| GATE-13 | Phase 1 | Complete |
 | MAIL-01 | Phase 02.1 | Pending |
 | MAIL-02 | Phase 02.1 | Pending |
 | MAIL-03 | Phase 02.1 | Pending |
