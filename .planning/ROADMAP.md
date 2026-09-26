@@ -30,7 +30,7 @@ by default, its own audit verb, and verification by running it on device and ins
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Gate — Land the Spiked Architecture Cuts** - Native seam fail-closed, module boundaries settled, one registration record, Mail's fixture and recoverable preflight fixed
+- [x] **Phase 1: Gate — Land the Spiked Architecture Cuts** - Native seam fail-closed, module boundaries settled, one registration record, Mail's fixture and recoverable preflight fixed (completed 2026-09-26)
 - [ ] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes
 - [ ] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names
 - [ ] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness
@@ -201,7 +201,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Gate — Land the Spiked Architecture Cuts | 14/14 | In Progress|  |
+| 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 0/TBD | Not started | - |
 | 02.1. Mail Fixes (INSERTED) | 0/TBD | Not started | - |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |

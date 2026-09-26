@@ -1,44 +1,45 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 01
-current_phase_name: Gate — Land the Spiked Architecture Cuts
-status: executing
-stopped_at: "All 14 plans done; verifier human_needed (6/6) — owner /mcp check pending in 01-UAT.md; code review 0 critical, 1 warning (WR-01)"
-last_updated: "2026-09-25T23:48:15.000Z"
-last_activity: 2026-09-25
-last_activity_desc: Phase 01 execution started
-state_head: aa412da1317e06e9fb2317f363c54f1a164a09de
+current_phase: 2
+current_phase_name: Gate Close — Fail-Closed Suite and Device Sweep
+status: planning
+stopped_at: Phase 01 complete, ready to plan Phase 2
+last_updated: "2026-09-26T09:35:12.302Z"
+last_activity: 2026-09-26
+last_activity_desc: Phase 01 complete, transitioned to Phase 2
+state_head: b2005b642166ad2f148e50e20bcbfcb21843f1d0
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 14
   completed_plans: 14
+  percent: 14
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-28)
+See: .planning/PROJECT.md (updated 2026-09-26)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 01 — Gate — Land the Spiked Architecture Cuts
+**Current focus:** Phase 2 — Gate Close — Fail-Closed Suite and Device Sweep
 
 ## Current Position
 
-Phase: 01 (Gate — Land the Spiked Architecture Cuts) — EXECUTING
-Plan: 14 of 14
-Status: Awaiting human verification — run /gsd-verify-work 01 (01-UAT.md, 1 item); then /gsd-secure-phase 01
-Last activity: 2026-09-26 — 01-14 done: dev build 8885ad0 installed and probed; 11 spike branches + 9 worktrees deleted; GATE-13 ticked
+Phase: 2 — Gate Close — Fail-Closed Suite and Device Sweep
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-09-26 — Phase 01 complete, transitioned to Phase 2
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 14%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 14
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -46,7 +47,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 14 | - | - |
 
 **Recent Trend:**
 
@@ -70,7 +71,7 @@ Recent decisions affecting current work:
 - Gate first: land the 2026-08-28 spiked review before any adapter work — cards 1/7/5 reshape `server.py`/`runtime.py`/`doctor.py`, the files every adapter PR touches.
 - Gate build order is load-bearing: 1 → 7 → 5 → 2 sequentially, Mail-scoped 3/4/9 in parallel; after cards 5 and 2 rebuild the daemon and prove `doctor().version`.
 - Spike branches (`spike/arch-review-*`) are primary sources, never landing branches — each cut re-lands by rebasing onto the previous PR.
-- `dry_run=True` on every destructive tool, enforced from the registration record (today `delete_event`/`delete_draft` default False, `delete_note` has none).
+- `dry_run=True` on every destructive tool, enforced from the registration record — done in Phase 1 (GATE-05), live-verified 2026-09-26.
 - Contacts and Messages depth are v2, not v1 (owner, 2026-08-28 roadmap review) — the requirements stay tracked under `## v2 Requirements`, out of this milestone's phases.
 - Email work comes before any new or additional feature (owner, 2026-09-24). Mail fixes are Phase 02.1, right after the gate; the gate stays first because card 4 rewrites `recoverable()`, the function #206 fixes.
 - #205 (Intel build) is DIST-06 in Phase 6 but depends on nothing before it — it may land early as a `/gsd-quick` task.
@@ -87,8 +88,8 @@ Recent decisions affecting current work:
 ### Blockers/Concerns
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
-- Phase 1 rebase risk: all `spike/arch-review-*` branches are 16 commits behind `develop`, and each one overlaps files the Sequoia plane changed (`doctor.py`, `server.py`, `runtime.py`, `contracts.py`, `mail.py`, `mail_index.py`, `tests/conftest.py`). Expect conflicts. Card 3's shared fixture must absorb `sequoiaify_envelope` and the sidecar.
-- `develop` carries unreleased work since v0.10.1 (#199/#201/#204). The installed daemon does not have it until a release build is installed; release timing stays the operator's call.
+- [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
+- [Phase 1] The installed daemon is a dev build of `develop` `8885ad0`, not a release; v0.11.0 is the last release. Release timing stays the operator's call.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
 
@@ -109,6 +110,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-25T11:41:17.935Z
-Stopped at: Wave 10 done (13/14). 01-14 Task 1 answered swap-and-clean. Next: dispatch 01-14 from a NEW chat, then the phase gates
+Last session: 2026-09-26T09:40:00Z
+Stopped at: Phase 01 complete, ready to plan Phase 2
 Resume file: None
