@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>002 · Audit review</title>
+<link rel="stylesheet" href="../themes/default.css">
+<link rel="stylesheet" href="../_shared/base.css">
+<link rel="stylesheet" href="../_shared/shell.css">
+<style>
+  .b-detail > * { max-width: 680px; }
+  .card { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); padding: var(--space-3) var(--space-4); }
+  del.w { background: var(--color-danger-bg); color: var(--color-danger); text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+  ins.w { background: var(--color-success-bg); color: var(--color-success); text-decoration: none; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+  .diffline { font-size: var(--text-lg); line-height: 1.6; }
+  .fid.full { } .fid.partial { background: var(--color-accent-bg); color: #c77700; } .fid.absent { background: var(--color-danger-bg); color: var(--color-danger); }
+  table.targets { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+  table.targets td { padding: 6px 4px; border-top: 0.5px solid var(--color-separator); vertical-align: top; }
+  table.targets tr:first-child td { border-top: 0; }
+  table.targets td:first-child { width: 100%; }
+
+  /* B: timeline */
+  .tl { list-style: none; margin: 0; padding: 0; position: relative; }
+  .tl::before { content: ""; position: absolute; left: 11px; top: 8px; bottom: 8px; width: 1.5px; background: var(--color-border); }
+  .tl li { position: relative; padding: 0 0 var(--space-4) 36px; }
+  .tl li .node {
+    position: absolute; left: 4px; top: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--color-surface); box-shadow: inset 0 0 0 1.5px var(--color-text-faint);
+  }
+  .tl li.add .node { box-shadow: inset 0 0 0 5px var(--color-success); }
+  .tl li.chg .node { box-shadow: inset 0 0 0 5px var(--color-accent); }
+  .tl li.out .node { box-shadow: inset 0 0 0 5px var(--color-outbound); }
+  .tl li.ext .node { box-shadow: inset 0 0 0 1.5px var(--color-text-faint); background: var(--color-bg); }
+  .tl li.current > .card { box-shadow: 0 0 0 2px var(--color-primary), var(--shadow-md); }
+  .tl li .when { font-size: var(--text-xs); color: var(--color-text-muted); margin-bottom: 2px; }
+  .tl li .card { padding: var(--space-2) var(--space-3); }
+  .tl li.clickable .card { cursor: pointer; transition: all .15s ease; }
+  .tl li.clickable .card:hover { background: var(--color-neutral-bg); }
+
+  /* C: sentence + raw */
+  .sentence { font-size: var(--text-xl); line-height: 1.45; margin: var(--space-3) 0 var(--space-4); font-weight: 400; }
+  .sentence b { font-weight: 600; }
+  pre.json {
+    margin: 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-2);
+    box-shadow: inset 0 0 0 0.5px var(--color-border); font: 11.5px/1.55 var(--font-mono); overflow: auto; white-space: pre;
+  }
+  pre.json .k { color: var(--color-primary); } pre.json .s { color: #b3541e; } pre.json .n { color: var(--color-outbound); }
+  :root[data-theme="dark"] pre.json .s { color: #ff9f6b; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) pre.json .s { color: #ff9f6b; } }
+  details.raw > summary { cursor: pointer; color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-2) 0; }
+  details.raw > summary:hover { color: var(--color-text); }
+</style>
+</head>
+<body>
+<div id="sketch-root">
+  <section class="variant" id="variant-a" data-label="A: Word diff + what was asked"><div class="b-shell"></div></section>
+  <section class="variant" id="variant-b" data-label="B: History of the target"><div class="b-shell"></div></section>
+  <section class="variant" id="variant-c" data-label="C: Sentence + raw record"><div class="b-shell"></div></section>
+  <section class="variant" id="variant-d" data-label="D: A + C's raw lines" data-winner><div class="b-shell"></div></section>
+</div>
+
+<script src="../_shared/data.js"></script>
+<script src="../_shared/sketch.js"></script>
+<script src="../_shared/shell.js"></script>
+<script>
+const D = DATA, F = fmt, H = Shell.header;
+const START = "2026-09-28T09:31:55"; // update_event: Dentist moved an hour
+
+// ---------- shared pieces ----------
+function wordDiff(a, b) {
+  const x = a.split(" "), y = b.split(" ");
+  let i = 0; while (i < x.length && i < y.length && x[i] === y[i]) i++;
+  let j = 0; while (j < x.length - i && j < y.length - i && x[x.length - 1 - j] === y[y.length - 1 - j]) j++;
+  const part = (arr, from, to) => arr.slice(from, to).join(" ");
+  return `${part(x, 0, i)} ${i < x.length - j ? `<del class="w">${part(x, i, x.length - j)}</del> ` : ""}${i < y.length - j ? `<ins class="w">${part(y, i, y.length - j)}</ins>` : ""} ${part(x, x.length - j)}`;
+}
+const fidChip = (f) => `<span class="chip fid ${f}">${f === "absent" ? "no backup" : f}</span>`;
+const statusChip = (s) => s === "ok" ? `<span class="chip ok">ok</span>` : `<span class="chip danger">${s}</span>`;
+function targetsTable(r, limit = 5) {
+  const rows = r.targets.slice(0, limit).map((t) => `<tr><td>${t.summary}<div class="faint">${F.account(t.account)} · ${t.folder}</div></td><td>${fidChip(t.fidelity)}</td><td>${statusChip(t.status)}</td></tr>`).join("");
+  const more = r.targets.length > limit ? `<tr><td colspan="3" class="muted">and ${r.targets.length - limit} more</td></tr>` : "";
+  return `<table class="targets">${rows}${more}</table>`;
+}
+const undoneAt = (e) => { const u = D.audit.find((x) => x.receipt === e.undone_by); return u ? `${F.day(u.ts)} ${F.time(u.ts)}` : ""; };
+const receiptOf = (e) => D.receipts[e.receipt] || (e.args.receipt && D.receipts[e.args.receipt]);
+function previewBanner(e) {
+  return e.preview ? `<div class="banner"><span>ⓘ</span><div><b>Preview only — nothing changed.</b> The caller did not pass <span class="mono">dry_run</span>, and <span class="mono">${e.tool}</span> defaults to a preview. ${nextReal(e) ? `The real call came ${nextReal(e)}.` : ""}</div></div>` : "";
+}
+function nextReal(e) {
+  const n = D.audit.find((x) => !x.preview && x.tool === e.tool && x.ts > e.ts && x.ts.slice(0, 10) === e.ts.slice(0, 10));
+  if (!n) return "";
+  const s = (new Date(n.ts) - new Date(e.ts)) / 1000;
+  return `${Math.round(s)} s later, at ${F.time(n.ts)}`;
+}
+const openBtn = (e) => (e.after || e.before) ? `<button class="btn" onclick="toast('Opens ${(e.after || e.before).deeplink}')">Open in ${e.app}</button>` : "";
+const copyBtn = (v, label = "Copy id") => `<button class="btn" onclick="navigator.clipboard?.writeText('${v}');toast('Copied ${v}')">${label}</button>`;
+
+// ---------- A: word diff + what was asked ----------
+function argValue(e, k, v) {
+  if (typeof v === "boolean") return `<span class="mono">${v}</span>`;
+  return String(v);
+}
+function detailA(e, box) {
+  let what;
+  if (e.receipt) {
+    const r = receiptOf(e), s = r && F.receiptStats(r);
+    what = r ? `<div class="card"><p style="margin:0 0 var(--space-2)"><b>${s.ok} of ${s.n}</b> messages → <b>${r.destination}</b> · ${s.full} full backups${s.lossy ? `, ${s.lossy} partial or none` : ""}</p>${targetsTable(r)}</div>`
+             : `<div class="card">Moved the messages of <span class="mono">${e.args.receipt}</span> back to where they came from.</div>`;
+  } else if (e.before && e.after) {
+    what = `<div class="card diffline">${wordDiff(e.before.summary, e.after.summary)}</div>`;
+  } else if (e.after) {
+    what = `<div class="card diffline"><ins class="w">${e.after.summary}</ins></div><p class="muted" style="font-size:var(--text-sm)">New — it did not exist before.</p>`;
+  } else if (e.before) {
+    what = `<div class="card diffline"><del class="w">${e.before.summary}</del></div>`;
+  } else what = `<div class="card muted">${e.summary}</div>`;
+  const args = Object.entries(e.args).map(([k, v]) => `<dt>${k}</dt><dd>${argValue(e, k, v)}</dd>`).join("");
+  const dry = "dry_run" in e.args ? "" : `<dt>dry_run</dt><dd class="muted">not passed — ${e.preview ? "defaulted to <b>true</b>" : "not a dry-run tool"}</dd>`;
+  box.innerHTML = `${H(e)}${previewBanner(e)}
+    <div class="section-label">${e.preview ? "What it would have changed" : "What changed"}</div><div style="${e.preview ? "opacity:.55" : ""}">${what}</div>
+    <div class="section-label">What the model asked for</div>
+    <dl class="kv"><dt>tool</dt><dd class="mono">${e.tool}</dd>${args}${dry}</dl>
+    <div class="actions">${openBtn(e)}${e.target_id ? copyBtn(e.target_id) : ""}${e.receipt ? `<button class="btn" onclick="toast('Opens the receipt — sketch 003')">Open receipt</button>` : ""}${e.undone_by ? `<span class="chip">undone · ${undoneAt(e)}</span>` : ""}</div>`;
+}
+
+// ---------- B: history of the target ----------
+const cls = (e) => e.preview ? "ext" : e.tier === "additive" ? "add" : e.tier === "outbound" ? "out" : "chg";
+function detailB(e, box) {
+  let items;
+  if (e.receipt || (e.args && e.args.receipt)) {
+    const r = receiptOf(e);
+    const rid = e.receipt;
+    const plan = r ? F.receiptStats(r) : null;
+    items = r ? [
+      { k: "ext", when: `${F.day(r.ts)} ${F.time(r.ts)}`, html: `<b>Backed up ${plan.n} messages</b> before acting<div class="sub muted">${plan.full} full, ${plan.lossy} partial or none · <span class="mono">${rid}</span></div>` },
+      { k: "chg", when: `${F.day(r.ts)} ${F.time(r.ts)}`, html: `<b>${r.op === "move" ? "Moved" : "Moved to Trash"}: ${plan.ok} of ${plan.n}</b>${plan.ok < plan.n ? ` <span class="chip danger">${plan.n - plan.ok} missing</span>` : ""}<div style="margin-top:6px">${targetsTable(r, 3)}</div>`, current: true },
+      ...(r.undone_by ? [{ k: "add", when: undoneAt(e), html: `<b>Undone</b> — all ${plan.ok} moved back to ${r.targets[0].folder}<div class="sub muted mono">${r.undone_by}</div>`, go: "2026-09-27T10:25:40" }]
+                     : [{ k: "ext", when: "Now", html: `<span class="muted">Not undone. The backup is kept.</span> <button class="btn link" onclick="toast('Undo flow — sketch 003')">Undo…</button>` }]),
+    ] : [{ k: "chg", when: F.time(e.ts), html: `Undo of <span class="mono">${e.args.receipt}</span>`, current: true }];
+  } else {
+    const hist = D.audit.filter((x) => x.target_id && x.target_id === e.target_id).sort((a, b) => a.ts.localeCompare(b.ts));
+    items = hist.map((x) => ({
+      k: cls(x), when: `${F.day(x.ts)} ${F.time(x.ts)} · <span class="mono">${x.tool}</span>`, current: x.ts === e.ts, go: x.ts !== e.ts ? x.ts : null,
+      html: x.preview ? `<span class="muted">${F.title(x)} — preview, nothing changed</span>`
+        : x.before && x.after ? `<b>${F.title(x).split(" ")[0]}</b> ${wordDiff(x.before.summary, x.after.summary)}`
+        : `<b>${F.title(x)}</b>`,
+    }));
+    if (hist[0] && hist[0].op !== "create") items.unshift({ k: "ext", when: "Before", html: `<span class="muted">Created outside this server — in ${e.app} itself or by another app. The log starts here.</span>` });
+    items.push({ k: "ext", when: "Now", html: `<span class="muted">The log records only what the model did. Open it in ${e.app} to see its state now.</span>` });
+  }
+  box.innerHTML = `${H(e)}${previewBanner(e)}
+    <div class="section-label">History of this ${e.receipt ? "batch" : "item"}</div>
+    <ol class="tl">${items.map((i) => `<li class="${i.k}${i.current ? " current" : ""}${i.go ? " clickable" : ""}" ${i.go ? `data-go="${i.go}"` : ""}><span class="node"></span><div class="when">${i.when}</div><div class="card">${i.html}</div></li>`).join("")}</ol>
+    <div class="actions">${openBtn(e)}${e.target_id ? copyBtn(e.target_id) : ""}</div>`;
+  box.querySelectorAll("[data-go]").forEach((li) => li.onclick = () => shells.b.select(li.dataset.go));
+}
+
+// ---------- C: sentence + raw record ----------
+function sentence(e) {
+  const t = (p) => `<b>${p.summary.split(" — ")[0]}</b>`;
+  if (e.preview) return `The model <b>previewed</b> ${e.op === "delete" ? `deleting ${t(e.before)}` : e.summary.replace(/^Would /, "").replace(/^move/, "moving")}. Nothing changed.`;
+  if (e.receipt) { const r = receiptOf(e); return r ? `The model moved <b>${F.receiptStats(r).ok} of ${r.targets.length}</b> messages to <b>${r.destination}</b>, after backing them up.` : `The model <b>undid</b> an earlier batch and moved its messages back.`; }
+  const rest = (p) => p.summary.split(" — ").slice(1).join(" — ");
+  switch (e.op) {
+    case "create": return `The model <b>added</b> ${t(e.after)}${rest(e.after) ? ` — ${rest(e.after)}` : ""} to ${e.app}.`;
+    case "update": return `The model <b>changed</b> ${t(e.after)} from <b>${rest(e.before)}</b> to <b>${rest(e.after)}</b>.`;
+    case "delete": return `The model <b>deleted</b> ${t(e.before)} (${rest(e.before)}).`;
+    case "complete": return `The model marked ${t(e.before)} <b>done</b>.`;
+    case "send": return `The model <b>sent</b> “${e.args.subject}” to <b>${e.args.to}</b>. This left the Mac.`;
+  }
+}
+function rawRecords(e) {
+  const mw = { ts: e.ts, tool: e.tool, op: e.op, args: e.args, target_id: e.target_id ?? null, before: e.before ?? null, after: e.after ?? null };
+  const r = e.receipt && receiptOf(e);
+  if (!r) return [mw];
+  const tg = r.targets.slice(0, 2).map((t, i) => ({ id: t.id, folder: t.folder, fidelity: t.fidelity, account: t.account, rowid: 48120 + i, backup: `${r.backup_dir}/${48120 + i}.eml`, status: "planned" }));
+  return [
+    { ts: r.ts, tool: "mail_recover", op: r.op, phase: "plan", receipt: e.receipt, destination: r.destination, backup_dir: r.backup_dir, targets: [...tg, `… ${r.targets.length - 2} more`] },
+    { ts: r.ts, tool: "mail_recover", op: r.op, phase: "done", receipt: e.receipt, results: Object.fromEntries(r.targets.slice(0, 3).map((t) => [t.id, t.status])) },
+    mw,
+  ];
+}
+const hl = (json) => json.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null|\d+)\b/g, (m, s, c, lit) =>
+    lit ? `<span class="n">${lit}</span>` : c ? `<span class="k">${s}</span>${c}` : `<span class="s">${s}</span>`);
+function detailC(e, box) {
+  const recs = rawRecords(e);
+  box.innerHTML = `${H(e)}
+    <p class="sentence">${sentence(e)}</p>
+    <dl class="kv"><dt>When</dt><dd>${F.day(e.ts)} at ${e.ts.slice(11)}</dd><dt>Tool</dt><dd class="mono">${e.tool}</dd>
+      ${e.target_id ? `<dt>Target</dt><dd class="mono">${e.target_id}</dd>` : ""}
+      <dt>Caller</dt><dd class="muted">not recorded — the audit log has no session field</dd></dl>
+    <div class="actions">${openBtn(e)}${e.receipt ? `<button class="btn" onclick="toast('Opens the receipt — sketch 003')">Open receipt</button>` : ""}</div>
+    <details class="raw" open><summary>${recs.length} ${recs.length > 1 ? "lines" : "line"} in audit.jsonl</summary>
+      <pre class="json">${recs.map((r) => hl(JSON.stringify(r, null, 2))).join("\n")}</pre>
+      <div class="actions">${copyBtn("", "Copy JSON")}</div></details>`;
+}
+
+// ---------- D: A, with C's raw lines collapsed at the bottom ----------
+function detailD(e, box) {
+  detailA(e, box);
+  const recs = rawRecords(e);
+  box.insertAdjacentHTML("beforeend", `<details class="raw" style="margin-top:var(--space-6)"><summary>${recs.length} ${recs.length > 1 ? "lines" : "line"} in audit.jsonl</summary>
+    <pre class="json">${recs.map((r) => hl(JSON.stringify(r, null, 2))).join("\n")}</pre></details>`);
+}
+
+const shells = {
+  a: Shell.mount(document.querySelector("#variant-a .b-shell"), { detail: detailA, select: START }),
+  b: Shell.mount(document.querySelector("#variant-b .b-shell"), { detail: detailB, select: START }),
+  c: Shell.mount(document.querySelector("#variant-c .b-shell"), { detail: detailC, select: START }),
+  d: Shell.mount(document.querySelector("#variant-d .b-shell"), { detail: detailD, select: START }),
+};
+</script>
+</body>
+</html>

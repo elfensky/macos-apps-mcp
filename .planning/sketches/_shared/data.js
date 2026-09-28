@@ -89,6 +89,36 @@ window.DATA = {
       receipt: "20260927-102540-011802-001-undo",
       summary: "Undo of the dedupe: 9 messages moved back to Archive",
     },
+    // Previews: the caller omitted dry_run, the tool defaulted to True, and the
+    // middleware logged it anyway — args carry no dry_run key (preview is derived).
+    {
+      ts: "2026-09-28T09:38:50", tool: "trash_mail", op: "trash", tier: "destructive", app: "Mail", preview: true,
+      args: { ids: "6 ids", mailbox: "INBOX" },
+      target_id: null, before: null, after: null,
+      summary: "Would move 6 newsletters to Trash",
+    },
+    {
+      ts: "2026-09-27T16:01:31", tool: "delete_event", op: "delete", tier: "destructive", app: "Calendar", preview: true,
+      args: { id: "ical-7710" },
+      target_id: "ical-7710",
+      before: { id: "ical-7710", summary: "1:1 with Sam — Thu 2 Oct 10:00", deeplink: "ical://ekevent/7710" },
+      after: null,
+    },
+    // Older writes, so one target shows a history.
+    {
+      ts: "2026-09-25T08:30:40", tool: "create_reminder", op: "create", tier: "additive", app: "Reminders",
+      args: { title: "Call the bank about the card", list_name: "Personal" },
+      target_id: "x-apple-reminder://C4A9",
+      before: null,
+      after: { id: "x-apple-reminder://C4A9", summary: "Call the bank about the card — open", deeplink: "x-apple-reminderkit://REMCDReminder/C4A9" },
+    },
+    {
+      ts: "2026-09-22T19:05:12", tool: "create_event", op: "create", tier: "additive", app: "Calendar",
+      args: { title: "Dentist", start: "2026-09-30T14:00", end: "2026-09-30T14:30", calendar: "Personal" },
+      target_id: "ical-8841",
+      before: null,
+      after: { id: "ical-8841", summary: "Dentist — Tue 30 Sep 14:00–14:30", deeplink: "ical://ekevent/8841" },
+    },
   ],
 
   // mail_recover plan + done, merged. fidelity: full | partial | absent.
@@ -152,7 +182,8 @@ window.DATA.audit.sort((a, b) => b.ts.localeCompare(a.ts));
 
 window.fmt = {
   time: (ts) => ts.slice(11, 16),
-  day: (ts) => ({ "2026-09-28": "Today", "2026-09-27": "Yesterday" })[ts.slice(0, 10)] || ts.slice(0, 10),
+  day: (ts) => ({ "2026-09-28": "Today", "2026-09-27": "Yesterday" })[ts.slice(0, 10)] ||
+    new Date(ts).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }),
   tierChip: (tier) => `<span class="chip ${tier}">${{ additive: "adds", destructive: "changes", outbound: "sends" }[tier]}</span>`,
   receiptStats(r) {
     const n = r.targets.length;
@@ -164,8 +195,8 @@ window.fmt = {
   appico: (app) => `<span class="appico ${app}" aria-hidden="true">${app === "Calendar" ? "30" : app[0]}</span>`,
   // "Updated Dentist — Tue 30 Sep 15:00–15:30" — one line a person can read.
   title(e) {
-    if (e.receipt) return e.summary;
-    const verb = { create: "Created", update: "Updated", delete: "Deleted", complete: "Completed", send: "Sent" }[e.op] || e.op;
+    if (e.summary) return e.summary;
+    const verb = e.preview ? `Would ${e.op}` : { create: "Created", update: "Updated", delete: "Deleted", complete: "Completed", send: "Sent" }[e.op] || e.op;
     return `${verb} ${(e.after || e.before).summary}`;
   },
 };
