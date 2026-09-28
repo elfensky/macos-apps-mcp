@@ -115,7 +115,26 @@ Plans:
   2. `uv run pytest` runs no live `pgrep`/`ps` against the dev machine: doctor's 17 process-probe tests go through the locked `tracked_run` seam.
   3. `uv run pytest -m integration` is green on the current macOS against a daemon rebuilt and reinstalled from the gate, and `uv run ruff check .` plus `uv run ruff format --check .` pass.
 
-**Plans**: TBD
+**Plans**: 6 plans in 4 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — GATE-07: fact tests read `registry.TOOLS`, call tests skip read-only by one marker, CI read-only step (D-01, D-02)
+- [ ] 02-02-PLAN.md — GATE-11: `doctor._process_name` through `tracked_run`, AST tripwire, Popen-spy proof at 0
+- [ ] 02-03-PLAN.md — D-04: integration Mail writes use 2 marker mails only; `inbox_messages` fails loud
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-04-PLAN.md — Device prep: dev-build daemon from `develop`, watchdog check, seed the 2 marker mails (D-03, D-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-05-PLAN.md — GATE-12: full device sweep, findings (fix / issue + strict xfail / record), final green run (D-05..D-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-06-PLAN.md — v0.12.0 release, owner-approved one-way cut, `doctor()` proof (D-09)
 
 ### Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)
 

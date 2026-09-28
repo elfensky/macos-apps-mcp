@@ -40,18 +40,18 @@ created: "2026-09-28"
 
 ## Per-Task Verification Map
 
-Seeded from RESEARCH.md §Validation Architecture. The planner fills task IDs; the executor updates status.
+Seeded from RESEARCH.md §Validation Architecture; task IDs from the 6 plans. The executor updates status.
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | GATE-07 | — | Read-only deployment: gated-off tools absent, not registered-and-erroring; 4 fact tests read `registry.TOOLS`; 8 call tests skip by one named marker | unit | `MACOS_APPS_READ_ONLY=1 uv run pytest -q` | ✅ | ⬜ pending |
-| TBD | TBD | TBD | GATE-07 | — | CI runs the read-only suite as a second step (D-02) | CI | `grep -c "MACOS_APPS_READ_ONLY=1 uv run pytest" .github/workflows/ci.yml` | ✅ | ⬜ pending |
-| TBD | TBD | TBD | GATE-11 | — | `doctor._process_name` reaches `ps` only through `runtime.tracked_run` | unit | `uv run pytest tests/test_doctor.py tests/test_doctor_deploy.py -q` | ✅ | ⬜ pending |
-| TBD | TBD | TBD | GATE-11 | — | A direct `subprocess` call in `doctor.py` / `adapters/*.py` fails the tripwire | unit | `uv run pytest tests/test_native_seam.py -v` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | GATE-11 | — | Unit suite spawns 0 `ps` / `pgrep` processes | unit (proof) | `uv run pytest -p <popen-spy plugin> -q` | ❌ W0 | ⬜ pending |
-| TBD | TBD | TBD | GATE-12 | — | `inbox_messages` selects marker mails only, account-matched to `scratch_mailbox`, fails loud naming the seed command (D-04) | integration | `uv run pytest -m integration -k inbox` | ✅ (rewrite) | ⬜ pending |
-| TBD | TBD | TBD | GATE-12 | — | Device suite green on macOS 27.0 against a daemon rebuilt from `develop` | integration | `MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration` | ✅ | ⬜ pending |
-| TBD | TBD | TBD | GATE-12 | — | Lint and format clean at gate close | CI + local | `uv run ruff check . && uv run ruff format --check .` | ✅ | ⬜ pending |
+| 02-01 T1 | 02-01 | 1 | GATE-07 | — | Read-only deployment: gated-off tools absent, not registered-and-erroring; 4 fact tests read `registry.TOOLS`; 8 call tests skip by one named marker | unit | `MACOS_APPS_READ_ONLY=1 uv run pytest -q` | ✅ | ⬜ pending |
+| 02-01 T2 | 02-01 | 1 | GATE-07 | — | CI runs the read-only suite as a second step (D-02) | CI | `grep -c "MACOS_APPS_READ_ONLY=1 uv run pytest" .github/workflows/ci.yml` | ✅ | ⬜ pending |
+| 02-02 T1 | 02-02 | 1 | GATE-11 | — | `doctor._process_name` reaches `ps` only through `runtime.tracked_run` | unit | `uv run pytest tests/test_doctor.py tests/test_doctor_deploy.py -q` | ✅ | ⬜ pending |
+| 02-02 T1 | 02-02 | 1 | GATE-11 | — | A direct `subprocess` call in `doctor.py` / `adapters/*.py` fails the tripwire | unit | `uv run pytest tests/test_native_seam.py -v` | ❌ W0 | ⬜ pending |
+| 02-02 T1 | 02-02 | 1 | GATE-11 | — | Unit suite spawns 0 `ps` / `pgrep` processes | unit (proof) | `uv run pytest -p <popen-spy plugin> -q` | ❌ W0 | ⬜ pending |
+| 02-03 T1; 02-04 T3 | 02-03, 02-04 | 1, 2 | GATE-12 | — | `inbox_messages` selects marker mails only, account-matched to `scratch_mailbox`, fails loud naming the seed command (D-04) | integration | `uv run pytest -m integration -k inbox` | ✅ (rewrite) | ⬜ pending |
+| 02-05 T3 | 02-05 | 3 | GATE-12 | — | Device suite green on macOS 27.0 against a daemon rebuilt from `develop` | integration | `MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration` | ✅ | ⬜ pending |
+| 02-05 T3 | 02-05 | 3 | GATE-12 | — | Lint and format clean at gate close | CI + local | `uv run ruff check . && uv run ruff format --check .` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
