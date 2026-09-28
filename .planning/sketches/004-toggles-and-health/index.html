@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>004 · Toggles and health</title>
+<link rel="stylesheet" href="../themes/default.css?v=4">
+<link rel="stylesheet" href="../_shared/base.css?v=4">
+<link rel="stylesheet" href="../_shared/shell.css?v=4">
+<style>
+  .restart-bar {
+    position: sticky; top: calc(-1 * var(--space-6)); z-index: 2; margin: 0 0 var(--space-4);
+    display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg);
+    background: var(--color-surface); box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-md); animation: drop .18s ease;
+  }
+  .restart-bar .grow { flex: 1; min-width: 200px; }
+  @keyframes drop { from { transform: translateY(-6px); opacity: 0; } }
+  .chip.pending { background: var(--color-accent-bg); color: #c77700; }
+  :root[data-theme="dark"] .chip.pending { color: var(--color-accent); }
+  .state { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .state span { display: flex; gap: 5px; align-items: center; }
+  .spin { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--color-border); border-top-color: var(--color-primary); animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .cmd { display: flex; gap: var(--space-2); align-items: center; padding: 6px var(--space-2); margin-top: 6px; border-radius: var(--radius-md); background: var(--color-surface-2); box-shadow: inset 0 0 0 0.5px var(--color-border); }
+  .cmd code { flex: 1; min-width: 0; font: 12px var(--font-mono); overflow-wrap: anywhere; }
+  .row.expand { flex-wrap: wrap; }
+  .row .reveal { flex-basis: 100%; padding-left: calc(20px + var(--space-3)); font-size: var(--text-sm); color: var(--color-text-muted); }
+  .row.locked .title::after { content: " 🔒"; font-size: 11px; }
+  .restarting { opacity: .5; pointer-events: none; transition: opacity .2s; }
+</style>
+</head>
+<body>
+<div id="sketch-root">
+  <section class="variant" id="variant-a" data-label="A: Switch + restart here" data-winner><div class="b-shell"></div></section>
+  <section class="variant" id="variant-b" data-label="B: Switch saves, you restart"><div class="b-shell"></div></section>
+  <section class="variant" id="variant-c" data-label="C: Read-only + CLI command"><div class="b-shell"></div></section>
+</div>
+
+<script src="../_shared/data.js?v=4"></script>
+<script src="../_shared/sketch.js?v=4"></script>
+<script src="../_shared/shell.js?v=4"></script>
+<script>
+const D = DATA, F = fmt;
+const CONFIG = "~/.local/state/macos-apps-mcp/adapters";
+const KICK = "launchctl kickstart -k gui/501/ren.lav.macos-apps-mcp";
+const copy = (v) => `<button class="btn" onclick="navigator.clipboard?.writeText('${v}');toast('Copied')">Copy</button>`;
+const grantChip = (a) => a.grant === "granted" ? "" : `<span class="chip ${a.grant === "denied" ? "danger" : ""}">${a.grant}</span>`;
+
+// Every variant keeps two states per adapter, like doctor's outbound configured vs registered.
+function variant(kind, shellEl) {
+  const running = Object.fromEntries(D.adapters.map((a) => [a.name, a.enabled]));
+  const config = { ...running };
+  let restarting = false, open = null, nav = null;
+  const pending = () => D.adapters.filter((a) => config[a.name] !== running[a.name]);
+  const active = () => D.adapters.filter((a) => running[a.name]);
+
+  function badge() {
+    const c = shellEl.querySelector('[data-page="adapters"] .count');
+    const p = pending().length;
+    c.innerHTML = p ? `<span class="chip pending">${p} pending</span>` : `${active().length}/${D.adapters.length}`;
+  }
+  function restart(after) {
+    restarting = true; render();
+    setTimeout(() => {
+      Object.assign(running, config); restarting = false;
+      toast(`Daemon restarted — ${active().length} adapters active`);
+      render(); after && after();
+    }, 1500);
+  }
+
+  function row(a) {
+    const on = config[a.name], changed = on !== running[a.name];
+    const sub = `${a.permission} · ${a.tools} tool${a.tools > 1 ? "s" : ""}${a.calls ? ` · ${a.calls} calls` : ""}`;
+    const pend = changed ? `<span class="chip pending">${on ? "on" : "off"} after restart</span>` : "";
+    const sw = `<label class="switch"><input type="checkbox" data-sw="${a.name}" ${on ? "checked" : ""} ${restarting ? "disabled" : ""}><span></span></label>`;
+    if (kind === "a") return `<div class="row">${F.appico(a.name)}<div class="grow"><div class="title">${a.name}</div><div class="sub">${sub}</div></div>${grantChip(a)}${pend}${sw}</div>`;
+    if (kind === "b") return `<div class="row">${F.appico(a.name)}<div class="grow"><div class="title">${a.name}</div><div class="sub">${sub}</div></div>${grantChip(a)}
+      <div class="state"><span><span class="dot ${running[a.name] ? "ok" : ""}"></span>${running[a.name] ? "running" : "not loaded"}</span>${changed ? `<span class="chip pending">config: ${on ? "on" : "off"}</span>` : ""}</div>${sw}</div>`;
+    const cmd = `macos-apps-mcp adapters ${running[a.name] ? "off" : "on"} ${a.name.toLowerCase()}`;
+    return `<div class="row expand">${F.appico(a.name)}<div class="grow"><div class="title">${a.name}</div><div class="sub">${sub}</div></div>${grantChip(a)}
+      <span class="muted" style="font-size:var(--text-sm)">${running[a.name] ? "On" : "Off"}</span><button class="btn" data-chg="${a.name}">Change…</button>
+      ${open === a.name ? `<div class="reveal">Run this in Terminal. It writes the config and restarts the daemon, like <span class="mono">allow-send</span>. The model cannot run it.
+        <div class="cmd"><code>${cmd}</code>${copy(cmd)}<button class="btn link" data-sim="${a.name}">Sketch: simulate</button></div></div>` : ""}</div>`;
+  }
+
+  function top() {
+    const p = pending();
+    if (kind === "a" && restarting) return `<div class="restart-bar"><span class="spin"></span><div class="grow"><b>Restarting the daemon…</b> This page reconnects by itself. MCP clients reconnect on their next call.</div></div>`;
+    if (kind === "a" && p.length) return `<div class="restart-bar"><div class="grow"><b>${p.length} ${p.length > 1 ? "changes wait" : "change waits"} for a restart.</b> <span class="muted">${p.map((a) => `${a.name} ${config[a.name] ? "on" : "off"}`).join(", ")}. A restart drops open MCP connections for a moment.</span></div><button class="btn" data-act="discard">Discard</button><button class="btn primary" data-act="restart">Restart daemon</button></div>`;
+    if (kind === "b" && restarting) return `<div class="banner"><span class="spin"></span><div>Waiting for the daemon to come back…</div></div>`;
+    if (kind === "b" && p.length) return `<div class="banner warn"><span>⚠</span><div style="flex:1"><b>Saved to <span class="mono">${CONFIG}</span>.</b> ${p.length} ${p.length > 1 ? "changes apply" : "change applies"} at the next daemon restart. Restart when no Claude session is mid-task:
+        <div class="cmd"><code>${KICK}</code>${copy(KICK)}<button class="btn link" data-act="restart">Sketch: simulate a restart</button></div></div></div>`;
+    return "";
+  }
+
+  function render() {
+    badge();
+    if (!nav || !nav.box.isConnected || nav.page !== "adapters") return;
+    const b = nav.box;
+    b.innerHTML = `${top()}
+      <h1>Adapters</h1><p class="lede">${kind === "c" ? "What is loaded now. Changes happen in Terminal, never from this page." : "Turn an app off and its tools disappear after the daemon restarts."}</p>
+      <div class="group ${restarting ? "restarting" : ""}">${D.adapters.map(row).join("")}</div>
+      <div class="group-title">Sending off this Mac</div>
+      <div class="group"><div class="row locked"><div class="grow"><div class="title">Outbound: ${D.outbound.registered.join(", ")}</div>
+        <div class="sub">Never changed from this page — any website could send a request to 127.0.0.1. Change it in Terminal:</div>
+        <div class="cmd"><code>macos-apps-mcp allow-send mail</code>${copy("macos-apps-mcp allow-send mail")}</div></div></div></div>
+      ${kind === "c" ? "" : `<p class="muted" style="font-size:var(--text-sm);margin:var(--space-3)">Toggles write <span class="mono">${CONFIG}</span>. Each change is logged in audit.jsonl with caller <b>dashboard</b>.</p>`}`;
+    b.querySelectorAll("[data-sw]").forEach((i) => i.onchange = () => { config[i.dataset.sw] = i.checked; render(); });
+    b.querySelectorAll("[data-act]").forEach((x) => x.onclick = () => {
+      if (x.dataset.act === "discard") { Object.assign(config, running); render(); }
+      if (x.dataset.act === "restart") restart();
+    });
+    b.querySelectorAll("[data-chg]").forEach((x) => x.onclick = () => { open = open === x.dataset.chg ? null : x.dataset.chg; render(); });
+    b.querySelectorAll("[data-sim]").forEach((x) => x.onclick = () => { const n = x.dataset.sim; config[n] = !running[n]; open = null; restart(); });
+  }
+
+  function health(b) {
+    const bad = D.adapters.filter((a) => running[a.name] && a.grant === "denied");
+    const p = pending();
+    const rows = [
+      ["ok", "Daemon", `Running as ren.lav.macos-apps-mcp, pid ${D.server.pid}, up ${D.server.uptime}`],
+      [p.length ? "warn" : "ok", "Adapters", `${active().length} active: ${active().map((a) => a.name).join(", ")}${p.length ? ` — ${p.length} pending restart` : ""}`, p.length ? "adapters" : null],
+      ["ok", "Full Disk Access", "Granted"],
+      ["ok", "EventKit", "Calendar and Reminders: full access"],
+      ...D.adapters.filter((a) => a.grant !== "granted").map((a) => [running[a.name] ? (a.grant === "denied" ? "bad" : "warn") : "", `Automation → ${a.name}`, `${a.grant === "denied" ? "Denied" : "Not asked yet"}${running[a.name] ? "" : " · adapter is off, so this does not matter"}`, null, running[a.name]]),
+      ["ok", "Outbound", `Send enabled for: ${D.outbound.registered.join(", ")}`],
+      ["ok", "Mail backups", `${D.backups.mb} MB in ${D.backups.receipts} receipts (oldest ${D.backups.oldest})`],
+    ];
+    b.innerHTML = `<h1>Health</h1><p class="lede">What <span class="mono">doctor</span> reports right now.</p>
+      ${bad.length ? `<div class="banner bad"><span>●</span><div><b>${bad.length} active adapter${bad.length > 1 ? "s" : ""} cannot work:</b> ${bad.map((a) => `${a.name} (${a.grant})`).join(", ")}. Grant access, or turn the adapter off.</div></div>` : ""}
+      <div class="group">${rows.map(([d, t, s, link, fix]) => `<div class="row"><span class="dot ${d}"></span><div class="grow"><div class="title">${t}</div><div class="sub">${s}</div></div>
+        ${link ? `<button class="btn" data-open="${link}">Show</button>` : ""}${fix ? `<button class="btn" onclick="toast('Opens System Settings → Privacy &amp; Security → Automation')">Open Settings</button>` : ""}</div>`).join("")}</div>
+      <div class="group-title">Deployment</div><div class="group">${Shell.deploymentRows()}</div>`;
+    b.querySelectorAll("[data-open]").forEach((x) => x.onclick = () => shell.openPage(x.dataset.open));
+  }
+
+  const shell = Shell.mount(shellEl, {
+    detail: (e, box) => box.innerHTML = `${Shell.header(e)}<p class="muted">Write details — sketch 002.</p>`,
+    page: "adapters",
+    pages: {
+      adapters: { label: "Adapters", group: "System", badge: "", render: (b) => { nav = { box: b, page: "adapters" }; render(); } },
+      health: { label: "Health", group: "System", badge: `<span class="dot warn"></span>`, render: (b) => { nav = { box: b, page: "health" }; health(b); } },
+    },
+  });
+  badge();
+}
+
+variant("a", document.querySelector("#variant-a .b-shell"));
+variant("b", document.querySelector("#variant-b .b-shell"));
+variant("c", document.querySelector("#variant-c .b-shell"));
+</script>
+</body>
+</html>

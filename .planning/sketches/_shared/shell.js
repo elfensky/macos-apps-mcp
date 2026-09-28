@@ -28,7 +28,7 @@
   const adapterRow = (a) => {
     const pill = a.grant === "granted" ? "" : `<span class="chip ${a.grant === "denied" ? "danger" : ""}">${a.grant}</span>`;
     return `<div class="row">${F.appico(a.name)}<div class="grow"><div class="title">${a.name}</div>
-      <div class="sub">${a.permission} · ${a.tools} tools</div></div>${pill}
+      <div class="sub">${a.permission} · ${a.tools} tool${a.tools > 1 ? "s" : ""}</div></div>${pill}
       <label class="switch"><input type="checkbox" ${a.enabled ? "checked" : ""} onchange="toast('${a.name} ' + (this.checked ? 'on' : 'off') + ' — applies after restart (sketch 004)')"><span></span></label></div>`;
   };
 
