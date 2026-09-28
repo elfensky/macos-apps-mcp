@@ -32,7 +32,7 @@ once, so the timeline is usually one step.
 - Which variant makes a wrong write obvious — the diff (A), the history (B) or the sentence (C)?
 
 ## Findings From the Code
-- **Previews are logged in the same shape as real writes.** `AuditMiddleware` logs every
+- **Previews are logged in the same shape as real writes (#222).** `AuditMiddleware` logs every
   successful write call, including dry runs. Most destructive tools default to
   `dry_run=True`; a caller that omits the flag leaves no `dry_run` key in `args`, so a
   preview `delete_event` looks like a real delete (`before` set, `after` null). The
@@ -41,5 +41,5 @@ once, so the timeline is usually one step.
 - **Pointers carry summaries, not fields.** `before` and `after` are `Pointer` dicts, so a
   field-level diff is not possible; A diffs the summary strings word by word, and the
   `args` show the requested values.
-- **The caller is not recorded.** No record says which session or client made the write
+- **The caller is not recorded (#222).** No record says which session or client made the write
   (C shows this as "Caller: not recorded").
