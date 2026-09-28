@@ -69,11 +69,13 @@
       <div class="b-page"></div>`;
 
     let filter = "all", query = "", sel = null, previews = true;
+    // A search also finds the batch that touched a message ("where did my email go?").
+    const targetText = (e) => { const r = e.receipt && D.receipts[e.receipt]; return r ? r.targets.map((t) => t.summary).join(" ") : ""; };
     const match = (e) =>
       (previews || !e.preview) &&
       !(filter === "receipt" && !e.receipt) && !(filter === "outbound" && e.tier !== "outbound") &&
       !(filter.startsWith("app:") && e.app !== filter.slice(4)) &&
-      (!query || (F.title(e) + e.tool).toLowerCase().includes(query));
+      (!query || (F.title(e) + e.tool + targetText(e)).toLowerCase().includes(query));
     function render() {
       let html = "", day = "";
       for (const e of D.audit.filter(match)) {
@@ -90,7 +92,7 @@
       shell.classList.add("detail-open");
       render();
       const box = q(".b-detail");
-      opts.detail(D.audit.find((x) => x.ts === ts), box);
+      opts.detail(D.audit.find((x) => x.ts === ts), box, { query });
       box.scrollTop = 0;
     }
     const activate = (btn) => qa(".sidebar .nav-item").forEach((x) => x.classList.toggle("active", x === btn));
@@ -108,7 +110,7 @@
     render();
     if (opts.select) select(opts.select);
     if (opts.page) openPage(opts.page);
-    return { select, openPage };
+    return { select, openPage, refresh: () => { render(); if (sel) opts.detail(D.audit.find((x) => x.ts === sel), q(".b-detail"), { query }); } };
   }
 
   window.Shell = { mount, auditRow, header, healthRows, adapterRow, usageRows, deploymentRows };

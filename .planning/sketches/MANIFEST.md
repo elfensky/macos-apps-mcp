@@ -26,5 +26,5 @@ follows the real `audit.py` and `mail_recover` record shapes.
 |---|------|----------------|--------|------|
 | 001 | dashboard-shell | What frame holds the dashboard when review + recovery is the core action? | **D** B's list + detail; Health, Adapters, Usage as pages | layout, navigation |
 | 002 | audit-review | How does one write read, with before → after, deeplink and receipt? | **D** word diff + resolved args; raw audit.jsonl collapsed | audit, detail |
-| 003 | recovery-flow | How do you restore a batch — and does the dashboard act, or only show? | — | recovery, safety |
+| 003 | recovery-flow | How do you restore a batch — and does the dashboard act, or only show? | **D** read-only: per-message backups + ask-Claude undo prompt | recovery, safety |
 | 004 | toggles-and-health | How do grants, `doctor` and adapter toggles show "restart needed"? | — | adapters, health |
