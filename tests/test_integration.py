@@ -1507,17 +1507,38 @@ SEED_MARKERS = (
 )
 
 
-def _scratch_account(rows) -> str:
+def _pick_account(
+    non_gmail: list[str], fallback: str, marker_folders: list[str]
+) -> str:
+    """Pure: among `non_gmail` account ids, prefer whichever one's INBOX holds a
+    MARKER_SUBJECT hit (most hits wins); `fallback` when none does."""
+    marker_accounts = [
+        f.split("://", 1)[1].split("/", 1)[0]
+        for f in marker_folders
+        if f.endswith("/INBOX")
+    ]
+    candidates = [a for a in marker_accounts if a in non_gmail]
+    return max(set(candidates), key=candidates.count) if candidates else fallback
+
+
+def _scratch_account(m) -> str:
     """The account id both `scratch_mailbox` and `inbox_messages` operate on
     (RESEARCH Pitfall 2) — one helper, so a "same-account" move test cannot
-    silently cross accounts. Prefer a NON-Gmail account, deterministically.
-    overview() sorts unread-first, so "first account" changed day to day — and on
-    a Gmail account the move/undo verifications are structurally unreliable: a
-    Gmail "move" is a label edit the server reconciles at its own pace, and label
-    copies were observed RESURRECTING after both a verified trash and a verified
-    unlabel (2026-08-20, -23). True IMAP accounts verify moves synchronously
-    (§5b), so pick one when it exists.
+    silently cross accounts.
+
+    Markers define the account (owner decision, 2026-09-29): the seed sends to
+    andrei@lav.ren, and that address lands in whichever account receives it on
+    this Mac — not necessarily the first non-Gmail account by sorted id. Prefer
+    whichever IMAP non-Gmail account's INBOX holds a MARKER_SUBJECT hit. When no
+    INBOX holds a marker, fall back to the first non-Gmail account by sorted id,
+    deterministically — overview() sorts unread-first, so "first account" changed
+    day to day, and a Gmail account's move/undo verifications are structurally
+    unreliable: a Gmail "move" is a label edit the server reconciles at its own
+    pace, and label copies were observed RESURRECTING after both a verified
+    trash and a verified unlabel (2026-08-20, -23). True IMAP accounts verify
+    moves synchronously (§5b), so pick one when the markers don't decide it.
     """
+    rows = m.overview()
     imap_rows = [r for r in rows if r["folder"].startswith("imap://")]
     if not imap_rows:
         pytest.skip("no IMAP account in Mail on this Mac")
@@ -1525,20 +1546,26 @@ def _scratch_account(rows) -> str:
         r["account_id"] for r in imap_rows if "%5BGmail%5D" in r["folder"]
     }
     account_ids = sorted({r["account_id"] for r in imap_rows})
-    return next((a for a in account_ids if a not in gmail_accounts), account_ids[0])
+    non_gmail = [a for a in account_ids if a not in gmail_accounts]
+    fallback = next(iter(non_gmail), account_ids[0])
+    marker_folders = [
+        h["folder"] for h in m.search(subject=MARKER_SUBJECT, limit=5)["results"]
+    ]
+    return _pick_account(non_gmail, fallback, marker_folders)
 
 
 @pytest.fixture
 def scratch_mailbox():
     """A mailbox to move test mail into, on the account `_scratch_account` picks
-    (non-Gmail first, sorted, deterministic — see its docstring).
+    (the account the marker mails landed in; sorted non-Gmail fallback when
+    none did — see its docstring).
 
     NOT removed in teardown: `delete <mailbox>` is not scriptable (-10000 in every form,
     device-verified 2026-08-03), so a scratch mailbox is a permanent artefact of running
     this test. It is created once and reused — the name is stable on purpose.
     """
     m = _mail_adapter()
-    account = _scratch_account(m.overview())
+    account = _scratch_account(m)
     name = "macos-apps-mcp-test"
     folder = f"imap://{account}/{name}"
     # already there from an earlier run is the NORMAL case — the stable name is the
@@ -1551,7 +1578,7 @@ def scratch_mailbox():
 @pytest.fixture
 def inbox_messages():
     """The 2 marker mails in the scratch account's INBOX (D-04) — never real mail.
-    Selection is by MARKER_SUBJECT only, scoped to `_scratch_account`'s INBOX, so
+    Selection is by MARKER_SUBJECT only, scoped to `_scratch_account`'s pick, so
     the same-account move tests agree with `scratch_mailbox` on which account
     they operate on. Each test taking this fixture must leave the marker mails
     back in the INBOX; a run that does not makes the NEXT run fail loudly (D-04,
@@ -1559,8 +1586,8 @@ def inbox_messages():
     skips.
     """
     m = _mail_adapter()
+    account = _scratch_account(m)
     rows = m.overview()
-    account = _scratch_account(rows)
     inbox_rows = [
         r for r in rows if r["account_id"] == account and r["folder"].endswith("/INBOX")
     ]
