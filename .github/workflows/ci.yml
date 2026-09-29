@@ -5,6 +5,8 @@ name: ci
 # integration/TCC tests never run in CI (the default pytest addopts deselect them). Lint-gate practice
 # imported from the sibling repos (lintle, descent-engine); kept to one job because macos-apps-mcp has no
 # Python-version matrix to fan a shared lint leg across.
+# The suite runs twice: default, then MACOS_APPS_READ_ONLY=1 — a read-only deployment's tests must
+# stay green (GATE-07), and the read-only debt has grown unseen before (01-13).
 
 on:
   push:
@@ -28,3 +30,4 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+      - run: MACOS_APPS_READ_ONLY=1 uv run pytest
