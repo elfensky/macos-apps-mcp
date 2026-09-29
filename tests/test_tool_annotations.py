@@ -67,8 +67,10 @@ def test_run_shortcut_carries_open_world_hint():
     # carries openWorldHint — but it stays in the destructive write tier, NOT the send
     # tier: most shortcuts are local ("unknown world" is the honest label), and the
     # send tier would silently unregister the tool for every existing user.
-    by_name = {t.name: t for t in _tools()}
-    assert by_name["run_shortcut"].annotations.openWorldHint is True
+    # Read the record directly (every record, registered or not, GATE-07/D-01) —
+    # run_shortcut is gated off under MACOS_APPS_READ_ONLY=1, so the live FastMCP
+    # tool list never contains it in that mode.
+    assert registry.TOOLS["run_shortcut"].annotations["openWorldHint"] is True
 
 
 def test_permission_map_matches_registered_tools():
@@ -99,7 +101,11 @@ def test_every_tool_docstring_states_permission_and_is_nontrivial():
 
 
 def test_every_write_tool_is_audit_classified():
-    import macos_apps_mcp.tiers as tiers
+    # Read registry.TOOLS directly (every record, registered or not, GATE-07/D-01) —
+    # registry.write_tools()/snapshot_sources() filter to r.registered, which is
+    # empty under MACOS_APPS_READ_ONLY=1. registry.TOOLS keeps send_mail/reply_all/
+    # forward_mail in every mode, so they are envelope_only unconditionally rather
+    # than gated on tiers.allow_send("mail").
 
     # writes with no id-addressed before-state: creates + non-id actions
     envelope_only = {
@@ -122,10 +128,15 @@ def test_every_write_tool_is_audit_classified():
         "play_playlist",
         "set_volume",
         "set_mode",
+        "send_mail",
+        "reply_all",
+        "forward_mail",
     }
-    if tiers.allow_send("mail"):
-        envelope_only |= {"send_mail", "reply_all", "forward_mail"}
-    assert set(registry.snapshot_sources()) | envelope_only == registry.write_tools()
+    all_writes = {n for n, r in registry.TOOLS.items() if r.is_write}
+    all_snapshot_sources = {
+        n for n, r in registry.TOOLS.items() if r.snapshot is not None
+    }
+    assert all_snapshot_sources | envelope_only == all_writes
 
 
 # #159: a destructive MAIL write either rides the recoverable plane (backup → log →

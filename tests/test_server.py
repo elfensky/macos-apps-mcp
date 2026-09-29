@@ -28,6 +28,16 @@ from macos_apps_mcp.contracts import (
 )
 from macos_apps_mcp.errors import AppNotRunning, AutomationDenied
 
+# The 8 tests below assert "srv.<tool> raises ToolError" — true only when the write
+# tier is registered: a gated-off tool's dispatch function is returned undecorated,
+# without _guard (server.py's _tool), so a raw ValueError/NativeError escapes
+# instead. Absence of the gated-off tool is proven separately by
+# test_gate_on_dispatch.py; skipping here loses nothing.
+_write_gate_on_only = pytest.mark.skipif(
+    tiers.read_only(),
+    reason="valid only when write tools are registered (see server.py's _tool gate)",
+)
+
 
 class _FakeSource:
     def __init__(self):
@@ -423,6 +433,7 @@ def test_create_reminder_passes_priority_and_start(monkeypatch):
     assert data.priority == 1 and data.start == datetime(2026, 6, 25, 9, 0)
 
 
+@_write_gate_on_only
 def test_create_reminder_rejects_out_of_range_priority(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
     with pytest.raises(ToolError, match="priority must be"):
@@ -449,6 +460,7 @@ def test_create_event_all_day_accepts_date_only(monkeypatch):
     assert data.start == datetime(2026, 7, 1) and data.end == datetime(2026, 7, 2)
 
 
+@_write_gate_on_only
 def test_create_event_all_day_rejects_utc_offset(monkeypatch):
     # an all-day instant with a UTC offset can land on the wrong calendar day —
     # rejected with the date-only hint, prefixed by the failing param's label.
@@ -462,6 +474,7 @@ def test_create_event_all_day_rejects_utc_offset(monkeypatch):
         )
 
 
+@_write_gate_on_only
 def test_update_event_all_day_rejects_utc_offset(monkeypatch):
     monkeypatch.setattr(srv, "_calendar", _FakeWriter())
     with pytest.raises(ToolError, match="date-only"):
@@ -498,6 +511,7 @@ def test_create_reminder_parses_recurrence(monkeypatch):
     assert data.recurrence == Recurrence(frequency="daily")
 
 
+@_write_gate_on_only
 def test_create_reminder_recurrence_without_due_rejected(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", _FakeWriter())
     with pytest.raises(ToolError, match="needs a due date"):
@@ -535,6 +549,7 @@ def test_update_reminder_recurrence_rrule_parses(monkeypatch):
     assert data.recurrence == Recurrence(frequency="daily")
 
 
+@_write_gate_on_only
 def test_create_event_rejects_bad_rrule(monkeypatch):
     monkeypatch.setattr(srv, "_calendar", _FakeWriter())
     with pytest.raises(ToolError, match="unsupported RRULE"):
@@ -582,6 +597,7 @@ def test_safari_open_dispatches(monkeypatch):
     }
 
 
+@_write_gate_on_only
 def test_create_event_rejects_empty_start():
     # Required event dates fail clearly at the tool boundary, not as an obscure
     # worker-thread crash: the label prefixes contracts.parse_datetime's message
@@ -812,6 +828,7 @@ def test_read_tool_empty_result_is_not_an_error(monkeypatch):
     assert srv.notes("nonexistent") == []
 
 
+@_write_gate_on_only
 def test_write_tool_converts_native_error_to_agent_directive(monkeypatch):
     class _DeadWriter:
         def create_reminder(self, data: ReminderData) -> Pointer:
@@ -870,6 +887,7 @@ def test_guard_converts_value_error_to_agent_directive(monkeypatch):
         srv.contacts("jane")
 
 
+@_write_gate_on_only
 def test_optional_datetime_parse_error_names_the_field(monkeypatch):
     # An optional datetime param that fails to parse is labeled with the failing
     # field, exactly like the required ones.

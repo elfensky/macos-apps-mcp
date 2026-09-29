@@ -165,6 +165,10 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
     # (@_write_tool(snapshot=…)), and every registered source satisfies the declared
     # Snapshotter Protocol — no duck-typed method, no hand-maintained dict. GATE-04:
     # the registry (not a hand-maintained server.py set) is the one record now.
+    # Read registry.TOOLS directly (every record, registered or not, GATE-07/D-01) —
+    # registry.snapshot_sources()/write_tools() filter to r.registered, empty under
+    # MACOS_APPS_READ_ONLY=1. This is a fact about a write tool (every record,
+    # registered or not), not about what's live in this process.
     import macos_apps_mcp.registry as registry
 
     expected = {
@@ -176,9 +180,12 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
         "delete_note",
         "delete_draft",
     }
-    snapshot_sources = registry.snapshot_sources()
+    snapshot_sources = {
+        n: r.snapshot for n, r in registry.TOOLS.items() if r.snapshot is not None
+    }
     assert set(snapshot_sources) == expected
     for source in snapshot_sources.values():
         assert isinstance(source, Snapshotter)
-    # every snapshot-capable tool is also a registered write tool
-    assert set(snapshot_sources) <= registry.write_tools()
+    all_writes = {n for n, r in registry.TOOLS.items() if r.is_write}
+    # every snapshot-capable tool is also a write tool (every record, registered or not)
+    assert set(snapshot_sources) <= all_writes

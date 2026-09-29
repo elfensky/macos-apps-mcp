@@ -488,10 +488,14 @@ def test_mail_duplicates_reports_and_points_at_the_cli(blank_envelope):
 
 
 def test_mail_duplicates_is_registered_read_only():
+    # Read registry.TOOLS directly (every record, registered or not, GATE-07/D-01) —
+    # registry.write_tools() filters to r.registered, empty under
+    # MACOS_APPS_READ_ONLY=1.
     import macos_apps_mcp.registry as registry
 
-    assert "mail_duplicates" not in registry.write_tools()
-    assert "trash_mail" in registry.write_tools()
+    all_writes = {n for n, r in registry.TOOLS.items() if r.is_write}
+    assert "mail_duplicates" not in all_writes
+    assert "trash_mail" in all_writes
 
 
 def test_dedupe_is_cli_only_and_never_an_mcp_tool():
