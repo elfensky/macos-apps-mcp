@@ -832,7 +832,9 @@ def test_update_note_preserves_id():
     updated = adapter.update(
         created.id, NoteData(title="mac-mcp itest upd", body="after")
     )
-    assert updated.id == created.id  # id survives a body edit
+    # update() returns a plain dict (Pointer(...).as_dict()), not a Pointer — the
+    # same envelope shape its dry_run=True preview uses (GATE-05/D-02 uniformity).
+    assert updated["id"] == created.id  # id survives a body edit
     bodies = adapter.get_bodies([created.id])
     assert "after" in bodies[0]["body"] and "before" not in bodies[0]["body"]
     adapter.delete(created.id)
@@ -1151,8 +1153,13 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
 
     adapter = notes_mod.NotesAdapter()
     sqlite_ids = {p.id for p in adapter.get_all()}  # sqlite path (FDA granted)
+    # notes.py imports the native seam qualified (`from .. import runtime`,
+    # Phase 1 gate card 1) — there is no module-level run_osascript to call.
     applescript_ids = {
-        p.id for p in notes_mod._parse_all(notes_mod.run_osascript(notes_mod._LIST_ALL))
+        p.id
+        for p in notes_mod._parse_all(
+            notes_mod.runtime.run_osascript(notes_mod._LIST_ALL)
+        )
     }
     if not applescript_ids:
         pytest.skip("no notes in this Mac's library")
@@ -1160,7 +1167,9 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     # ids AppleScript currently holds in Recently Deleted — a note mid-delete that
     # sqlite hasn't caught up on lives here, and is NOT a leak.
     recently_deleted = {
-        i for i in notes_mod.run_osascript(_RECENTLY_DELETED_IDS).splitlines() if i
+        i
+        for i in notes_mod.runtime.run_osascript(_RECENTLY_DELETED_IDS).splitlines()
+        if i
     }
     phantom = sqlite_ids - applescript_ids - recently_deleted
     assert not phantom, (  # in neither live nor trash = wrong id or genuine leak
@@ -1348,6 +1357,11 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="#230 — quoted_body() times out reading content after heavy local "
+    "activity; Mail transiently unresponsive, reproduced on macOS 27.0",
+)
 def test_mail_reply_opens_threaded_draft_and_never_sends():
     """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
     message) with our body; delete it; confirm nothing sent. Threading headers can

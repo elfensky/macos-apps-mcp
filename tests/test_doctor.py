@@ -384,7 +384,11 @@ def test_probe_carries_applescript_side_timeout():
 @pytest.mark.integration
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
-    assert len(report["surfaces"]) == 11
+    # 2 eventkit (calendar, reminders) + 7 automation (mail, notes, contacts,
+    # photos, safari, messages, music) + shortcuts_cli + full_disk_access +
+    # mail_index = 12. Was 11 before mail_index shipped in the Sequoia plane
+    # (#199/#201, released 0.11.0) — the count here was never bumped.
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:

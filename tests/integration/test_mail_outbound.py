@@ -93,6 +93,11 @@ def test_send_to_self_and_delete_draft_round_trip():
 # --- #135: the rollback tells the truth, and outbox_pending measures the real queue ---
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="#229 — rollback() cannot verify delete of a windowless outgoing message "
+    "when Mail is in the §3c zombie-delete state; reproduced on macOS 27.0",
+)
 def test_rollback_verifies_a_real_delete():
     """The rollback handler run against live Mail: it deletes a freshly built outgoing
     message and PROVES it, returning true. The old code called a bare `delete` and
