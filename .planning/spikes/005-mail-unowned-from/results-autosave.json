@@ -1,0 +1,17 @@
+{
+  "tag": "gsd-spike-005 b224b83a",
+  "created": {
+    "visible-default-bare": {
+      "set_error": "",
+      "readback": "account:Personal"
+    }
+  },
+  "autosaved": {},
+  "drafts_before": 278,
+  "drafts_after_autosave": 278,
+  "outgoing_gone_kept": "1 0",
+  "tagged_drafts_after_outgoing_delete": 0,
+  "drafts_deleted": 0,
+  "left": 0,
+  "drafts_final": 278
+}

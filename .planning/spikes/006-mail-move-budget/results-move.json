@@ -1,0 +1,72 @@
+{
+  "shipped-1": {
+    "n": 1,
+    "wall_s": 35.3,
+    "per_msg_s": 35.34,
+    "statuses": {
+      "ok": 1
+    },
+    "phases_s": {},
+    "receipt": "20260929-131148-471852-000-move"
+  },
+  "shipped-3": {
+    "n": 3,
+    "wall_s": 53.5,
+    "per_msg_s": 17.82,
+    "statuses": {
+      "ok": 3
+    },
+    "phases_s": {},
+    "receipt": "20260929-131222-585085-001-move"
+  },
+  "proto-5": {
+    "n": 5,
+    "wall_s": 32.4,
+    "per_msg_s": 6.48,
+    "statuses": {
+      "ok": 5
+    },
+    "phases_s": {
+      "bulk_src_s": 1.5,
+      "bulk_dst_before_s": 11.83,
+      "act_s": 5.69,
+      "bulk_dst_after_s": 11.65
+    },
+    "receipt": "20260929-131316-421223-002-move"
+  },
+  "proto-25": {
+    "n": 25,
+    "wall_s": 62.8,
+    "per_msg_s": 2.51,
+    "statuses": {
+      "ok": 25
+    },
+    "phases_s": {
+      "bulk_src_s": 2.75,
+      "bulk_dst_before_s": 11.5,
+      "act_s": 30.41,
+      "bulk_dst_after_s": 16.97
+    },
+    "receipt": "20260929-131348-298444-003-move"
+  },
+  "undo-shipped-1": {
+    "wall_s": 35.4,
+    "statuses": {
+      "ok": 1
+    },
+    "receipt": "20260929-131451-715189-004-move"
+  },
+  "re-archive-1": {
+    "wall_s": 14.6,
+    "statuses": {
+      "ok": 1
+    },
+    "phases_s": {
+      "bulk_src_s": 1.54,
+      "bulk_dst_before_s": 5.39,
+      "act_s": 1.63,
+      "bulk_dst_after_s": 4.9
+    },
+    "receipt": "20260929-131526-443064-005-move"
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "tag": "gsd-spike-005 09fa4cce",
+  "created": {
+    "hidden-default": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "hidden-owned": {
+      "set_error": "",
+      "readback": "account:Business"
+    },
+    "hidden-owned-display": {
+      "set_error": "",
+      "readback": "account:Business"
+    },
+    "hidden-owned-upper": {
+      "set_error": "",
+      "readback": "account:Business"
+    },
+    "hidden-unowned": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "hidden-unowned-owned-domain": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "visible-default": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "visible-owned": {
+      "set_error": "",
+      "readback": "account:Business"
+    },
+    "visible-unowned": {
+      "set_error": "",
+      "readback": "account:Personal"
+    }
+  },
+  "autosaved": {
+    "visible-owned": [
+      {
+        "sender": "account:Business",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "hidden-owned-upper": [
+      {
+        "sender": "other",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "hidden-owned-display": [
+      {
+        "sender": "account:Business",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "hidden-owned": [
+      {
+        "sender": "account:Business",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "visible-unowned": [
+      {
+        "sender": "account:Personal",
+        "from_header": "account:Personal",
+        "filed_in": "Personal",
+        "in_reply_to": false
+      }
+    ],
+    "hidden-unowned-owned-domain": [
+      {
+        "sender": "account:Personal",
+        "from_header": "account:Personal",
+        "filed_in": "Personal",
+        "in_reply_to": false
+      }
+    ],
+    "hidden-unowned": [
+      {
+        "sender": "account:Personal",
+        "from_header": "account:Personal",
+        "filed_in": "Personal",
+        "in_reply_to": false
+      }
+    ]
+  },
+  "drafts_before": 278,
+  "drafts_after_autosave": 285,
+  "outgoing_gone_kept": "3 6",
+  "tagged_drafts_after_outgoing_delete": 7,
+  "drafts_deleted": 7,
+  "left": 0,
+  "drafts_final": 278
+}

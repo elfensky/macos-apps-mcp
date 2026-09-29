@@ -1,0 +1,57 @@
+{
+  "tag": "gsd-spike-005 732d022e",
+  "replies": {
+    "business-direct": {
+      "receiving": "business",
+      "original_from": "other",
+      "original_to": [
+        "Business"
+      ],
+      "reply_sender": "account:Business",
+      "reply_to": [
+        "other:a@a.a.a"
+      ],
+      "outgoing": "gone"
+    },
+    "icloud-direct": {
+      "receiving": "icloud",
+      "original_from": "other",
+      "original_to": [
+        "iCloud"
+      ],
+      "reply_sender": "account:iCloud",
+      "reply_to": [
+        "other:a@a.a.a"
+      ],
+      "outgoing": "gone"
+    },
+    "personal-from-grandma": {
+      "receiving": "personal",
+      "original_from": "Grandma",
+      "original_to": [
+        "Google"
+      ],
+      "reply_sender": "account:Grandma",
+      "reply_to": [
+        "account:Grandma"
+      ],
+      "outgoing": "gone"
+    },
+    "personal-from-mama": {
+      "receiving": "personal",
+      "original_from": "Mama",
+      "original_to": [
+        "Google"
+      ],
+      "reply_sender": "account:Mama",
+      "reply_to": [
+        "account:Mama"
+      ],
+      "outgoing": "gone"
+    }
+  },
+  "drafts_before": 278,
+  "drafts_after": 278,
+  "tagged_litter": {},
+  "litter_deleted": 0
+}

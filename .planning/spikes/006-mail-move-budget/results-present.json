@@ -1,0 +1,22 @@
+{
+  "n=1": {
+    "wall_s": 2.2,
+    "per_id_s": 2.21,
+    "present": 1
+  },
+  "n=5": {
+    "wall_s": 5.0,
+    "per_id_s": 1.0,
+    "present": 5
+  },
+  "n=25": {
+    "wall_s": 22.8,
+    "per_id_s": 0.91,
+    "present": 25
+  },
+  "n=25 (repeat)": {
+    "wall_s": 22.4,
+    "per_id_s": 0.89,
+    "present": 25
+  }
+}

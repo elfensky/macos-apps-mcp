@@ -1,0 +1,99 @@
+{
+  "A": {
+    "ok": true,
+    "trail": [
+      {
+        "t": 0.0,
+        "A": {
+          "store": {
+            "deleted": 1,
+            "completed": 0,
+            "parent": null
+          },
+          "ek": null
+        },
+        "A.1": {
+          "store": {
+            "deleted": 1,
+            "completed": 0,
+            "parent": "A"
+          },
+          "ek": null
+        },
+        "A.2": {
+          "store": {
+            "deleted": 1,
+            "completed": 0,
+            "parent": "A"
+          },
+          "ek": null
+        }
+      }
+    ]
+  },
+  "B": {
+    "ok": true,
+    "trail": [
+      {
+        "t": 0.0,
+        "B": {
+          "store": {
+            "deleted": 0,
+            "completed": 0,
+            "parent": null
+          },
+          "ek": {
+            "completed": false
+          }
+        },
+        "B.1": {
+          "store": {
+            "deleted": 1,
+            "completed": 0,
+            "parent": null
+          },
+          "ek": null
+        },
+        "B.2": {
+          "store": {
+            "deleted": 0,
+            "completed": 0,
+            "parent": "B"
+          },
+          "ek": {
+            "completed": false
+          }
+        }
+      }
+    ]
+  },
+  "C": {
+    "ok": true,
+    "trail": [
+      {
+        "t": 0.0,
+        "B": {
+          "store": {
+            "deleted": 0,
+            "completed": 1,
+            "parent": null
+          },
+          "ek": {
+            "completed": true
+          }
+        },
+        "B.2": {
+          "store": {
+            "deleted": 0,
+            "completed": 0,
+            "parent": "B"
+          },
+          "ek": {
+            "completed": false
+          }
+        }
+      }
+    ]
+  },
+  "list_removed": true
+}

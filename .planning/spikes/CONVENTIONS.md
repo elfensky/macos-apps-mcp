@@ -21,7 +21,9 @@ the question requires otherwise.
 
 - **The repo is public.** A probe prints and commits aggregates only: counts, schema, timings,
   scores. Personal text (titles, tag names, note bodies, queries that paraphrase them) stays in
-  `$SPIKE_PRIVATE_DIR` outside the repo (002, 004).
+  `$SPIKE_PRIVATE_DIR` outside the repo (002, 004). Addresses and ids become roles
+  (`account:Business`), position labels (`oldest`) or masked shapes (`A@a.a <A@A.A>`); grep
+  the `results-*.json` for `@` and UUIDs before committing (005, 006, 007).
 - **Device writes use a scratch container** named `gsd-spike-NNN` (a Reminders list, an iCloud
   calendar). Remove it in a `finally`, then check that nothing is left (002, 003).
   A source that refuses new containers (Google, `EKErrorDomain 17`) gets writes in an
@@ -34,7 +36,20 @@ the question requires otherwise.
 - **Reuse the adapter's own code path** where one exists (`CalendarAdapter.create_event`,
   `notes._decode_note_data`, `notes._FROM`), so the spike measures what ships (003, 004).
 - **Distrust a clean first pass.** Add an edge case designed to break it (no-midnight DST days,
-  tombstone rows, raw-count cross-check against the daemon).
+  tombstone rows, raw-count cross-check against the daemon, an occurrence ON a DST-change
+  day, a control that separates two explanations of one result).
+- **Mail probes run with the watchdog on and address only named mailboxes** (facts §8b).
+  Nothing is sent; a real move goes through `mail_recover.recoverable()` so it leaves a
+  receipt `mail_undo` accepts. Family accounts (Grandma, Mama) are never targets (005, 006).
+- **Check Mail's health before timing it.** The facts §3c state (a windowless `delete` that
+  no-ops) made every Apple Event 5–9× slower. A timing taken in that state is labelled as
+  such, and the healthy numbers come after an owner-approved restart (006).
+- **A fixture only a human can build is checked before the probe acts.** The probe stops
+  with a named assertion when the fixture is not in the store (007).
+- **One `EKEventStore` per operation.** An `EKCalendar` from one store passed to another
+  store's predicate raises `NSNull backingObject`; re-fetch by identifier instead (003, 008).
+- **A timing test re-reads over time**, from a fresh store, at fixed steps (0/10/30/60/120 s),
+  because a remote source can rewrite a saved item after the local read succeeds (008).
 
 ## Tools & Libraries
 
@@ -43,3 +58,8 @@ the question requires otherwise.
 - Shortcuts ToolKit index (`~/Library/Shortcuts/ToolKit/Tools-*.sqlite`, read-only) lists every
   App Intent and its parameters. It is the way to find public, Shortcuts-only routes.
 - `doctor()` over MCP shows which TCC grants the daemon identity holds.
+- Timing inside AppleScript: `use framework "Foundation"` and
+  `current application's NSDate's timeIntervalSinceReferenceDate()` give millisecond timing
+  without the osascript start-up cost (006).
+- `runtime.run_osascript(..., timeout=…)` for a long script; raw `osascript -` via
+  `subprocess` only when the probe must wait longer than one call (facts §2) (005, 006).
