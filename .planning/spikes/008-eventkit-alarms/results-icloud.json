@@ -1,0 +1,5295 @@
+{
+  "source": "iCloud",
+  "created": [
+    {
+      "case": "timed-none",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-15",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-0",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-60-15",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-1day",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-six",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-abs",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-none",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-0900",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-0900-before",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-midnight",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-abs",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "series-0900",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "series-0900-before",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "daily-fall-0900",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "daily-spring-0900",
+      "creator": "Europe/Brussels",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-none",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-15",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-0",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-60-15",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-1day",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-six",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "timed-abs",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-none",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-0900",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-0900-before",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-midnight",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "allday-abs",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "series-0900",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "series-0900-before",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "daily-fall-0900",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    },
+    {
+      "case": "daily-spring-0900",
+      "creator": "Pacific/Auckland",
+      "saved": true,
+      "err": ""
+    }
+  ],
+  "reads": {
+    "Europe/Brussels": [
+      {
+        "title": "allday-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-abs Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-29T09:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-abs Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-28T21:00"
+          }
+        ],
+        "fires": [
+          "2026-10-28T21:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-none Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "allday-none Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T08:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T08:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T10:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T10:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "timed-0 Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T10:00"
+        ]
+      },
+      {
+        "title": "timed-0 Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-29T22:00"
+        ]
+      },
+      {
+        "title": "timed-15 Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:45"
+        ]
+      },
+      {
+        "title": "timed-15 Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-29T21:45"
+        ]
+      },
+      {
+        "title": "timed-1day Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-29T10:00"
+        ]
+      },
+      {
+        "title": "timed-1day Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-28T22:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:45",
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-29T21:00",
+          "2026-10-29T21:45"
+        ]
+      },
+      {
+        "title": "timed-abs Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-30T08:00"
+          }
+        ],
+        "fires": [
+          "2026-10-30T08:00"
+        ]
+      },
+      {
+        "title": "timed-abs Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-29T20:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T20:00"
+        ]
+      },
+      {
+        "title": "timed-none Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-none Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-six Europe/Brussels",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00",
+          "2026-10-30T09:55",
+          "2026-10-30T09:50",
+          "2026-10-30T08:00",
+          "2026-10-30T09:30",
+          "2026-10-30T09:45"
+        ]
+      },
+      {
+        "title": "timed-six Pacific/Auckland",
+        "start": "2026-10-29T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-29T21:50",
+          "2026-10-29T21:45",
+          "2026-10-29T21:30",
+          "2026-10-29T21:55",
+          "2026-10-29T20:00",
+          "2026-10-29T21:00"
+        ]
+      }
+    ],
+    "Pacific/Auckland": [
+      {
+        "title": "allday-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-abs Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-29T21:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T21:00"
+        ]
+      },
+      {
+        "title": "allday-abs Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-29T09:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-none Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "allday-none Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "timed-0 Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T22:00"
+        ]
+      },
+      {
+        "title": "timed-0 Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T10:00"
+        ]
+      },
+      {
+        "title": "timed-15 Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T21:45"
+        ]
+      },
+      {
+        "title": "timed-15 Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:45"
+        ]
+      },
+      {
+        "title": "timed-1day Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-29T22:00"
+        ]
+      },
+      {
+        "title": "timed-1day Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-29T10:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-30T21:45",
+          "2026-10-30T21:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00",
+          "2026-10-30T09:45"
+        ]
+      },
+      {
+        "title": "timed-abs Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-30T20:00"
+          }
+        ],
+        "fires": [
+          "2026-10-30T20:00"
+        ]
+      },
+      {
+        "title": "timed-abs Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-30T08:00"
+          }
+        ],
+        "fires": [
+          "2026-10-30T08:00"
+        ]
+      },
+      {
+        "title": "timed-none Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-none Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-six Europe/Brussels",
+        "start": "2026-10-30T22:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T21:00",
+          "2026-10-30T21:55",
+          "2026-10-30T21:50",
+          "2026-10-30T20:00",
+          "2026-10-30T21:30",
+          "2026-10-30T21:45"
+        ]
+      },
+      {
+        "title": "timed-six Pacific/Auckland",
+        "start": "2026-10-30T10:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:50",
+          "2026-10-30T09:45",
+          "2026-10-30T09:30",
+          "2026-10-30T09:55",
+          "2026-10-30T08:00",
+          "2026-10-30T09:00"
+        ]
+      }
+    ],
+    "America/Los_Angeles": [
+      {
+        "title": "allday-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-abs Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-29T01:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T01:00"
+        ]
+      },
+      {
+        "title": "allday-abs Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-28T13:00"
+          }
+        ],
+        "fires": [
+          "2026-10-28T13:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-none Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "allday-none Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T08:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T08:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T10:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T10:00 (wall 09:00)"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "timed-0 Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T02:00"
+        ]
+      },
+      {
+        "title": "timed-0 Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-29T14:00"
+        ]
+      },
+      {
+        "title": "timed-15 Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T01:45"
+        ]
+      },
+      {
+        "title": "timed-15 Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-29T13:45"
+        ]
+      },
+      {
+        "title": "timed-1day Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-29T02:00"
+        ]
+      },
+      {
+        "title": "timed-1day Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-28T14:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T01:00",
+          "2026-10-30T01:45"
+        ]
+      },
+      {
+        "title": "timed-60-15 Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-29T13:45",
+          "2026-10-29T13:00"
+        ]
+      },
+      {
+        "title": "timed-abs Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-30T00:00"
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "timed-abs Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-29T12:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T12:00"
+        ]
+      },
+      {
+        "title": "timed-none Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-none Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-six Europe/Brussels",
+        "start": "2026-10-30T02:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-30T01:30",
+          "2026-10-30T00:00",
+          "2026-10-30T01:55",
+          "2026-10-30T01:45",
+          "2026-10-30T01:00",
+          "2026-10-30T01:50"
+        ]
+      },
+      {
+        "title": "timed-six Pacific/Auckland",
+        "start": "2026-10-29T14:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -30
+          }
+        ],
+        "fires": [
+          "2026-10-29T13:45",
+          "2026-10-29T13:55",
+          "2026-10-29T12:00",
+          "2026-10-29T13:00",
+          "2026-10-29T13:50",
+          "2026-10-29T13:30"
+        ]
+      }
+    ],
+    "UTC": [
+      {
+        "title": "allday-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-0900-before Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "allday-abs Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-29T08:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T08:00"
+        ]
+      },
+      {
+        "title": "allday-abs Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "abs": "2026-10-28T20:00"
+          }
+        ],
+        "fires": [
+          "2026-10-28T20:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-midnight Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T00:00"
+        ]
+      },
+      {
+        "title": "allday-none Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "allday-none Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-30T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-10-31T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-31T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-01T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "daily-fall-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Europe/Brussels",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-12T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-12T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-13T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-13T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-14T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-14T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-15T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-15T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-16T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-16T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-17T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-17T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-18T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-18T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-19T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-20T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-20T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-21T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-21T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-22T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-22T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-23T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-23T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-24T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-24T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-25T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-25T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-26T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-27T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-27T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-28T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-28T09:00"
+        ]
+      },
+      {
+        "title": "daily-spring-0900 Pacific/Auckland",
+        "start": "2027-03-29T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2027-03-29T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-19T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-10-26T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-02T09:00"
+        ]
+      },
+      {
+        "title": "series-0900 Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": 540
+          }
+        ],
+        "fires": [
+          "2026-11-09T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Europe/Brussels",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-19T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-18T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-10-26T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-10-25T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-02T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-01T09:00"
+        ]
+      },
+      {
+        "title": "series-0900-before Pacific/Auckland",
+        "start": "2026-11-09T00:00",
+        "all_day": true,
+        "alarms": [
+          {
+            "rel_min": -900
+          }
+        ],
+        "fires": [
+          "2026-11-08T09:00"
+        ]
+      },
+      {
+        "title": "timed-0 Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-30T09:00"
+        ]
+      },
+      {
+        "title": "timed-0 Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": 0
+          }
+        ],
+        "fires": [
+          "2026-10-29T21:00"
+        ]
+      },
+      {
+        "title": "timed-15 Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-30T08:45"
+        ]
+      },
+      {
+        "title": "timed-15 Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-29T20:45"
+        ]
+      },
+      {
+        "title": "timed-1day Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-29T09:00"
+        ]
+      },
+      {
+        "title": "timed-1day Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -1440
+          }
+        ],
+        "fires": [
+          "2026-10-28T21:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -60
+          }
+        ],
+        "fires": [
+          "2026-10-30T08:45",
+          "2026-10-30T08:00"
+        ]
+      },
+      {
+        "title": "timed-60-15 Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -15
+          }
+        ],
+        "fires": [
+          "2026-10-29T20:00",
+          "2026-10-29T20:45"
+        ]
+      },
+      {
+        "title": "timed-abs Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-30T07:00"
+          }
+        ],
+        "fires": [
+          "2026-10-30T07:00"
+        ]
+      },
+      {
+        "title": "timed-abs Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "abs": "2026-10-29T19:00"
+          }
+        ],
+        "fires": [
+          "2026-10-29T19:00"
+        ]
+      },
+      {
+        "title": "timed-none Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-none Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [],
+        "fires": []
+      },
+      {
+        "title": "timed-six Europe/Brussels",
+        "start": "2026-10-30T09:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -30
+          },
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -10
+          }
+        ],
+        "fires": [
+          "2026-10-30T08:30",
+          "2026-10-30T08:45",
+          "2026-10-30T08:00",
+          "2026-10-30T08:55",
+          "2026-10-30T07:00",
+          "2026-10-30T08:50"
+        ]
+      },
+      {
+        "title": "timed-six Pacific/Auckland",
+        "start": "2026-10-29T21:00",
+        "all_day": false,
+        "alarms": [
+          {
+            "rel_min": -15
+          },
+          {
+            "rel_min": -5
+          },
+          {
+            "rel_min": -120
+          },
+          {
+            "rel_min": -60
+          },
+          {
+            "rel_min": -10
+          },
+          {
+            "rel_min": -30
+          }
+        ],
+        "fires": [
+          "2026-10-29T20:45",
+          "2026-10-29T20:55",
+          "2026-10-29T19:00",
+          "2026-10-29T20:00",
+          "2026-10-29T20:50",
+          "2026-10-29T20:30"
+        ]
+      }
+    ]
+  }
+}
