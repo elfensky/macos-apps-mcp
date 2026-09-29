@@ -15,11 +15,11 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **GATE-04**: Every tool is registered through one record (tier, adapter, permission, audit verb, notice policy); annotations, gates, guard, snapshot registry, notice exemption, audit verb and the tests' expectations are all derived from it; gated-off tools are still recorded pre-gate (never derived from FastMCP `Tool` objects)
 - [x] **GATE-05**: Every destructive tool defaults `dry_run=True` (`delete_event`, `delete_draft`, `delete_note` gain it), enforced by a registry test that fails when a new destructive tool omits it
 - [x] **GATE-06**: Writes audit under their own verb — `trash_mail`, `move_mail`, `mail_undo`, `export_mail`, `save_mail_attachment`, `music_control`, `play_playlist`, `set_mode`, `set_volume`, `create_contact` no longer log as bare `"write"` / unlogged
-- [ ] **GATE-07**: `MACOS_APPS_READ_ONLY=1 uv run pytest` passes (12 failures on develop today)
+- [x] **GATE-07**: `MACOS_APPS_READ_ONLY=1 uv run pytest` passes (12 failures on develop today)
 - [x] **GATE-08**: `_fake_envelope` is a shared fixture (`tests/envelope.py`) whose schema carries every column any `query_*` executor reads (incl. `m.size`, `message_references`); Mail tests that stubbed `query_*` only to compensate for a missing store go through the fixture; `HEADER_FINGERPRINT` covers those columns so a real store missing them surfaces as drift, not a query-time error
 - [x] **GATE-09**: The recoverable destructive plane runs its own preflight — `recoverable(op, targets, act, *, dry_run, present)` performs check_batch → present → preview; a dry run without a stated `present` is an error; `dedupe_batch(dry_run=True)` can no longer report "planned" for targets it never checked; device-verified on a scratch mailbox with the Mail watchdog running, dry-run envelopes and osascript argv byte-identical to before
 - [x] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
-- [ ] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
+- [x] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
 - [ ] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
 - [x] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
 
@@ -44,8 +44,6 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **REM-03**: User can read and create subtasks via the public `parentReminder` route (macOS 14+) (#91)
 - [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write (#91)
 - [ ] **REM-06**: `reminders()` Pointers carry the owning list's id in `Pointer.folder` — same rule and test shape as CAL-04; `reminder_lists()` maps ids to names (#207)
-
-
 
 ### Notes
 
@@ -78,12 +76,14 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 Deferred. Tracked but not in the current roadmap.
 
 ### Contacts (deferred 2026-08-28 — owner's call at roadmap review)
+
 - **CON-01**: User can fetch a full, bounded contact card by id — all handles, addresses, birthday, organisation; the notes field is excluded by design (entitlement-gated, crashes updates) (#94)
 - **CON-02**: User can fetch their own card (`contacts_me`) (#94)
 - **CON-03**: User can update a contact by id (write tier, dry-runnable, audited, verify-after-write); native `CNContactStore` if the daemon's bundle identity is granted Contacts TCC (device spike), else the osascript update path — notes excluded either way (#94)
 - **CON-04**: Contact search reads the AddressBook sqlite store when Full Disk Access is present and falls back to AppleScript otherwise; the schema fingerprint covers every column the queries read; `doctor` reports which plane is active (#95)
 
 ### Messages (deferred 2026-08-28 — owner's call at roadmap review)
+
 - **MSG-01**: User can filter `messages_with` and `messages_search` by `since`/`until` (#88)
 - **MSG-02**: User can filter for unread incoming messages (#88)
 - **MSG-03**: Message Pointers are annotated with attachment name/type when present (#87)
@@ -93,22 +93,26 @@ Deferred. Tracked but not in the current roadmap.
 - **MSG-07**: User can check whether a handle is iMessage-reachable (ungated read) (#86)
 
 ### Safari
+
 - **SAF-01**: Bookmarks + reading list as Pointers (Bookmarks.plist; reading list needs FDA) (#97)
 - **SAF-02**: History search (`History.db`, read-only, FDA) — an open niche no surveyed server ships (#97)
 
 ### New domains (low priority)
+
 - **MAP-01**: Maps search/directions/ETA via MapKit after a throttle measurement and NSRunLoop pump (#98)
 - **LOC-01**: Geocode/reverse-geocode via CLGeocoder (#99a)
 - **LOC-02**: Current position — spike-gated on headless CoreLocation authorization (#99b)
 - **WX-01**: Weather via keyless Open-Meteo HTTP (#100)
 
 ### Platform
+
 - **PLAT-03**: User-preferences env context injected into server instructions (#105)
 - **PLAT-04**: Menubar companion — Swift `MenuBarExtra`, pure client of the daemon (stats, recovery/history, adapter toggles); never a second TCC identity, never Python
 - **PLAT-05**: Network transport + auth for remote MCP clients — Tailscale-bound listener + bearer auth AND an SSE bridge (Home Assistant's MCP Client is SSE-only); dashboard/MCP route auth parity decided before code (#127)
 - **REM-05**: Alarms on reminders (same mechanism as CAL-01)
 
 ### Mail
+
 - **MAIL-05**: Move/trash dry-run previews answered from the Envelope Index (message-id → mailbox url) with no Apple Events; the index can lag Mail, which is why #174's re-check exists (#206 follow-up)
 
 ## Out of Scope
@@ -141,11 +145,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-04 | Phase 1 | Complete |
 | GATE-05 | Phase 1 | Complete |
 | GATE-06 | Phase 1 | Complete |
-| GATE-07 | Phase 2 | Pending |
+| GATE-07 | Phase 2 | Complete |
 | GATE-08 | Phase 1 | Complete |
 | GATE-09 | Phase 1 | Complete |
 | GATE-10 | Phase 1 | Complete |
-| GATE-11 | Phase 2 | Pending |
+| GATE-11 | Phase 2 | Complete |
 | GATE-12 | Phase 2 | Pending |
 | GATE-13 | Phase 1 | Complete |
 | MAIL-01 | Phase 02.1 | Pending |
@@ -177,6 +181,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIST-06 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 40 total
 - Mapped to phases: 40
 - Unmapped: 0 ✓

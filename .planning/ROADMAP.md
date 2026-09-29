@@ -115,14 +115,14 @@ Plans:
   2. `uv run pytest` runs no live `pgrep`/`ps` against the dev machine: doctor's 17 process-probe tests go through the locked `tracked_run` seam.
   3. `uv run pytest -m integration` is green on the current macOS against a daemon rebuilt and reinstalled from the gate, and `uv run ruff check .` plus `uv run ruff format --check .` pass.
 
-**Plans**: 6 plans in 4 waves
+**Plans**: 3/6 plans executed in 4 waves
 
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — GATE-07: fact tests read `registry.TOOLS`, call tests skip read-only by one marker, CI read-only step (D-01, D-02)
-- [ ] 02-02-PLAN.md — GATE-11: `doctor._process_name` through `tracked_run`, AST tripwire, Popen-spy proof at 0
-- [ ] 02-03-PLAN.md — D-04: integration Mail writes use 2 marker mails only; `inbox_messages` fails loud
+- [x] 02-01-PLAN.md — GATE-07: fact tests read `registry.TOOLS`, call tests skip read-only by one marker, CI read-only step (D-01, D-02)
+- [x] 02-02-PLAN.md — GATE-11: `doctor._process_name` through `tracked_run`, AST tripwire, Popen-spy proof at 0
+- [x] 02-03-PLAN.md — D-04: integration Mail writes use 2 marker mails only; `inbox_messages` fails loud
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -221,7 +221,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
-| 2. Gate Close — Fail-Closed Suite and Device Sweep | 0/TBD | Not started | - |
+| 2. Gate Close — Fail-Closed Suite and Device Sweep | 3/6 | In Progress|  |
 | 02.1. Mail Fixes (INSERTED) | 0/TBD | Not started | - |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
