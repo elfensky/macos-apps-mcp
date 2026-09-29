@@ -12,6 +12,10 @@ raises instead of reaching a live app — lives in ``tests/conftest.py``'s autou
 
 Every ``adapters/*.py`` (except ``__init__.py``) plus ``doctor.py`` is covered, so a
 NEW module inherits the rule without anyone remembering to add it here (card 1).
+
+The AST tests also forbid a direct ``subprocess`` spawn (``run``/``Popen``/``call``/
+``check_call``/``check_output``) in these modules — the only door to a subprocess is
+``runtime.tracked_run`` (GATE-11).
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import pytest
 from macos_apps_mcp import runtime
 
 _SEAM = frozenset({"run_osascript", "body_file", "tracked_run"})
+_SPAWNERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 _ADAPTERS_DIR = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters"
 _NATIVE_MODULES = sorted(
     [p for p in _ADAPTERS_DIR.glob("*.py") if p.name != "__init__.py"]
@@ -41,6 +46,32 @@ def test_native_module_does_not_import_the_seam_by_name(path):
                 f"{path.name}:{node.lineno} imports {sorted(offenders)} by name — "
                 "use `from .. import runtime` and call runtime.<name>(...) so tests "
                 "patch one seam (#176)"
+            )
+
+
+@pytest.mark.parametrize("path", _NATIVE_MODULES, ids=lambda p: p.name)
+def test_native_module_spawns_no_subprocess_directly(path):
+    # a direct subprocess spawn skips the #56 cleanup registry AND the conftest lock
+    # runtime.tracked_run gives every other seam call (GATE-11). Only ast.Call nodes
+    # are checked — a bare `subprocess.TimeoutExpired` exception-class reference
+    # (shortcuts.py) is not a spawn and must not be flagged.
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+            and node.func.attr in _SPAWNERS
+        ) or (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "subprocess"
+            and _SPAWNERS.intersection(a.name for a in node.names)
+        ):
+            raise AssertionError(
+                f"{path.name}:{node.lineno} spawns a process directly — call "
+                "runtime.tracked_run(...) qualified so the conftest lock fakes or "
+                "refuses it (GATE-11)"
             )
 
 

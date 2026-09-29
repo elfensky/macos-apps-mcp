@@ -251,12 +251,7 @@ def _process_name(pid: int) -> str:
     """Best-effort executable path for a pid (no TCC needed). ponytail: immediate parent
     only — walk the ancestor chain to the first *.app if the .app is ever ambiguous."""
     try:
-        proc = subprocess.run(
-            ["ps", "-o", "comm=", "-p", str(pid)],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+        proc = runtime.tracked_run(["ps", "-o", "comm=", "-p", str(pid)], timeout=5.0)
     except (OSError, subprocess.SubprocessError):
         return f"pid {pid}"
     return proc.stdout.strip() or f"pid {pid}"
