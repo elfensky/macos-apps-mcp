@@ -1,0 +1,98 @@
+{
+  "Fiction/INBOX": {
+    "whose-mid": [
+      {
+        "result": "1",
+        "s": 2.497
+      },
+      {
+        "result": "1",
+        "s": 0.929
+      }
+    ],
+    "bulk-mid": [
+      {
+        "result": "9497",
+        "s": 0.916
+      }
+    ],
+    "bulk-id": [
+      {
+        "result": "9497",
+        "s": 0.172
+      }
+    ],
+    "find-in-list": [
+      {
+        "result": "4749",
+        "s": 0.701
+      }
+    ],
+    "by-index": [
+      {
+        "result": "true",
+        "s": 0.169
+      }
+    ],
+    "by-id": [
+      {
+        "result": "true",
+        "s": 0.012
+      }
+    ],
+    "whose-id": [
+      {
+        "result": "true",
+        "s": 0.181
+      }
+    ]
+  },
+  "Fiction/Archive": {
+    "whose-mid": [
+      {
+        "result": "3",
+        "s": 14.423
+      },
+      {
+        "result": "3",
+        "s": 10.909
+      }
+    ],
+    "bulk-mid": [
+      {
+        "result": "49531",
+        "s": 11.192
+      }
+    ],
+    "bulk-id": [
+      {
+        "result": "49531",
+        "s": 1.516
+      }
+    ],
+    "find-in-list": [
+      {
+        "result": "24766",
+        "s": 21.039
+      }
+    ],
+    "by-index": [
+      {
+        "result": "true",
+        "s": 1.802
+      }
+    ],
+    "by-id": [
+      {
+        "result": "true",
+        "s": 0.004
+      }
+    ],
+    "whose-id": [
+      {
+        "result": "true",
+        "s": 1.996
+      }
+    ]
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "Business/INBOX": {
+    "messages": 8,
+    "count_s": 0.015,
+    "scan_median_s": 0.017,
+    "scan_max_s": 0.029,
+    "scan_by_position_s": {
+      "oldest": [
+        0.019,
+        0.018,
+        0.016
+      ],
+      "median": [
+        0.029,
+        0.019,
+        0.02
+      ],
+      "newest": [
+        0.008,
+        0.017,
+        0.015
+      ],
+      "missing": [
+        0.012,
+        0.013,
+        0.018
+      ]
+    },
+    "hits": {
+      "oldest": 1,
+      "median": 1,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 8,
+    "bulk_s": 0.013,
+    "wall_s": 0.6
+  },
+  "Personal/INBOX": {
+    "messages": 44,
+    "count_s": 0.016,
+    "scan_median_s": 0.035,
+    "scan_max_s": 0.058,
+    "scan_by_position_s": {
+      "oldest": [
+        0.058,
+        0.027,
+        0.037
+      ],
+      "median": [
+        0.032,
+        0.045,
+        0.024
+      ],
+      "newest": [
+        0.039,
+        0.039,
+        0.044
+      ],
+      "missing": [
+        0.034,
+        0.03,
+        0.031
+      ]
+    },
+    "hits": {
+      "oldest": 1,
+      "median": 1,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 44,
+    "bulk_s": 0.057,
+    "wall_s": 0.9
+  },
+  "Personal/Travel": {
+    "messages": 4430,
+    "count_s": 0.802,
+    "scan_median_s": 4.609,
+    "scan_max_s": 6.326,
+    "scan_by_position_s": {
+      "oldest": [
+        6.082,
+        3.746,
+        4.298
+      ],
+      "median": [
+        6.326,
+        5.887,
+        4.372
+      ],
+      "newest": [
+        5.601,
+        4.084,
+        4.845
+      ],
+      "missing": [
+        5.55,
+        3.786,
+        3.633
+      ]
+    },
+    "hits": {
+      "oldest": 3,
+      "median": 6,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 4430,
+    "bulk_s": 5.298,
+    "wall_s": 64.7
+  },
+  "Fiction/Trash": {
+    "messages": 0,
+    "count_s": 0.005,
+    "scan_median_s": 0.016,
+    "scan_max_s": 0.017,
+    "scan_by_position_s": {
+      "missing": [
+        0.006,
+        0.016,
+        0.017
+      ]
+    },
+    "hits": {
+      "missing": 0
+    },
+    "bulk_ids": 0,
+    "bulk_s": 0.018,
+    "wall_s": 0.4
+  },
+  "Fiction/FanfictionNet": {
+    "messages": 7386,
+    "count_s": 1.138,
+    "scan_median_s": 7.339,
+    "scan_max_s": 8.773,
+    "scan_by_position_s": {
+      "oldest": [
+        7.269,
+        7.288,
+        7.041
+      ],
+      "median": [
+        7.858,
+        8.166,
+        7.39
+      ],
+      "newest": [
+        8.176,
+        7.019,
+        7.657
+      ],
+      "missing": [
+        8.773,
+        7.092,
+        6.846
+      ]
+    },
+    "hits": {
+      "oldest": 1,
+      "median": 2,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 7386,
+    "bulk_s": 6.963,
+    "wall_s": 99.0
+  },
+  "Fiction/INBOX": {
+    "messages": 9458,
+    "count_s": 1.634,
+    "scan_median_s": 8.721,
+    "scan_max_s": 12.114,
+    "scan_by_position_s": {
+      "oldest": [
+        12.114,
+        8.603,
+        9.326
+      ],
+      "median": [
+        9.515,
+        8.509,
+        8.292
+      ],
+      "newest": [
+        8.797,
+        8.645,
+        9.636
+      ],
+      "missing": [
+        8.566,
+        8.482,
+        9.012
+      ]
+    },
+    "hits": {
+      "oldest": 1,
+      "median": 1,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 9458,
+    "bulk_s": 8.917,
+    "wall_s": 120.4
+  },
+  "Fiction/Archive": {
+    "messages": 49531,
+    "count_s": 8.431,
+    "scan_median_s": 60.194,
+    "scan_max_s": 64.673,
+    "scan_by_position_s": {
+      "oldest": [
+        57.928,
+        59.165,
+        61.487
+      ],
+      "median": [
+        59.516,
+        64.673,
+        60.895
+      ],
+      "newest": [
+        57.181,
+        63.93,
+        60.873
+      ],
+      "missing": [
+        57.277,
+        61.619,
+        58.56
+      ]
+    },
+    "hits": {
+      "oldest": 1,
+      "median": 3,
+      "newest": 1,
+      "missing": 0
+    },
+    "bulk_ids": 49531,
+    "bulk_s": 65.49,
+    "wall_s": 797.5
+  }
+}
