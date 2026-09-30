@@ -1357,6 +1357,12 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
+@pytest.mark.xfail(
+    strict=False,
+    reason="#230 — intermittent: quoted_body() content read exceeds the 30 s cap "
+    "on some inbox messages (4 of 5 device runs failed, Mail not wedged); "
+    "strict=False because it also passes — Phase 02.1 investigates",
+)
 def test_mail_reply_opens_threaded_draft_and_never_sends():
     """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
     message) with our body; delete it; confirm nothing sent. Threading headers can
