@@ -1357,11 +1357,6 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#230 — quoted_body() times out reading content after heavy local "
-    "activity; Mail transiently unresponsive, reproduced on macOS 27.0",
-)
 def test_mail_reply_opens_threaded_draft_and_never_sends():
     """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing
     message) with our body; delete it; confirm nothing sent. Threading headers can
