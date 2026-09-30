@@ -67,9 +67,9 @@ packages = ["macos_apps_mcp"]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
-# ruff 0.16 formats Python code blocks inside markdown; docs/superpowers/ are frozen
-# historical plans — leave their snippets as they were written.
-exclude = ["docs/"]
+# ruff 0.16 formats Python code blocks inside markdown; docs/superpowers/ and the GSD
+# planning records under .planning/ are frozen — leave their snippets as written.
+exclude = ["docs/", ".planning/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
