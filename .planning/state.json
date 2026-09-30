@@ -1,0 +1,48 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v0.11.0",
+  "phases": [
+    {
+      "number": "1",
+      "name": "Gate — Land the Spiked Architecture Cuts",
+      "status": "complete"
+    },
+    {
+      "number": "2",
+      "name": "Gate Close — Fail-Closed Suite and Device Sweep",
+      "status": "in_progress"
+    },
+    {
+      "number": "02.1",
+      "name": "Mail Fixes (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "3",
+      "name": "EventKit Depth — Calendar & Reminders",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Notes & Photos",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Operator Control Plane",
+      "status": "pending"
+    },
+    {
+      "number": "6",
+      "name": "Distribution",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "/gsd:progress --next",
+    "label": "Advance to the next step",
+    "reason": "Phase 02 of 7 · executing"
+  },
+  "updated_at": "2026-09-30T19:57:28.422Z"
+}

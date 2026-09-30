@@ -9,13 +9,14 @@ requires:
     provides: "02-04 (dev-build daemon 7e8a079, marker mails seeded in the Personal account INBOX)"
 provides:
   - "Task 1: full 80-test device sweep run 1 executed and triaged (5 failed, 74 passed, 1 skipped)"
-  - "Task 2 (partial): 2 GitHub issues filed (#229, #230), 3 test-only Bucket C fixes and 2 Bucket B strict xfails merged (PR #231, test/sweep-findings), sweep-02 re-synced with no daemon-rebuild diff, 3 of 5 affected nodeids re-verified green on device — HALTED before Task 3 on a Flaky finding the plan requires an owner decision for"
-affects: ["02-05 continuation (finish Task 2's flaky-test decision, then Task 3's final green run)", "02-06 (v0.12.0 release cut, blocked on this plan closing)"]
+  - "Task 2: 2 GitHub issues filed (#229, #230), 3 test-only Bucket C fixes and 2 Bucket B strict xfails merged (PR #231); the #230 flaky row decided twice by the owner — 35e2462 (un-mark) and PR #236 / 32386ff (non-strict xfail with fresh evidence) — and all 5 affected nodeids re-proven on device"
+  - "Task 3: final full sweep green by D-06 on macOS 27.0 against daemon build 7e8a079 — tests 80, failures 0, errors 0 (77 passed, 1 skipped, 2 xfailed), ruff clean, every skip and xfail named"
+affects: ["02-06 (v0.12.0 release cut — unblocked; its Task 1 precondition holds)", "02.1 (owning phase for #229 and #230)"]
 
 actuals:
-  tokens: 12000
-  tasks: 1.6
-  commits: 0
+  tokens: 45000
+  tasks: 3
+  commits: 3
 
 tech-stack:
   added: []
@@ -27,14 +28,17 @@ key-files:
     - "tests/integration/test_mail_outbound.py (PR #231, merge commit 140ffcaa20c676276a27592774e2f6c4318d17d2 on origin/develop)"
     - "tests/test_doctor.py (PR #231, same merge commit)"
     - "tests/test_integration.py (PR #231, same merge commit)"
+    - "tests/test_integration.py (35e2462, owner: strict xfail on the reply test removed; PR #236 rebase commit 32386ff: non-strict xfail with fresh evidence)"
 
 key-decisions:
   - "Task 1's 5 failures and 1 skip were triaged with one diagnostic re-run each (per plan rule) before landing anything: 2 Mail-write-path findings (Bucket B, filed #229/#230, strict-xfailed), 3 test-only stale-assertion findings (Bucket C, fixed directly), 0 Bucket A findings (no adapter-code bug found)."
-  - "HALTED at Task 2's own re-verification step: test_mail_reply_opens_threaded_draft_and_never_sends (#230, strict-xfailed in PR #231) came back XPASS(strict) on its on-device re-run after the PR merged — a Flaky row per the plan's own definition ('it failed, then passed on the diagnostic re-run'). The plan is explicit: 'A strict xfail cannot hold a flaky test. Stop and ask the owner how to proceed (issue + owner's call); do not mark it.' This executor's own dispatch instructions independently list 'any Flaky row' as a mandatory stop-and-return condition ('do not decide yourself'). Both are followed: this SUMMARY records the halt, not a self-made fix."
+  - "Owner decision 1 (2026-09-30 09:16, commit 35e2462): option 1 — un-mark the strict xfail on test_mail_reply_opens_threaded_draft_and_never_sends; #230 stays open, relabelled intermittent for Phase 02.1."
+  - "Owner decision 2 (2026-09-30 ~19:40, after the final-sweep attempt 1 failed on that same test and its one diagnostic re-run failed again on the same 30 s content read): non-strict xfail (strict=False) with the fresh evidence, then re-run the final sweep. Why: 4 of 5 device runs failed and 1 passed, so a strict mark would flip the D-06 gate on a pass; Mail was proven not wedged (a bare Apple Event from the same shell answered at once), so the failure is the genuine content-read timeout tracked in #230, not a device stall."
+  - "HALTED (2026-09-29) at Task 2's own re-verification step: test_mail_reply_opens_threaded_draft_and_never_sends (#230, strict-xfailed in PR #231) came back XPASS(strict) on its on-device re-run after the PR merged — a Flaky row per the plan's own definition ('it failed, then passed on the diagnostic re-run'). The plan is explicit: 'A strict xfail cannot hold a flaky test. Stop and ask the owner how to proceed (issue + owner's call); do not mark it.' This executor's own dispatch instructions independently list 'any Flaky row' as a mandatory stop-and-return condition ('do not decide yourself'). Both are followed: this SUMMARY records the halt, not a self-made fix."
 
 patterns-established: []
 
-requirements-completed: []
+requirements-completed: [GATE-12]
 
 coverage:
   - id: D1
@@ -46,30 +50,38 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "Task 2 (partial): Bucket B issues filed and strict-xfailed, Bucket C stale assertions fixed, landed as PR #231 and re-synced into sweep-02 with no daemon-rebuild diff; 3 of 5 affected nodeids re-verified green on device"
+    description: "Task 2: Bucket B issues filed and xfailed, Bucket C stale assertions fixed (PR #231); the #230 flaky row resolved by two owner decisions (35e2462, PR #236); all 5 affected nodeids re-proven on device in the final run with no failed, error or unexpected-xpass result"
     requirement: GATE-12
     verification:
       - kind: integration
-        ref: "cd .worktrees/sweep-02 && MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration <5 affected nodeids> -rA -q — 3 passed, 1 xfailed (as expected), 1 XPASS(strict) → FAILED (the flaky finding)"
-        status: fail
+        ref: ".worktrees/sweep-02-final.log — the 5 affected nodeids: 3 PASSED, test_rollback_verifies_a_real_delete XFAIL (#229), test_mail_reply_opens_threaded_draft_and_never_sends XFAIL (#230, non-strict)"
+        status: pass
     human_judgment: true
-    rationale: "The one FAILED outcome is the flaky test itself, which is the subject of the halt below — not a defect coverage can auto-pass past. The owner's decision determines the correct final state."
-duration: ~3h30min (Task 1 run 1: 1h51m; watchdog/diagnostic re-runs, triage, issue filing, PR landing, re-sync and re-verification: remainder)
-completed: 2026-09-29
-status: halted
+    rationale: "The flaky row's resolution was the owner's call twice (plan rule), not an executor fix; both decisions and their evidence are recorded in the Task 2 continuation section."
+  - id: D3
+    description: "Task 3: final full sweep green by D-06 (failures 0, errors 0, no XPASS), marker mails 2/2, ruff clean, skips and xfails recorded, sweep-02 worktree removed"
+    requirement: GATE-12
+    verification:
+      - kind: integration
+        ref: ".worktrees/sweep-02-final.xml (junit: tests=80 failures=0 errors=0 skipped=3 incl. 2 xfails; plan verify command exit 0) and sweep-02-final.log summary line: 77 passed, 1 skipped, 1492 deselected, 2 xfailed in 7248.22s (2:00:48)"
+        status: pass
+    human_judgment: false
+duration: "2026-09-29: ~3h30min (Task 1 run 1 1h51m; triage, PR #231, re-verification). 2026-09-30: ~4h45min (final-sweep attempt 1 1h58m; diagnostic re-run, evidence, PR #236 ~35min; final sweep 2h00m; close-out)"
+completed: 2026-09-30
+status: complete
 ---
 
-# Phase 2 Plan 5: Full device sweep run 1, triage, and findings landing — HALTED before Task 3 Summary
+# Phase 2 Plan 5: Full device sweep, triage, findings landing, and the final green run Summary
 
-**Task 1 complete (80-test sweep run 1: 5 failed, 74 passed, 1 skipped, triaged into 2 Bucket-B Mail findings and 3 Bucket-C stale-test findings); Task 2 partially complete (issues #229/#230 filed, PR #231 merged, sweep-02 re-synced with no daemon-rebuild diff) — HALTED when the on-device re-verification revealed #230's xfail is flaky (XPASS on its 3rd occurrence after 2 consistent failures), which the plan requires an owner decision for, not an executor fix.**
+**GATE-12 proven: the final 80-test device sweep is green by D-06 on macOS 27.0 (26A428) against daemon build 7e8a079 — failures 0, errors 0, 77 passed, 1 skipped, 2 xfailed (#229 strict, #230 non-strict) in 2h00m, ruff clean, marker mails 2/2. Run 1 found 5 failures (2 Bucket-B Mail findings filed as #229/#230, 3 Bucket-C stale tests fixed in PR #231); the #230 row proved intermittent and was decided twice by the owner (35e2462 un-mark, then PR #236 non-strict xfail with fresh evidence) before the final run passed.**
 
 ## Performance
 
 - **Duration:** ~3h30min. Task 1's single full-suite run took 1h51m (dominated by the FTS body-index first build, ~1h37m, a legitimate one-time local pass over this Mac's Mail store — no code hang). Remaining time: watchdog checks, 2 diagnostic re-runs, triage writeup, issue filing, PR landing (checks + merge), sweep-02 re-sync, and re-verification of 5 nodeids.
 - **Started:** 2026-09-29T15:04:00+02:00 (approx, first Bash call)
-- **Halted:** 2026-09-29T19:12:00+02:00 (approx)
-- **Tasks:** 1 of 3 complete (Task 1); Task 2 partially complete; Task 3 not started
-- **Files modified:** 3 (all in the merged PR #231, none in this plan's own checkout)
+- **Halted:** 2026-09-29T19:12:00+02:00 (approx); **resumed** 2026-09-30 09:16 (owner decision 1) and 19:14 (this session); **completed** 2026-09-30T21:55+02:00 (approx)
+- **Tasks:** 3 of 3 complete
+- **Files modified:** 3 in PR #231; `tests/test_integration.py` again in 35e2462 and PR #236 — none in this plan's own checkout
 
 ## Task 1: Full sweep run 1 — COMPLETE
 
@@ -134,7 +146,7 @@ deliberate skip has no upside), and the plan's own frontmatter already anticipat
 this exact edge case for the verifier ("a skip for a reason other than absent data (a finding)…
 The row stays flagged for the verifier"). Flagged here accordingly, not resolved.
 
-## Task 2 (partial): Findings landed, sweep-02 re-synced, HALTED at re-verification
+## Task 2: Findings landed, sweep-02 re-synced, halted at re-verification (2026-09-29)
 
 ### Bucket B — issues filed, strict-xfailed
 
@@ -142,7 +154,7 @@ The row stays flagged for the verifier"). Flagged here accordingly, not resolved
   cannot verify delete of a windowless outgoing message. Owning phase: Mail → 02.1.
 - **#230** — <https://github.com/elfensky/macos-apps-mcp/issues/230> — Mail: reply's
   `quoted_body()` times out reading content after heavy local activity. Owning phase:
-  Mail → 02.1. **See HALT below — this xfail is now known-flaky.**
+  Mail → 02.1. **Proved intermittent — resolved twice by the owner, see the Task 2 continuation below.**
 
 ### Bucket C — test-only fixes, recorded
 
@@ -247,75 +259,173 @@ Result: **3 passed, 1 xfailed (as expected), 1 failed** —
   Mail answered normally this time — no timeout at all, exactly the "self-clears" behavior
   #230's own issue body predicted, now confirmed a third data point later.
 
-## HALT: Flaky finding — owner decision required (plan-mandated, not an executor call)
+## HALT (2026-09-29): Flaky finding — owner decision required
 
-`test_mail_reply_opens_threaded_draft_and_never_sends` (#230) has now: **failed** (Task 1 run 1),
-**failed** (Task 1's one allowed diagnostic re-run), **passed** (Task 2's on-device
-re-verification, ~25 minutes later, no daemon or code change in between). This is exactly the
-plan's own definition of Flaky: *"it failed, then passed on the diagnostic re-run. A strict
-xfail cannot hold a flaky test. Stop and ask the owner how to proceed (issue + owner's call); do
-not mark it."* This executor's dispatch instructions independently list "any Flaky row" as a
-mandatory stop-and-return condition ("do not decide yourself"). Both apply here, so this plan
-halts rather than picking a resolution.
+Recorded at the time: `test_mail_reply_opens_threaded_draft_and_never_sends` (#230) had **failed**
+(Task 1 run 1), **failed** (Task 1's one diagnostic re-run), then **passed** (Task 2's on-device
+re-verification ~25 minutes later, no code or daemon change in between) — the plan's own
+definition of Flaky, which a strict xfail cannot hold. The executor stopped and put three options
+to the owner: (1) un-mark the xfail and relabel #230 intermittent for 02.1 (recommended), (2)
+widen the read's timeout, (3) leave the strict mark. The full option text and the state handed
+to the continuation are in the git history of this file (commit `a0f5b61` lineage, re-landed by
+PR #234).
 
-**Current state left on `origin/develop`:** PR #231 (merge commit `140ffcaa2`) carries a
-`strict=True` xfail mark on `test_mail_reply_opens_threaded_draft_and_never_sends` that has now
-proven to XPASS intermittently — meaning a future run of this suite (including this plan's own
-Task 3 final run) could non-deterministically report either `1 xfailed` (matching the current
-mark) or `1 failed` (an XPASS(strict) failure), which would fail GATE-12's "0 failed, 0 errors"
-gate for reasons unrelated to any new regression.
+## Task 2 continuation (2026-09-30): owner decisions and the second flaky resolution
 
-### Options for the owner
+### Owner decision 1 — un-mark (option 1)
 
-1. **(Recommended) Un-mark the xfail.** Remove the `@pytest.mark.xfail(...)` decorator from
-   `test_mail_reply_opens_threaded_draft_and_never_sends`, leave it as a plain (currently
-   passing) test, and relabel #230 as a tracked intermittent/flaky issue for Phase 02.1
-   investigation rather than a reliably-reproducing bug. This matches the plan's literal
-   instruction ("do not mark it") and keeps the suite honest — no XPASS/FAIL flip-flop risk on
-   the final run. If it times out again during Task 3's final run, that run applies Task 1's
-   normal rule (one diagnostic re-run; a second consecutive failure would then be a legitimate,
-   reproducible Bucket B finding worth re-marking with fresh evidence).
-2. **Widen the read's timeout as a targeted mitigation**, rather than leaving it unmarked. This
-   risks drifting toward "changed an assertion/behavior to make it pass" without new
-   device-observed justification beyond what's already in #230, and touches Mail-timeout
-   semantics CLAUDE.md is deliberately strict about (no shim↔daemon deadline changes; this is a
-   narrower per-call `_run_osascript`-family timeout, not the shim↔daemon hop, but still a
-   timing-sensitive Mail-facing change). Not recommended without explicit owner sign-off.
-3. **Leave the strict xfail as merged**, treating this XPASS as a one-off fluke not to act on.
-   Not recommended — directly contradicts the plan's explicit prohibition against holding a
-   strict xfail on a test that has already both failed and passed with no code change between
-   runs, and risks a non-deterministic Task 3 gate result.
+Commit `35e2462` on `origin/develop` (2026-09-30 09:16, "test(02-05): #230 is intermittent — no
+xfail on the reply test (owner decision)") removed the strict xfail; #230 stays open, relabelled
+intermittent for Phase 02.1. A first attempt at Task 3's final run followed in that session,
+09:19–11:17 (`sweep-02` at `35e2462`, daemon still `7e8a079`, no rebuild diff):
 
-**If there is no answer:** this plan cannot safely proceed to Task 3 — the final gate's "0
-failed, 0 errors" criterion is not currently well-defined for this one nodeid (it depends on
-Mail's real-time responsiveness at run time, not on a fixed, known-correct expectation). Task 3
-is not attempted until this is resolved.
+```
+junit: tests 80 failures 1 errors 0 skipped 2 (time 7081s)
+= 1 failed, 77 passed, 1 skipped, 1492 deselected, 1 xfailed in 7081.26s (1:58:01) =
+FAILED tests/test_integration.py::test_mail_reply_opens_threaded_draft_and_never_sends
+```
 
-### What's ready for a continuation agent
+Preserved as `.worktrees/sweep-02-final-attempt1.{xml,log}`. That session ended without recording
+the result; it is recorded here from its files. The D-06 gate failed on the one unmarked test, so
+per Task 3 ("go back to Task 2 with the new finding") Task 1's rule applied: one diagnostic re-run
+of that nodeid.
 
-- `.worktrees/sweep-02` is at `140ffcaa20c676276a27592774e2f6c4318d17d2`, `uv sync`'d, clean.
-  No daemon rebuild is needed (confirmed `git diff --quiet` empty against the installed
-  `7e8a079` build).
-- The 2 marker mails are confirmed present (2/2) in the scratch account's INBOX as of the last
-  check (after Task 1's run 1; not disturbed since — Task 2's re-verification touched no Mail
-  write paths for the 3 passing nodeids, and the 2 Mail-write nodeids' own postconditions were
-  unaffected).
-- Once the owner's decision is applied (a small follow-up commit/PR if option 1 or 2 is chosen,
-  or none if option 3), Task 3 proceeds exactly as written: a final full sweep run (or reuse of
-  Task 1's run if it were already 0/0, which it was not), the D-06 gate check, the "Skips and
-  xfails" SUMMARY section, and `.worktrees/sweep-02` removal.
+### Diagnostic re-run (the one allowed) — FAILED again, same call
+
+Precondition: watchdog line 8 s old (`2026-09-30 19:14:21 mail_cpu=3.4% mem=0.2% rss=49MB
+osascript=0`), Mail pid 92104 idle.
+
+```
+cd .worktrees/sweep-02 && MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration -rA -q \
+  tests/test_integration.py::test_mail_reply_opens_threaded_draft_and_never_sends
+E   macos_apps_mcp.errors.NativeTimeout: The macOS app didn't respond within 30.0s (...)
+    Mail (pid 92104, up 01-06:06:59, state S, 0.3% CPU) is IDLE yet not answering Apple Events (...)
+FAILED tests/test_integration.py::test_mail_reply_opens_threaded_draft_and_never_sends
+1 failed in 31.21s
+```
+
+Recorded as `.worktrees/sweep-02-diag-230-final.{xml,log}`. Both failures (attempt 1 and this
+re-run) are the same call chain — `MailAdapter().reply` → `mail_drafts.reply` →
+`mail_outgoing.quoted_body` → `run_osascript` reading `content of m` of the message being replied
+to (`MI9PR01MB4051264DEAD1EC572E7704A1E4E98B2@…exchangelabs.com` in attempt 1,
+`1790766398600.141fbded-…@26077024t.mobilevikings.be` in the re-run) — timing out at the 30 s cap.
+
+**Not a wedge.** The runtime's hint names facts §9b, but the evidence contradicts it: 77 tests
+passed in the same attempt-1 sweep, and at 19:17:08, right after the re-run, a bare
+`tell application "Mail" to get name of every account` from the same shell (the VS Code Claude
+extension's TCC identity, so Automation is granted there too) returned 8 account names in under a
+second. During the re-run the watchdog saw Mail RSS jump 49 MB → 242 MB at 3.4 % CPU, then idle —
+Mail loading that message's body on demand, not an event-queue stall. Hypothesis handed to 02.1
+on #230: `content` on a message whose body is not downloaded triggers an IMAP fetch that can
+exceed 30 s; the test picks a real inbox message, so the message differs per run. Tally: 4
+failures in 5 device runs (run 1, its diagnostic re-run, attempt 1, this re-run) and 1 pass
+(the 2026-09-29 re-verification). Evidence posted as a comment on #230.
+
+### Owner decision 2 — non-strict xfail, then the final sweep
+
+A second consecutive failure is the "legitimate, reproducible Bucket B finding worth re-marking
+with fresh evidence" that option 1 foresaw. Put to the owner (2026-09-30 ~19:40): (a) non-strict
+xfail, recommended; (b) strict xfail per the D-07 wording — about 1 run in 5 would XPASS and fail
+the gate; (c) investigate the content read now (02.1 work). Owner: **(a)**, and **go** for the
+2-hour final sweep in this session (plan rule: a new session re-asks before any run).
+
+Landed in lane `.worktrees/xfail-230` (branch `test/xfail-230-intermittent`, off `origin/develop`
+@ `167367e`): `@pytest.mark.xfail(strict=False, reason="#230 — intermittent: …")` on the reply
+test, 6 insertions in `tests/test_integration.py`; `ruff check` and `ruff format --check` clean;
+the nodeid still collects. PR [#236](https://github.com/elfensky/macos-apps-mcp/pull/236) →
+required check passed (1m03s) → `gh pr merge --rebase --delete-branch` → **`32386ff` on
+`origin/develop`**. Lane removed.
+
+`strict=False` is a deliberate, owner-approved deviation from D-07's "strict xfail" wording for
+this one test: a strict mark on a test that both fails and passes makes the D-06 gate
+non-deterministic, which is exactly what the halt was about.
+
+## Task 3: Final full sweep green by D-06 — COMPLETE
+
+### Sync and precondition
+
+`sweep-02` checked out detached at `32386ff` (`origin/develop` after #236), `uv sync` ok.
+`git diff --stat 7e8a079 origin/develop -- macos_apps_mcp packaging scripts` is empty: every
+commit since the installed build is tests, planning or `pyproject.toml`'s ruff exclude — no
+daemon rebuild, `$BUILT` unchanged.
+
+D-03 precondition (`.worktrees/sweep-02-final-precondition.txt`):
+
+```
+D-03 precondition at Wed Sep 30 19:50:49 CEST 2026
+-	0	ren.lav.mail-watchdog
+2026-09-30 19:49:47 mail_cpu=0.0% mem=0.6% rss=137MB osascript=0
+2026-09-30 19:50:18 mail_cpu=0.0% mem=0.2% rss=46MB osascript=0
+2026-09-30 19:50:48 mail_cpu=0.0% mem=0.2% rss=52MB osascript=0
+Mail pid: 92104
+osascript procs: 0
+sweep-02 HEAD: 32386ff
+daemon build: --- summary --- PROBE PASSED     (.daemon_probe.py 0.11.0 7e8a079…)
+watchdog line age: 4s
+```
+
+### Run and gate
+
+```
+cd .worktrees/sweep-02 && MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration -rA \
+  --junitxml=.worktrees/sweep-02-final.xml 2>&1 | tee .worktrees/sweep-02-final.log
+sweep start Wed Sep 30 19:50:52 CEST 2026 … sweep end Wed Sep 30 21:51:42 CEST 2026
+```
+
+junit counts (the plan's verify command, exit 0): `tests 80 failures 0 errors 0 skipped 3`
+(junit's `skipped` counts the 2 xfails together with the 1 skip), time 7248 s.
+
+pytest summary line: `==== 77 passed, 1 skipped, 1492 deselected, 2 xfailed in 7248.22s (2:00:48) ====`
+
+**D-06 gate: PASS** — failures 0, errors 0, no XPASS. Mail stayed responsive throughout (watchdog
+`osascript=0` between calls; Mail pid 92104 unchanged, never force-quit).
+
+Marker mails in the scratch INBOX (`imap://AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1/INBOX`) after the
+run: **2/2** — `<748F15CE-D3A6-4594-B8B0-DFAF9EAE2707@lav.ren>` and
+`<903E7153-34B4-4AB8-A51D-9E6845FD5C0D@lav.ren>`, via `mail_search(subject="macos-apps-mcp sweep
+marker", limit=5)` on the installed daemon.
+
+ruff on the final tree (`.worktrees/sweep-02-final-ruff.txt`):
+
+```
+ruff on sweep-02 @ 32386ff, Wed Sep 30 19:51:59 CEST 2026
+All checks passed!
+104 files already formatted
+```
+
+### Skips and xfails (D-06, for 02-VERIFICATION.md)
+
+| Kind | Nodeid | Reason / issue |
+|---|---|---|
+| SKIPPED | `tests/test_integration.py::test_mail_reads_return_id_triple_real_inbox` (line 1268) | `inbox too large for the AppleScript whose-scan within 30s` — a property of this Mac's data (a large real inbox), deliberate per the test's docstring; flagged for the verifier exactly as in Task 1, unchanged |
+| XFAIL (strict) | `tests/integration/test_mail_outbound.py::test_rollback_verifies_a_real_delete` | #229 — `rollback()` cannot verify delete of a windowless outgoing message in the §3c zombie-delete state; reproduced on macOS 27.0 (4th consecutive reproduction) |
+| XFAIL (non-strict) | `tests/test_integration.py::test_mail_reply_opens_threaded_draft_and_never_sends` | #230 — intermittent: `quoted_body()` content read exceeds the 30 s cap on some inbox messages; xfailed (timed out) on this run too |
+
+### Clean-up
+
+`git worktree remove --force .worktrees/sweep-02` done; `git worktree list` no longer lists it.
+Run artifacts kept under the git-ignored main-checkout `.worktrees/`: `sweep-02-run1.{xml,log}`,
+`sweep-02-final-attempt1.{xml,log}`, `sweep-02-diag-230-final.{xml,log}`,
+`sweep-02-final-precondition.txt`, `sweep-02-final-ruff.txt`, `sweep-02-final.{xml,log}`.
+Vault journal: "Phase 2 device sweep green on macOS 27.0 …" logged 2026-09-30.
 
 ## Files Created/Modified
 
 - `tests/integration/test_mail_outbound.py`, `tests/test_doctor.py`, `tests/test_integration.py`
   — all via PR #231 (merge commit `140ffcaa20c676276a27592774e2f6c4318d17d2` on
   `origin/develop`), not as commits in this plan's own checkout.
-- No files created or modified in the main checkout by this executor.
+- `tests/test_integration.py` — again via commit `35e2462` (owner, un-mark) and PR #236
+  (rebase commit `32386ff` on `origin/develop`, non-strict xfail with fresh evidence).
+- Run artifacts under the git-ignored `.worktrees/` (listed in Task 3 → Clean-up).
+- No files created or modified in the main checkout; this SUMMARY lands by PR from a locked
+  worktree per the repo's lane rule.
 
 ## Decisions Made
 
-- See "key-decisions" in frontmatter and the HALT section above — the central decision (Task 1
-  triage buckets) was applied; the flaky-test resolution is deferred to the owner.
+- Task 1 triage buckets applied as the plan specifies (2 × B, 3 × C, 0 × A).
+- The #230 flaky row was the owner's call, twice: un-mark (35e2462), then non-strict xfail with
+  fresh evidence plus the "go" for the final run (PR #236). See "key-decisions" in the
+  frontmatter and the Task 2 continuation.
 
 ## Deviations from Plan
 
@@ -323,6 +433,18 @@ None in the Rule 1-3 auto-fix sense — every code-facing question found was eit
 assertion (Bucket C, fixed per the plan's own D-08 process) or a Mail write-path finding (Bucket
 B, filed and xfailed per D-07), both exactly as the plan specifies. The HALT itself is not a
 deviation — it is the plan's own designed behavior for a Flaky row, executed as written.
+
+- 2026-09-30: Task 2's continuation and Task 3 were executed inline by the phase orchestrator
+  session (execute-phase, interactive style) rather than by a fresh executor subagent, after the
+  owner's answers; every plan rule — one diagnostic re-run, owner decision on a flaky row, a
+  new session's "go" before any run, the D-03 watchdog precondition — was applied as written.
+- The final-sweep attempt 1 (2026-09-30 09:19–11:17) was run by an earlier session that ended
+  without a SUMMARY update; its result is recorded here from the files it left.
+- `strict=False` on the #230 mark instead of D-07's strict wording — owner decision 2, see the
+  Task 2 continuation.
+- This SUMMARY lands by PR from a locked worktree (repo lane rule), not as a commit on the main
+  checkout's `develop`: the earlier direct planning commits had left that branch 11 ahead / 8
+  behind origin and were re-landed by PR #234 on 2026-09-30.
 
 ## Issues Encountered
 
@@ -351,35 +473,28 @@ None — no external service configuration required.
 
 ## Next Phase Readiness
 
-- Not ready. This plan halts before Task 3 (GATE-12's final green run) and before Task
-  02-06 (v0.12.0 release cut), which depends on this plan closing.
-- Once the owner resolves the flaky-test question above, a continuation can complete Task 2's
-  remaining acceptance criteria (all 5 affected nodeids re-proven with **no failed, error, or
-  unexpected xpassed result** — currently 4 of 5 meet that bar) and then run Task 3.
+- Ready. GATE-12 is proven; 02-06 (v0.12.0 release cut) is unblocked, and its Task 1
+  precondition holds: `.worktrees/sweep-02-final.xml` reports failures 0 and errors 0.
+- Open for Phase 02.1: #229 (rollback cannot verify a windowless delete) and #230 (content read
+  for the reply quote exceeds 30 s on some messages — IMAP-fetch hypothesis on the issue),
+  alongside #206 and #208 already on the roadmap.
 
 ---
 *Phase: 02-gate-close-fail-closed-suite-and-device-sweep*
-*Halted: 2026-09-29*
+*Completed: 2026-09-30*
 
 ## Self-Check: PASSED
 
 - `.planning/phases/02-gate-close-fail-closed-suite-and-device-sweep/02-05-SUMMARY.md` exists on
-  disk (this file).
-- `.worktrees/sweep-02-run1.log` and `.worktrees/sweep-02-run1.xml` exist and match the pasted
-  counts (`tests 80 failures 5 errors 0 skipped 1`; pytest summary `5 failed, 74 passed, 1
-  skipped, ... 6679.74s`).
-- PR #231 confirmed `MERGED` via `gh pr view 231 --json state,mergeCommit` →
-  `140ffcaa20c676276a27592774e2f6c4318d17d2`, confirmed present in `origin/develop`'s log
-  (`.worktrees/sweep-02` fetched and checked out to it).
-- Issues #229 and #230 confirmed created via their returned URLs
-  (`https://github.com/elfensky/macos-apps-mcp/issues/229`,
-  `.../issues/230`).
-- Marker-mail count (2/2) re-confirmed via a direct `MailAdapter().search(...)` call against
-  `.worktrees/sweep-02` (post-merge tree) immediately before writing this SUMMARY.
-- The re-verification pytest output (`3 passed, 1 xfailed, 1 failed`) and the isolated
-  `test_mail_reply...` re-run (`XPASS(strict)` → `FAILED`) are pasted verbatim above, not
-  narrated.
-- No commits exist in this plan's own main checkout — matches the plan's execution model (all
-  code changes landed via the `test/sweep-findings` PR lane, per CLAUDE.md worktree discipline);
-  this SUMMARY itself is intentionally left uncommitted per this executor's dispatch instructions
-  (the orchestrator commits it).
+  disk (this file) and lands by PR.
+- `.worktrees/sweep-02-final.xml` parsed with the plan's verify command: exit 0, `tests 80
+  failures 0 errors 0 skipped 3`; `.worktrees/sweep-02-final.log` summary line `77 passed, 1
+  skipped, 1492 deselected, 2 xfailed in 7248.22s (2:00:48)` — pasted above, not narrated.
+- PR #236 confirmed `MERGED` → `32386ff` on `origin/develop`; `sweep-02` ran detached at that sha
+  (precondition file line `sweep-02 HEAD: 32386ff`).
+- Daemon probe `PROBE PASSED` at `7e8a079` (0.11.0) immediately before the run; no
+  daemon-relevant diff between `7e8a079` and `origin/develop`.
+- Marker-mail count 2/2 re-confirmed via the installed daemon's `mail_search` after the run.
+- `git worktree list` lists no `.worktrees/sweep-02`.
+- No commits on the main checkout's `develop`; the xfail change and this SUMMARY each went
+  through a locked worktree and a rebase-merged PR.

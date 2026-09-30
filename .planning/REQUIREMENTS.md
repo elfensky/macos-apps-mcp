@@ -20,7 +20,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **GATE-09**: The recoverable destructive plane runs its own preflight — `recoverable(op, targets, act, *, dry_run, present)` performs check_batch → present → preview; a dry run without a stated `present` is an error; `dedupe_batch(dry_run=True)` can no longer report "planned" for targets it never checked; device-verified on a scratch mailbox with the Mail watchdog running, dry-run envelopes and osascript argv byte-identical to before
 - [x] **GATE-10**: A tripwire test asserts every AppleScript template's `with timeout` backstop ≥ the host-side `timeout=` at every call site; `mail._DEDUPE` (600 < 900) fixed; `check_batch`'s refusal text no longer claims a backup for `update_status`; stale `daemon.py` comment removed
 - [x] **GATE-11**: Doctor unit tests no longer run live `pgrep`/`ps` on the dev machine (17 tests go through the locked `tracked_run` seam)
-- [ ] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
+- [x] **GATE-12**: The full device integration suite (`uv run pytest -m integration`) is green on the current macOS after the gate lands
 - [x] **GATE-13**: Each gate cut is re-landed by rebasing onto the previous PR on `develop` (1 → 7 → 5 → 2; Mail-scoped 3/4/9 in parallel); after cards 5 and 2 the daemon is rebuilt, restarted and `doctor().version` + one outbound dry run confirm the gates still read correctly; `spike/arch-review-*` branches and `.claude/worktrees/` are deleted afterwards
 
 ### Mail — email work comes before any new or additional feature (owner, 2026-09-24)
@@ -150,7 +150,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-09 | Phase 1 | Complete |
 | GATE-10 | Phase 1 | Complete |
 | GATE-11 | Phase 2 | Complete |
-| GATE-12 | Phase 2 | Pending |
+| GATE-12 | Phase 2 | Complete |
 | GATE-13 | Phase 1 | Complete |
 | MAIL-01 | Phase 02.1 | Pending |
 | MAIL-02 | Phase 02.1 | Pending |

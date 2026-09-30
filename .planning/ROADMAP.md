@@ -115,7 +115,7 @@ Plans:
   2. `uv run pytest` runs no live `pgrep`/`ps` against the dev machine: doctor's 17 process-probe tests go through the locked `tracked_run` seam.
   3. `uv run pytest -m integration` is green on the current macOS against a daemon rebuilt and reinstalled from the gate, and `uv run ruff check .` plus `uv run ruff format --check .` pass.
 
-**Plans**: 4/6 plans executed in 4 waves
+**Plans**: 5/6 plans executed in 4 waves
 
 Plans:
 **Wave 1**
@@ -130,7 +130,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-05-PLAN.md — GATE-12: full device sweep, findings (fix / issue + strict xfail / record), final green run (D-05..D-08)
+- [x] 02-05-PLAN.md — GATE-12: full device sweep, findings (fix / issue + strict xfail / record), final green run (D-05..D-08)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -221,7 +221,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
-| 2. Gate Close — Fail-Closed Suite and Device Sweep | 4/6 | In Progress|  |
+| 2. Gate Close — Fail-Closed Suite and Device Sweep | 5/6 | In Progress|  |
 | 02.1. Mail Fixes (INSERTED) | 0/TBD | Not started | - |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
