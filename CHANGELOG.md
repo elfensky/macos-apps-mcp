@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-30 — Architecture gate
+
 ### Changed
 
 - **Dry-run defaults are correct by construction (GATE-05).** `delete_event`,
