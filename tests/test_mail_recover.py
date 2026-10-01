@@ -17,7 +17,7 @@ import pytest
 
 from macos_apps_mcp import audit
 from macos_apps_mcp.adapters import mail_index, mail_recover
-from macos_apps_mcp.errors import BatchTooLarge, NativeError
+from macos_apps_mcp.errors import AutomationDenied, BatchTooLarge, NativeError, NativeTimeout
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 BOX = f"imap://{ACCT}/INBOX"
@@ -358,3 +358,98 @@ def test_purge_backup_removes_the_receipts_directory(store):
     )
     assert mail_recover.purge_backup(result["receipt"]) == 1
     assert mail_recover.purge_backup(result["receipt"]) == 0
+
+
+# --- receipt on timeout (MAIL-02, D-06/D-07) ------------------------------------------
+
+
+def test_a_timeout_mid_act_still_writes_a_done_record_and_names_the_receipt(store):
+    # D-06: act() raising NativeTimeout must not leave a plan with no outcome record.
+    def act(ts):
+        raise NativeTimeout("osascript killed")
+
+    with pytest.raises(NativeTimeout) as e:
+        mail_recover.recoverable(
+            "move", [_target("a@x"), _target("b@x")], act, destination=ARCHIVE
+        )
+    assert isinstance(e.value.__cause__, NativeTimeout)
+    assert e.value.__cause__.args[0] == "osascript killed"
+
+    plan = [r for r in _audit_lines() if r.get("phase") == "plan"][-1]
+    receipt_id = plan["receipt"]
+    text = str(e.value)
+    assert receipt_id in text
+    assert "not-in-source" in text
+    assert f'mail_undo("{receipt_id}")' in text
+    rerun_idx = text.index("re-run")
+    undo_idx = text.index("mail_undo(")
+    assert rerun_idx < undo_idx
+    assert "dismiss any stuck prompt" not in text
+
+
+def test_timeout_done_record_marks_every_target_unknown_with_matching_keys(store):
+    # D-06/edge MAIL-02/encoding: the done record's keys are the same Target.id
+    # strings as the plan record's targets[].id, so undo_plan's per-id lookup matches.
+    def act(ts):
+        raise NativeTimeout("osascript killed")
+
+    with pytest.raises(NativeTimeout):
+        mail_recover.recoverable(
+            "move", [_target("a@x"), _target("b@x")], act, destination=ARCHIVE
+        )
+    plan = [r for r in _audit_lines() if r.get("phase") == "plan"][-1]
+    _, outcomes = mail_recover.find_receipt(plan["receipt"])
+    assert outcomes == {"a@x": "unknown", "b@x": "unknown"}
+    assert set(outcomes.keys()) == {t["id"] for t in plan["targets"]}
+
+
+def test_automation_denied_propagates_unchanged_with_no_done_record(store):
+    # D-06: only NativeTimeout is caught — AutomationDenied/AppNotRunning act on
+    # nothing and keep today's path (no done record).
+    original = AutomationDenied("Mail is not running")
+
+    def act(ts):
+        raise original
+
+    with pytest.raises(AutomationDenied) as e:
+        mail_recover.recoverable(
+            "move", [_target("a@x"), _target("b@x")], act, destination=ARCHIVE
+        )
+    assert e.value is original
+    plan = [r for r in _audit_lines() if r.get("phase") == "plan"][-1]
+    _, outcomes = mail_recover.find_receipt(plan["receipt"])
+    assert outcomes == {}
+
+
+def test_undo_plan_replays_a_timeout_receipts_unknown_targets(store):
+    # D-07: a timeout receipt's all-unknown done record still undoes.
+    def act(ts):
+        raise NativeTimeout("osascript killed")
+
+    with pytest.raises(NativeTimeout):
+        mail_recover.recoverable(
+            "move", [_target("a@x"), _target("b@x")], act, destination=ARCHIVE
+        )
+    plan = [r for r in _audit_lines() if r.get("phase") == "plan"][-1]
+    rec, targets = mail_recover.undo_plan(plan["receipt"])
+    assert rec["destination"] == ARCHIVE
+    assert {t.id for t in targets} == {"a@x", "b@x"}
+    assert all(t.folder == BOX for t in targets)
+
+
+def test_undo_plan_replays_ok_and_unknown_but_excludes_the_rest(store):
+    # D-07: ok and unknown replay; not-in-source, failed, missing and ERROR … stay
+    # excluded.
+    result = mail_recover.recoverable(
+        "move",
+        [_target("a@x"), _target("b@x"), _target("c@x"), _target("d@x")],
+        lambda ts: {
+            "a@x": "ok",
+            "b@x": "unknown",
+            "c@x": "not-in-source",
+            "d@x": "ERROR boom",
+        },
+        destination=ARCHIVE,
+    )
+    rec, targets = mail_recover.undo_plan(result["receipt"])
+    assert [t.id for t in targets] == ["a@x", "b@x"]
