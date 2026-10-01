@@ -1633,6 +1633,32 @@ def test_parse_statuses_skips_partial_records():
     assert mail._parse_statuses(raw) == {"a@x": "ok", "b@x": "not-in-source"}
 
 
+def test_copies_matches_message_id_exact_bare_form_case_sensitive(monkeypatch):
+    # MAIL-01/encoding: equality in the by-ID map is exact on the bare form, never
+    # case-folded — "A@X" must not match a target of "a@x". A `missing value` entry
+    # (header-less message) and a blank entry never match anything either.
+    def fake_run(script, *args, **kw):
+        assert script is mail._BULK
+        mids = US.join(["A@X", "<a@x>", "missing value", ""])
+        nids = US.join(["1", "2", "3", "4"])
+        return mids + RS + nids
+
+    monkeypatch.setattr(runtime, "run_osascript", fake_run)
+    out = mail._copies(_INBOX_BOX, ["a@x"])
+    assert out == {"a@x": ["2"]}  # "A@X" (wrong case) excluded; bracketed form stripped
+
+
+def test_counts_skips_missing_value_and_blank_counts_case_sensitive(monkeypatch):
+    def fake_run(script, *args, **kw):
+        assert script is mail._BULK
+        mids = US.join(["a@x", "a@x", "A@X", "missing value", ""])
+        return mids + RS  # no internal ids requested
+
+    monkeypatch.setattr(runtime, "run_osascript", fake_run)
+    out = mail._counts(_INBOX_BOX)
+    assert out == {"a@x": 2, "A@X": 1}
+
+
 def test_tri_state_distinguishes_absent_from_false():
     # argv carries only text, so "leave it alone" needs a spelling of its own —
     # collapsing it to "0" would silently mark a whole batch unread
