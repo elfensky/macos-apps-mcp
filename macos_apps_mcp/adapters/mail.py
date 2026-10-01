@@ -858,7 +858,9 @@ class MailAdapter:
                 out[r["message_id"]] = text
         return out
 
-    def create_draft(self, to: str, subject: str, body: str) -> dict:
+    def create_draft(
+        self, to: str, subject: str, body: str, from_address: str | None = None
+    ) -> dict:
         """Create a Mail draft and OPEN it for the human to review/send — NEVER sends.
         Atomic (#44): if any step after creation fails, the script rolls the partial
         draft back before erroring. That rollback is verified but NOT sufficient (#133):
@@ -872,8 +874,14 @@ class MailAdapter:
         address it by that stable id. The body is written to a 0600 tempfile and read
         by the script as «class utf8» (never interpolated); to/subject go via argv.
         The tempfile is deleted after the (synchronous) script has read its content
-        into the draft."""
-        return mail_drafts.create_draft(to, subject, body)
+        into the draft.
+
+        ``from_address`` (#208, D-11) is applied the way ``send``'s is: an address one
+        of Mail's accounts owns (matched case-insensitively; `Name <addr>` accepted),
+        or omitted for Mail's default. An address no account owns is refused before
+        any native write — Mail would otherwise substitute its default account
+        silently. The locator's `from` reports which applies."""
+        return mail_drafts.create_draft(to, subject, body, from_address)
 
     def _draft_records(self) -> list[dict]:
         """The Drafts read: Pointer fields plus the discrete ``subject``/``to`` (#157).
@@ -954,9 +962,14 @@ class MailAdapter:
         send — reading a stored message strands nothing, and an id alone tells an
         approving human nothing (see ``mail_outgoing``, rule 2).
 
-        ``from_address`` sets the sending account. Omitted, Mail picks its default —
-        which is NOT predictable from account order (device-verified), so the preview
-        reports "(Mail default account)" rather than a guess. Addresses accept a
+        ``from_address`` picks the sending account and must be an address one of
+        Mail's accounts owns (matched case-insensitively; ``Name <addr>`` accepted);
+        any other address is refused before Mail builds anything — Mail would
+        otherwise substitute its default account silently (#208, MAIL-04, D-09). The
+        dry run does NOT check ownership — it makes no native call, and its preview
+        reports the caller's typed value. Omitted, Mail picks its default — which is
+        NOT predictable from account order (device-verified), so the preview reports
+        "(Mail default account)" rather than a guess. Addresses accept a
         comma-separated string or a list; ``html=True`` sends the body as HTML.
 
         A successful return (``sent: True``) means Mail ACCEPTED the message — NOT

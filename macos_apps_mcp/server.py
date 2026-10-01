@@ -644,14 +644,23 @@ def save_mail_attachment(
 
 
 @_additive_tool(adapter="mail", permission="Automation")
-def create_draft(to: str, subject: str = "", body: str = "") -> dict:
+def create_draft(
+    to: str, subject: str = "", body: str = "", from_address: str | None = None
+) -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
     its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
-    "mailbox", "note"}) — a freshly opened compose window has no stable id yet, so
-    this says where to find it (Drafts) instead of fabricating one; save it and
-    `drafts()` resolves it by its stable message-id. If the create FAILS partway, Mail
-    may still leave a stray autosaved draft behind (#133 — its autosave is
+    "mailbox", "from", "note"}) — a freshly opened compose window has no stable id
+    yet, so this says where to find it (Drafts) instead of fabricating one; save it
+    and `drafts()` resolves it by its stable message-id. If the create FAILS partway,
+    Mail may still leave a stray autosaved draft behind (#133 — its autosave is
     asynchronous and cannot be suppressed); `drafts()` + `delete_draft()` clear it.
+
+    A new draft is unthreaded; it is sent from `from_address` (an address one of
+    Mail's accounts owns, matched case-insensitively, `Name <addr>` accepted) or
+    Mail's default account.
+    An address no account owns is refused before Mail builds anything — Mail would
+    otherwise use its default account silently. To answer a message use
+    `mail_reply`, which is threaded and sent from the account that received it.
 
     THE AUTOSAVE WINDOW: Mail stamps the Message-ID only when it autosaves the draft,
     ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
@@ -659,8 +668,8 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     then `drafts()` resolves it. **Do NOT retry this call** because the draft has not
     appeared: you get two drafts and the first one still arrives.
     Additive (creates a draft; does not send/modify/delete); needs Automation access
-    for Mail."""
-    return _mail.create_draft(to, subject, body)
+    for Mail (the ownership read is Automation too)."""
+    return _mail.create_draft(to, subject, body, from_address)
 
 
 @_additive_tool(audit="reply", adapter="mail", permission="Automation")
@@ -903,7 +912,11 @@ def send_mail(
     preview shape is the same for every send tool here — {action, to, cc, bcc, from,
     subject, source, body_chars, html}. Pass `dry_run=False` to actually send.
     Addresses are comma-separated (or a list). `from_address` picks the sending
-    account; omitted, Mail uses its default. `html=True` sends the body as HTML.
+    account and must be an address one of Mail's accounts owns (matched
+    case-insensitively; `Name <addr>` accepted).
+    Any other address is refused before Mail builds anything — omitted, Mail uses
+    its default. The dry run does not check ownership — it makes no native call.
+    `html=True` sends the body as HTML.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
     Automation access for Mail."""
     return _mail.send(
