@@ -638,9 +638,12 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     seen = {}
 
     def fake(script, *argv):
-        # a real send now dispatches TWO scripts: _SEND, then _OUTBOX_COUNT (#134's
-        # outbox truth-check) — recorded separately so asserting the _SEND argv can't
-        # be clobbered by the outbox call's (empty) argv.
+        # a real send now dispatches THREE scripts: the ownership read
+        # (mail_addressing._MY_ADDRESSES, #208/D-09), _SEND, then _OUTBOX_COUNT
+        # (#134's outbox truth-check) — recorded separately so asserting the _SEND
+        # argv can't be clobbered by another call's (empty) argv.
+        if script is mail_addressing._MY_ADDRESSES:
+            return f"Me@Corp.com{US}other@corp.com"
         if script is mail_outgoing._SEND:
             seen["send_script"], seen["send_argv"] = script, argv
             return "sent"
@@ -665,7 +668,8 @@ def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     assert out["outbox_pending"] == 3
     assert "Outbox" in out["note"]
     subj, _path, is_html, from_addr, to_j, cc_j, bcc_j = seen["send_argv"]
-    assert (subj, is_html, from_addr) == ("Hi", "1", "me@corp.com")
+    # Mail's own spelling (D-09), not the caller's lower-cased typing.
+    assert (subj, is_html, from_addr) == ("Hi", "1", "Me@Corp.com")
     assert to_j == f"a@b.com{US}e@f.com"
     assert (cc_j, bcc_j) == ("c@d.com", "x@y.com")
     # the truth-check ran too

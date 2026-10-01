@@ -10,10 +10,13 @@ is why #157 rebuilds one and why the refusals exist at all.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters import mail, mail_drafts, mail_outgoing
+from macos_apps_mcp.adapters import mail, mail_addressing, mail_drafts, mail_outgoing
+from macos_apps_mcp.errors import AutomationDenied, NativeError
 from macos_apps_mcp.text import RS, US
 
 _PREVIEW_KEYS = {
@@ -320,4 +323,140 @@ def test_drafts_expose_to_and_subject_as_discrete_fields(monkeypatch):
     assert rec["subject"] == "Quarterly numbers"
     assert rec["to"] == "boss@corp.com"
     assert rec["id"] == "<d@x>"
+
+
+# --- #208/MAIL-04: an unowned from_address is refused before any native write --------
+#
+# Mail does not reject a from_address no account owns — it silently sends from its
+# default account instead (spike 005, device-verified). So the refusal lives in Python,
+# before `_SEND` ever runs. `owned_sender` (mail_outgoing) checks against
+# `owned_addresses()` (mail_addressing), which reads `_MY_ADDRESSES` and fails CLOSED
+# (an unreadable Mail raises; it never returns {}).
+
+
+def _owned(*spellings: str) -> str:
+    """One _MY_ADDRESSES payload: each account's address, US-joined."""
+    return US.join(spellings)
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "me@corp.com",
+        "Andrei <ME@CORP.COM>",
+        "me@corp.com <ME@CORP.COM>",
+    ],
+)
+def test_send_passes_mails_spelling_for_an_owned_from_address(monkeypatch, typed):
+    """Case-insensitive match; a display name or Mail's own `x@y <X@Y>` shape both
+    resolve to the address inside the last `<...>` (D-09 — not email.utils.parseaddr,
+    which returns ('', '') on that shape)."""
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail_addressing._MY_ADDRESSES:
+            return _owned("Me@Corp.com", "other@corp.com")
+        if script is mail_outgoing._OUTBOX_COUNT:
+            return "0"
+        return "sent"
+
+    _patch_run(monkeypatch, fake)
+    monkeypatch.setattr(
+        runtime, "body_file", lambda text: nullcontext("/tmp/fake-body")
+    )
+    out = mail.MailAdapter().send(
+        "x@y.com", "Hi", "body", from_address=typed, dry_run=False
+    )
+    assert out["sent"] is True
+    from_addr = seen[mail_outgoing._SEND][3]
+    assert from_addr == "Me@Corp.com"  # Mail's own spelling, not the caller's typing
+
+
+def test_send_refuses_an_unowned_from_address_before_any_native_write(monkeypatch):
+    """Mail would silently fall back to its default account instead of rejecting this —
+    so the refusal must fire in Python before anything is built. Only the ownership
+    read happens; `_SEND` never runs and `body_file` is never entered (the autouse
+    fail-closed native seam raises if it is)."""
+    calls = []
+
+    def fake(script, *argv):
+        calls.append(script)
+        return _owned("Me@Corp.com")
+
+    _patch_run(monkeypatch, fake)
+    with pytest.raises(ValueError, match="nobody@elsewhere.example") as exc_info:
+        mail.MailAdapter().send(
+            "x@y.com",
+            "Hi",
+            "body",
+            from_address="nobody@elsewhere.example",
+            dry_run=False,
+        )
+    assert "Me@Corp.com" in str(exc_info.value)
+    assert calls == [mail_addressing._MY_ADDRESSES]
+
+
+def test_send_fails_closed_when_my_addresses_is_unreadable(monkeypatch):
+    """D-08: owned_addresses() FAILS CLOSED — a failing read propagates, it never
+    returns {} (which would let an unowned sender through as "no addresses owned, so
+    nothing refuses it")."""
+
+    def fake(script, *argv):
+        if script is mail_addressing._MY_ADDRESSES:
+            raise AutomationDenied("Mail is not authorized")
+        raise AssertionError(f"must not reach {script!r} after a fail-closed read")
+
+    _patch_run(monkeypatch, fake)
+    with pytest.raises(AutomationDenied):
+        mail.MailAdapter().send(
+            "x@y.com", "Hi", "body", from_address="me@corp.com", dry_run=False
+        )
+
+
+def test_send_fails_closed_when_my_addresses_is_empty(monkeypatch):
+    """An empty address list is not "nothing to check against" — it is Mail still
+    launching, or every account's address list genuinely empty. Either way, raise
+    rather than silently treating every from_address as owned."""
+
+    def fake(script, *argv):
+        if script is mail_addressing._MY_ADDRESSES:
+            return ""
+        raise AssertionError(f"must not reach {script!r} after a fail-closed read")
+
+    _patch_run(monkeypatch, fake)
+    with pytest.raises(NativeError):
+        mail.MailAdapter().send(
+            "x@y.com", "Hi", "body", from_address="me@corp.com", dry_run=False
+        )
+
+
+def test_send_dry_run_with_unowned_from_address_makes_no_native_call(monkeypatch):
+    """D-10: the ownership check lives only in dispatch(); deliver() calls dispatch()
+    only when dry_run=False. The autouse fail-closed seam raises if either
+    run_osascript or body_file is reached at all."""
+    out = mail.MailAdapter().send(
+        "x@y.com", "Hi", "body", from_address="nobody@elsewhere.example"
+    )
+    assert out["would_send"]["from"] == "nobody@elsewhere.example"
+
+
+def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
+    """A blank from_address means omitted: no ownership read, argv item 4 is empty."""
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail_addressing._MY_ADDRESSES:
+            raise AssertionError("blank from_address must not trigger an ownership read")
+        if script is mail_outgoing._OUTBOX_COUNT:
+            return "0"
+        return "sent"
+
+    _patch_run(monkeypatch, fake)
+    monkeypatch.setattr(
+        runtime, "body_file", lambda text: nullcontext("/tmp/fake-body")
+    )
+    mail.MailAdapter().send("x@y.com", "Hi", "body", from_address="   ", dry_run=False)
+    assert seen[mail_outgoing._SEND][3] == ""
     assert rec["folder"] == "drafts"
