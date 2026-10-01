@@ -238,6 +238,34 @@ def test_dedupe_dry_run_reads_presence(wired):
     assert out["count"] == old["dedupe_dry"]["count"]
 
 
+def test_present_calls_carry_the_scaled_cap(wired):
+    # THE D-05 delta (card 4 pattern): the ONLY change from the v0.11.0 baseline is that
+    # every `_PRESENT` call now carries the scaled bulk-read cap in its kwargs — argv
+    # and dry-run envelopes are byte-identical (pinned by the four tests above).
+    ad, calls = wired
+
+    def present_call_for(fn) -> dict:
+        calls.clear()
+        fn()
+        found = [c for c in calls if c["script"] == "_PRESENT"]
+        assert len(found) == 1, found
+        return found[0]
+
+    for fn in (
+        lambda: ad.move_mail("<a@x>,b@x,c@x", INBOX, ARCHIVE),
+        lambda: ad.trash_mail("<a@x>,b@x,c@x", BOX),
+        lambda: ad.dedupe_batch("<a@x>,b@x", BOX),
+    ):
+        call = present_call_for(fn)
+        n = len(call["args"][2].split(US)) if call["args"][2] else 0
+        assert call["kwargs"] == {"timeout": mail._present_timeout(n)}
+
+    moved = ad.move_mail("a@x", INBOX, ARCHIVE, dry_run=False)
+    call = present_call_for(lambda: ad.undo(moved["receipt"]))
+    n = len(call["args"][2].split(US)) if call["args"][2] else 0
+    assert call["kwargs"] == {"timeout": mail._present_timeout(n)}
+
+
 def test_cap_and_empty_batch_errors(wired):
     old = _old()
     ad, calls = wired

@@ -1728,6 +1728,43 @@ def test_move_mail_dry_run_reports_per_id_presence_and_moves_nothing(
     assert out["destination"] == _ARCHIVE
 
 
+def test_move_mail_dry_run_presence_reads_once_with_the_scaled_cap(
+    monkeypatch, no_backup
+):
+    # Task 1 tracer (#206/D-04): FakeMail INBOX=[a@x]; the dry-run preview is ONE
+    # _PRESENT call whose host cap is mail._present_timeout(len(ids)) — the bulk-read
+    # cap, not the old 30s default.
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("a@x,b@x", _INBOX, _ARCHIVE)
+    assert [c[0] for c in fake.calls] == [mail._PRESENT]
+    assert fake.calls[0][2] == {"timeout": mail._present_timeout(2)}
+    assert fake.calls[0][2] == {"timeout": 182.0}
+    assert [t["status"] for t in out["would_affect"]] == ["present", "missing"]
+
+
+def test_present_script_is_one_bulk_read_matched_under_considering_case():
+    # #206/D-04: _PRESENT reads the mailbox once and matches in AppleScript, not a
+    # per-id `whose` scan — the same exact-equality rule the by-ID act uses.
+    assert mail._PRESENT.count("message id of every message of mb") == 1
+    assert "whose" not in mail._PRESENT
+    assert "considering case" in mail._PRESENT
+    assert "stripFraming" in mail._PRESENT
+    # a failed bulk read yields ERROR <message> for every requested id, not a partial
+    # answer — the per-id error shape the old per-id script produced.
+    assert 'set outcome to "ERROR " & readErr' in mail._PRESENT
+
+
+def test_present_timeout_scales_with_a_floor_from_the_bulk_read_cap():
+    # D-02/D-04: _PRESENT's real cost after the bulk-read rewrite follows mailbox SIZE,
+    # not batch size, so `base` alone (the _BULK_TIMEOUT floor) covers the worst case —
+    # `per_id` stays thin and the clamp at MAX_TARGETS still holds.
+    assert mail._present_timeout(1) == 181.0
+    assert mail._present_timeout(25) == 205.0
+    assert mail._present_timeout(40) == 205.0
+
+
 def test_move_mail_caps_the_batch_before_any_native_call(monkeypatch, no_backup):
     def boom(*a, **kw):
         raise AssertionError("the cap must be enforced before Mail is touched")
