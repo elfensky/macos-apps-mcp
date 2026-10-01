@@ -1,0 +1,84 @@
+[
+ {
+  "method": "today: title+snippet substring",
+  "hit@1": 0.3076923076923077,
+  "hit@3": 0.6153846153846154,
+  "mrr": 0.45512820512820507,
+  "ms/query": 0.03209291921498684,
+  "index_bytes": 0
+ },
+ {
+  "method": "body substring (fold_text, per token)",
+  "hit@1": 0.3076923076923077,
+  "hit@3": 0.6153846153846154,
+  "mrr": 0.46794871794871795,
+  "ms/query": 0.09050638450739476,
+  "index_bytes": 0
+ },
+ {
+  "method": "FTS5 bm25 (porter, OR of tokens)",
+  "hit@1": 0.5384615384615384,
+  "hit@3": 0.6923076923076923,
+  "mrr": 0.6410256410256411,
+  "ms/query": 0.03033338222079552,
+  "index_bytes": 21495
+ },
+ {
+  "method": "native NLContextualEmbedding mean-pool (public)",
+  "hit@1": 0.23076923076923078,
+  "hit@3": 0.46153846153846156,
+  "mrr": 0.4386752136752137,
+  "ms/query": 47.11861861869693,
+  "index_bytes": 65536,
+  "build_s": 15.702,
+  "dim": 512,
+  "chunks_per_s": 2
+ },
+ {
+  "method": "native NLEmbedding 'en' (macOS, no download)",
+  "hit@1": 0.15384615384615385,
+  "hit@3": 0.46153846153846156,
+  "mrr": 0.34706959706959706,
+  "ms/query": 5.882285230864699,
+  "index_bytes": 65536,
+  "build_s": 1.547,
+  "dim": 512,
+  "chunks_per_s": 19
+ },
+ {
+  "method": "sentence-transformers/all-MiniLM-L6-v2",
+  "hit@1": 1.0,
+  "hit@3": 1.0,
+  "mrr": 1.0,
+  "ms/query": 14.811339761273793,
+  "index_bytes": 49152,
+  "build_s": 0.774,
+  "load_s": 0.1,
+  "dim": 384,
+  "chunks_per_s": 29
+ },
+ {
+  "method": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "hit@1": 0.8461538461538461,
+  "hit@3": 0.9230769230769231,
+  "mrr": 0.8999999999999999,
+  "ms/query": 6.200906999695759,
+  "index_bytes": 49152,
+  "build_s": 1.018,
+  "load_s": 0.9,
+  "dim": 384,
+  "chunks_per_s": 32
+ },
+ {
+  "method": "minishlab/potion-multilingual-128M",
+  "hit@1": 0.5384615384615384,
+  "hit@3": 0.6923076923076923,
+  "mrr": 0.6514374514374514,
+  "ms/query": 0.14937815005676106,
+  "index_bytes": 32768,
+  "build_s": 0.009,
+  "load_s": 1.9,
+  "dim": 256,
+  "chunks_per_s": 4786
+ }
+]
