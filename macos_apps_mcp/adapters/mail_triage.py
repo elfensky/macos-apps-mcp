@@ -37,7 +37,7 @@ from ..text import (
     parse_framed,
 )
 from . import mail_index
-from .mail_addressing import _norm_mid
+from .mail_addressing import _MY_ADDRESSES, _norm_mid
 from .mail_index import _deeplink
 
 NEEDS_SCAN = 100  # inbox messages scanned newest-first for needs-response
@@ -131,23 +131,6 @@ on run argv
   return out
 end run"""
 )
-
-# _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
-# iteration raises -1700). Verified on-device.
-_MY_ADDRESSES = """on run argv
-  set us to character id 31
-  set AppleScript's text item delimiters to us
-  set out to ""
-  with timeout of 600 seconds
-  tell application "Mail"
-    repeat with acc in accounts
-      set out to out & ((email addresses of acc) as text) & us
-    end repeat
-  end tell
-  end timeout
-  set AppleScript's text item delimiters to ""
-  return out
-end run"""
 
 # _INBOX_REFS: for inbox messages received within `cutoffSecs` ago (the correlation
 # window), emit the RAW HEADERS (RS-framed) of only those that ARE replies (carry

@@ -323,6 +323,7 @@ def test_drafts_expose_to_and_subject_as_discrete_fields(monkeypatch):
     assert rec["subject"] == "Quarterly numbers"
     assert rec["to"] == "boss@corp.com"
     assert rec["id"] == "<d@x>"
+    assert rec["folder"] == "drafts"
 
 
 # --- #208/MAIL-04: an unowned from_address is refused before any native write --------
@@ -448,7 +449,9 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
     def fake(script, *argv):
         seen[script] = argv
         if script is mail_addressing._MY_ADDRESSES:
-            raise AssertionError("blank from_address must not trigger an ownership read")
+            raise AssertionError(
+                "blank from_address must not trigger an ownership read"
+            )
         if script is mail_outgoing._OUTBOX_COUNT:
             return "0"
         return "sent"
@@ -459,4 +462,3 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
     )
     mail.MailAdapter().send("x@y.com", "Hi", "body", from_address="   ", dry_run=False)
     assert seen[mail_outgoing._SEND][3] == ""
-    assert rec["folder"] == "drafts"
