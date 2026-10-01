@@ -263,7 +263,7 @@ def test_reply_quote_truncates_huge_original(monkeypatch):
 
     huge = "z" * (BODY_HARD_MAX + 100)
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         if _is_reply_script(script):
             return ""
         # _ORIGINAL: sender, date, then a body over the hard cap
@@ -375,7 +375,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
 
     bodies = []
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         if _is_reply_script(script):
             with open(args[1], encoding="utf-8") as f:
                 bodies.append(f.read())
@@ -398,7 +398,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
     calls = []
     bodies = []
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         calls.append((script, args))
         if not _is_reply_script(script):
             # _ORIGINAL: return a US-framed sender/date/body triple
@@ -453,7 +453,7 @@ def test_reply_original_missing_value_skips_quote(monkeypatch):
 
     bodies = []
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         if _is_reply_script(script):
             with open(args[1], encoding="utf-8") as f:
                 bodies.append(f.read())
@@ -810,7 +810,7 @@ def test_reply_all_sends_with_quote(monkeypatch):
     seen = {}
     bodies = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
@@ -1423,7 +1423,7 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
     # is the silent half of this bug.
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
@@ -1463,7 +1463,7 @@ def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
 def test_reply_all_send_passes_the_mailbox(monkeypatch):
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
             return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"

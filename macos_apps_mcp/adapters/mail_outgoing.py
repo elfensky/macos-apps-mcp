@@ -658,7 +658,11 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     carry, so the quote header stays clean even when the script side is bypassed (a
     mocked ``_ORIGINAL`` in tests). An original that cannot be read degrades to an
     unquoted body — the reply is the deliverable, the quote is decoration."""
-    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args)
+    # #230: a body that is not downloaded makes this read an IMAP fetch that ran past
+    # the 30s default on device; 120.0 equals the script's own backstop (GATE-10 is
+    # >=, so equality passes). 02.1-06 observes on device which error surfaces if the
+    # read still reaches the cap.
+    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args, timeout=120.0)
     if not raw.strip() or raw.strip() == _MISSING_VALUE:
         return body
     sender, _, rest = raw.partition(US)
