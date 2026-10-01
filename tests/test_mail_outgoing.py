@@ -142,6 +142,21 @@ def test_the_quote_preamble_exists_once(monkeypatch):
     assert bodies == ["hello [QUOTE]", "hello [QUOTE]"]
 
 
+def test_quoted_body_reads_the_original_with_a_120s_cap(monkeypatch):
+    """#230: a body that is not downloaded makes the content read an IMAP fetch that
+    ran past the 30s default on device. 120.0 equals the script's own backstop
+    (GATE-10's >= invariant passes on equality; D-13)."""
+    seen = {}
+
+    def fake(script, *argv, **kw):
+        seen["kw"] = kw
+        return ""
+
+    _patch_run(monkeypatch, fake)
+    mail_outgoing.quoted_body("hi", "a@b", ("ACCT", "inbox"))
+    assert seen["kw"] == {"timeout": 120.0}
+
+
 # --- #157: send an approved draft by id ----------------------------------------------
 
 
