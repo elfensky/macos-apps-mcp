@@ -801,10 +801,14 @@ def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     names: Mail files a deleted message in its OWNING account's Trash, and a unified
     name ("inbox") cannot say which account that is.
     Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
-    keep `receipt` to undo the batch. Each id is verified to have ARRIVED in Trash
-    (Mail's delete clears the source asynchronously, so "gone from the source" is not
-    a signal that can be read straight after the call). Needs Automation access for
-    Mail, plus Full Disk Access to locate each message's file for the backup."""
+    keep `receipt` to undo the batch. Each copy is deleted by Mail's internal id and
+    verified by the account Trash's count rising, or every one of its copies' source
+    reference going gone within a bounded 6s wait — Mail's delete clears the source
+    ASYNCHRONOUSLY, so "gone from the source" alone is not a signal that can be read
+    straight after the call. A message with several stored copies gets every one of
+    them trashed. If the call times out mid-batch, re-run the same batch or
+    `mail_undo` the receipt. Needs Automation access for Mail, plus Full Disk Access
+    to locate each message's file for the backup."""
     return _mail.trash_mail(ids, mailbox, dry_run=dry_run)
 
 

@@ -572,8 +572,9 @@ on run argv
 end run"""
 )
 
-# _TRASH (#80) — soft delete. Device-verified 2026-08-05, and the verification differs
-# from _MOVE's in a way that matters:
+# _TRASH (#80, by-ID act #206/D-01) — soft delete. Device-verified 2026-08-05 for the
+# soft-delete facts; the by-ID addressing is NEW here (the spike never ran it — D-15's
+# device check is mandatory) and keeps its OWN verification shape, never _MOVE's:
 #
 # 1. `delete <message>` in an ordinary mailbox is a MOVE TO THAT ACCOUNT'S TRASH. It is
 #    not an erase, and the message stays addressable in Trash afterwards. There is no
@@ -583,14 +584,26 @@ end run"""
 # 2. **`delete` is ASYNCHRONOUS on the source side.** Measured t0/t3/t10: the source
 #    still counts the message immediately after the verb returns and only clears by t3,
 #    while Trash is populated at once. So this must NOT copy _MOVE's "gone from source"
-#    assertion — that reports a clean failure on a delete that worked. The reliable
-#    signal is the DESTINATION, and it is checked as an INCREASE (before vs after), not
-#    as presence: a message whose duplicate already sat in Trash would otherwise read as
-#    "ok" no matter what the delete did.
+#    assertion — that reports a clean failure on a delete that worked.
 # 3. The Trash mailbox is passed IN, resolved from the Envelope Index by the caller —
 #    `trash mailbox of <account>` raises -1728 for every account despite Mail.sdef
 #    declaring it, and the application-level unified accessor must not be used here: a
 #    `move` out of it moved the mail and then crashed Mail (§5c).
+#
+# By-ID addressing, same two passes as `_MOVE`: FIRST, per copy, resolve
+# `«class mssg» id n of src`, check its `message id` under `considering case` against
+# the expected id (a mismatch is a loud ERROR, never a silent act on the wrong
+# message), then `delete m` — recorded as `"deleted"`. SECOND, a bounded wait
+# (`repeat 12 times` / `delay 0.5`, unchanged from the original script) probes each
+# `"deleted"` copy's own reference: error -1728 proves it died (`"gone"`); any other
+# probe error is an honest `"unknown"`, never assumed; if it never dies the outcome
+# stays `"deleted"`. The VERIFICATION RULE — ok when the Trash count of a Message-ID
+# rose, OR every one of its copies is `"gone"` — now lives entirely in the Python fold
+# (`trash_mail`'s act closure, below), the same count-increase discipline `_MOVE` uses,
+# because presence alone cannot tell "this landed" from "a pre-existing copy was
+# already there" (duplicates exist). Source absence may only CONFIRM success, never
+# declare failure on its own — a copy that stays "deleted" with no Trash count rise is
+# the one case that folds to an ERROR.
 _TRASH = (
     STRIP_FRAMING
     + "\n\n"
@@ -603,53 +616,74 @@ on run argv
   set us to character id 31
   set rs to character id 30
   set AppleScript's text item delimiters to us
-  set ids to text items of (item 5 of argv)
+  set mids to text items of (item 5 of argv)
+  set nids to text items of (item 6 of argv)
   set AppleScript's text item delimiters to ""
   set out to ""
+  set acted to {}
   with timeout of 600 seconds
   tell application "Mail"
-    repeat with rawId in ids
-      set mid to rawId as text
-      if mid is not "" then
-        set outcome to "unknown"
+    repeat with k from 1 to (count of mids)
+      set mid to item k of mids
+      set n to (item k of nids) as integer
+      set outcome to "unknown"
+      try
+        set m to «class mssg» id n of src
+        set gotId to "<<unreadable>>"
         try
-          if (count of (messages of src whose message id is mid)) is 0 then
-            set outcome to "not-in-source"
-          else
-            set beforeTrash to (count of (messages of tb whose message id is mid))
-            delete (messages of src whose message id is mid)
-            set landed to false
-            repeat 12 times
-              if (count of (messages of tb whose message id is mid)) > beforeTrash then
-                set landed to true
-                exit repeat
-              end if
-              delay 0.5
-            end repeat
-            if landed then
-              set outcome to "ok"
-            else if (count of (messages of src whose message id is mid)) is 0 then
-              set outcome to "ok"
-            else
-              set outcome to "ERROR delete returned cleanly but the message is " & ¬
-                "still in the source and never reached Trash"
-            end if
-          end if
-        on error errMsg
-          set outcome to "ERROR " & errMsg
+          set gotId to message id of m
         end try
-        set out to out & mid & us & (my stripFraming(outcome)) & rs
+        if gotId is "<<unreadable>>" then
+          set outcome to "not-in-source"
+        else
+          set matched to false
+          considering case
+            if gotId is mid then set matched to true
+          end considering
+          if not matched then
+            set outcome to "ERROR internal id resolved to another message"
+          else
+            delete m
+            set outcome to "deleted"
+          end if
+        end if
+      on error errMsg
+        set outcome to "ERROR " & errMsg
+      end try
+      set acted to acted & {{n, outcome}}
+    end repeat
+    repeat with rec in acted
+      set n to item 1 of rec
+      set outcome to item 2 of rec
+      if outcome is "deleted" then
+        repeat 12 times
+          set probeResult to "present"
+          try
+            message id of («class mssg» id n of src)
+          on error errProbe number errNum
+            if errNum is -1728 then
+              set probeResult to "gone"
+            else
+              set probeResult to "other"
+            end if
+          end try
+          if probeResult is "gone" then
+            set outcome to "gone"
+            exit repeat
+          else if probeResult is "other" then
+            set outcome to "unknown"
+            exit repeat
+          end if
+          delay 0.5
+        end repeat
       end if
+      set out to out & n & us & (my stripFraming(outcome)) & rs
     end repeat
   end tell
   end timeout
   return out
 end run"""
 )
-
-# Same reasoning as _MOVE_TIMEOUT: N Apple Events against a possibly-remote IMAP store,
-# two verifying counts each, not a 30-second job.
-_TRASH_TIMEOUT = 300.0
 
 # Dedupe gets its own, longer ceiling. Measured 2026-08-05 against a real IMAP account:
 # the deletes are SERVER-bound, not CPU-bound (Mail idles at ~3% while they run), and a
@@ -1613,6 +1647,16 @@ class MailAdapter:
         rule ``move_mail`` follows, and it is what makes the destination knowable: the
         account owns the Trash, so one source mailbox means one Trash mailbox and one
         replayable receipt.
+
+        Verification is by-ID (#206, D-01), like ``move_mail``, but keeps its OWN rule:
+        each copy is deleted by Mail's internal id, and ``ok`` requires EITHER the
+        account Trash's count of that Message-ID to have risen between a bulk read
+        before and after the batch, OR every one of its copies to have gone dead
+        (-1728) — never ``_MOVE``'s synchronous "gone from source" rule, because
+        Mail's delete clears the source ASYNCHRONOUSLY (facts §5c). A Message-ID with
+        several copies in the source gets EVERY one of them trashed (D-03), same as
+        ``move_mail``. The by-ID trash act was never run in the spike that proved
+        ``_MOVE``'s shape — its device check (02.1-05) is mandatory, not a formality.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -1644,15 +1688,61 @@ class MailAdapter:
         dst = mail_addressing.mailbox_args(trash)
 
         def act(located):
-            return _parse_statuses(
-                runtime.run_osascript(
-                    _TRASH,
-                    *src,
-                    *dst,
-                    US.join(t.id for t in located),
-                    timeout=_TRASH_TIMEOUT,
-                )
+            # D-01: map Message-ID -> every stored internal id with ONE bulk read of
+            # the source, then act by internal id — never the old per-id `whose` scan.
+            ids = [t.id for t in located]
+            copies = _copies(src, ids)
+            before = _counts(dst)
+            pairs = [(mid, nid) for mid in ids for nid in copies.get(mid, [])]
+            if not pairs:
+                # Nothing to act on: every target already answered `not-in-source` by
+                # the source bulk read above — no `_TRASH` call, no second count.
+                return {mid: "not-in-source" for mid in ids}
+            raw = runtime.run_osascript(
+                _TRASH,
+                *src,
+                *dst,
+                US.join(mid for mid, _nid in pairs),
+                US.join(nid for _mid, nid in pairs),
+                timeout=_act_timeout(len(pairs)),
             )
+            # Keyed by INTERNAL id now (one answer per copy) — fold per
+            # Message-ID below.
+            statuses = _parse_statuses(raw)
+            after = _counts(dst)
+            result: dict[str, str] = {}
+            for mid in ids:
+                copy_ids = copies.get(mid, [])
+                if not copy_ids:
+                    result[mid] = "not-in-source"
+                    continue
+                outcomes = [statuses.get(nid, "unknown") for nid in copy_ids]
+                if all(o in ("deleted", "gone") for o in outcomes):
+                    rose = after[mid] > before[mid]
+                    all_gone = all(o == "gone" for o in outcomes)
+                    result[mid] = (
+                        "ok"
+                        if (rose or all_gone)
+                        else (
+                            "ERROR delete returned cleanly but the message is "
+                            "still in the source and never reached Trash"
+                        )
+                    )
+                elif all(o == "not-in-source" for o in outcomes):
+                    result[mid] = "not-in-source"
+                else:
+                    # D-03 partial: some copies acted, others didn't.
+                    errors = [o for o in outcomes if o.startswith("ERROR")]
+                    acted_n = sum(1 for o in outcomes if o in ("deleted", "gone"))
+                    if errors:
+                        result[mid] = (
+                            f"{errors[0]} ({acted_n} of {len(outcomes)} copies deleted)"
+                            if acted_n > 0
+                            else errors[0]
+                        )
+                    else:
+                        result[mid] = "unknown"
+            return result
 
         return mail_recover.recoverable(
             "trash",
