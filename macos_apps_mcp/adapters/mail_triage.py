@@ -52,9 +52,10 @@ REFS_SCAN = 150  # inbox reply-headers scanned in the correlation window
 # Mail is idle — and busy Mail is exactly when triage is asked for. Device-measured
 # 2026-08-20 on an IDLE Mail: _SENT_TRIAGE reads 100 records off a 13k-message
 # unified All Sent in 209s (~4-5 events per message; each event is fast, the loop
-# is not), while the inbox scan fits in ~34s. 600 = ~3x the idle measurement, the
-# same headroom rationale as _MOVE_TIMEOUT/_SAVE_TIMEOUT (300s). Do NOT shrink the
-# scan sizes to "fix" a timeout (changes results, not latency) and do not retry.
+# is not), while the inbox scan fits in ~34s. 600 = ~3x the idle measurement — the
+# same ~3x-headroom rationale this project's other raised host caps use. Do NOT
+# shrink the scan sizes to "fix" a timeout (changes results, not latency) and do
+# not retry.
 _TRIAGE_TIMEOUT = 600.0
 
 # _INBOX_TRIAGE: newest-first inbox records, US/RS framed. Fields INLINED into the

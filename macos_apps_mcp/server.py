@@ -762,9 +762,14 @@ def move_mail(
     mailbox), so it is refused for an On My Mac source — that store has none of the
     five. Pass a `folder` url from mail_overview when in doubt. To archive, move into a
     mailbox named Archive — there is no separate archive tool.
-    Cross-account moves are supported and leave exactly ONE copy; each message is
-    verified present in the destination and gone from the source afterwards, so a
-    per-id `status` reports what really happened rather than assuming success.
+    Cross-account moves are supported and leave exactly ONE copy. Verification is
+    by-ID (#206): each copy's internal reference must go dead after the move, and the
+    destination's count of that Message-ID must rise — presence alone can't tell a
+    landed copy from a pre-existing one. A Message-ID with several copies in the
+    source gets every one of them moved; `ok` means every copy left. A per-id
+    `status` reports what really happened rather than assuming success. If the call
+    times out mid-batch, the error names the receipt — re-run the same batch, or
+    `mail_undo` it.
     Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
     keep `receipt` to undo the batch. Needs Automation access for Mail,
     plus Full Disk Access to locate each message's file for the backup."""
@@ -839,8 +844,13 @@ def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     `dry_run=False`. The undo is itself backed up, logged and verified, and returns its
     own receipt — so an undo can be undone. A receipt for an operation with no
     destination mailbox cannot be replayed; the error names the directory holding the
-    preserved message bytes for manual re-import. Destructive (it moves mail); needs
-    Automation access for Mail and Full Disk Access."""
+    preserved message bytes for manual re-import.
+    Undoing a batch moved into a mailbox that already held pre-existing copies of the
+    same Message-ID moves those copies back too — the by-ID act moves every copy of a
+    Message-ID, and undo is an ordinary move. A receipt whose targets recorded
+    `unknown` (a timeout mid-act) is replayed the same as `ok`.
+    Destructive (it moves mail); needs Automation access for Mail and Full Disk Access.
+    """
     return _mail.undo(receipt, dry_run=dry_run)
 
 

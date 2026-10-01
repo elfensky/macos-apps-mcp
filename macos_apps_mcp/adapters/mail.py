@@ -627,11 +627,14 @@ _DEDUPE_TIMEOUT = 900.0
 # _DEDUPE (#140) — collapse N same-mailbox copies of one Message-ID down to 1.
 #
 # It cannot be spelled as "delete the losers", because AppleScript has no way to name
-# one of them. sqlite identifies a specific row by `messages.ROWID`; Mail's scripting
-# layer only understands `messages of mb whose message id is X`, which matches ALL the
-# copies at once — so `delete` on that collection (what `_TRASH` does, correctly, for a
-# single-copy target) would take the survivor with them. There is no ROWID in the
-# dictionary and no other per-copy handle.
+# WHICH one of them is the keeper. Mail's internal id (`«class mssg» id n`) IS a
+# per-copy handle — `_MOVE` acts through it since #206/D-01 — but it is a handle to a
+# specific copy already in hand, not an answer to "which copy should survive": that is
+# a byte-identity decision (below), unrelated to addressing. sqlite identifies a
+# specific row by `messages.ROWID`, but acting through sqlite is forbidden; Mail's
+# scripting layer only understands `messages of mb whose message id is X`, which
+# matches ALL the copies at once — so `delete` on that collection (what `_TRASH` does,
+# correctly, for a single-copy target) would take the survivor with them.
 #
 # So the winner is not CHOSEN here, it is what is LEFT: the collection is captured once,
 # then items n..2 are deleted in REVERSE index order (the §6 rule — forward iteration
@@ -1423,6 +1426,13 @@ class MailAdapter:
         server that behaved otherwise would be reported (``status`` says the message
         reads present in BOTH mailboxes), never silently duplicated.
 
+        Verification is by-ID (#206, D-01): each copy's internal-id reference must go
+        dead after the move, and the destination's count of that Message-ID must rise
+        — presence alone can't tell a landed copy from a pre-existing duplicate. A
+        Message-ID with several copies in the source gets EVERY one of them moved
+        (D-03); ``ok`` means every copy left. If the call times out mid-batch, the
+        error names the receipt — re-run the same batch, or ``mail_undo`` it.
+
         A canonical name as ``to_mailbox`` is a UNIFIED accessor ("All Drafts" — a
         container spanning every account, with no ``account`` of its own), and Mail
         files into the mailbox of that role belonging to the **source message's own
@@ -1748,6 +1758,12 @@ class MailAdapter:
         is itself backed up, logged, verified and undoable, with no second code path to
         keep in step. A receipt with no destination (a permanent delete) cannot be
         replayed at all; ``undo_plan`` raises and names the preserved bytes instead.
+
+        Undoing a batch moved into a mailbox that already held PRE-EXISTING copies of
+        the same Message-ID moves those copies back too (D-03: the by-ID act moves
+        every copy of a Message-ID, and undo is an ordinary move) — unchanged
+        behavior, now stated. A receipt whose targets recorded ``unknown`` (a timeout
+        mid-act, #206/D-06) is replayed the same as ``ok``.
 
         ponytail: every receipt today comes from ``move_mail``, which takes ONE source
         mailbox, so a receipt has exactly one source and the undo is one move. Group by
