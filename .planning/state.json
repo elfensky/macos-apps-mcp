@@ -11,7 +11,7 @@
     {
       "number": "2",
       "name": "Gate Close — Fail-Closed Suite and Device Sweep",
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "number": "02.1",
@@ -41,8 +41,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 02 of 7 · executing"
+    "label": "Advance to the next step (plan phase 02.1)",
+    "reason": "Phase 02.1 of 7 — needs a plan"
   },
-  "updated_at": "2026-09-30T19:57:28.422Z"
+  "updated_at": "2026-10-01T05:47:35.071Z"
 }

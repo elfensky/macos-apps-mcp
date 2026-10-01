@@ -1,44 +1,45 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 02
-current_phase_name: Gate Close — Fail-Closed Suite and Device Sweep
-status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-09-30T19:57:28.408Z"
-last_activity: 2026-09-30
-last_activity_desc: Plan 02-05 complete — final device sweep green (GATE-12)
-state_head: 32386ffba2025c4cfb8d2390410e6000bccc466e
+current_phase: "02.1"
+current_phase_name: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account
+status: planning
+stopped_at: Phase 02 complete, ready to plan Phase 02.1
+last_updated: "2026-10-01T05:47:35.052Z"
+last_activity: 2026-10-01
+last_activity_desc: Phase 02 complete, transitioned to Phase 02.1
+state_head: 1c30018c01325a9c7b21594c0bf6440ee387b175
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
+  percent: 29
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-26)
+See: .planning/PROJECT.md (updated 2026-10-01)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 02 — Gate Close — Fail-Closed Suite and Device Sweep
+**Current focus:** Phase 02.1 — Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account
 
 ## Current Position
 
-Phase: 02 (Gate Close — Fail-Closed Suite and Device Sweep) — EXECUTING
-Plan: 6 of 6
-Status: 02-05 complete (GATE-12 proven on device) — 02-06 release cut next; stops for owner approval at its Task 2
-Last activity: 2026-09-29 — Phase 02 execution started
+Phase: 02.1 — Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-01 — Phase 02 complete, transitioned to Phase 02.1
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [███░░░░░░░] 29%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 20
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -47,6 +48,7 @@ Progress: [█░░░░░░░░░] 14%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 14 | - | - |
+| 02 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -78,6 +80,9 @@ Recent decisions affecting current work:
 - A probe that overturns an issue's premise is a valid deliverable — ten consecutive 0.9.x cuts were revised on device before code was written.
 - [Phase 01]: Release cut: PR develop→main merged with --merge (never rebase, never --delete-branch since head=develop); tag the merge commit; build only in a detached tag worktree; re-zip after stapling.
 - [Phase 01]: One-off daemon proofs live at .worktrees/.daemon_probe.py (git-ignored), reused across plans 01-10 and 01-14 instead of rewritten per plan.
+- [Phase 02]: An intermittent device test is held by a non-strict xfail with evidence (#230): a strict mark flips the sweep gate on a pass; the mechanism question (content read of an undownloaded body) goes to 02.1.
+- [Phase 02]: A new session re-asks the owner before any device run; one diagnostic re-run per failed nodeid; the watchdog precondition before every Mail run; Mail is never force-quit on a timeout hint alone — a bare Apple Event decides whether it is wedged.
+- [Phase 02]: Planning records land by PR from a locked worktree like code (the main checkout had drifted 11 ahead / 8 behind by direct commits); `.planning/` is excluded from `ruff format` because ruff 0.16 formats Python fences in markdown.
 
 ### Pending Todos
 
@@ -88,7 +93,9 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- [Phase 1] The installed daemon is a dev build of `develop` `8885ad0`, not a release; v0.11.0 is the last release. Release timing stays the operator's call.
+- [Phase 2] The installed daemon is release v0.12.0 (build `5ce98ab`, installed 2026-10-01). The next dev build is needed only when 02.1 lands adapter code.
+- [Phase 2] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) are xfailed in the integration suite and owned by 02.1. The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
+- [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
 
@@ -110,5 +117,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-09-28T08:08:04.248Z
-Stopped at: Phase 2 context gathered
+Stopped at: Phase 02 complete, ready to plan Phase 02.1
 Resume file: .planning/phases/02-gate-close-fail-closed-suite-and-device-sweep/02-CONTEXT.md
