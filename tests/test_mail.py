@@ -26,6 +26,7 @@ from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
+from tests._fakes import FakeMail
 
 
 def _patch_run(monkeypatch, fake):
@@ -1604,6 +1605,8 @@ def test_pointer_omits_account_when_unset():
 _ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 _INBOX = f"imap://{_ACCT}/INBOX"
 _ARCHIVE = f"imap://{_ACCT}/Archive"
+_INBOX_BOX = (_ACCT, "INBOX")
+_ARCHIVE_BOX = (_ACCT, "Archive")
 
 
 def _statuses(pairs) -> str:
@@ -1735,9 +1738,9 @@ def test_move_mail_allows_a_unified_destination_from_an_imap_source(
     # The other half of the same census: from an imap source every unified destination
     # WORKS (it resolves to that account's concrete mailbox), so the #171 refusal must
     # not widen into "a unified accessor can never be a destination".
-    monkeypatch.setattr(
-        runtime, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
-    )
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    _patch_run(monkeypatch, fake)
     out = MailAdapter().move_mail("a@x", _INBOX, "drafts", dry_run=False)
     assert out["succeeded"] == 1
 
@@ -1745,22 +1748,49 @@ def test_move_mail_allows_a_unified_destination_from_an_imap_source(
 def test_move_mail_reports_what_the_verify_found_not_what_it_hoped(
     monkeypatch, no_backup
 ):
-    monkeypatch.setattr(
-        runtime,
-        "run_osascript",
-        lambda *a, **kw: _statuses(
-            [("a@x", "ok"), ("b@x", "not-in-source"), ("c@x", "ERROR boom")]
-        ),
-    )
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    [c_nid] = fake.seed(_INBOX_BOX, "c@x")
+    fake.lands_nowhere.add(c_nid)  # "ok" per the script, no count rise at dst
+    _patch_run(monkeypatch, fake)
     out = MailAdapter().move_mail("a@x,b@x,c@x", _INBOX, _ARCHIVE, dry_run=False)
     assert out["succeeded"] == 1
-    assert [t["status"] for t in out["targets"]] == [
-        "ok",
-        "not-in-source",
-        "ERROR boom",
-    ]
+    statuses = {t["id"]: t["status"] for t in out["targets"]}
+    assert statuses["a@x"] == "ok"
+    assert statuses["b@x"] == "not-in-source"  # never seeded — no copy anywhere
+    assert statuses["c@x"] == (
+        "ERROR move returned cleanly but the message is not in the destination"
+    )
     assert "were NOT affected" in out["note"]
     assert out["undo"].startswith("mail_undo(")
+
+
+def test_move_mail_reports_self_move_when_the_source_copy_survives(
+    monkeypatch, no_backup
+):
+    # D-01's post-move probe: the source reference must go dead (-1728); any other
+    # outcome is reported, never assumed. "survives" simulates the still-readable case.
+    fake = FakeMail()
+    [nid] = fake.seed(_INBOX_BOX, "a@x")
+    fake.survives.add(nid)
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert out["targets"][0]["status"] == FakeMail.SURVIVES_ERROR
+
+
+def test_move_mail_with_no_copies_in_source_reports_not_in_source_with_no_move_call(
+    monkeypatch, no_backup
+):
+    # D-01: zero copies anywhere means no pairs to act on — the whole point of mapping
+    # Message-ID -> internal id BEFORE acting is to never issue a no-op `_MOVE` call.
+    fake = FakeMail()  # nothing seeded
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("a@x,b@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert [t["status"] for t in out["targets"]] == [
+        "not-in-source",
+        "not-in-source",
+    ]
+    assert all(script is not mail._MOVE for script, _args, _kw in fake.calls)
 
 
 def test_move_script_rechecks_before_reporting_both_and_states_the_observation():
@@ -1772,8 +1802,6 @@ def test_move_script_rechecks_before_reporting_both_and_states_the_observation()
     # never the old "this was a COPY" inference that sent callers hunting a duplicate
     # that did not exist. The happy path stays poll-free: measured 2026-08-13,
     # 17/17 cross-account moves read source=0 in the statement after the verb.
-    both_branch = mail._MOVE.split("srcLeft")[1:]
-    assert both_branch, "the re-check branch is gone from _MOVE"
     assert "delay 2" in mail._MOVE  # bounded, single — never a poll (facts §8)
     assert "was a COPY" not in mail._MOVE  # the unsupported inference
     assert "self-move" in mail._MOVE  # the §5e reading, named
@@ -1781,40 +1809,66 @@ def test_move_script_rechecks_before_reporting_both_and_states_the_observation()
 
 
 def test_move_mail_gets_a_raised_timeout(monkeypatch, no_backup):
-    # 25 moves against a remote IMAP store, each with two verifying counts, is not a
-    # 30-second job — the host-side default would kill a legitimate batch
-    seen = {}
-    monkeypatch.setattr(
-        runtime,
-        "run_osascript",
-        lambda *a, **kw: seen.update(kw) or _statuses([("a@x", "ok")]),
-    )
+    # #206/D-02: the by-ID act's host cap scales with the copies it touches, and every
+    # `_BULK` read's cap is the flat mailbox-size-driven constant.
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    _patch_run(monkeypatch, fake)
     MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
-    assert seen["timeout"] == mail._MOVE_TIMEOUT
+    move_calls = [c for c in fake.calls if c[0] is mail._MOVE]
+    bulk_calls = [c for c in fake.calls if c[0] is mail._BULK]
+    assert len(move_calls) == 1
+    assert move_calls[0][2]["timeout"] == mail._act_timeout(1)
+    assert bulk_calls
+    assert all(c[2]["timeout"] == mail._BULK_TIMEOUT for c in bulk_calls)
+
+
+def test_move_mail_by_id_act_bulk_reads_then_acts_then_recounts(monkeypatch, no_backup):
+    # Task 1 tracer behavior: one bulk read of the source (with internal ids), one
+    # bulk read of the destination BEFORE acting, one `_MOVE`, one bulk read of the
+    # destination AFTER — in that exact order (D-01's count-increase verification).
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x", "b@x")
+    _patch_run(monkeypatch, fake)
+    adapter = MailAdapter()
+    moved = adapter.move_mail("a@x,b@x", _INBOX, _ARCHIVE, dry_run=False)
+
+    assert moved["succeeded"] == 2
+    assert all(t["status"] == "ok" for t in moved["targets"])
+    assert {mid for _, mid in fake.boxes[_ARCHIVE_BOX]} == {"a@x", "b@x"}
+    assert fake.boxes.get(_INBOX_BOX, []) == []
+
+    scripts = [c[0] for c in fake.calls]
+    assert scripts == [mail._BULK, mail._BULK, mail._MOVE, mail._BULK]
+    assert fake.calls[0][1][2] == "1"  # source read wants internal ids
+    assert fake.calls[1][1][2] == "0"  # before-count: destination, no internal ids
+    assert fake.calls[3][1][2] == "0"  # after-count: destination, no internal ids
+    assert fake.calls[0][2]["timeout"] == mail._BULK_TIMEOUT
+    assert fake.calls[1][2]["timeout"] == mail._BULK_TIMEOUT
+    assert fake.calls[2][2]["timeout"] == mail._act_timeout(2)
+    assert fake.calls[3][2]["timeout"] == mail._BULK_TIMEOUT
 
 
 # --- mail_undo -----------------------------------------------------------------------
 
 
 def test_undo_moves_the_batch_back_to_each_messages_source(monkeypatch, no_backup):
-    monkeypatch.setattr(
-        runtime, "run_osascript", lambda *a, **kw: _statuses([("a@x", "ok")])
-    )
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    _patch_run(monkeypatch, fake)
     adapter = MailAdapter()
     moved = adapter.move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
 
-    seen = []
-
-    def fake(script, *args, **kw):
-        seen.append(args)
-        return _statuses([("a@x", "ok")])
-
-    _patch_run(monkeypatch, fake)
+    fake.calls.clear()
     out = adapter.undo(moved["receipt"], dry_run=False)
-    # source and destination swapped: argv is (srcAcct, srcPath, dstAcct, dstPath, ids)
-    assert seen[0][:4] == (_ACCT, "Archive", _ACCT, "INBOX")
+    move_calls = [c for c in fake.calls if c[0] is mail._MOVE]
+    assert len(move_calls) == 1
+    # source and destination swapped: argv is (srcAcct, srcPath, dstAcct, dstPath, ...)
+    assert move_calls[0][1][:4] == (_ACCT, "Archive", _ACCT, "INBOX")
     # the undo is itself a plane operation, so it has its own receipt and can be undone
     assert out["receipt"] != moved["receipt"]
+    assert out["succeeded"] == 1
+    assert {mid for _, mid in fake.boxes[_INBOX_BOX]} == {"a@x"}
 
 
 def test_undo_of_an_unknown_receipt_raises(no_backup):

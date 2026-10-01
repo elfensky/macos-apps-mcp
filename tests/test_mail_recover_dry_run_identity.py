@@ -23,6 +23,7 @@ from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail, mail_index, mail_recover
 from macos_apps_mcp.errors import BatchTooLarge
 from macos_apps_mcp.text import RS, US
+from tests._fakes import FakeMail
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 INBOX = f"imap://{ACCT}/INBOX"
@@ -54,10 +55,18 @@ def capture() -> dict:
         calls: list[dict] = []
         names = {
             id(mail._PRESENT): "_PRESENT",
+            id(mail._BULK): "_BULK",
             id(mail._MOVE): "_MOVE",
             id(mail._TRASH): "_TRASH",
             id(mail._DEDUPE): "_DEDUPE",
         }
+        # #206: the by-ID act (`_BULK`/`_MOVE`) needs a real mailbox-shaped answer, not
+        # the flat per-id "ok" echo below — delegate those two scripts to FakeMail,
+        # seeded with the one message the wet `move_mail(..., dry_run=False)` call
+        # below touches (used only to mint a receipt for `undo_dry`; its own calls are
+        # cleared and never compared against the baseline).
+        fakemail = FakeMail()
+        fakemail.seed((ACCT, "INBOX"), "a@x")
 
         def fake(script, *args, **kw):
             calls.append(
@@ -67,6 +76,10 @@ def capture() -> dict:
                     "kwargs": kw,
                 }
             )
+            if script is mail._BULK:
+                return fakemail._bulk(args)
+            if script is mail._MOVE:
+                return fakemail._move(args)
             ids = args[-1].split(US) if args else []
             if names.get(id(script)) == "_PRESENT":
                 return "".join(
@@ -149,15 +162,22 @@ def wired(monkeypatch):
     calls: list[dict] = []
     names = {
         id(mail._PRESENT): "_PRESENT",
+        id(mail._BULK): "_BULK",
         id(mail._MOVE): "_MOVE",
         id(mail._TRASH): "_TRASH",
         id(mail._DEDUPE): "_DEDUPE",
     }
+    fakemail = FakeMail()
+    fakemail.seed((ACCT, "INBOX"), "a@x")
 
     def fake(script, *args, **kw):
         calls.append(
             {"script": names.get(id(script), "?"), "args": list(args), "kwargs": kw}
         )
+        if script is mail._BULK:
+            return fakemail._bulk(args)
+        if script is mail._MOVE:
+            return fakemail._move(args)
         ids = args[-1].split(US) if args else []
         if names.get(id(script)) == "_PRESENT":
             return "".join(f"{m}{US}{STATUS.get(m, 'present')}{RS}" for m in ids if m)

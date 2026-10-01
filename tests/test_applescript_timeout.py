@@ -17,7 +17,10 @@ invariant is: **the script's own backstop must be >= the host cap that gates it.
 - the TEMPLATE string passed as the first positional argument — a bare name looked up
   on the calling module, or a ``module.NAME`` attribute chain (one level, matching the
   ``from . import mail_drafts`` + ``mail_drafts._DELETE_DRAFT`` shape actually used);
-- the HOST CAP — the ``timeout=`` keyword's literal or module-attribute value, or
+- the HOST CAP — the ``timeout=`` keyword's literal, module-attribute value, or (#206,
+  D-02) a CALL expression (``timeout=mail._act_timeout(len(located))``), resolved by
+  calling the real function with ``mail_recover.MAX_TARGETS`` — the worst case the cap
+  must cover, not whatever expression the call site happened to pass — or
   ``runtime._OSASCRIPT_TIMEOUT`` (30s) when the keyword is absent;
 - the SCRIPT BACKSTOP — the integer N of the first ``with timeout of N seconds`` at or
   after the template's ``on run`` line (a handler's own ``with timeout`` block, like
@@ -45,6 +48,7 @@ import pytest
 
 import macos_apps_mcp.adapters as adapters_pkg
 from macos_apps_mcp import runtime
+from macos_apps_mcp.adapters import mail_recover as _mail_recover_mod
 
 
 def _osascript_templates():
@@ -156,6 +160,18 @@ def _resolve_host_cap(call: ast.Call, module) -> float:
             if not isinstance(resolved, (int, float)):
                 raise _Unresolved(f"timeout= resolved to non-numeric {resolved!r}")
             return float(resolved)
+        if isinstance(value, ast.Call):
+            fn = _resolve_expr(value.func, module)
+            if not callable(fn):
+                raise _Unresolved(f"timeout= call target {fn!r} is not callable")
+            # Evaluate at the worst case the cap must cover (MAX_TARGETS), never at
+            # whatever expression the call site passed (e.g. `len(located)`) — GATE-10
+            # asks "does the backstop cover the worst case", not "does it cover
+            # whatever this particular call happened to pass".
+            result = fn(_mail_recover_mod.MAX_TARGETS)
+            if not isinstance(result, (int, float)):
+                raise _Unresolved(f"timeout= call returned non-numeric {result!r}")
+            return float(result)
         raise _Unresolved(f"unsupported timeout= expression shape: {ast.dump(value)}")
     return float(runtime._OSASCRIPT_TIMEOUT)
 
@@ -222,3 +238,16 @@ def test_every_call_site_backstop_covers_host_cap(site: _CallSite):
         f"{site.id}: script backstop {site.backstop}s < host cap {site.host}s — "
         "the script can self-abort before the host-side timeout ever fires (GATE-10)"
     )
+
+
+def test_call_shaped_host_caps_are_evaluated_at_max_targets():
+    # #206/D-02: `_MOVE`'s call site passes a CALL expression (`_act_timeout(n)`), not
+    # a literal or a module-level constant — the resolver must evaluate the real
+    # function at MAX_TARGETS (25), proving the shipped formula, not a re-derivation.
+    sites = [
+        s for s in _CALL_SITES if s.id.endswith(":_MOVE") and s.id.startswith("mail.py")
+    ]
+    assert sites, "no mail.py call site resolved for _MOVE"
+    for site in sites:
+        assert site.error is None, f"{site.id}: {site.error}"
+        assert site.host == 435.0, f"{site.id}: host cap {site.host} != 435.0"
