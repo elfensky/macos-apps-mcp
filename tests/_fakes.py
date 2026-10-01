@@ -36,6 +36,18 @@ class FakeMail:
     - ``survives``: internal ids whose source copy "survives" the move (the post-move
       probe would still read it) — the fake answers the exact self-move ERROR text
       ``_MOVE`` itself would emit, and leaves the copy present in BOTH mailboxes.
+
+    Knobs for the by-ID trash's three verification outcomes (#206, D-01, facts §5c —
+    delete is ASYNCHRONOUS on the source side, so the script's own per-copy status and
+    whether the copy actually lands at the destination are independent):
+    - ``trash_rise_only``: the copy lands at the destination (its count rises) but the
+      script still reports ``"deleted"`` (the source reference has not died yet) —
+      verified ``ok`` by the destination rise alone.
+    - ``trash_gone_only``: the source reference dies (reported ``"gone"``) but the copy
+      never lands at the destination — verified ``ok`` because every copy is ``"gone"``,
+      never because of a rise that didn't happen.
+    - ``trash_neither``: the copy neither lands at the destination nor is reported
+      gone — the one case that must fold to an ``ERROR``, never a silent ``ok``.
     - ``raise_for``: ``{script: exception}`` — raise instead of answering, for a given
       script object.
 
@@ -55,6 +67,9 @@ class FakeMail:
         self.calls: list[tuple[object, tuple, dict]] = []
         self.lands_nowhere: set[int] = set()
         self.survives: set[int] = set()
+        self.trash_rise_only: set[int] = set()
+        self.trash_gone_only: set[int] = set()
+        self.trash_neither: set[int] = set()
         self.raise_for: dict[object, Exception] = {}
 
     def seed(self, box: tuple[str, str], *message_ids: str) -> list[int]:
@@ -77,6 +92,8 @@ class FakeMail:
             return self._bulk(args)
         if script is _mail._MOVE:
             return self._move(args)
+        if script is _mail._TRASH:
+            return self._trash(args)
         if script is _mail._PRESENT:
             return self._present(args)
         raise AssertionError(f"FakeMail has no answer for this script: {script!r}")
@@ -117,6 +134,46 @@ class FakeMail:
                 out.append((nid, self.SURVIVES_ERROR))
                 continue
             out.append((nid, "moved"))
+        return "".join(f"{nid}{US}{status}{RS}" for nid, status in out)
+
+    def _trash(self, args):
+        src_acct, src_path, dst_acct, dst_path, mids_joined, nids_joined = args
+        src = (src_acct, src_path)
+        dst = (dst_acct, dst_path)
+        mids = mids_joined.split(US) if mids_joined else []
+        nids = [int(n) for n in nids_joined.split(US)] if nids_joined else []
+        out: list[tuple[int, str]] = []
+        for mid, nid in zip(mids, nids, strict=True):
+            copies = self.boxes.setdefault(src, [])
+            idx = next((i for i, (n, _m) in enumerate(copies) if n == nid), None)
+            if idx is None:
+                out.append((nid, "not-in-source"))
+                continue
+            _, stored_mid = copies[idx]
+            if stored_mid != mid:
+                out.append((nid, "ERROR internal id resolved to another message"))
+                continue
+            if nid in self.trash_neither:
+                # the delete call returns cleanly but nothing actually happened — the
+                # source copy stays and the destination never grows. The one case the
+                # Python fold must turn into an ERROR, never a silent "ok".
+                out.append((nid, "deleted"))
+                continue
+            del copies[idx]
+            if nid in self.trash_gone_only:
+                # the source reference died (reported "gone"), but the copy never
+                # lands at the destination — source absence alone must be enough here
+                # (facts §5c: delete clears the source asynchronously).
+                out.append((nid, "gone"))
+                continue
+            self.boxes.setdefault(dst, []).append((nid, mid))
+            if nid in self.trash_rise_only:
+                # lands at the destination (its count rises) but the script still
+                # reports the copy as readable — the asynchronous source side hasn't
+                # caught up yet.
+                out.append((nid, "deleted"))
+                continue
+            out.append((nid, "gone"))
         return "".join(f"{nid}{US}{status}{RS}" for nid, status in out)
 
     def _present(self, args):

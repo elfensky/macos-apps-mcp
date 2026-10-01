@@ -25,6 +25,7 @@ from macos_apps_mcp.adapters import mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
 from macos_apps_mcp.errors import NativeError
 from macos_apps_mcp.text import RS, US
+from tests._fakes import FakeMail
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 BOX = f"imap://{ACCT}/Travel"
@@ -34,11 +35,21 @@ TRASH = f"imap://{ACCT}/Trash"
 @pytest.fixture
 def wired(monkeypatch):
     """Adapter with both boundaries faked: the index answers a Trash url and no
-    backups, the AppleScript layer records its calls and replies "ok" per id."""
+    backups; the AppleScript layer delegates `_BULK`/`_TRASH`/`_PRESENT` (#206, D-01's
+    by-ID act) to a ``FakeMail`` seeded with a@x, b@x in Travel and an empty Trash,
+    while `_DEDUPE` (out of this plan's scope) keeps its flat per-id "ok" echo."""
+    fake = FakeMail()
+    fake.seed((ACCT, "Travel"), "a@x", "b@x")
     calls = []
 
     def fake_osascript(script, *args, **kwargs):
         calls.append({"script": script, "args": list(args), "kwargs": kwargs})
+        if script is mail_mod._BULK:
+            return fake._bulk(args)
+        if script is mail_mod._TRASH:
+            return fake._trash(args)
+        if script is mail_mod._PRESENT:
+            return fake._present(args)
         ids = args[-1].split(US) if args else []
         return "".join(f"{mid}{US}ok{RS}" for mid in ids if mid)
 
@@ -47,14 +58,14 @@ def wired(monkeypatch):
     # no store on disk: locate stamps every target `absent`, backups write nothing
     monkeypatch.setattr(mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail_index, "query_message_locations", lambda ids: [])
-    return MailAdapter(), calls
+    return MailAdapter(), calls, fake
 
 
 # --- trash_mail (#80) ----------------------------------------------------------------
 
 
 def test_trash_mail_dry_run_previews_through_the_plane_and_moves_nothing(wired):
-    adapter, calls = wired
+    adapter, calls, _fake = wired
     out = adapter.trash_mail("<a@x>,<b@x>", BOX, dry_run=True)
     assert mail_recover.is_preview(out)
     assert out["op"] == "trash" and out["count"] == 2
@@ -68,14 +79,19 @@ def test_delete_verification_waits_because_delete_is_async_on_both_sides():
     # Device-measured 2026-08-05, and it cost a false failure to learn: `delete` is
     # asynchronous on BOTH sides. A one-shot destination count reported "did not appear
     # in Trash" for a message that was demonstrably in Trash, because a back-to-back
-    # batch had not settled yet. So the success test is a BOUNDED WAIT on the
-    # destination growing — bounded, never `while true` (facts §8).
+    # batch had not settled yet. So the script keeps a BOUNDED WAIT — bounded, never
+    # `while true` (facts §8) — but #206/D-01 moved the actual VERIFICATION RULE (rise
+    # in Trash's count, or every copy's reference confirmed gone) into the Python fold,
+    # mirroring move_mail; the script's own job is now only to let the source reference
+    # settle before reporting each copy's final status.
     for script in (mail_mod._TRASH, mail_mod._DEDUPE):
         assert "repeat 12 times" in script, "the bounded wait was removed"
         assert "delay 0.5" in script
-    # _TRASH verifies the destination GREW (a single-copy target may already have had a
-    # copy in Trash, so presence alone proves nothing).
-    assert "> beforeTrash" in mail_mod._TRASH
+    # #206/D-01: by-ID addressing and the -1728 proof, same as _MOVE.
+    body = mail_mod._TRASH.split("on run argv", 1)[1]
+    assert "«class mssg» id n of src" in body
+    assert "-1728" in body
+    assert "whose" not in body
     # _DEDUPE verifies in a SECOND pass that exactly ONE copy survives — which also
     # catches over-deletion (0 left), unlike counting how much Trash grew.
     assert "survivors is 1" in mail_mod._DEDUPE
@@ -84,32 +100,86 @@ def test_delete_verification_waits_because_delete_is_async_on_both_sides():
     ) < mail_mod._DEDUPE.index("survivors"), (
         "verification must be a second pass, after every delete in the batch"
     )
-    # _MOVE's synchronous both-sides assertion must NOT be copied here: source absence
-    # may only CONFIRM success (Trash lagging), never declare failure.
-    tail = mail_mod._TRASH.split("delete (messages of src")[1]
-    fail_branch = tail.split("else")[-1]
-    assert "count of (messages of src" not in fail_branch
+
+
+def test_trash_mail_ok_when_still_readable_but_trash_count_rose(wired):
+    # "rise only" (#206/D-01): the script still reports the copy as "deleted" (the
+    # asynchronous source side hasn't caught up yet, facts §5c), but the account
+    # Trash's count of this Message-ID already rose — that alone is proof enough.
+    adapter, _calls, fake = wired
+    [nid] = fake.seed((ACCT, "Travel"), "c@x")
+    fake.trash_rise_only.add(nid)
+    out = adapter.trash_mail("c@x", BOX, dry_run=False)
+    assert out["targets"][0]["status"] == "ok"
+
+
+def test_trash_mail_ok_when_gone_but_trash_count_did_not_rise(wired):
+    # "gone only": the source reference died (-1728) but the Trash bulk count never
+    # rose — source absence ALONE confirms success here, unlike _MOVE's rule.
+    adapter, _calls, fake = wired
+    [nid] = fake.seed((ACCT, "Travel"), "c@x")
+    fake.trash_gone_only.add(nid)
+    out = adapter.trash_mail("c@x", BOX, dry_run=False)
+    assert out["targets"][0]["status"] == "ok"
+
+
+def test_trash_mail_errors_when_neither_gone_nor_risen(wired):
+    # "neither": the delete call returned cleanly, the copy is still resolvable, and
+    # the Trash count never rose — the one case that must be a loud ERROR, never a
+    # silent "ok".
+    adapter, _calls, fake = wired
+    [nid] = fake.seed((ACCT, "Travel"), "c@x")
+    fake.trash_neither.add(nid)
+    out = adapter.trash_mail("c@x", BOX, dry_run=False)
+    assert out["targets"][0]["status"] == (
+        "ERROR delete returned cleanly but the message is still in the source and "
+        "never reached Trash"
+    )
+
+
+def test_trash_mail_moves_every_copy_of_a_duplicated_message_id(wired):
+    # D-03: a Message-ID with two copies in the source gets BOTH internal ids trashed.
+    adapter, calls, fake = wired
+    fake.seed((ACCT, "Travel"), "c@x", "c@x")
+    out = adapter.trash_mail("c@x", BOX, dry_run=False)
+    assert out["targets"][0]["status"] == "ok"
+    delete_call = [c for c in calls if c["script"] is mail_mod._TRASH][0]
+    assert len(delete_call["args"][5].split(US)) == 2
+
+
+def test_trash_mail_with_no_copies_in_source_reports_not_in_source_with_no_trash_call(
+    wired,
+):
+    # D-01: zero copies anywhere means no pairs to act on — no _TRASH call is issued.
+    adapter, calls, _fake = wired
+    out = adapter.trash_mail("z@x", BOX, dry_run=False)
+    assert out["targets"][0]["status"] == "not-in-source"
+    assert all(c["script"] is not mail_mod._TRASH for c in calls)
 
 
 def test_trash_mail_acts_through_the_plane_and_returns_an_undoable_receipt(wired):
-    adapter, calls = wired
+    adapter, calls, _fake = wired
     out = adapter.trash_mail("<a@x>,<b@x>", BOX, dry_run=False)
     assert out["op"] == "trash"
     assert out["succeeded"] == 2
+    assert all(t["status"] == "ok" for t in out["targets"])
     assert out["destination"] == TRASH
     assert out["undo"] == f'mail_undo("{out["receipt"]}")'
-    # the delete script ran with source AND trash mailbox args, ids last
+    # #206/D-01: the delete script ran with source AND trash mailbox args, BARE
+    # message ids (as move_mail sends them), then the internal id of each copy it
+    # actually addressed — one per copy, same shape as the by-ID move.
     delete_call = [c for c in calls if c["script"] is mail_mod._TRASH][0]
     assert delete_call["args"][:4] == [ACCT, "Travel", ACCT, "Trash"]
-    # BARE ids on the wire — the form the scripts echo back, as move_mail sends them
     assert delete_call["args"][4] == f"a@x{US}b@x"
+    assert len(delete_call["args"][5].split(US)) == 2  # one internal id per copy
+    assert delete_call["kwargs"]["timeout"] == mail_mod._act_timeout(2)
 
 
 def test_trash_mail_refuses_a_unified_mailbox_name(wired):
     # A canonical name cannot say WHICH account's Trash the message lands in, and Mail
     # will not answer `trash mailbox of <account>` (-1728, §5c). Refuse rather than
     # guess an account.
-    adapter, _ = wired
+    adapter, _, _fake = wired
     with pytest.raises(ValueError, match="unified accessor"):
         adapter.trash_mail("<a@x>", "inbox", dry_run=True)
 
@@ -117,20 +187,20 @@ def test_trash_mail_refuses_a_unified_mailbox_name(wired):
 def test_trash_mail_refuses_when_the_source_is_already_trash(wired):
     # `delete` on a message already in Trash is a silent no-op (§5c) — so this would
     # report success having done nothing. Refuse loudly instead.
-    adapter, _ = wired
+    adapter, _, _fake = wired
     with pytest.raises(ValueError, match="already in Trash"):
         adapter.trash_mail("<a@x>", TRASH, dry_run=True)
 
 
 def test_trash_mail_refuses_when_the_account_has_no_trash(wired, monkeypatch):
-    adapter, _ = wired
+    adapter, _, _fake = wired
     monkeypatch.setattr(mail_index, "query_trash_url", lambda acct: None)
     with pytest.raises(NativeError, match="no Trash mailbox"):
         adapter.trash_mail("<a@x>", BOX, dry_run=False)
 
 
 def test_trash_mail_enforces_the_plane_cap(wired):
-    adapter, calls = wired
+    adapter, calls, _fake = wired
     from macos_apps_mcp.errors import BatchTooLarge
 
     ids = ",".join(f"<m{i}@x>" for i in range(26))
@@ -143,7 +213,7 @@ def test_trash_mail_enforces_the_plane_cap(wired):
 
 
 def test_dedupe_batch_is_log_only_and_skips_the_file_backup(wired):
-    adapter, _ = wired
+    adapter, _, _fake = wired
     out = adapter.dedupe_batch("<a@x>", BOX, dry_run=False)
     assert out["op"] == "dedupe"
     # backup=False: the surviving copy IS the backup, so no directory is claimed
