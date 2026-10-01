@@ -537,9 +537,9 @@ def test_every_applescript_constant_actually_compiles():
 
     if not shutil.which("osacompile"):
         pytest.skip("osacompile is macOS-only")
-    from macos_apps_mcp.adapters import mail_addressing, mail_outgoing
+    from macos_apps_mcp.adapters import mail_addressing, mail_drafts, mail_outgoing
 
-    modules = (mail_mod, mail_outgoing, mail_addressing)
+    modules = (mail_mod, mail_outgoing, mail_addressing, mail_drafts)
     scripts = {
         f"{mod.__name__.rsplit('.', 1)[-1]}.{name}": getattr(mod, name)
         for mod in modules
