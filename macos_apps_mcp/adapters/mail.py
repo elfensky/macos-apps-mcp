@@ -69,6 +69,7 @@ import time
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 
 from .. import runtime
 from ..contracts import Pointer, read_result
@@ -277,44 +278,174 @@ on run argv
 end run"""
 )
 
-# _MOVE (#78) — the first DESTRUCTIVE mail write, and the shape the rest of 0.9.2/0.9.3
-# copies. Device-verified 2026-08-03, and two of the three answers contradict what the
-# dictionary reads like:
+# _BULK (#206, D-01) — maps every stored copy's Message-ID to Mail's internal id
+# (`id of message`) with ONE Apple Event, O(mailbox) regardless of the batch size.
+# Spike 006, healthy Mail: `message id of every message` costs 0.9s on a 9.5k INBOX,
+# 11.2s on a 49.5k Archive; `id of every message` costs 6-7x less (0.17s / 1.5s). Both
+# lists come back in the SAME order, so zipping them by position is sound — this is
+# the one bulk read `_MOVE`'s by-ID act (below) and the before/after destination counts
+# (`_counts`) are both built from. The two lists are joined to text OUTSIDE the `tell`
+# block (a cheap in-memory coercion, no further Apple Event) so the timeout only bounds
+# the read itself. `internal_ids` ("1"/"0") skips the second read when only the
+# Message-ID half is needed (a before/after destination count never touches it).
+# A `missing value` id (a header-less message) coerces to the literal text
+# "missing value" when joined — checked locally with osascript — which is why every
+# Python-side consumer of this read skips that exact string (`_copies`/`_counts`).
+_BULK = (
+    mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set mb to my mailboxFor(item 1 of argv, item 2 of argv)
+  set wantInternal to item 3 of argv
+  set us to character id 31
+  set rs to character id 30
+  with timeout of 300 seconds
+  tell application "Mail"
+    set mids to message id of every message of mb
+    if wantInternal is "1" then
+      set nids to id of every message of mb
+    else
+      set nids to {}
+    end if
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to us
+  set midText to mids as text
+  set nidText to nids as text
+  set AppleScript's text item delimiters to ""
+  return midText & rs & nidText
+end run"""
+)
+
+# D-02: one bulk read's cost is driven by mailbox SIZE, not batch size — 11.2s healthy
+# on a 49.5k mailbox, times the facts §3c 5-9x sick-Mail margin, rounded up with
+# headroom for growth. Covers `_BULK` regardless of how many ids the caller asked about.
+_BULK_TIMEOUT = 180.0
+
+# D-02: the by-ID act's host cap scales with how many copies it actually touches —
+# `base + per_id * n`. Spike 006, healthy Mail: 25 moves (through `recoverable()`,
+# including the three bulk reads) in 62.8s, ~1.2-1.5s per copy; times the facts §3c
+# margin for a sick Mail (~9x -> ~13.5s/copy) plus the rare 2s re-check gives
+# `_ACT_PER_ID = 15.0`. `_ACT_BASE = 60.0` covers the osascript spawn and the
+# `mailboxFor` lookups. At MAX_TARGETS copies: 60 + 15*25 = 435s <= the 600s script
+# backstop below, and >= the old flat 300s. Never lower a host cap (Phase 1, card 9) —
+# this is a WIDER cap at the top of its range, not a narrower one.
+_ACT_BASE = 60.0
+_ACT_PER_ID = 15.0
+
+
+def _scaled_timeout(n: int, *, base: float, per_id: float) -> float:
+    """D-02's one helper — every scaled host cap in this file is this formula with
+    different constants, so a drift between two re-derivations (what GATE-10 exists to
+    prevent) is a compile error, not a possible bug. Clamped at
+    ``mail_recover.MAX_TARGETS`` so the GATE-10 tripwire's "does the backstop cover the
+    worst case" check is true for every ``n`` a caller could ever pass — ``check_batch``
+    already refuses an oversized id list before this runs; a duplicate-heavy batch past
+    the cap (several copies per id) relies on 02.1-01's receipt-on-timeout instead.
+    ponytail: the clamp is the stated ceiling; a batch with >25 total copies pays for
+    that with 02.1-01's receipt rather than a cap that keeps growing unbounded."""
+    return base + per_id * min(n, mail_recover.MAX_TARGETS)
+
+
+# `_act_timeout(n)` == `_scaled_timeout(n, base=_ACT_BASE, per_id=_ACT_PER_ID)` — baked
+# in so the GATE-10 resolver can call it with just `mail_recover.MAX_TARGETS` and prove
+# the SHIPPED formula, not a re-derivation of it (tests/test_applescript_timeout.py).
+_act_timeout = partial(_scaled_timeout, base=_ACT_BASE, per_id=_ACT_PER_ID)
+
+
+def _bulk_read(
+    box: tuple[str, str], *, internal_ids: bool
+) -> tuple[list[str], list[str]]:
+    """D-01's one bulk read of ``box``: ``(message ids, internal ids)``, same order,
+    from ONE Apple Event (``_BULK``) — O(mailbox), not O(batch). ``internal_ids=False``
+    skips the second half (the destination's before/after counts never need it).
+
+    Framing guard (T-02.1-11, T-02.1-12): a Message-ID carrying a stray US/RS byte, or
+    new mail arriving between two bulk reads, can shift the split boundaries — this
+    raises here, before any move, rather than silently misaligning the two lists."""
+    raw = runtime.run_osascript(
+        _BULK, *box, "1" if internal_ids else "0", timeout=_BULK_TIMEOUT
+    )
+    parts = raw.split(RS)
+    if len(parts) != 2:
+        raise NativeError(
+            f"_BULK for mailbox {box!r} returned {len(parts)} RS-separated parts, "
+            "expected exactly 2 — a Message-ID may carry a stray framing byte. "
+            "Nothing was moved."
+        )
+    mids = parts[0].split(US) if parts[0] else []
+    nids = parts[1].split(US) if parts[1] else []
+    if internal_ids and len(mids) != len(nids):
+        raise NativeError(
+            f"_BULK for mailbox {box!r} returned {len(mids)} message ids but "
+            f"{len(nids)} internal ids — a Message-ID likely carries a stray US/RS "
+            "byte that shifted the split. Nothing was moved."
+        )
+    return mids, nids
+
+
+def _copies(box: tuple[str, str], ids: list[str]) -> dict[str, list[str]]:
+    """Internal ids of every stored copy of each of ``ids`` in ``box``, in bulk-read
+    order — D-03: a duplicated Message-ID gets every one of its copies, never just the
+    first. Equality is exact on the bare form, case-sensitive (truth 11); a blank or
+    ``missing value`` entry from the bulk read never matches a target."""
+    mids, nids = _bulk_read(box, internal_ids=True)
+    out: dict[str, list[str]] = {mid: [] for mid in ids}
+    for raw_mid, nid in zip(mids, nids, strict=True):
+        mid = bare_id(raw_mid.strip())
+        if not mid or mid == "missing value":
+            continue
+        if mid in out:
+            out[mid].append(nid)
+    return out
+
+
+def _counts(box: tuple[str, str]) -> Counter[str]:
+    """Copies per Message-ID in ``box``, from one bulk read with no internal ids — the
+    before/after reads D-01's count-increase verification needs (presence alone can't
+    distinguish "this move landed" from "a pre-existing duplicate was already
+    there")."""
+    mids, _ = _bulk_read(box, internal_ids=False)
+    return Counter(
+        bare_id(m.strip()) for m in mids if m.strip() and m.strip() != "missing value"
+    )
+
+
+# _MOVE (#78, by-ID act #206/D-01) — the first DESTRUCTIVE mail write, and the shape
+# the rest of 0.9.2/0.9.3 copies. The original per-id `whose message id is` scan
+# (device-verified 2026-08-03, kept in git history) cost 0.1-0.25ms PER STORED MESSAGE —
+# O(mailbox) — so a 25-message move against a 49.5k Archive took ~460s against the old
+# 300s cap (spike 006). The by-ID act replaces the scan with the ONE `_BULK` read above
+# plus a raw-class reference per copy, `«class mssg» id n of src`, which resolves in
+# 4-12ms on any mailbox size regardless of how big it is:
 #
-# 1. `move {a, b, c} to mb` — an AppleScript LIST of specifiers — raises -1700 ("Can't
-#    make {…} into type specifier") and moves NOTHING. The `list="yes"` direct parameter
-#    that makes a batch look like one Apple Event is inside a COMMENTED-OUT block of
-#    Mail.sdef; the live definition is a singular `type="specifier"`. `whose message id
-#    is in {…}` fails the same way. So a batch is N events in ONE script, not one event
-#    — which is exactly why the cap is 25 and why the timeout is raised below.
-#    The failure was atomic (0 of 3 moved), so nothing half-applied.
-# 2. `move <one ref> to dst` and `move (messages of src whose message id is "…") to dst`
-#    both work. The `whose` form is used here so the reference is re-evaluated per
-#    iteration — moving a message OUT of the source collection is the same mutation
-#    class that invalidates a forward-iterated reference (-1728, facts doc §6).
-# 3. A CROSS-ACCOUNT move is a true move: source 0, destination 1, stable across sync
-#    (re-checked after 45s and against the Envelope Index). Mail.app's own UI *drag*
-#    copies — that is where #140/#153's duplicates came from — but the `move` verb does
-#    not, so there is no copy → verify → delete-source dance to perform here.
+# 1. The raw-class spelling matters: `«class mssg» id n` resolves to the message that
+#    internal id names; the English form `message id n` parses as the `message id`
+#    PROPERTY instead and does not address anything (spike 006).
+# 2. Before acting, the script re-reads `message id of m` and checks it, under
+#    `considering case`, against the Message-ID the caller expects at that internal id
+#    — a mismatch (new mail shifted something, or the id resolved to a different
+#    message) is a loud `ERROR`, never a silent act on the wrong message (T-02.1-11/12).
+# 3. After the move, the source reference must go DEAD: only error -1728 proves it
+#    (facts §3). Any other error on that probe is an honest `unknown`, never assumed
+#    moved or assumed stuck. If the reference is still readable, the probe re-checks
+#    ONCE after a bounded 2s wait (#174) before reporting the observation — never an
+#    inference — naming self-move as one reading (facts §5e) and stating that nothing
+#    was deleted.
+# 4. `move {a, b, c} to mb` — an AppleScript LIST of specifiers — raises -1700 and moves
+#    NOTHING (the `list="yes"` direct parameter is inside a COMMENTED-OUT block of
+#    Mail.sdef). So a batch is still N Apple Events in ONE script, never one event.
+# 5. A CROSS-ACCOUNT move is a true move: source 0, destination 1, stable across sync
+#    (device-verified 2026-08-03). Mail.app's own UI *drag* copies — that is where
+#    #140/#153's duplicates came from — the `move` verb does not.
 #
-# It VERIFIES rather than asserting: a 0-match `whose` makes `move` a silent no-op, so
-# each id is checked present-in-source first, then absent-from-source AND
-# present-in-destination after. `moved: 25` is never assumed (#135). Both mailboxes and
-# the US-joined id list arrive via argv; nothing is interpolated.
-#
-# The still-in-source branch RE-CHECKS once after a bounded 2s wait before it reports,
-# and what it reports is the OBSERVATION, not an inference (#174). That branch has two
-# device-verified ways to fire on a move that did nothing wrong: a self-move (a unified
-# destination whose container already includes the source — a genuine no-op, facts §5e)
-# and, once on 2026-08-11 under a full-suite run, a cross-account move that a re-locate
-# immediately after proved was a clean TRUE move. The old text ("so this was a COPY,
-# not a move") sent callers hunting for a duplicate that did not exist. Measured
-# 2026-08-13 before choosing the 2s window: 17/17 cross-account moves (quiet AND under
-# a read-load that tripled verb latency to ~3.7s) read source=0 in the SAME script
-# statement after the verb — unlike `delete`, which measurably lags (§5c t0/t3). So
-# the source side of `move` is synchronous on this device and the re-check is a cheap
-# guard on the accusing path only, never a poll on the happy path. A real copy still
-# reads present in both after 2s and still gets a loud ERROR.
+# The DESTINATION side is verified as a COUNT INCREASE (D-01) from the before/after
+# `_counts(dst)` bulk reads the Python act closure takes — never by presence alone,
+# because duplicates exist and presence can't tell "this landed" from "a pre-existing
+# copy was already there". `ok` requires every copy of a Message-ID to report `moved`
+# AND the destination's count of that id to have risen (D-03: several copies of one
+# duplicated Message-ID all move; a target with only SOME copies moved is never `ok`).
 _MOVE = (
     STRIP_FRAMING
     + "\n\n"
@@ -327,31 +458,63 @@ on run argv
   set us to character id 31
   set rs to character id 30
   set AppleScript's text item delimiters to us
-  set ids to text items of (item 5 of argv)
+  set mids to text items of (item 5 of argv)
+  set nids to text items of (item 6 of argv)
   set AppleScript's text item delimiters to ""
   set out to ""
   with timeout of 600 seconds
   tell application "Mail"
-    repeat with rawId in ids
-      set mid to rawId as text
-      if mid is not "" then
-        set outcome to "unknown"
+    repeat with k from 1 to (count of mids)
+      set mid to item k of mids
+      set n to (item k of nids) as integer
+      set outcome to "unknown"
+      try
+        set m to «class mssg» id n of src
+        set gotId to "<<unreadable>>"
         try
-          if (count of (messages of src whose message id is mid)) is 0 then
-            set outcome to "not-in-source"
+          set gotId to message id of m
+        end try
+        if gotId is "<<unreadable>>" then
+          set outcome to "not-in-source"
+        else
+          set matched to false
+          considering case
+            if gotId is mid then set matched to true
+          end considering
+          if not matched then
+            set outcome to "ERROR internal id resolved to another message"
           else
-            move (messages of src whose message id is mid) to dst
-            if (count of (messages of dst whose message id is mid)) is 0 then
-              set outcome to "ERROR move returned cleanly but the message is " & ¬
-                "not in the destination"
-            else
-              set srcLeft to (count of (messages of src whose message id is mid))
-              if srcLeft > 0 then
-                delay 2
-                set srcLeft to (count of (messages of src whose message id is mid))
+            move m to dst
+            set probeResult to "present"
+            try
+              message id of m
+            on error errProbe number errNum
+              if errNum is -1728 then
+                set probeResult to "gone"
+              else
+                set probeResult to "other"
               end if
-              if srcLeft is 0 then
-                set outcome to "ok"
+            end try
+            if probeResult is "gone" then
+              set outcome to "moved"
+            else if probeResult is "other" then
+              set outcome to "unknown"
+            else
+              delay 2
+              set probeResult to "present"
+              try
+                message id of m
+              on error errProbe2 number errNum2
+                if errNum2 is -1728 then
+                  set probeResult to "gone"
+                else
+                  set probeResult to "other"
+                end if
+              end try
+              if probeResult is "gone" then
+                set outcome to "moved"
+              else if probeResult is "other" then
+                set outcome to "unknown"
               else
                 set outcome to "ERROR the message reads present in BOTH " & ¬
                   "mailboxes after a 2s re-check — either the source copy " & ¬
@@ -361,23 +524,17 @@ on run argv
               end if
             end if
           end if
-        on error errMsg
-          set outcome to "ERROR " & errMsg
-        end try
-        set out to out & mid & us & (my stripFraming(outcome)) & rs
-      end if
+        end if
+      on error errMsg
+        set outcome to "ERROR " & errMsg
+      end try
+      set out to out & n & us & (my stripFraming(outcome)) & rs
     end repeat
   end tell
   end timeout
   return out
 end run"""
 )
-
-# A batch of up to MAX_MAILS moves is N Apple Events against a possibly-remote IMAP
-# store, plus two verifying counts each — genuinely not a 30-second job, so this one
-# script gets a raised host-side timeout (the AppleScript-level `with timeout` above is
-# the second line of defense, never the first).
-_MOVE_TIMEOUT = 300.0
 
 # _TRASH (#80) — soft delete. Device-verified 2026-08-05, and the verification differs
 # from _MOVE's in a way that matters:
@@ -1321,15 +1478,59 @@ class MailAdapter:
         ]
 
         def act(located):
-            return _parse_statuses(
-                runtime.run_osascript(
-                    _MOVE,
-                    *src,
-                    *dst,
-                    US.join(t.id for t in located),
-                    timeout=_MOVE_TIMEOUT,
-                )
+            # D-01: map Message-ID -> every stored internal id with ONE bulk read of
+            # the source, then act by internal id — never the old per-id `whose` scan.
+            ids = [t.id for t in located]
+            copies = _copies(src, ids)
+            before = _counts(dst)
+            pairs = [(mid, nid) for mid in ids for nid in copies.get(mid, [])]
+            if not pairs:
+                # Nothing to act on: every target already answered `not-in-source` by
+                # the source bulk read above — no `_MOVE` call, no second count.
+                return {mid: "not-in-source" for mid in ids}
+            raw = runtime.run_osascript(
+                _MOVE,
+                *src,
+                *dst,
+                US.join(mid for mid, _nid in pairs),
+                US.join(nid for _mid, nid in pairs),
+                timeout=_act_timeout(len(pairs)),
             )
+            # Keyed by INTERNAL id now (one answer per copy) — fold per
+            # Message-ID below.
+            statuses = _parse_statuses(raw)
+            after = _counts(dst)
+            result: dict[str, str] = {}
+            for mid in ids:
+                copy_ids = copies.get(mid, [])
+                if not copy_ids:
+                    result[mid] = "not-in-source"
+                    continue
+                outcomes = [statuses.get(nid, "unknown") for nid in copy_ids]
+                if all(o == "moved" for o in outcomes):
+                    result[mid] = (
+                        "ok"
+                        if after[mid] > before[mid]
+                        else (
+                            "ERROR move returned cleanly but the message is not "
+                            "in the destination"
+                        )
+                    )
+                elif all(o == "not-in-source" for o in outcomes):
+                    result[mid] = "not-in-source"
+                else:
+                    # D-03 partial: some copies moved, others didn't.
+                    errors = [o for o in outcomes if o.startswith("ERROR")]
+                    moved_n = sum(1 for o in outcomes if o == "moved")
+                    if errors:
+                        result[mid] = (
+                            f"{errors[0]} ({moved_n} of {len(outcomes)} copies moved)"
+                            if moved_n > 0
+                            else errors[0]
+                        )
+                    else:
+                        result[mid] = "unknown"
+            return result
 
         return mail_recover.recoverable(
             "move",
