@@ -23,7 +23,7 @@ from macos_apps_mcp.adapters.mail import (
     _summary,
 )
 from macos_apps_mcp.contracts import Pointer
-from macos_apps_mcp.errors import BatchTooLarge
+from macos_apps_mcp.errors import BatchTooLarge, NativeTimeout
 from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
 from tests._fakes import FakeMail
@@ -1869,6 +1869,128 @@ def test_undo_moves_the_batch_back_to_each_messages_source(monkeypatch, no_backu
     assert out["receipt"] != moved["receipt"]
     assert out["succeeded"] == 1
     assert {mid for _, mid in fake.boxes[_INBOX_BOX]} == {"a@x"}
+
+
+# --- D-03 duplicate rule, D-06 timeout receipt, framing guard, order (#206) ----------
+
+
+def test_move_mail_moves_every_copy_of_a_duplicated_message_id(monkeypatch, no_backup):
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x", "a@x")  # two copies of the same Message-ID
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert out["targets"][0]["status"] == "ok"
+    move_call = next(c for c in fake.calls if c[0] is mail._MOVE)
+    mids_arg, nids_arg = move_call[1][4], move_call[1][5]
+    assert mids_arg.split(US) == ["a@x", "a@x"]
+    assert len(nids_arg.split(US)) == 2
+    assert [mid for _nid, mid in fake.boxes[_ARCHIVE_BOX]] == ["a@x", "a@x"]
+    assert fake.boxes.get(_INBOX_BOX, []) == []
+
+
+def test_move_mail_partial_duplicate_move_reports_error_with_copy_count(
+    monkeypatch, no_backup
+):
+    fake = FakeMail()
+    nids = fake.seed(_INBOX_BOX, "a@x", "a@x")
+    fake.survives.add(nids[1])  # the second copy's source reference survives
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    status = out["targets"][0]["status"]
+    assert status.startswith("ERROR")
+    assert status.endswith("(1 of 2 copies moved)")
+
+
+def test_move_mail_partial_duplicate_with_a_missing_answer_is_exactly_unknown(
+    monkeypatch, no_backup
+):
+    fake = FakeMail()
+    nids = fake.seed(_INBOX_BOX, "a@x", "a@x")
+
+    def fake_run(script, *args, **kw):
+        if script is mail._MOVE:
+            fake.calls.append((script, args, kw))
+            raw = fake._move(args)
+            # drop the SECOND copy's record entirely — the move still happened (its
+            # internal FakeMail state is unaffected), but the per-copy script never
+            # emitted an answer for it, same as a crash mid-repeat.
+            records = [r for r in raw.split(RS) if r]
+            kept = [r for r in records if not r.startswith(f"{nids[1]}{US}")]
+            return "".join(r + RS for r in kept)
+        return fake(script, *args, **kw)
+
+    monkeypatch.setattr(runtime, "run_osascript", fake_run)
+    out = MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert out["targets"][0]["status"] == "unknown"
+
+
+def test_undo_of_a_duplicate_rich_destination_moves_every_copy_back(
+    monkeypatch, no_backup
+):
+    # D-03's documented consequence: undoing into a mailbox that already held a
+    # pre-existing copy of the same Message-ID pulls that copy along too, because the
+    # by-ID act moves EVERY copy of a Message-ID it finds at the source.
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    fake.seed(_ARCHIVE_BOX, "a@x")  # a copy already sitting in the destination
+    _patch_run(monkeypatch, fake)
+    adapter = MailAdapter()
+    moved = adapter.move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert moved["targets"][0]["status"] == "ok"
+    assert [mid for _nid, mid in fake.boxes[_ARCHIVE_BOX]] == ["a@x", "a@x"]
+
+    adapter.undo(moved["receipt"], dry_run=False)
+    assert [mid for _nid, mid in fake.boxes[_INBOX_BOX]] == ["a@x", "a@x"]
+    assert fake.boxes.get(_ARCHIVE_BOX, []) == []
+
+
+def test_move_mail_timeout_on_the_destination_after_read_leaves_a_receipt(
+    monkeypatch, no_backup
+):
+    # D-06 across plans (02.1-01): a host timeout mid-act still leaves a receipt
+    # naming itself, and `mail_undo(..., dry_run=True)` previews every target.
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x")
+    dst_bulk_calls = [0]
+
+    def fake_run(script, *args, **kw):
+        if script is mail._BULK and args[:2] == _ARCHIVE_BOX:
+            dst_bulk_calls[0] += 1
+            if dst_bulk_calls[0] == 2:  # the AFTER read, following the move
+                fake.calls.append((script, args, kw))
+                raise NativeTimeout("osascript killed")
+        return fake(script, *args, **kw)
+
+    monkeypatch.setattr(runtime, "run_osascript", fake_run)
+    with pytest.raises(NativeTimeout) as exc:
+        MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+    match = re.search(r"receipt '([^']+)'", str(exc.value))
+    assert match, str(exc.value)
+
+    preview = MailAdapter().undo(match.group(1), dry_run=True)
+    assert mail.mail_recover.is_preview(preview)
+    assert len(preview["would_affect"]) == 1
+
+
+def test_move_mail_framing_guard_rejects_a_mismatched_bulk_read(monkeypatch, no_backup):
+    # T-02.1-11: a Message-ID carrying a stray US/RS byte shifts the split boundaries —
+    # 3 message ids answered against only 2 internal ids must raise before any move.
+    def fake_run(script, *args, **kw):
+        if script is mail._BULK:
+            return f"a@x{US}b@x{US}c@x" + RS + f"1{US}2"
+        raise AssertionError("must refuse before any _MOVE call")
+
+    monkeypatch.setattr(runtime, "run_osascript", fake_run)
+    with pytest.raises(mail.NativeError):
+        MailAdapter().move_mail("a@x", _INBOX, _ARCHIVE, dry_run=False)
+
+
+def test_move_mail_result_keeps_the_callers_id_order(monkeypatch, no_backup):
+    fake = FakeMail()
+    fake.seed(_INBOX_BOX, "a@x", "b@x", "c@x")  # Mail's own bulk order: a, b, c
+    _patch_run(monkeypatch, fake)
+    out = MailAdapter().move_mail("c@x,a@x,b@x", _INBOX, _ARCHIVE, dry_run=False)
+    assert [t["id"] for t in out["targets"]] == ["c@x", "a@x", "b@x"]
 
 
 def test_undo_of_an_unknown_receipt_raises(no_backup):
