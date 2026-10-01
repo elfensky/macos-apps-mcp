@@ -236,12 +236,25 @@ on run argv
 end run"""
 )
 
-# move_mail's dry-run preview (#78). Reads STORED messages through AppleScript rather
-# than sqlite ON PURPOSE: the Envelope Index lags Mail, and a preview reporting 25 ids
-# present when they are not is worse than no preview at all. A read of stored messages
-# strands nothing — the same justification #129's reply-all preview stands on, and the
-# reason this is not a violation of "a dry run makes no native call" (that rule exists
-# to stop CONSTRUCTING an outgoing message, which can strand an autosaved draft).
+# move_mail's dry-run preview (#78), and the one read behind every `_present_ids` call:
+# move/trash/dedupe dry runs and `presence()` (dedupe.py's keeper check, #153). Reads
+# STORED messages through AppleScript rather than sqlite ON PURPOSE: the Envelope Index
+# lags Mail, and a preview reporting 25 ids present when they are not is worse than no
+# preview at all (#146/#174). A read of stored messages strands nothing — the same
+# justification #129's reply-all preview stands on, and the reason this is not a
+# violation of "a dry run makes no native call" (that rule exists to stop CONSTRUCTING
+# an outgoing message, which can strand an autosaved draft).
+#
+# #206/D-04: ONE bulk read (`message id of every message of mb`), matched in AppleScript
+# against the requested ids under `considering case` — the same exact-equality rule the
+# by-ID act (`_MOVE`/`_TRASH`) uses. Replaces the old per-id `whose message id is`
+# count: spike 006 measured 22.8s for 25 ids against a 9.5k mailbox, against 0.9s/11.2s
+# for this one bulk read on a 9.5k/49.5k mailbox. Cost now follows MAILBOX size, not
+# batch size — which is why its host cap (`_present_timeout`, below) leans on `base`
+# (the `_BULK_TIMEOUT` floor), with only a thin `per_id` term. D-15 measures the real
+# list-membership cost on device. A failed read is reported once and echoed as `ERROR
+# <message>` for every requested id, the same per-id error shape the old script
+# produced — never a partial answer for some ids and silence for others.
 _PRESENT = (
     STRIP_FRAMING
     + "\n\n"
@@ -255,25 +268,33 @@ on run argv
   set AppleScript's text item delimiters to us
   set ids to text items of (item 3 of argv)
   set AppleScript's text item delimiters to ""
-  set out to ""
+  set readOk to true
+  set readErr to ""
   with timeout of 300 seconds
   tell application "Mail"
-    repeat with rawId in ids
-      set mid to rawId as text
-      if mid is not "" then
-        set outcome to "missing"
-        try
-          if (count of (messages of mb whose message id is mid)) > 0 then
-            set outcome to "present"
-          end if
-        on error errMsg
-          set outcome to "ERROR " & errMsg
-        end try
-        set out to out & mid & us & (my stripFraming(outcome)) & rs
-      end if
-    end repeat
+    try
+      set storedIds to message id of every message of mb
+    on error errMsg
+      set readOk to false
+      set readErr to errMsg
+    end try
   end tell
   end timeout
+  set out to ""
+  repeat with rawId in ids
+    set mid to rawId as text
+    if mid is not "" then
+      if not readOk then
+        set outcome to "ERROR " & readErr
+      else
+        set outcome to "missing"
+        considering case
+          if storedIds contains mid then set outcome to "present"
+        end considering
+      end if
+      set out to out & mid & us & (my stripFraming(outcome)) & rs
+    end if
+  end repeat
   return out
 end run"""
 )
@@ -352,6 +373,21 @@ def _scaled_timeout(n: int, *, base: float, per_id: float) -> float:
 # in so the GATE-10 resolver can call it with just `mail_recover.MAX_TARGETS` and prove
 # the SHIPPED formula, not a re-derivation of it (tests/test_applescript_timeout.py).
 _act_timeout = partial(_scaled_timeout, base=_ACT_BASE, per_id=_ACT_PER_ID)
+
+# #206/D-02, "Research open question 1": `_PRESENT` is now ONE bulk read of the SOURCE
+# mailbox (D-04), so its real cost tracks mailbox size, not `len(ids)` — the same n=1
+# dry run against a 9.5k or a 49.5k mailbox pays the same bulk-read cost. Folding it
+# into `base + per_id * n` the way `_MOVE`/`_TRASH` are (D-02's literal wording) is safe
+# either way (it never UNDER-caps), but the reasoning-correct split keeps `per_id` thin
+# and lets `base` do the real work: `base=_BULK_TIMEOUT` (180s, already sized for the
+# worst-case mailbox at the facts §3c sick-Mail margin) covers the bulk read itself,
+# and `per_id=1.0` is headroom for the per-id AppleScript list-membership match this
+# script now does in-script (cheap, but still N comparisons against a list that can
+# hold tens of thousands of entries). `dedupe.py`'s uncapped CLI-scale calls get the
+# same clamp at `mail_recover.MAX_TARGETS` as every other scaled cap here — see
+# `_scaled_timeout`'s own ponytail note.
+_PRESENT_PER_ID = 1.0
+_present_timeout = partial(_scaled_timeout, base=_BULK_TIMEOUT, per_id=_PRESENT_PER_ID)
 
 
 def _bulk_read(
@@ -849,7 +885,11 @@ def _present_ids(src: tuple[str, str], ids: list[str]) -> dict[str, str]:
     mailbox ``src`` right now, keyed by the bare id each script echoes back. Every
     dry-run preflight (move/trash/dedupe, via ``_presence`` below) and the public
     ``presence()`` tool route through this single call site."""
-    return _parse_statuses(runtime.run_osascript(_PRESENT, *src, US.join(ids)))
+    return _parse_statuses(
+        runtime.run_osascript(
+            _PRESENT, *src, US.join(ids), timeout=_present_timeout(len(ids))
+        )
+    )
 
 
 def _presence(src: tuple[str, str]) -> mail_recover.Present:

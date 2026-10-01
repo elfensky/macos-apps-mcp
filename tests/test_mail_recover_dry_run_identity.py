@@ -1,15 +1,18 @@
 """GATE-09: proves the plane-owned preflight (``recoverable(dry_run=, present=)``)
 answers byte-for-byte what the old adapter-owned dry-run branches did — for the ops
-where nothing was SUPPOSED to change (move/trash/undo) — and pins the one deliberate
-delta (card 4's divergence from the spike): ``dedupe_batch``'s dry run now reads
-presence too, instead of previewing "planned" for targets nobody checked.
+where nothing was SUPPOSED to change (move/trash/undo) — and pins two deliberate
+deltas: card 4's divergence from the spike (``dedupe_batch``'s dry run now reads
+presence too, instead of previewing "planned" for targets nobody checked), and
+#206/D-05 (every ``_PRESENT`` call now carries the scaled bulk-read cap in its kwargs).
 
-``tests/mail_recover_dry_run_baseline.json`` was captured by running ``capture()``
-below against the pre-cut ``develop`` (tag ``v0.11.0``, plan 01-01) — never the spike's
-own baseline, which predates #201's Sequoia-plane changes to ``mail.py`` (CONTEXT.md,
-"Card 4 baseline"). ``capture()`` uses ONLY names that exist at v0.11.0 (MailAdapter
-methods, module attributes), so the identical function ran unmodified on both trees;
-only the answer it recorded differs.
+``tests/mail_recover_dry_run_baseline.json`` was re-captured by running ``capture()``
+below against the 02.1 tree, after #206/D-04's ``_PRESENT`` rewrite — not the original
+v0.11.0 capture (CONTEXT.md, "Card 4 baseline"), which predates it. The ONLY delta from
+that v0.11.0 capture is `_PRESENT` call kwargs (`timeout`), pinned by name in
+``test_present_calls_carry_the_scaled_cap`` below — argv and every dry-run envelope are
+unchanged. ``capture()`` uses ONLY names that exist on both trees (MailAdapter methods,
+module attributes), so the identical function ran unmodified; only the answer it
+recorded differs.
 """
 
 from __future__ import annotations
@@ -145,7 +148,12 @@ if __name__ == "__main__":
             "usage: python test_mail_recover_dry_run_identity.py --capture"
         )
     print(f"macos_apps_mcp.__file__ = {mail.__file__}", file=sys.stderr)
-    print(json.dumps({"_source": "v0.11.0", **capture()}, indent=1))
+    print(
+        json.dumps(
+            {"_source": "v0.11.0 + 02.1 D-05 (_PRESENT scaled cap)", **capture()},
+            indent=1,
+        )
+    )
 
 
 # --- pytest section: run only against the CURRENT tree, compared to the baseline -----
@@ -217,25 +225,16 @@ def test_undo_dry_run_is_byte_identical(wired):
     _same(calls, "undo_dry_calls", old)
 
 
-def test_dedupe_dry_run_reads_presence(wired):
-    # THE one intended delta (CONTEXT.md "Card 4 baseline"): the baseline's dedupe dry
-    # run made no call and previewed "planned" for both ids — the exact GATE-09 bug.
-    # The new dry run reads presence like move/trash and reports what the read found.
+def test_dedupe_dry_run_is_byte_identical(wired):
+    # Card 4's delta (dedupe dry run reads presence instead of previewing "planned" for
+    # targets nobody checked) is baked into THIS baseline — it was captured against the
+    # 02.1 tree (post-Card-4), not the original v0.11.0 one. #206/D-05 re-captured this
+    # file, so dedupe now joins move/trash/undo as a plain byte-identity check; its own
+    # one `_PRESENT` call carries the scaled cap exactly like the others.
     old = _old()
     ad, calls = wired
-    assert old["dedupe_dry_calls"] == []
-    assert [t["status"] for t in old["dedupe_dry"]["would_affect"]] == [
-        "planned",
-        "planned",
-    ]
-    out = ad.dedupe_batch("<a@x>,b@x", BOX)
-    assert len(calls) == 1
-    assert calls[0]["script"] == "_PRESENT"
-    assert [t["status"] for t in out["would_affect"]] == ["present", "missing"]
-    # everything ELSE about the envelope is unchanged from the baseline shape
-    assert out["op"] == old["dedupe_dry"]["op"]
-    assert out["destination"] == old["dedupe_dry"]["destination"]
-    assert out["count"] == old["dedupe_dry"]["count"]
+    _same(ad.dedupe_batch("<a@x>,b@x", BOX), "dedupe_dry", old)
+    _same(calls, "dedupe_dry_calls", old)
 
 
 def test_present_calls_carry_the_scaled_cap(wired):
@@ -279,17 +278,18 @@ def test_cap_and_empty_batch_errors(wired):
     with pytest.raises(ValueError) as e:
         ad.export("", "x")
     assert f"{type(e.value).__name__}: {e.value}" == old["export_0"]
-    # the CAP text changed (GATE-10 small fix): new wording, not the baseline's
+    # the CAP text (an earlier GATE-10 wording fix, already baked into this baseline
+    # since #206/D-05's re-capture) is pinned like every other error text here
     with pytest.raises(BatchTooLarge) as e:
         ad.move_mail(",".join(f"m{i}@x" for i in range(26)), INBOX, ARCHIVE)
     assert "not overridable" in str(e.value)
     assert "backed up" not in str(e.value)
-    assert str(e.value) != old["move_26"].split(": ", 1)[1]
+    assert f"{type(e.value).__name__}: {e.value}" == old["move_26"]
     with pytest.raises(BatchTooLarge) as e:
         ad.trash_mail(",".join(f"m{i}@x" for i in range(26)), BOX)
     assert "not overridable" in str(e.value)
     assert "backed up" not in str(e.value)
-    assert str(e.value) != old["trash_26"].split(": ", 1)[1]
+    assert f"{type(e.value).__name__}: {e.value}" == old["trash_26"]
     assert calls == [] == old["cap_calls"]
 
 

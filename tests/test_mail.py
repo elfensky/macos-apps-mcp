@@ -1746,14 +1746,18 @@ def test_move_mail_dry_run_presence_reads_once_with_the_scaled_cap(
 
 def test_present_script_is_one_bulk_read_matched_under_considering_case():
     # #206/D-04: _PRESENT reads the mailbox once and matches in AppleScript, not a
-    # per-id `whose` scan — the same exact-equality rule the by-ID act uses.
+    # per-id `whose` scan — the same exact-equality rule the by-ID act uses. The shared
+    # `mailboxFor` handler (prefixed onto every by-ID script) legitimately uses `whose`
+    # to resolve an ACCOUNT, so the "no whose" check is scoped to _PRESENT's own `on
+    # run` body, the part this task rewrote.
+    body = mail._PRESENT.split("on run argv", 1)[1]
     assert mail._PRESENT.count("message id of every message of mb") == 1
-    assert "whose" not in mail._PRESENT
-    assert "considering case" in mail._PRESENT
+    assert "whose" not in body
+    assert "considering case" in body
     assert "stripFraming" in mail._PRESENT
     # a failed bulk read yields ERROR <message> for every requested id, not a partial
     # answer — the per-id error shape the old per-id script produced.
-    assert 'set outcome to "ERROR " & readErr' in mail._PRESENT
+    assert 'set outcome to "ERROR " & readErr' in body
 
 
 def test_present_timeout_scales_with_a_floor_from_the_bulk_read_cap():
