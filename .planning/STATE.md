@@ -2,13 +2,13 @@
 gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "02.1"
-current_phase_name: mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a
+current_phase_name: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)
 status: executing
 stopped_at: Phase 02.1 context gathered (assumptions mode)
-last_updated: "2026-10-01T20:27:51.308Z"
+last_updated: "2026-10-01T20:58:49.231Z"
 last_activity: 2026-10-01
-last_activity_desc: Phase 02 complete, transitioned to Phase 02.1
-state_head: 452e1681c38473e64304d872a99c59454615860b
+last_activity_desc: Phase 02.1 execution started
+state_head: e8454dff4922358e8498687bcd5e4b3266dbd0aa
 progress:
   total_phases: 7
   completed_phases: 2
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-01)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 02.1 — Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account
+**Current focus:** Phase 02.1 — Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)
 
 ## Current Position
 
-Phase: 02.1 (mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-01 — Phase 02 complete, transitioned to Phase 02.1
+Phase: 02.1 (Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 02.1
+Last activity: 2026-10-01 — Phase 02.1 execution started
 
 Progress: [███░░░░░░░] 29%
 
