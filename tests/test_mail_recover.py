@@ -17,7 +17,12 @@ import pytest
 
 from macos_apps_mcp import audit
 from macos_apps_mcp.adapters import mail_index, mail_recover
-from macos_apps_mcp.errors import AutomationDenied, BatchTooLarge, NativeError, NativeTimeout
+from macos_apps_mcp.errors import (
+    AutomationDenied,
+    BatchTooLarge,
+    NativeError,
+    NativeTimeout,
+)
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 BOX = f"imap://{ACCT}/INBOX"
