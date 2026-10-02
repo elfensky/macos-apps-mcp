@@ -29,7 +29,7 @@ def _add_rank_overmatch_messages(db):
     conn = sqlite3.connect(db)
     conn.executescript(
         f"""
-        INSERT INTO mailboxes VALUES
+        INSERT INTO mailboxes(ROWID, url) VALUES
             (6,'imap://{ACCT_B}/Junkyard'),
             (7,'imap://{ACCT_B}/Wallets/Old%20Mail'),
             (8,'imap://{ACCT_A}/%5BGmail%5D/All%20Mail');
@@ -399,7 +399,7 @@ def _add_bin_trash_messages(db):
     conn = sqlite3.connect(db)
     conn.executescript(
         f"""
-        INSERT INTO mailboxes VALUES (9,'imap://{ACCT_B}/Bin');
+        INSERT INTO mailboxes(ROWID, url) VALUES (9,'imap://{ACCT_B}/Bin');
         INSERT INTO subjects VALUES (12,'Binned');
         INSERT INTO message_global_data (ROWID, message_id_header)
             VALUES (15,'<binned@ex.com>');

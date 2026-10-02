@@ -54,6 +54,11 @@ surface may still shift between minor versions.
   `uv.lock`, mcp and fastmcp are capped at the tested majors (`mcp<2`, `fastmcp<4`), and
   the build smoke-tests one streamed call.
 
+- Mail overview and indexed search now include Gmail Inbox, Sent, and custom label
+  memberships stored separately from the message's All Mail location. Counts keep
+  their existing per-mailbox deduplication, and search results carry the matching
+  mailbox URL. Physical file-location queries are unchanged.
+
 - `delete_event` now verifies the event is gone after the delete (the same contract as
   `delete_reminder`).
 

@@ -52,7 +52,12 @@ MSG_COLS = (
 SCHEMA = """
 CREATE TABLE subjects(ROWID INTEGER PRIMARY KEY, subject TEXT);
 CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
-CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
+CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT, source INTEGER);
+CREATE TABLE labels(
+    message_id INTEGER REFERENCES messages(ROWID) ON DELETE CASCADE,
+    mailbox_id INTEGER REFERENCES mailboxes(ROWID) ON DELETE CASCADE,
+    PRIMARY KEY(message_id, mailbox_id)) WITHOUT ROWID;
+CREATE INDEX labels_mailbox_id_index ON labels(mailbox_id);
 CREATE TABLE message_global_data(
     ROWID INTEGER PRIMARY KEY,
     message_id_header TEXT,
@@ -99,7 +104,7 @@ def seed_base(path) -> None:
             (1,'Invoice 42'),(2,'Re: Invoice 42'),(3,'Split thread'),(4,'Re: Split'),
             (5,'Zero dated'),(6,'Re: Zero dated'),(7,'Junk ranking');
         INSERT INTO addresses VALUES (1,'jane@ex.com','Jane Doe');
-        INSERT INTO mailboxes VALUES
+        INSERT INTO mailboxes(ROWID, url) VALUES
             (1,'imap://{ACCT_A}/INBOX'),
             (2,'imap://{ACCT_A}/Archive'),
             (3,'imap://{ACCT_B}/Travel'),
@@ -173,11 +178,13 @@ class Envelope:
         finally:
             conn.close()
 
-    def add_mailbox(self, url: str) -> int:
+    def add_mailbox(self, url: str, *, source: int | None = None) -> int:
         """INSERT one mailboxes row, return its ROWID."""
         conn = sqlite3.connect(self.path)
         try:
-            cur = conn.execute("INSERT INTO mailboxes(url) VALUES (?)", (url,))
+            cur = conn.execute(
+                "INSERT INTO mailboxes(url, source) VALUES (?, ?)", (url, source)
+            )
             conn.commit()
             return cur.lastrowid
         finally:

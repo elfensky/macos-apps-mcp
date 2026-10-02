@@ -306,6 +306,24 @@ Also learned on this pass, both about `outgoing message`, both §6-class:
   discards the content; the empty window shell is a ⌘W for the human. So a probe that opens
   compose windows cannot fully sweep its own litter from a script.
 
+## 5f. Gmail membership is not the physical message location
+
+Observed in user-supplied V10 Envelope Index schema and read-only counts on
+2026-10-02. Gmail INBOX had **0 direct message rows but 82 live label memberships**
+(10 unread); Sent Mail had 0 direct rows and 6,486 label memberships. All 58,001
+label records referenced existing messages and mailboxes. These are raw row counts,
+not a verification of deduplicated totals or of a patched live server.
+
+- `labels.message_id` references **messages.ROWID**, not `messages.message_id` or
+  `global_message_id`; `labels.mailbox_id` references `mailboxes.ROWID`.
+- Mail's `after_insert_message` and label counter triggers define membership:
+  direct rows count when `mailboxes.source IS NULL`; label rows count only when
+  `mailboxes.source = messages.mailbox`. Merely unioning every label can include
+  relationships outside the mailbox's backing store.
+- Logical reads must follow those memberships. The on-disk `.emlx` location remains
+  `messages.mailbox`; expanding backup/file-location queries to label URLs would
+  point at files that need not exist there.
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
