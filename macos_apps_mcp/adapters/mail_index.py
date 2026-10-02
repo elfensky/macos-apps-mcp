@@ -52,7 +52,8 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
-    "mailboxes": {"ROWID", "url"},
+    "mailboxes": {"ROWID", "url", "source"},
+    "labels": {"message_id", "mailbox_id"},
     "message_global_data": {"ROWID", "message_id_header", "message_id"},
     "recipients": {"message", "address", "type", "position"},
     # conversation_id: Mail's own threading key (five dedicated indexes on it),
@@ -149,14 +150,35 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        mb.url               AS mailbox_url,
        m.date_received      AS date_received"""
 
-_BASE_SQL = f"""
+# Logical mailbox membership differs from the physical .emlx location on Gmail.
+# Mail's own counter triggers use source IS NULL for direct mailboxes, and
+# source = messages.mailbox for label mailboxes (schema observed 2026-10-02).
+# Keep this read projection separate from build_message_location_query: backup
+# and body-file lookup still need the physical messages.mailbox, not a label.
+_MAILBOX_MEMBERSHIP_CTE = """
+WITH mailbox_membership(message_rowid, mailbox_id) AS (
+    SELECT m.ROWID, mb.ROWID
+    FROM messages m
+    JOIN mailboxes mb ON mb.ROWID = m.mailbox AND mb.source IS NULL
+    WHERE m.deleted = 0
+    UNION
+    SELECT m.ROWID, l.mailbox_id
+    FROM labels l
+    JOIN messages m ON m.ROWID = l.message_id
+    JOIN mailboxes mb ON mb.ROWID = l.mailbox_id AND mb.source = m.mailbox
+    WHERE m.deleted = 0
+)
+"""
+
+_BASE_SQL = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT {_DEDUP_SELECT_COLS},
        ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
                           ORDER BY {_MAILBOX_RANK}, m.date_received DESC, m.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
   AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -711,19 +733,20 @@ def build_overview_query():
     still counts (keyed on its ROWID) — it has no citation, but it is genuinely in the
     mailbox, and a count that silently omits it is the same class of lie.
 
-    Mailboxes with no messages are included via the LEFT JOINs (both of them — the
-    message_global_data join must not turn the outer join inner), so a newly-created
-    folder shows as 0/0 rather than vanishing.
+    Count logical memberships, including Gmail labels backed by All Mail. Joining
+    messages.mailbox alone incorrectly reports those mailboxes as empty.
+    LEFT JOINs preserve empty mailboxes and messages without global data.
     """
     # One expression, used twice: the dedup key. COUNT(DISTINCT …) ignores NULLs, so
     # the unread count is the same key wrapped in a CASE with no ELSE.
     key = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
-    sql = f"""
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT mb.url                                       AS mailbox_url,
        COUNT(DISTINCT {key})                        AS total,
        COUNT(DISTINCT CASE WHEN m.read = 0 THEN {key} END) AS unread
 FROM mailboxes mb
-LEFT JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted = 0
+LEFT JOIN mailbox_membership mm ON mm.mailbox_id = mb.ROWID
+LEFT JOIN messages m ON m.ROWID = mm.message_rowid
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 GROUP BY mb.ROWID
 ORDER BY unread DESC, mailbox_url ASC
