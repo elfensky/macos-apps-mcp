@@ -6,6 +6,13 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- Mail overview and indexed search now include Gmail Inbox, Sent, and custom label
+  memberships stored separately from the message's All Mail location. Counts keep
+  their existing per-mailbox deduplication, and search results carry the matching
+  mailbox URL. Physical file-location queries are unchanged.
+
 ## [0.12.0] - 2026-09-30 — Architecture gate
 
 ### Changed
