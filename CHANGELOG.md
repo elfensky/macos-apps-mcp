@@ -16,8 +16,8 @@ surface may still shift between minor versions.
 ### Changed
 
 - **`send_mail` and `create_draft` refuse a `from_address` no Mail account owns** (MAIL-04,
-  #208) — before, Mail silently sent from its default account; the dry run still makes no
-  native call.
+  #208) — before, Mail silently sent from its default account. `send_mail`'s dry run
+  still makes no native call; `create_draft` has no dry run.
 - **Move and trash act by Mail's internal id** (MAIL-01, #206) — host caps scale with the
   batch; a 25-message batch, its undo and its dry runs fit on a 9k+ IMAP mailbox (device
   numbers); every copy of a duplicated Message-ID moves.
