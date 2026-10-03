@@ -1370,17 +1370,24 @@ def _family_account_skip_reason(mid: str) -> str | None:
     could differ and the guard could clear one while the test replied into another.
     Tries ``mid`` under each family account name via ``mail_addressing.resolve``;
     that call is account-scoped, so it also catches a Message-ID filed under both a
-    family account and another one. Never names the message id, only the account."""
+    family account and another one. Never names the message id, only the account.
+
+    Only the plain ``NativeError`` base class means "no such account" or "this id
+    isn't filed under it" (``resolve``/``resolve_account`` raise it bare for both).
+    Every typed subclass — ``AccessDenied``, ``FullDiskAccessDenied``, ``SchemaDrift``,
+    ``NativeTimeout``, ``AmbiguousTarget``, etc. — means the check itself could not
+    run, and must fail closed, not be swallowed by a broad ``except NativeError``."""
     from macos_apps_mcp.adapters import mail_addressing
     from macos_apps_mcp.errors import NativeError
 
     for name in ("Grandma", "Mama"):
         try:
             mail_addressing.resolve(mid, account=name)
-        except NativeError:
-            continue  # no such account, or this id isn't filed under it
-        except Exception as exc:  # fail closed — never let this guard go unnoticed
-            return f"could not verify the {name} account ({exc!r})"
+        except Exception as exc:
+            if type(exc) is NativeError:
+                continue  # no such account, or this id isn't filed under it
+            # any typed subclass or other exception — fail closed, never swallow it
+            return f"could not verify the {name} account ({type(exc).__name__})"
         else:
             return f"the replied-to message belongs to the {name} account"
     return None
