@@ -1357,6 +1357,30 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
+def _family_account_skip_reason() -> str | None:
+    """A skip reason when the newest unified-INBOX message cannot be proven safe to
+    reply into — either because it belongs to the Grandma/Mama family accounts, or
+    because the check itself could not resolve an account. Fails CLOSED: an
+    unreadable index skips rather than risking a reply into family mail — the
+    standing rule is "never", not "best effort" (02.1-06, #230). Resolves the same
+    way 02.1-06's device probe did: one Envelope Index read for the newest INBOX
+    Pointer's account id, then the account-name lookup — no new AppleScript probe."""
+    from macos_apps_mcp.adapters import mail_addressing
+    from macos_apps_mcp.adapters.mail import MailAdapter
+
+    try:
+        ptrs = MailAdapter().search(mailbox="inbox", limit=1)["results"]
+        if not ptrs:
+            return "the unified INBOX read back empty — cannot verify the account"
+        uuid = ptrs[0].get("account")
+        name = mail_addressing.account_map().get(uuid, "") if uuid else ""
+    except Exception as exc:  # fail closed — never let this guard itself go unnoticed
+        return f"could not resolve the newest INBOX message's account ({exc!r})"
+    if name in {"Grandma", "Mama"}:
+        return f"newest unified-INBOX message belongs to the {name} account"
+    return None
+
+
 @pytest.mark.xfail(
     strict=False,
     reason="#230 — intermittent: quoted_body() content read exceeds the 30 s cap "
@@ -1370,6 +1394,10 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     verification'."""
     from macos_apps_mcp.adapters.mail import MailAdapter
     from macos_apps_mcp.runtime import run_osascript
+
+    skip_reason = _family_account_skip_reason()
+    if skip_reason:
+        pytest.skip(f"#230 family-account rule: {skip_reason}")
 
     # newest inbox message id
     mid = run_osascript(
