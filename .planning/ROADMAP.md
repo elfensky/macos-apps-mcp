@@ -149,7 +149,7 @@ Plans:
   4. On a Mac with more than one account, `mail_reply` keeps the receiving account and the thread headers — checked on device and recorded in `docs/mail-applescript-facts.md`.
   5. A device probe runs first and settles what Mail does with a `from_address` that no account owns: reject it, fall back to the default, or keep a bare From header. The finding goes into `docs/mail-applescript-facts.md`. If Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and `send_mail`'s dry run still makes no native call.
 
-**Plans**: 5/8 plans executed in 7 waves
+**Plans**: 6/8 plans executed in 7 waves
 
 Plans:
 **Wave 1**
@@ -171,7 +171,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 02.1-06-PLAN.md — Device: owned sender, unowned refusal, reply identity; Mail integration sweep; #230 five runs (D-13, D-14, D-16)
+- [x] 02.1-06-PLAN.md — Device: owned sender, unowned refusal, reply identity; Mail integration sweep; #230 five runs (D-13, D-14, D-16)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -252,7 +252,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
-| 02.1. Mail Fixes (INSERTED) | 5/8 | In Progress|  |
+| 02.1. Mail Fixes (INSERTED) | 6/8 | In Progress|  |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
