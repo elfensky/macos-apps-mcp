@@ -360,10 +360,11 @@ def _scaled_timeout(n: int, *, base: float, per_id: float) -> float:
     """D-02's one helper — every scaled host cap in this file is this formula with
     different constants, so a drift between two re-derivations (what GATE-10 exists to
     prevent) is a compile error, not a possible bug. Clamped at
-    ``mail_recover.MAX_TARGETS`` so the GATE-10 tripwire's "does the backstop cover the
-    worst case" check is true for every ``n`` a caller could ever pass — ``check_batch``
-    already refuses an oversized id list before this runs; a duplicate-heavy batch past
-    the cap (several copies per id) relies on 02.1-01's receipt-on-timeout instead.
+    ``mail_recover.MAX_TARGETS``, which bounds the GATE-10-verified cap at 25 **copies**
+    — ``check_batch`` already refuses a batch of more than 25 Message-IDs before this
+    runs, but a duplicate-heavy batch (several stored copies per id, D-03) can still
+    pass more than 25 *copies* through here, past the clamp's ceiling; that case relies
+    on 02.1-01's receipt-on-timeout path, not a wider cap.
     ponytail: the clamp is the stated ceiling; a batch with >25 total copies pays for
     that with 02.1-01's receipt rather than a cap that keeps growing unbounded."""
     return base + per_id * min(n, mail_recover.MAX_TARGETS)
