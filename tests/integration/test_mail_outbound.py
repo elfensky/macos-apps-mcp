@@ -94,9 +94,14 @@ def test_send_to_self_and_delete_draft_round_trip():
 
 
 @pytest.mark.xfail(
-    strict=True,
+    strict=False,
     reason="#229 — rollback() cannot verify delete of a windowless outgoing message "
-    "when Mail is in the §3c zombie-delete state; reproduced on macOS 27.0",
+    "when Mail is in the §3c zombie-delete state; reproduced on macOS 27.0. "
+    "strict=False as of 2026-10-03: two strict XPASSes on device that day (phase "
+    "02.1 sweep + its diagnostic re-run) — rollback() verified the windowless "
+    "delete both times, showing the §3c zombie-delete state is intermittent, not "
+    "permanent. Phase 2 rule: an intermittent device bug is held by a non-strict "
+    "xfail, not a strict one that flips the sweep gate on a pass.",
 )
 def test_rollback_verifies_a_real_delete():
     """The rollback handler run against live Mail: it deletes a freshly built outgoing
