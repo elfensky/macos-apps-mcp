@@ -595,9 +595,10 @@ end run"""
 # `«class mssg» id n of src`, check its `message id` under `considering case` against
 # the expected id (a mismatch is a loud ERROR, never a silent act on the wrong
 # message), then `delete m` — recorded as `"deleted"`. SECOND, a bounded wait
-# (`repeat 12 times` / `delay 0.5`, unchanged from the original script) probes each
-# `"deleted"` copy's own reference: error -1728 proves it died (`"gone"`); any other
-# probe error is an honest `"unknown"`, never assumed; if it never dies the outcome
+# (`repeat 12 times` / `delay 0.5`, unchanged from the original script — 12 checks,
+# 0.5s apart, up to 5.5s) probes each `"deleted"` copy's own reference: error -1728
+# proves it died (`"gone"`); any other probe error is an honest `"unknown"`, never
+# assumed; if it never dies the outcome
 # stays `"deleted"`. The VERIFICATION RULE — ok when the Trash count of a Message-ID
 # rose, OR every one of its copies is `"gone"` — now lives entirely in the Python fold
 # (`trash_mail`'s act closure, below), the same count-increase discipline `_MOVE` uses,
