@@ -81,11 +81,15 @@ def owned_sender(from_address: str) -> str:
     its default silently), and the fix (one of the owned addresses, or omit
     ``from_address`` for Mail's default).
 
-    Extraction is the address inside the last ``<...>`` when the stripped value ends
+    Extraction is the address inside the LAST ``<...>`` when the stripped value ends
     with ``>``, else the whole stripped value — matched case-insensitively against
     ``mail_addressing.owned_addresses()``. Deliberately NOT ``email.utils.parseaddr``:
     it returns ``('', '')`` on Mail's own ``x@y <X@Y>`` shape, a display name
-    containing an ``@`` with no quoting (device-verified, facts doc).
+    containing an ``@`` with no quoting (device-verified, facts doc). Taking the LAST
+    pair is also the deliberately-safe choice, not merely the Mail-compatible one: a
+    display name that itself contains a ``<...>`` pair cannot smuggle a second address
+    past this ownership check, since the real address Mail will send from is always
+    the final bracketed pair.
     """
     addr = from_address.strip()
     if addr.endswith(">") and "<" in addr:
