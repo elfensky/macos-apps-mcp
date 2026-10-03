@@ -1357,27 +1357,32 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
-def _family_account_skip_reason() -> str | None:
-    """A skip reason when the newest unified-INBOX message cannot be proven safe to
-    reply into — either because it belongs to the Grandma/Mama family accounts, or
-    because the check itself could not resolve an account. Fails CLOSED: an
+def _family_account_skip_reason(mid: str) -> str | None:
+    """A skip reason when ``mid`` — the exact message id the test is about to reply
+    to — cannot be proven safe, either because it lives in a Grandma/Mama family
+    account, or because the check itself could not rule that out. Fails CLOSED: an
     unreadable index skips rather than risking a reply into family mail — the
-    standing rule is "never", not "best effort" (02.1-06, #230). Resolves the same
-    way 02.1-06's device probe did: one Envelope Index read for the newest INBOX
-    Pointer's account id, then the account-name lookup — no new AppleScript probe."""
-    from macos_apps_mcp.adapters import mail_addressing
-    from macos_apps_mcp.adapters.mail import MailAdapter
+    standing rule is "never", not "best effort" (02.1-06, #230).
 
-    try:
-        ptrs = MailAdapter().search(mailbox="inbox", limit=1)["results"]
-        if not ptrs:
-            return "the unified INBOX read back empty — cannot verify the account"
-        uuid = ptrs[0].get("account")
-        name = mail_addressing.account_map().get(uuid, "") if uuid else ""
-    except Exception as exc:  # fail closed — never let this guard itself go unnoticed
-        return f"could not resolve the newest INBOX message's account ({exc!r})"
-    if name in {"Grandma", "Mama"}:
-        return f"newest unified-INBOX message belongs to the {name} account"
+    Checks ``mid`` itself, not a separately-read "newest" message — a prior version
+    read the newest INBOX row from the Envelope Index while the test picked its
+    reply target via a separate AppleScript query, so the two "newest" messages
+    could differ and the guard could clear one while the test replied into another.
+    Tries ``mid`` under each family account name via ``mail_addressing.resolve``;
+    that call is account-scoped, so it also catches a Message-ID filed under both a
+    family account and another one. Never names the message id, only the account."""
+    from macos_apps_mcp.adapters import mail_addressing
+    from macos_apps_mcp.errors import NativeError
+
+    for name in ("Grandma", "Mama"):
+        try:
+            mail_addressing.resolve(mid, account=name)
+        except NativeError:
+            continue  # no such account, or this id isn't filed under it
+        except Exception as exc:  # fail closed — never let this guard go unnoticed
+            return f"could not verify the {name} account ({exc!r})"
+        else:
+            return f"the replied-to message belongs to the {name} account"
     return None
 
 
@@ -1395,10 +1400,6 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     from macos_apps_mcp.adapters.mail import MailAdapter
     from macos_apps_mcp.runtime import run_osascript
 
-    skip_reason = _family_account_skip_reason()
-    if skip_reason:
-        pytest.skip(f"#230 family-account rule: {skip_reason}")
-
     # newest inbox message id
     mid = run_osascript(
         'tell application "Mail" to return message id of '
@@ -1406,6 +1407,9 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     ).strip()
     if not mid:
         pytest.skip("no messages in this Mac's inbox")
+    skip_reason = _family_account_skip_reason(mid)
+    if skip_reason:
+        pytest.skip(f"#230 family-account rule: {skip_reason}")
     marker = "macos-apps-mcp-itest-reply-marker-do-not-send"
     # "inbox" is the canonical-name alias for the mailbox this id was just read from
     # (#146) — the url form is what a mail_search result hands back.
