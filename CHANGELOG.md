@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-03 — Mail fixes
+
 ### Added
 
 - **`create_draft` takes `from_address`** (MAIL-03, #208) — applied like `send_mail`; the
