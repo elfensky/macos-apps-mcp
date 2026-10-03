@@ -6,6 +6,26 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **`create_draft` takes `from_address`** (MAIL-03, #208) — applied like `send_mail`; the
+  locator reports `from`; a new draft is unthreaded and replies go through `mail_reply`.
+
+### Changed
+
+- **`send_mail` and `create_draft` refuse a `from_address` no Mail account owns** (MAIL-04,
+  #208) — before, Mail silently sent from its default account; the dry run still makes no
+  native call.
+- **Move and trash act by Mail's internal id** (MAIL-01, #206) — host caps scale with the
+  batch; a 25-message batch, its undo and its dry runs fit on a 9k+ IMAP mailbox (device
+  numbers); every copy of a duplicated Message-ID moves.
+
+### Fixed
+
+- **A timeout inside a destructive Mail batch still leaves a receipt** (MAIL-02, #206) — the
+  error names the receipt and the two safe next steps.
+- **Reply quotes wait 120 s for the original** (#230).
+
 ## [0.12.0] - 2026-09-30 — Architecture gate
 
 ### Changed

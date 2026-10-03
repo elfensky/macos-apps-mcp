@@ -99,7 +99,9 @@ as a code regression, and if it survives a REBOOT, that is new information worth
 filing. Everything scripted was also ~2× slower in the same state (0.58 s per
 sent-record read; the awaiting-reply scans ran 37–58 s against their 30 s default
 timeout), so a `NativeTimeout` from a bounded scan is the same symptom, not a second
-bug.
+bug. Spike 006 (2026-09-29) measured a steeper slowdown for per-id AppleScript scans
+specifically: **5–9×**, not the ~2× above. A timing taken on a sick Mail is labeled
+sick, never averaged with a healthy reading.
 
 ## 3d. Send Later has NO scripting surface (#84)
 
@@ -313,6 +315,50 @@ Also learned on this pass, both about `outgoing message`, both §6-class:
 - Mail's default sender is **not** predictable from account order (with 4 accounts, the first is
   `andrei@lavrenov.io` but Mail picks `andrei@lav.ren`). `set sender` **does** work — which is why
   `send_mail` takes `from_address` and the preview never guesses.
+- **Addressing a message by Mail's internal id** (spike 006, 2026-09-29; #206). `«class mssg» id n
+  of mb` resolves in 4–12 ms on any mailbox size — write the raw class: the English spelling
+  `message id n` parses as the `message id` **property**, not an object specifier. The per-id
+  `whose message id is` scan is the alternative's whole cost: it reads the WHOLE mailbox every
+  time, 0.1–0.25 ms per stored message, and a hit costs the same as a miss (position never
+  matters). Bulk reads on the same mailboxes (Fiction INBOX 9.5k / Archive 49.5k): `message id of
+  every message` 0.9 s / 11.2 s; `id of every message` 0.17 s / 1.5 s (6–7× cheaper, same order).
+  `message k of mb` — index access — is ALSO O(mailbox) (0.17 s / 1.8 s), and new mail shifts
+  every later index, so it is not a safe substitute either. A moved message's SOURCE reference
+  dies with -1728 right after the move; the destination is verified as a bulk-read count RISE
+  (before vs. after the batch), never by presence alone — duplicates exist. Duplicate rule: when
+  a Message-ID has more than one internal id in the source, every copy moves (today's `whose`
+  semantics, kept) — so an undo from a duplicate-rich destination can pull pre-existing copies
+  back into the source, true before this change and unchanged by it.
+- **Device proof** (02.1 device session, 2026-10-02, labeled sick — the run's own health read was
+  2.762 s against the 2.0 s healthy cap): a 25-message move → undo, trash → undo and their three
+  dry runs all ran through `recoverable()` on the Fiction account. All 26 osascript calls stayed
+  well under their host cap — worst ratio 0.092 (`undo_move`'s `_BULK` call, 16.523 s against
+  180 s; clears the healthy ×9 margin too, 148.7 s < 180 s). Final state: all 25 messages back in
+  Fiction INBOX, none left in Archive or Trash. The by-ID `_TRASH` ran on device for the first
+  time in this session and passed (`{"ok": 25}`, same shape as move). List-membership cost: 25
+  `is in` tests against the Archive list measured FASTER than the one bulk read that preceded it
+  (13.231 s vs. 15.642 s) — no added cost at all, let alone the proposed 10% ceiling. The owner
+  accepted the AppleScript presence match and the host caps as shipped; no gap-closure plan
+  followed.
+- **MAIL-04** (spike 005, 2026-09-29; 02.1 device session, 2026-10-02/03). Mail does **not**
+  reject an unowned `sender` — no error, no domain match; it sends from its default account
+  instead. The match is case-insensitive (uppercase resolves to the owning account); `Name <addr>`
+  resolves the same way. The stored `sender` keeps the **caller's** spelling, not Mail's — and
+  Mail can report `sender` as `x@y <X@Y>` (a display name containing an `@`, no quotes), which
+  `email.utils.parseaddr` does not read (`('', '')`). So the refusal runs in Python before any
+  native write, and when it passes it sets Mail's own spelling from `email addresses`, not the
+  caller's. Device-verified: an owned non-default `from_address` sticks on a real draft filed in
+  that account's own Drafts; an unowned address is refused with exactly one native call (the
+  ownership read) and no draft appears within 60 s; the outbound dry run makes zero native calls
+  and previews `from` exactly as typed.
+- A reply to a third-party message held by a non-default account (02.1 device session,
+  2026-10-02) was sent from (drafted as) the receiving account, and its autosaved draft carried
+  both `In-Reply-To:` and `References:`.
+- The Envelope Index's `subjects` table stores a subject with any `Re:`/`Fwd:` prefix already
+  STRIPPED into a column the search query does not select (02.1 device session, 2026-10-02) — so
+  matching a reply draft by `summary.startswith("Re:")` finds nothing, even against the real
+  reply. Disambiguate candidate drafts by account + mailbox scope and the newest-first order
+  instead; no subject-prefix assumption needed.
 
 ## 7. AppleScript language traps
 
@@ -326,6 +372,10 @@ Also learned on this pass, both about `outgoing message`, both §6-class:
   *"Can't set me to …"* (-10003), naming a line you never wrote, and `repeat with at in (mail
   attachments of m)` fails with *"Expected variable name or property but found parameter name"*
   (-2741), naming nothing useful (`at`, 2026-07-31).
+- **`try` accepts exactly ONE `on error` clause, not one per error number.** Two chained clauses
+  (`on error number -1728 … on error …`) fail to compile — confirmed with `osacompile` (02.1
+  device session, 2026-10-02). Branch on the number INSIDE a single clause instead: `on error
+  errNum number errNum … if errNum is -1728 then …`.
 - **`with timeout` is lexical.** It does **not** cover a handler body called from inside it. Every
   handler that talks to Mail needs its own `with timeout` (#56), or a hung Mail can pin an Apple
   Event indefinitely.
@@ -405,3 +455,13 @@ Single observation, and the watchdog was NOT run before the force-quit (§9 — 
 would have named the blocking call is lost), so "the rename did it" is a hypothesis without a
 control, not a verified mechanism. What IS verified: the signature, the recovery, and the
 serialization.
+
+**#230 (02.1 device sessions, 2026-10-02/03).** A #230 stall reads as a transient IMAP body
+fetch that clears in 30–90 s, not the permanent wedge above — `quoted_body` now waits 120 s for
+the original (D-13). This phase's five dedicated runs did not happen: the newest unified-INBOX
+message belonged to a family account, which no Mail probe may target, and the owner chose not
+to wait for the precheck to clear rather than widen the target. The phase's one incidental data
+point: the Mail integration sweep's own invocation of the reply test (predating this phase's
+family-account guard) XPASSed once, in 96.8 s, under the new 120 s cap — consistent with the
+transient-stall reading above, not a reproduction of the permanent wedge. The xfail stays
+non-strict; the issue stays open.
