@@ -1572,7 +1572,9 @@ class MailAdapter:
             pairs = [(mid, nid) for mid in ids for nid in copies.get(mid, [])]
             if not pairs:
                 # Nothing to act on: every target already answered `not-in-source` by
-                # the source bulk read above — no `_MOVE` call, no second count.
+                # the source bulk read above — no `_MOVE` call, no second count. The
+                # destination's before-count above already ran regardless (a discarded
+                # read, not a second Apple Event).
                 return {mid: "not-in-source" for mid in ids}
             raw = runtime.run_osascript(
                 _MOVE,
@@ -1698,7 +1700,9 @@ class MailAdapter:
             pairs = [(mid, nid) for mid in ids for nid in copies.get(mid, [])]
             if not pairs:
                 # Nothing to act on: every target already answered `not-in-source` by
-                # the source bulk read above — no `_TRASH` call, no second count.
+                # the source bulk read above — no `_TRASH` call, no second count. The
+                # destination's before-count above already ran regardless (a discarded
+                # read, not a second Apple Event).
                 return {mid: "not-in-source" for mid in ids}
             raw = runtime.run_osascript(
                 _TRASH,
