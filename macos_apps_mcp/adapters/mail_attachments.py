@@ -200,8 +200,9 @@ end run"""
 )
 
 # Saving can FETCH the message off the server (see above), so 30s is not enough — a
-# large attachment on a slow IMAP account is an ordinary case, not a hang. Same
-# reasoning as _MOVE_TIMEOUT.
+# large attachment on a slow IMAP account is an ordinary case, not a hang. 300s matches
+# the other raised host caps in this project for a single-item Apple Event against a
+# possibly-remote IMAP store.
 _SAVE_TIMEOUT = 300.0
 
 

@@ -1357,6 +1357,42 @@ def test_list_attachments_finds_draft_attachment(created):
         )
 
 
+def _family_account_skip_reason(mid: str) -> str | None:
+    """A skip reason when ``mid`` — the exact message id the test is about to reply
+    to — cannot be proven safe, either because it lives in a Grandma/Mama family
+    account, or because the check itself could not rule that out. Fails CLOSED: an
+    unreadable index skips rather than risking a reply into family mail — the
+    standing rule is "never", not "best effort" (02.1-06, #230).
+
+    Checks ``mid`` itself, not a separately-read "newest" message — a prior version
+    read the newest INBOX row from the Envelope Index while the test picked its
+    reply target via a separate AppleScript query, so the two "newest" messages
+    could differ and the guard could clear one while the test replied into another.
+    Tries ``mid`` under each family account name via ``mail_addressing.resolve``;
+    that call is account-scoped, so it also catches a Message-ID filed under both a
+    family account and another one. Never names the message id, only the account.
+
+    Only the plain ``NativeError`` base class means "no such account" or "this id
+    isn't filed under it" (``resolve``/``resolve_account`` raise it bare for both).
+    Every typed subclass — ``AccessDenied``, ``FullDiskAccessDenied``, ``SchemaDrift``,
+    ``NativeTimeout``, ``AmbiguousTarget``, etc. — means the check itself could not
+    run, and must fail closed, not be swallowed by a broad ``except NativeError``."""
+    from macos_apps_mcp.adapters import mail_addressing
+    from macos_apps_mcp.errors import NativeError
+
+    for name in ("Grandma", "Mama"):
+        try:
+            mail_addressing.resolve(mid, account=name)
+        except Exception as exc:
+            if type(exc) is NativeError:
+                continue  # no such account, or this id isn't filed under it
+            # any typed subclass or other exception — fail closed, never swallow it
+            return f"could not verify the {name} account ({type(exc).__name__})"
+        else:
+            return f"the replied-to message belongs to the {name} account"
+    return None
+
+
 @pytest.mark.xfail(
     strict=False,
     reason="#230 — intermittent: quoted_body() content read exceeds the 30 s cap "
@@ -1378,6 +1414,9 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     ).strip()
     if not mid:
         pytest.skip("no messages in this Mac's inbox")
+    skip_reason = _family_account_skip_reason(mid)
+    if skip_reason:
+        pytest.skip(f"#230 family-account rule: {skip_reason}")
     marker = "macos-apps-mcp-itest-reply-marker-do-not-send"
     # "inbox" is the canonical-name alias for the mailbox this id was just read from
     # (#146) — the url form is what a mail_search result hands back.

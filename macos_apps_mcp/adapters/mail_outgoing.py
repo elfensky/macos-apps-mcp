@@ -69,6 +69,44 @@ _MISSING_VALUE = "missing value"
 MAIL_DEFAULT_SENDER = "(Mail default account)"
 
 
+def owned_sender(from_address: str) -> str:
+    """The caller's ``from_address``, verified against an owned Mail account and
+    returned in MAIL's OWN spelling — the form ``set sender of msg to ...`` must
+    receive (#208, MAIL-04, D-09).
+
+    Mail does not reject a ``from_address`` no account owns — it silently sends from
+    its default account instead (spike 005, device-verified). So this refuses it
+    first, in Python, before any native write: an unowned address raises a typed
+    ``ValueError`` naming the refused address, why (Mail would otherwise substitute
+    its default silently), and the fix (one of the owned addresses, or omit
+    ``from_address`` for Mail's default).
+
+    Extraction is the address inside the LAST ``<...>`` when the stripped value ends
+    with ``>``, else the whole stripped value — matched case-insensitively against
+    ``mail_addressing.owned_addresses()``. Deliberately NOT ``email.utils.parseaddr``:
+    it returns ``('', '')`` on Mail's own ``x@y <X@Y>`` shape, a display name
+    containing an ``@`` with no quoting (device-verified, facts doc). Taking the LAST
+    pair is also the deliberately-safe choice, not merely the Mail-compatible one: a
+    display name that itself contains a ``<...>`` pair cannot smuggle a second address
+    past this ownership check, since the real address Mail will send from is always
+    the final bracketed pair.
+    """
+    addr = from_address.strip()
+    if addr.endswith(">") and "<" in addr:
+        addr = addr.rsplit("<", 1)[1][:-1].strip()
+    owned = mail_addressing.owned_addresses()
+    spelling = owned.get(addr.lower())
+    if spelling is None:
+        raise ValueError(
+            f"{from_address!r} is not an address any Mail account owns — Mail would "
+            "silently send from its default account instead of refusing, so this "
+            "call refuses first. Owned addresses: "
+            f"{', '.join(sorted(owned.values()))}. Use one of them, or omit "
+            "from_address for Mail's default."
+        )
+    return spelling
+
+
 # --- the scripts ---------------------------------------------------------------------
 #
 # rollback (#135): the ONLY place this adapter deletes a message it just built. A bare
@@ -624,7 +662,11 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     carry, so the quote header stays clean even when the script side is bypassed (a
     mocked ``_ORIGINAL`` in tests). An original that cannot be read degrades to an
     unquoted body — the reply is the deliverable, the quote is decoration."""
-    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args)
+    # #230: a body that is not downloaded makes this read an IMAP fetch that ran past
+    # the 30s default on device; 120.0 equals the script's own backstop (GATE-10 is
+    # >=, so equality passes). 02.1-06 observes on device which error surfaces if the
+    # read still reaches the cap.
+    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args, timeout=120.0)
     if not raw.strip() or raw.strip() == _MISSING_VALUE:
         return body
     sender, _, rest = raw.partition(US)
@@ -658,13 +700,17 @@ def new_message(
     subj = subject or ""
 
     def dispatch() -> None:
+        # D-09/D-10: resolve Mail's own spelling (or refuse) BEFORE any native write.
+        # This only runs here — deliver() calls dispatch() only when dry_run=False —
+        # so a dry run never reaches the ownership read and never constructs anything.
+        spelling = owned_sender(sender) if sender else ""
         with runtime.body_file(text) as path:
             runtime.run_osascript(
                 _SEND,
                 subj,
                 path,
                 "1" if html else "0",
-                sender,
+                spelling,
                 US.join(to_list),
                 US.join(cc_list),
                 US.join(bcc_list),

@@ -13,7 +13,7 @@ import re
 import pytest
 
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters import mail, mail_drafts
+from macos_apps_mcp.adapters import mail, mail_addressing, mail_drafts, mail_outgoing
 from macos_apps_mcp.adapters.mail_drafts import _CREATE_DRAFT
 from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
@@ -262,3 +262,87 @@ def test_delete_draft_dry_run_resolves_bracketed_id_against_bare_snapshot(monkey
     out = mail.MailAdapter().delete_draft("<a@b>", dry_run=True)  # caller id bracketed
     assert out["dry_run"] is True
     assert out["would_delete"]["id"] == "a@b"
+
+
+# --- #208/D-11: create_draft takes from_address, applied like send_mail --------------
+
+
+def test_create_draft_with_an_owned_from_address_sets_the_sender(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        if script is mail_addressing._MY_ADDRESSES:
+            return f"Me@Corp.com{US}other@corp.com"
+        return ""
+
+    _patch_run(monkeypatch, fake)
+    _use_real_body_file(monkeypatch)
+    out = mail.MailAdapter().create_draft(
+        "x@example.com", "Hi", "body", from_address="ME@corp.com"
+    )
+    assert seen[_CREATE_DRAFT][3] == "Me@Corp.com"  # Mail's own spelling, 4th argv item
+    assert out["from"] == "Me@Corp.com"
+
+
+def test_create_draft_without_from_address_reports_the_default(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return ""
+
+    _patch_run(monkeypatch, fake)
+    _use_real_body_file(monkeypatch)
+    out = mail.MailAdapter().create_draft("x@example.com", "Hi", "body")
+    assert seen[_CREATE_DRAFT][3] == ""  # no sender argv item when omitted
+    assert out["from"] == mail_outgoing.MAIL_DEFAULT_SENDER
+    assert mail_addressing._MY_ADDRESSES not in seen  # no ownership read
+
+
+def test_create_draft_blank_from_address_behaves_as_omitted(monkeypatch):
+    seen = {}
+
+    def fake(script, *argv):
+        seen[script] = argv
+        return ""
+
+    _patch_run(monkeypatch, fake)
+    _use_real_body_file(monkeypatch)
+    out = mail.MailAdapter().create_draft(
+        "x@example.com", "Hi", "body", from_address="   "
+    )
+    assert seen[_CREATE_DRAFT][3] == ""
+    assert out["from"] == mail_outgoing.MAIL_DEFAULT_SENDER
+    assert mail_addressing._MY_ADDRESSES not in seen
+
+
+def test_create_draft_refuses_an_unowned_from_address_before_any_native_write(
+    monkeypatch,
+):
+    calls = []
+
+    def fake(script, *argv):
+        calls.append(script)
+        return f"Me@Corp.com{US}other@corp.com"
+
+    _patch_run(monkeypatch, fake)
+    with pytest.raises(ValueError, match="nobody@elsewhere.example"):
+        mail.MailAdapter().create_draft(
+            "x@example.com", "Hi", "body", from_address="nobody@elsewhere.example"
+        )
+    # only the ownership read happened — body_file never entered (the autouse
+    # fail-closed seam raises if it is), and _CREATE_DRAFT never ran.
+    assert calls == [mail_addressing._MY_ADDRESSES]
+
+
+def test_create_draft_script_sets_sender_after_content_before_recipient():
+    """The sender line mirrors _SEND's verbatim (D-11) and must run after the body is
+    set and before any recipient is added — same ordering _SEND itself uses."""
+    assert "set fromAddr to item 4 of argv" in _CREATE_DRAFT
+    content_idx = _CREATE_DRAFT.index("set content of msg to bodyText")
+    sender_idx = _CREATE_DRAFT.index(
+        'if fromAddr is not "" then set sender of msg to fromAddr'
+    )
+    recipient_idx = _CREATE_DRAFT.index("make new to recipient")
+    assert content_idx < sender_idx < recipient_idx

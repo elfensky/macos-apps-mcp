@@ -644,14 +644,23 @@ def save_mail_attachment(
 
 
 @_additive_tool(adapter="mail", permission="Automation")
-def create_draft(to: str, subject: str = "", body: str = "") -> dict:
+def create_draft(
+    to: str, subject: str = "", body: str = "", from_address: str | None = None
+) -> dict:
     """Create a Mail draft and OPEN it for you to review and send — it NEVER sends on
     its own. `to` a recipient address. Returns a locator dict ({"created", "subject",
-    "mailbox", "note"}) — a freshly opened compose window has no stable id yet, so
-    this says where to find it (Drafts) instead of fabricating one; save it and
-    `drafts()` resolves it by its stable message-id. If the create FAILS partway, Mail
-    may still leave a stray autosaved draft behind (#133 — its autosave is
+    "mailbox", "from", "note"}) — a freshly opened compose window has no stable id
+    yet, so this says where to find it (Drafts) instead of fabricating one; save it
+    and `drafts()` resolves it by its stable message-id. If the create FAILS partway,
+    Mail may still leave a stray autosaved draft behind (#133 — its autosave is
     asynchronous and cannot be suppressed); `drafts()` + `delete_draft()` clear it.
+
+    A new draft is unthreaded; it is sent from `from_address` (an address one of
+    Mail's accounts owns, matched case-insensitively, `Name <addr>` accepted) or
+    Mail's default account.
+    An address no account owns is refused before Mail builds anything — Mail would
+    otherwise use its default account silently. To answer a message use
+    `mail_reply`, which is threaded and sent from the account that received it.
 
     THE AUTOSAVE WINDOW: Mail stamps the Message-ID only when it autosaves the draft,
     ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
@@ -659,8 +668,8 @@ def create_draft(to: str, subject: str = "", body: str = "") -> dict:
     then `drafts()` resolves it. **Do NOT retry this call** because the draft has not
     appeared: you get two drafts and the first one still arrives.
     Additive (creates a draft; does not send/modify/delete); needs Automation access
-    for Mail."""
-    return _mail.create_draft(to, subject, body)
+    for Mail (the ownership read is Automation too)."""
+    return _mail.create_draft(to, subject, body, from_address)
 
 
 @_additive_tool(audit="reply", adapter="mail", permission="Automation")
@@ -753,9 +762,14 @@ def move_mail(
     mailbox), so it is refused for an On My Mac source — that store has none of the
     five. Pass a `folder` url from mail_overview when in doubt. To archive, move into a
     mailbox named Archive — there is no separate archive tool.
-    Cross-account moves are supported and leave exactly ONE copy; each message is
-    verified present in the destination and gone from the source afterwards, so a
-    per-id `status` reports what really happened rather than assuming success.
+    Cross-account moves are supported and leave exactly ONE copy. Verification is
+    by-ID (#206): each copy's internal reference must go dead after the move, and the
+    destination's count of that Message-ID must rise — presence alone can't tell a
+    landed copy from a pre-existing one. A Message-ID with several copies in the
+    source gets every one of them moved; `ok` means every copy left. A per-id
+    `status` reports what really happened rather than assuming success. If the call
+    times out mid-batch, the error names the receipt — re-run the same batch, or
+    `mail_undo` it.
     Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
     keep `receipt` to undo the batch. Needs Automation access for Mail,
     plus Full Disk Access to locate each message's file for the backup."""
@@ -787,10 +801,15 @@ def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     names: Mail files a deleted message in its OWNING account's Trash, and a unified
     name ("inbox") cannot say which account that is.
     Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
-    keep `receipt` to undo the batch. Each id is verified to have ARRIVED in Trash
-    (Mail's delete clears the source asynchronously, so "gone from the source" is not
-    a signal that can be read straight after the call). Needs Automation access for
-    Mail, plus Full Disk Access to locate each message's file for the backup."""
+    keep `receipt` to undo the batch. Each copy is deleted by Mail's internal id and
+    verified by the account Trash's count rising, or every one of its copies' source
+    reference going gone within a bounded wait (12 checks, 0.5s apart — up to 5.5s) —
+    Mail's delete clears the source ASYNCHRONOUSLY, so "gone from the source" alone is
+    not a signal that can be read straight after the call. A message with several
+    stored copies gets every one of them trashed. If the call times out mid-batch,
+    re-run the same batch or
+    `mail_undo` the receipt. Needs Automation access for Mail, plus Full Disk Access
+    to locate each message's file for the backup."""
     return _mail.trash_mail(ids, mailbox, dry_run=dry_run)
 
 
@@ -830,8 +849,13 @@ def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     `dry_run=False`. The undo is itself backed up, logged and verified, and returns its
     own receipt — so an undo can be undone. A receipt for an operation with no
     destination mailbox cannot be replayed; the error names the directory holding the
-    preserved message bytes for manual re-import. Destructive (it moves mail); needs
-    Automation access for Mail and Full Disk Access."""
+    preserved message bytes for manual re-import.
+    Undoing a batch moved into a mailbox that already held pre-existing copies of the
+    same Message-ID moves those copies back too — the by-ID act moves every copy of a
+    Message-ID, and undo is an ordinary move. A receipt whose targets recorded
+    `unknown` (a timeout mid-act) is replayed the same as `ok`.
+    Destructive (it moves mail); needs Automation access for Mail and Full Disk Access.
+    """
     return _mail.undo(receipt, dry_run=dry_run)
 
 
@@ -903,7 +927,11 @@ def send_mail(
     preview shape is the same for every send tool here — {action, to, cc, bcc, from,
     subject, source, body_chars, html}. Pass `dry_run=False` to actually send.
     Addresses are comma-separated (or a list). `from_address` picks the sending
-    account; omitted, Mail uses its default. `html=True` sends the body as HTML.
+    account and must be an address one of Mail's accounts owns (matched
+    case-insensitively; `Name <addr>` accepted).
+    Any other address is refused before Mail builds anything — omitted, Mail uses
+    its default. The dry run does not check ownership — it makes no native call.
+    `html=True` sends the body as HTML.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
     Automation access for Mail."""
     return _mail.send(

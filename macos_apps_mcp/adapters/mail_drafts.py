@@ -62,12 +62,14 @@ on run argv
   set recipientAddr to item 1 of argv
   set subj to item 2 of argv
   set bodyText to my readBody(item 3 of argv)
+  set fromAddr to item 4 of argv
   with timeout of 120 seconds
   tell application "Mail"
     set msg to make new outgoing message with properties {visible:true}
     try
       set subject of msg to subj
       set content of msg to bodyText
+      if fromAddr is not "" then set sender of msg to fromAddr
       tell msg to make new to recipient with properties {address:recipientAddr}
       activate
     on error errMsg
@@ -226,18 +228,28 @@ def _parse_draft_records(raw: str) -> list[dict]:
     ]
 
 
-def create_draft(to: str, subject: str, body: str) -> dict:
+def create_draft(
+    to: str, subject: str, body: str, from_address: str | None = None
+) -> dict:
     """The body of ``MailAdapter.create_draft`` — see that docstring for the
-    caller-facing contract."""
+    caller-facing contract.
+
+    ``from_address`` is applied the way ``send_mail`` applies it (#208, D-11): a blank
+    value is omitted, an owned one is resolved to Mail's own spelling and refused
+    BEFORE any native write when no account owns it (``mail_outgoing.owned_sender``,
+    before ``runtime.body_file``)."""
     addr = to.strip()
     if not addr:
         raise ValueError("create_draft needs a recipient address (to)")
+    typed = (from_address or "").strip()
+    spelling = mail_outgoing.owned_sender(typed) if typed else ""
     with runtime.body_file(body or "") as path:
-        runtime.run_osascript(_CREATE_DRAFT, addr, subject or "", path)
+        runtime.run_osascript(_CREATE_DRAFT, addr, subject or "", path, spelling)
     return {
         "created": True,
         "subject": subject or "",
         "mailbox": "Drafts",
+        "from": spelling or mail_outgoing.MAIL_DEFAULT_SENDER,
         "note": "opened in a Mail compose window for your review; save it to keep "
         "it in Drafts, where it gets a stable message-id — see drafts()/"
         "delete_draft().",

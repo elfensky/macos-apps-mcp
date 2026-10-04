@@ -62,11 +62,27 @@ git tag -a vX.Y.Z origin/main -m "vX.Y.Z — <milestone name>"
 git push origin vX.Y.Z
 ```
 
-Merging to main triggers **TestPyPI** automatically. Production PyPI is a deliberate manual step —
-`workflow_dispatch` with `target=pypi` — because PyPI uploads are permanent. Auth is Trusted
-Publishing (OIDC); there are no stored tokens.
+Merging to main triggers **TestPyPI** automatically. Production PyPI is the next step.
 
-**4. Publish the GitHub release** with `gh release create vX.Y.Z`, and close the milestone if the
+**4. Upload to production PyPI — only with the operator's explicit approval.** A PyPI upload is
+permanent: a version number can never be uploaded again, even after deletion. So the upload is a
+manual `workflow_dispatch` with `target=pypi`, and the operator approves it at every release — an
+agent asks, and never dispatches on its own. Dispatch on the **tag**, not on `develop`, so the
+package is built from the released commit. Auth is Trusted Publishing (OIDC); there are no stored
+tokens.
+
+```sh
+gh workflow run publish.yml --ref vX.Y.Z -f target=pypi
+gh run list --workflow publish.yml --limit 1          # note the run id
+gh run watch <run-id> --exit-status
+curl -sf -o /dev/null https://pypi.org/pypi/macos-apps-mcp/X.Y.Z/json && echo "X.Y.Z is on PyPI"
+```
+
+The per-version URL is the proof; the project page's "latest" lags behind the CDN cache. This step
+is easy to skip — 0.9.0, 0.11.0 and 0.12.0 reached PyPI only on 2026-10-01. Never upload a tag
+before `v0.6.0`: those build `apple-mcp` (a PyPI name owned by someone else) or `mac-mcp`.
+
+**5. Publish the GitHub release** with `gh release create vX.Y.Z`, and close the milestone if the
 release completes it. A release may ship without closing its milestone — see below.
 
 ## Deploying to the daemon
@@ -99,6 +115,8 @@ not close a milestone just because a same-numbered release went out.
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
 - [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed
+- [ ] PyPI upload **approved by the operator**, dispatched on the tag, and
+      `https://pypi.org/pypi/macos-apps-mcp/X.Y.Z/json` returns 200
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha

@@ -55,7 +55,7 @@ from itertools import count
 from pathlib import Path
 
 from ..audit import audit_read, audit_write, state_dir
-from ..errors import BatchTooLarge, NativeError
+from ..errors import BatchTooLarge, NativeError, NativeTimeout
 from . import mail_addressing, mail_index
 
 # Hard cap on one destructive batch, rejected BEFORE any native call. Inbox-zero needs
@@ -400,6 +400,14 @@ def recoverable(
     An id missing from that map is recorded as ``unknown``, which is honest; defaulting
     it to ``ok`` would be the reassuring-direction lie.
 
+    If ``act`` raises ``NativeTimeout`` (osascript was killed mid-batch), the ``done``
+    record is still written — every target ``unknown``, since no partial statuses exist
+    to trust — and the SAME error class is re-raised naming the receipt and two safe
+    next steps: re-run the batch (ids that already moved report ``not-in-source``), or
+    ``mail_undo(<receipt>)`` (#206, D-06). Only ``NativeTimeout`` is caught this way;
+    ``AutomationDenied``/``AppNotRunning`` mean nothing acted, so the plan-only record
+    already written above is the honest state, and they propagate unchanged.
+
     ``dry_run=True`` runs ``present`` over the batch and returns ``preview()``'s
     envelope; ``act``, ``_backup`` and ``audit_write`` are never reached. ``present`` is
     now REQUIRED on a dry run — GATE-09 closed the bug where a caller-owned dry run
@@ -469,7 +477,21 @@ def recoverable(
     # Logged BEFORE acting, deliberately: if the process dies mid-act, the log still
     # holds every source mailbox undo needs. The outcome record below completes it.
     audit_write(plan)
-    statuses = act(located) or {}
+    # D-06: osascript can be killed mid-batch (host-side NativeTimeout). Only that
+    # class is caught here — AutomationDenied/AppNotRunning act on nothing, so the
+    # plan-only record above is already the honest state, and they propagate
+    # unchanged below. A caught timeout leaves no partial statuses at all; the
+    # existing `done` line already defaults a missing id to `unknown`, so letting
+    # it run unchanged (with an empty status map) writes the SAME done-record shape
+    # as the normal path — no second copy of that audit_write. Only after that
+    # record is written do we re-raise, naming the receipt and the two safe next
+    # steps, never the generic runtime text.
+    timeout_error: NativeTimeout | None = None
+    try:
+        statuses = act(located) or {}
+    except NativeTimeout as e:
+        timeout_error = e
+        statuses = {}
     done = [replace(t, status=statuses.get(t.id, "unknown")) for t in located]
     audit_write(
         {
@@ -481,6 +503,17 @@ def recoverable(
             "results": {t.id: t.status for t in done},
         }
     )
+    if timeout_error is not None:
+        raise NativeTimeout(
+            f"this {op} timed out after it started acting on {len(located)} "
+            f"message(s); receipt {receipt_id!r} was written with every target "
+            "recorded as unknown, because osascript was stopped and Mail may still "
+            "finish the Apple Event in flight. Two safe next steps, in this order: "
+            "(1) re-run the same batch — ids that already moved report "
+            "'not-in-source' and are skipped; (2) "
+            f'mail_undo("{receipt_id}") — it moves back every target that may have '
+            "moved. Do not assume any target stayed or moved."
+        ) from timeout_error
     ok = [t for t in done if t.status == "ok"]
     out: dict = {
         "op": op,
@@ -520,9 +553,12 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
     Two records, because they are written at two different moments and both matter: the
     PLAN carries every target and its source mailbox (written before acting, so it
     survives a crash mid-act), and the DONE record carries what each target's status
-    ended up being. A plan with no matching done record — the crash case — yields ``{}``
-    outcomes, and the caller treats every planned target as possibly-acted, which is the
-    conservative reading.
+    ended up being. A plan with no matching done record — the process died before
+    ``act`` returned at all — yields ``{}`` outcomes, and the caller treats every
+    planned target as possibly-acted, which is the conservative reading. A crash via
+    ``NativeTimeout`` mid-``act`` (#206, D-06) is a DIFFERENT, more honest case: it
+    writes an explicit done record with every target ``unknown`` before re-raising, so
+    that case is never silent — ``outcomes`` comes back populated, not ``{}``.
 
     Raises when the plan is not in the recent log, naming the reason rather than
     answering an empty batch: an unresolvable receipt is exactly the thing a caller must
@@ -572,11 +608,13 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
             backup=t.get("backup"),
         )
         for t in rec.get("targets", [])
-        # Only replay what actually moved. A target the op reported as not-in-source or
-        # failed is already where undo would put it, and "moving" it back would report a
-        # fake success. An outcome we never recorded (the crash case) IS replayed: the
+        # Only replay what actually moved, or might have. A target the op reported as
+        # not-in-source or failed is already where undo would put it, and "moving" it
+        # back would report a fake success. A missing key (the process died before any
+        # done record existed) and an explicit `unknown` (D-06's timeout record, or an
+        # id the act did not answer for) share one reading: "we do not know", and the
         # conservative reading of "we do not know" is that it moved.
-        if outcomes.get(t["id"], "ok") == "ok"
+        if outcomes.get(t["id"], "ok") in ("ok", "unknown")
     ]
     if not targets:
         raise NativeError(

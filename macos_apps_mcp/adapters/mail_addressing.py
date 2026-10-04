@@ -334,6 +334,60 @@ def account_map() -> dict[str, str]:
     return _ACCOUNT_MAP_CACHE
 
 
+# _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
+# iteration raises -1700). Verified on-device. Moved here from mail_triage.py (#208,
+# D-08) — mail_triage imports it by name and keeps its own lower-casing parser;
+# `owned_addresses()` below is the new, fail-closed read that MAIL-04's refusal needs.
+_MY_ADDRESSES = """on run argv
+  set us to character id 31
+  set AppleScript's text item delimiters to us
+  set out to ""
+  with timeout of 600 seconds
+  tell application "Mail"
+    repeat with acc in accounts
+      set out to out & ((email addresses of acc) as text) & us
+    end repeat
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to ""
+  return out
+end run"""
+
+
+def owned_addresses() -> dict[str, str]:
+    """``{lower-cased address: Mail's own spelling}`` for every address any Mail
+    account owns (#208, MAIL-04, D-08).
+
+    **FAILS CLOSED** — the opposite of ``account_map()`` above. ``account_map()`` is
+    only a label lookup, so a failure there degrading to ``{}`` is harmless; this read
+    backs a REFUSAL (``mail_outgoing.owned_sender``), and an unreadable Mail must never
+    be read as "no addresses owned, so nothing is owned, so nothing can be refused" —
+    that would let every from_address through silently, exactly the MAIL-04 bug this
+    exists to close. So there is no ``try/except`` here: a failing
+    ``runtime.run_osascript`` call propagates its typed error untouched.
+
+    An empty result is ALSO a failure, raised rather than returned: Mail can still be
+    launching at login and answer with zero account records yet, and treating that as
+    "confirmed zero addresses" would refuse every send until the caller happens to
+    retry after Mail finishes starting. No cache, unlike ``account_map()`` — this is
+    one cheap read per real send or draft, not a hot path, so there is no failure-TTL
+    machinery to duplicate.
+    """
+    raw = runtime.run_osascript(_MY_ADDRESSES)
+    out: dict[str, str] = {}
+    for chunk in raw.split(US):
+        addr = chunk.strip()
+        if addr:
+            out[addr.lower()] = addr
+    if not out:
+        raise NativeError(
+            "Mail reported no account addresses (it may still be launching) — open "
+            "Mail, wait for its accounts to appear, then retry. Nothing was created "
+            "or sent."
+        )
+    return out
+
+
 # mailboxes.url embeds the account as a plain RFC-4122 UUID (8-4-4-4-12 hex).
 _ACCOUNT_UUID_RE = re.compile(
     r"\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z", re.IGNORECASE
