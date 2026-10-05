@@ -32,6 +32,7 @@ import macos_apps_mcp.tiers as tiers
 _DEVELOP_ADDITIVE = frozenset(
     {
         "create_reminder",
+        "create_reminder_list",
         "create_event",
         "create_contact",
         "safari_open",
@@ -78,6 +79,7 @@ _DEVELOP_PERMISSION = {
     "reminder_lists": "EventKit",
     "calendars": "EventKit",
     "create_reminder": "EventKit",
+    "create_reminder_list": "EventKit",
     "update_reminder": "EventKit",
     "complete_reminder": "EventKit",
     "create_event": "EventKit",
@@ -274,7 +276,7 @@ def test_tier_reproduces_the_develop_era_additive_and_destructive_sets():
 
 
 def test_permission_reproduces_the_develop_era_hand_map():
-    # Same pin for the 65-entry permission map — registry.ToolRecord.permission
+    # Same pin for the 66-entry permission map — registry.ToolRecord.permission
     # normalises a single grant to a 1-tuple and "none" (a meta tool) to ().
     want = {
         n: (() if p is None else (p,) if isinstance(p, str) else tuple(p))

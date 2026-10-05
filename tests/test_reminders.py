@@ -421,3 +421,140 @@ def test_get_pointers_folder_keeps_fetch_order(monkeypatch):
         ("R-1", "L-1"),
         ("R-2", "L-2"),
     ]
+
+
+# --- create_reminder_list on the default account (REM-02, D-22, #92) -----------------
+
+
+def _list_env(
+    monkeypatch,
+    existing=(("L-1", "Inbox"),),
+    source="iCloud",
+    save_error=None,
+    persist=True,
+    has_default=True,
+):
+    """Wire create_reminder_list to fakes. ``save_error``: an error code (int) the save
+    reports; ``persist=False``: the save says OK but the list never shows up."""
+    import macos_apps_mcp.adapters.reminders as rem
+
+    cals = [
+        SimpleNamespace(calendarIdentifier=lambda i=i: i, title=lambda t=t: t)
+        for i, t in existing
+    ]
+    saves, runs = [], []
+
+    def new_cal(_etype, _store):
+        c = SimpleNamespace(src=None, name=None, ident=f"NEW-{len(saves) + 1}")
+        c.setTitle_ = lambda t: setattr(c, "name", t)
+        c.setSource_ = lambda src: setattr(c, "src", src)
+        c.title = lambda: c.name
+        c.calendarIdentifier = lambda: c.ident
+        return c
+
+    def save(cal, commit, _err):
+        saves.append((cal, commit))
+        if save_error is not None:
+            return (False, SimpleNamespace(code=lambda: save_error))
+        if persist:
+            cals.append(cal)
+        return (True, None)
+
+    default = SimpleNamespace(source=lambda: SimpleNamespace(title=lambda: source))
+    s = SimpleNamespace(
+        calendarsForEntityType_=lambda _e: list(cals),
+        defaultCalendarForNewReminders=lambda: default if has_default else None,
+        saveCalendar_commit_error_=save,
+    )
+    fake_ek = SimpleNamespace(
+        EKEntityTypeReminder=1,
+        EKErrorSourceDoesNotAllowCalendarAddDelete=17,
+        EKErrorSourceDoesNotAllowReminders=24,
+        EKCalendar=SimpleNamespace(calendarForEntityType_eventStore_=new_cal),
+    )
+    monkeypatch.setattr(rem, "EK", fake_ek)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: (runs.append(1), f())[1])
+    return SimpleNamespace(adapter=rem.RemindersAdapter(), saves=saves, runs=runs)
+
+
+def test_create_reminder_list_saves_once_and_returns_the_list_pointer(monkeypatch):
+    env = _list_env(monkeypatch)
+    p = env.adapter.create_reminder_list("Groceries")
+    assert len(env.saves) == 1 and env.saves[0][1] is True
+    assert (p.id, p.summary, p.deeplink) == ("NEW-1", "Groceries", "")
+    assert env.saves[0][0].src.title() == "iCloud"  # the default list's source
+
+
+def test_create_reminder_list_refuses_an_exact_duplicate_naming_its_id(monkeypatch):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError, match="L-1") as ei:
+        env.adapter.create_reminder_list("Inbox")
+    assert "list_name" in str(ei.value)
+    assert env.saves == []
+
+
+def test_create_reminder_list_accepts_a_name_differing_only_in_case(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("inbox")  # write resolution is exact (#55)
+    assert len(env.saves) == 1
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a\x07b", "tab\there"])
+def test_create_reminder_list_bad_name_raises_before_any_native_call(monkeypatch, bad):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError):
+        env.adapter.create_reminder_list(bad)
+    assert env.runs == [] and env.saves == []
+
+
+def test_create_reminder_list_keeps_the_name_raw(monkeypatch):
+    env = _list_env(monkeypatch)
+    assert env.adapter.create_reminder_list(" Spaced  Out ").summary == " Spaced  Out "
+
+
+@pytest.mark.parametrize("code", [17, 24])
+def test_create_reminder_list_refusing_source_maps_to_write_refused(monkeypatch, code):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, save_error=code)
+    with pytest.raises(WriteRefused, match="iCloud") as ei:
+        env.adapter.create_reminder_list("Groceries")
+    assert "no list was created" in str(ei.value)
+
+
+def test_create_reminder_list_other_save_failure_uses_refused_write(monkeypatch):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, save_error=5)
+    with pytest.raises(WriteRefused, match="refused by the store"):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_without_a_default_list_is_write_refused(monkeypatch):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, has_default=False)
+    with pytest.raises(WriteRefused, match="default"):
+        env.adapter.create_reminder_list("Groceries")
+    assert env.saves == []
+
+
+def test_create_reminder_list_unverified_save_is_verification_failed(monkeypatch):
+    env = _list_env(monkeypatch, persist=False)
+    with pytest.raises(VerificationFailed):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_second_identical_create_is_a_duplicate(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("Groceries")
+    with pytest.raises(ValueError, match="NEW-1"):
+        env.adapter.create_reminder_list("Groceries")
+    assert len(env.saves) == 1  # exactly one list exists
+
+
+def test_create_reminder_list_scan_save_and_verify_share_one_run_native(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("Groceries")
+    assert env.runs == [1]

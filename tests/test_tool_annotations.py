@@ -110,6 +110,7 @@ def test_every_write_tool_is_audit_classified():
     # writes with no id-addressed before-state: creates + non-id actions
     envelope_only = {
         "create_reminder",
+        "create_reminder_list",
         "create_event",
         "create_note",
         "create_contact",
