@@ -31,13 +31,21 @@ def _ns(dt: datetime):
     return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
 
 
-def _fake_event(title, ident, start, end, all_day=False):
+def _fake_calendar(calendar_id):
+    """``calendar()`` for a fake item: None means an item with no calendar."""
+    if calendar_id is None:
+        return lambda: None
+    return lambda: SimpleNamespace(calendarIdentifier=lambda: calendar_id)
+
+
+def _fake_event(title, ident, start, end, all_day=False, calendar_id="C-1"):
     return SimpleNamespace(
         title=lambda: title,
         calendarItemIdentifier=lambda: ident,
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
         isAllDay=lambda: all_day,
+        calendar=_fake_calendar(calendar_id),
     )
 
 
@@ -515,7 +523,7 @@ def test_refetch_event_missing_is_rollback():
 # --- dry_run delete (#54) ------------------------------------------------------------
 
 
-def _fake_event_full(title, ident, start, end, *, recurring=False):
+def _fake_event_full(title, ident, start, end, *, recurring=False, calendar_id="C-1"):
     # everything _resolve_span + _event_pointer touch; recurrenceRules drives the span.
     return SimpleNamespace(
         title=lambda: title,
@@ -523,6 +531,7 @@ def _fake_event_full(title, ident, start, end, *, recurring=False):
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
         isAllDay=lambda: False,
+        calendar=_fake_calendar(calendar_id),
         recurrenceRules=lambda: [object()] if recurring else None,
     )
 
@@ -614,3 +623,76 @@ def test_calendar_snapshot_found(monkeypatch):
     monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: ev)
     p = cal.CalendarAdapter().snapshot("E-1|123")
     assert p is not None and "Standup" in p.summary
+
+
+# --- container id on the pointer (CAL-04, D-12, #207) --------------------------------
+
+
+def test_event_pointer_folder_is_the_calendar_identifier():
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Standup", "E-1", start, start, calendar_id="C-Work")
+    assert _event_pointer(e).as_dict()["folder"] == "C-Work"
+
+
+def test_event_pointer_folder_omitted_when_no_calendar():
+    # a calendar-less event: the key is absent from the wire dict, never null
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Orphan", "E-9", start, start, calendar_id=None)
+    assert "folder" not in _event_pointer(e).as_dict()
+
+
+def test_event_pointer_folder_is_raw_identifier_never_normalized():
+    # compared by exact equality: no trim, case-fold or NFC pass on the way out
+    start = datetime(2026, 6, 23, 9, 0)
+    raw = " Ab:C\u0301/x "
+    e = _fake_event("Standup", "E-1", start, start, calendar_id=raw)
+    assert _event_pointer(e).folder == raw
+
+
+def test_get_pointers_folder_round_trips_into_free_busy(monkeypatch):
+    # tracer: EventKit item -> Pointer.folder -> wire -> accepted back by free_busy
+    import macos_apps_mcp.adapters.calendar as cal
+
+    start = datetime(2026, 6, 23, 9, 0)
+    event = _fake_event("Standup", "E-1", start, start, calendar_id="C-Work")
+    seen = {}
+
+    def predicate(_s, _e, cals):
+        seen["cals"] = cals
+        return "pred"
+
+    s = SimpleNamespace(
+        calendarsForEntityType_=lambda _e: [
+            SimpleNamespace(calendarIdentifier=lambda: "C-Work", title=lambda: "T")
+        ],
+        predicateForEventsWithStartDate_endDate_calendars_=predicate,
+        eventsMatchingPredicate_=lambda _p: [event],
+    )
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+
+    ptrs = cal.CalendarAdapter().get_pointers("2026-06-23")
+    folder = ptrs[0].as_dict()["folder"]
+    assert folder == "C-Work"
+    cal.CalendarAdapter().get_free_busy(
+        "2026-06-23T00:00:00", "2026-06-24T00:00:00", calendars=[folder]
+    )  # no ValueError: the folder is a valid calendar id
+    assert [c.calendarIdentifier() for c in seen["cals"]] == ["C-Work"]
+
+
+def test_delete_event_dry_run_preview_carries_folder(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup",
+        "E-1",
+        datetime(2026, 6, 23, 9, 0),
+        datetime(2026, 6, 23, 9, 15),
+        calendar_id="C-Work",
+    )
+    store = SimpleNamespace(calendarItemWithIdentifier_=lambda i: event)
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    out = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert out["would_delete"]["folder"] == "C-Work"

@@ -23,7 +23,7 @@ from macos_apps_mcp.errors import AmbiguousTarget, VerificationFailed
 from tests._fakes import fake_rule
 
 
-def _fake_reminder(title, ident, due=None):
+def _fake_reminder(title, ident, due=None, calendar_id="L-1"):
     due_comps = None
     if due is not None:
         y, m, d = due
@@ -32,6 +32,12 @@ def _fake_reminder(title, ident, due=None):
         title=lambda: title,
         calendarItemIdentifier=lambda: ident,
         dueDateComponents=lambda: due_comps,
+        # None means a reminder with no list
+        calendar=(
+            (lambda: None)
+            if calendar_id is None
+            else (lambda: SimpleNamespace(calendarIdentifier=lambda: calendar_id))
+        ),
     )
 
 
@@ -366,3 +372,52 @@ def test_reminders_snapshot_missing_returns_none(monkeypatch):
     fake_store = SimpleNamespace(calendarItemWithIdentifier_=lambda i: None)
     monkeypatch.setattr(rem, "store", lambda: fake_store)
     assert rem.RemindersAdapter().snapshot("R-1") is None
+
+
+# --- container id on the pointer (REM-06, D-12, #207) --------------------------------
+
+
+def test_reminder_pointer_folder_is_the_list_identifier():
+    p = _reminder_pointer(_fake_reminder("Buy milk", "R-1", calendar_id="L-9"))
+    assert p.as_dict()["folder"] == "L-9"
+
+
+def test_reminder_pointer_folder_omitted_when_no_list():
+    p = _reminder_pointer(_fake_reminder("Orphan", "R-2", calendar_id=None))
+    assert "folder" not in p.as_dict()
+
+
+def test_reminder_pointer_folder_separates_lists_that_share_a_title():
+    # two lists both titled "Inbox": the folder (identifier) tells their reminders apart
+    a = _reminder_pointer(_fake_reminder("Inbox", "R-1", calendar_id="L-1"))
+    b = _reminder_pointer(_fake_reminder("Inbox", "R-2", calendar_id="L-2"))
+    assert (a.folder, b.folder) == ("L-1", "L-2")
+
+
+def test_reminder_pointer_folder_equals_the_list_pointer_id():
+    cal = SimpleNamespace(calendarIdentifier=lambda: "L:1/x ", title=lambda: "Inbox")
+    r = _fake_reminder("Buy milk", "R-1", calendar_id="L:1/x ")
+    assert _reminder_pointer(r).folder == _list_pointer(cal).id
+
+
+def test_get_pointers_folder_keeps_fetch_order(monkeypatch):
+    # adding folder must not reorder: EventKit's fetch order r3, r1, r2 survives
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+
+    s = _fake_store(["Work"])
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    monkeypatch.setattr(rem, "_incomplete_due_pred", lambda s, end, cals: cals)
+    order = [
+        _fake_reminder("c", "R-3", calendar_id="L-3"),
+        _fake_reminder("a", "R-1", calendar_id="L-1"),
+        _fake_reminder("b", "R-2", calendar_id="L-2"),
+    ]
+    monkeypatch.setattr(rem, "_fetch_reminders", lambda s, cals: order)
+    ptrs = RemindersAdapter().get_pointers("today")
+    assert [(p.id, p.folder) for p in ptrs] == [
+        ("R-3", "L-3"),
+        ("R-1", "L-1"),
+        ("R-2", "L-2"),
+    ]
