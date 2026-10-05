@@ -6,14 +6,53 @@ from __future__ import annotations
 from itertools import count as _counter
 from types import SimpleNamespace
 
+from macos_apps_mcp.eventkit import to_nsdate
 from macos_apps_mcp.text import RS, US
 
 
-def fake_rule(freq=0, interval=1, count=None):
-    # freq is the EKRecurrenceFrequency int (daily=0, weekly=1, monthly=2, yearly=3).
-    end = None if count is None else SimpleNamespace(occurrenceCount=lambda: count)
+def fake_rule(
+    freq=0,
+    interval=1,
+    count=None,
+    *,
+    byday=None,
+    bymonthday=None,
+    bymonth=None,
+    byyearday=None,
+    bysetpos=None,
+    until=None,
+):
+    """A persisted EKRecurrenceRule stand-in. ``freq`` is the EKRecurrenceFrequency
+    int (daily=0, weekly=1, monthly=2, yearly=3); ``byday`` is a list of
+    ``(ordinal, code)`` with EKWeekday numbers SU=1 … SA=7 behind the code; ``until``
+    is a naive datetime."""
+    weekday = {"SU": 1, "MO": 2, "TU": 3, "WE": 4, "TH": 5, "FR": 6, "SA": 7}
+    days = (
+        [
+            SimpleNamespace(
+                dayOfTheWeek=lambda c=code: weekday[c], weekNumber=lambda n=n: n
+            )
+            for n, code in byday
+        ]
+        if byday
+        else None
+    )
+    end = None
+    if count is not None or until is not None:
+        end = SimpleNamespace(
+            occurrenceCount=lambda: count or 0,
+            endDate=lambda: to_nsdate(until) if until is not None else None,
+        )
     return SimpleNamespace(
-        frequency=lambda: freq, interval=lambda: interval, recurrenceEnd=lambda: end
+        frequency=lambda: freq,
+        interval=lambda: interval,
+        recurrenceEnd=lambda: end,
+        daysOfTheWeek=lambda: days,
+        daysOfTheMonth=lambda: bymonthday,
+        monthsOfTheYear=lambda: bymonth,
+        weeksOfTheYear=lambda: None,
+        daysOfTheYear=lambda: byyearday,
+        setPositions=lambda: bysetpos,
     )
 
 

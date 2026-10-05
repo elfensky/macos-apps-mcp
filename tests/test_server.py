@@ -557,7 +557,7 @@ def test_create_event_rejects_bad_rrule(monkeypatch):
             "x",
             start="2026-06-24T09:00:00",
             end="2026-06-24T09:15:00",
-            recurrence="FREQ=WEEKLY;BYDAY=MO",
+            recurrence="FREQ=YEARLY;BYWEEKNO=20",
         )
 
 

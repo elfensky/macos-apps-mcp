@@ -390,6 +390,58 @@ def test_verify_event_matching_recurrence_passes():
     _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
+def _monthly_2tu_event(**kw):
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"),
+        **kw,
+    )
+
+
+def test_verify_event_byday_matching_passes():
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2, byday=[(2, "TU")]))
+    _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")  # no raise
+
+
+def test_verify_event_dropped_byday_raises():
+    # the store kept MONTHLY but lost the 2TU — presence+cadence alone would pass it
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")
+
+
+def test_verify_event_changed_byday_ordinal_raises():
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2, byday=[(3, "TU")]))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")
+
+
+def _timed_until_event():
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115"),
+    )
+
+
+def test_verify_event_timed_until_compared_at_day_granularity():
+    ok = fake_rule(freq=2, bymonthday=[15], until=datetime(2027, 1, 15, 9, 0))
+    _verify_event(
+        _fake_persisted_event(rule=ok), "E-1|x", _timed_until_event(), "C-Work"
+    )
+
+
+def test_verify_event_timed_until_on_another_day_raises():
+    bad = fake_rule(freq=2, bymonthday=[15], until=datetime(2027, 1, 16, 9, 0))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(
+            _fake_persisted_event(rule=bad), "E-1|x", _timed_until_event(), "C-Work"
+        )
+
+
 def test_verify_event_nfd_title_matches_nfc_persisted():
     # Cocoa treats NFC/NFD as equal — an NFD input persisted as NFC is the store
     # normalizing, not a dropped field (norm_text, #49 review).

@@ -109,7 +109,23 @@ def test_recurrence_rejects_unknown_freq():
 
 def test_recurrence_rejects_unsupported_part():
     with pytest.raises(ValueError, match="unsupported RRULE"):
-        Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO")
+        Recurrence.from_rrule("FREQ=YEARLY;BYWEEKNO=20")
+
+
+def test_recurrence_parses_byday_plain_weekdays_sorted():
+    r = Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=WE,MO,FR")
+    assert r.byday == ((0, "FR"), (0, "MO"), (0, "WE"))
+
+
+def test_recurrence_parses_byday_ordinals():
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=-1FR").byday == ((-1, "FR"),)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=+2TU").byday == ((2, "TU"),)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU").byday == ((2, "TU"),)
+
+
+def test_recurrence_parsing_is_idempotent():
+    rule = "FREQ=MONTHLY;BYDAY=2TU;COUNT=6"
+    assert Recurrence.from_rrule(rule) == Recurrence.from_rrule(rule)
 
 
 def test_recurrence_rejects_count_and_until_together():

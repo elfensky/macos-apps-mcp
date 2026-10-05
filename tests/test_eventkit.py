@@ -4,7 +4,6 @@ TCC calls (those are the D-08 device proof owned by plan 01-08)."""
 from __future__ import annotations
 
 from datetime import datetime
-from types import SimpleNamespace
 
 import EventKit as EK
 import pytest
@@ -25,6 +24,7 @@ from macos_apps_mcp.eventkit import (
     to_recurrence_rule,
 )
 from macos_apps_mcp.runtime import run_native
+from tests._fakes import fake_rule
 
 
 def test_require_full_access_passes_on_full_access():
@@ -95,73 +95,113 @@ def test_to_recurrence_rule_until_end():
     assert end is not None and end.occurrenceCount() == 0  # date-based, not count
 
 
-# --- verify-after-write diff (#49) recurrence signatures -----------------------------
+# --- BYDAY: the 9-argument builder (D-07) ---------------------------------------------
+
+
+def test_to_recurrence_rule_byday_ordinal_is_built_with_the_full_initializer():
+    rule = to_recurrence_rule(Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"))
+    day = rule.daysOfTheWeek()[0]
+    assert day.weekNumber() == 2
+    assert day.dayOfTheWeek() == 3  # EKWeekday: SU=1 … TU=3
+    assert rule.daysOfTheMonth() is None  # absent part → None, never []
+    assert rule.setPositions() is None
+
+
+def test_to_recurrence_rule_plain_weekday_has_ordinal_zero():
+    rule = to_recurrence_rule(Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO,WE"))
+    assert [(d.weekNumber(), d.dayOfTheWeek()) for d in rule.daysOfTheWeek()] == [
+        (0, 2),
+        (0, 4),
+    ]
+
+
+# --- verify-after-write diff (#49, D-08) canonical recurrence dict -------------------
+
+_KEYS = {
+    "freq",
+    "interval",
+    "byday",
+    "bymonthday",
+    "bymonth",
+    "byyearday",
+    "bysetpos",
+    "count",
+    "until",
+}
 
 
 def test_recurrence_signature_requested():
     assert recurrence_signature(None) is None
     assert recurrence_signature(CLEAR_RECURRENCE) is None  # explicit clear == no rule
-    # frequency maps to the EK constant; interval defaults 1; no count → 0
-    assert recurrence_signature(Recurrence(frequency="daily")) == (
-        int(EK.EKRecurrenceFrequencyDaily),
-        1,
-        0,
-    )
-    assert recurrence_signature(
-        Recurrence(frequency="weekly", interval=2, count=10)
-    ) == (int(EK.EKRecurrenceFrequencyWeekly), 2, 10)
-
-
-def test_persisted_recurrence_signature_readback():
-    assert persisted_recurrence_signature(None) is None
-    assert persisted_recurrence_signature([]) is None
-    rule = SimpleNamespace(
-        frequency=lambda: EK.EKRecurrenceFrequencyWeekly,
-        interval=lambda: 2,
-        recurrenceEnd=lambda: SimpleNamespace(occurrenceCount=lambda: 10),
-    )
-    assert persisted_recurrence_signature([rule]) == (
+    daily = recurrence_signature(Recurrence(frequency="daily"))
+    assert set(daily) == _KEYS
+    assert daily["freq"] == int(EK.EKRecurrenceFrequencyDaily)
+    assert (daily["interval"], daily["count"], daily["until"]) == (1, 0, None)
+    weekly = recurrence_signature(Recurrence(frequency="weekly", interval=2, count=10))
+    assert (weekly["freq"], weekly["interval"], weekly["count"]) == (
         int(EK.EKRecurrenceFrequencyWeekly),
         2,
         10,
     )
 
 
-def test_rrule_text_renders_freq_interval_count():
-    rule = SimpleNamespace(
-        frequency=lambda: EK.EKRecurrenceFrequencyWeekly,
-        interval=lambda: 2,
-        recurrenceEnd=lambda: SimpleNamespace(occurrenceCount=lambda: 10),
-    )
-    assert rrule_text(rule) == "FREQ=WEEKLY;INTERVAL=2;COUNT=10"
+def test_recurrence_signature_byday_sorted_regardless_of_input_order():
+    a = recurrence_signature(Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=FR,MO"))
+    b = recurrence_signature(Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO,FR"))
+    assert a == b
+    assert a["byday"] == [(0, "FR"), (0, "MO")]
 
 
-def test_rrule_text_omits_count_when_open_ended_or_date_based():
-    open_ended = SimpleNamespace(
-        frequency=lambda: EK.EKRecurrenceFrequencyDaily,
-        interval=lambda: 1,
-        recurrenceEnd=lambda: None,
+def test_persisted_recurrence_signature_readback():
+    assert persisted_recurrence_signature(None) is None
+    assert persisted_recurrence_signature([]) is None
+    sig = persisted_recurrence_signature(
+        [fake_rule(freq=1, interval=2, count=10, byday=[(0, "MO")])]
     )
-    assert rrule_text(open_ended) == "FREQ=DAILY;INTERVAL=1"
-    # date-based end reports occurrenceCount 0 → no COUNT= (matches signature rules)
-    until_based = SimpleNamespace(
-        frequency=lambda: EK.EKRecurrenceFrequencyMonthly,
-        interval=lambda: 3,
-        recurrenceEnd=lambda: SimpleNamespace(occurrenceCount=lambda: 0),
-    )
-    assert rrule_text(until_based) == "FREQ=MONTHLY;INTERVAL=3"
+    assert set(sig) == _KEYS
+    assert (sig["freq"], sig["interval"], sig["count"]) == (1, 2, 10)
+    assert sig["byday"] == [(0, "MO")]
 
 
 def test_recurrence_signatures_agree_for_equivalent_rule():
     # the requested and persisted signatures must be equal for an unchanged write, so
     # verify-after-write doesn't false-fail a correct recurrence.
     req = recurrence_signature(Recurrence(frequency="monthly", interval=1))
-    rule = SimpleNamespace(
-        frequency=lambda: EK.EKRecurrenceFrequencyMonthly,
-        interval=lambda: 1,
-        recurrenceEnd=lambda: None,  # open-ended → count 0
-    )
-    assert req == persisted_recurrence_signature([rule])
+    assert req == persisted_recurrence_signature([fake_rule(freq=2)])
+
+
+def test_byday_signatures_agree_between_request_and_a_real_rule_object():
+    r = Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU")
+    sig = recurrence_signature(r)
+    assert sig == persisted_recurrence_signature([to_recurrence_rule(r)])
+    assert sig["byday"] == [(2, "TU")]
+
+
+def test_persisted_signature_sees_a_dropped_byday():
+    req = recurrence_signature(Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"))
+    assert req != persisted_recurrence_signature([fake_rule(freq=2)])
+
+
+def test_until_is_day_granular_and_opt_in():
+    r = Recurrence(frequency="monthly", until=datetime(2027, 1, 15, 23, 59, 59))
+    assert recurrence_signature(r)["until"] is None  # default: omitted (#49)
+    assert recurrence_signature(r, include_until=True)["until"] == "20270115"
+    # persisted side: any time that day matches
+    late = fake_rule(freq=2, until=datetime(2027, 1, 15, 23, 59))
+    early = fake_rule(freq=2, until=datetime(2027, 1, 15, 0, 0))
+    want = recurrence_signature(r, include_until=True)
+    assert persisted_recurrence_signature([late], include_until=True) == want
+    assert persisted_recurrence_signature([early], include_until=True) == want
+    assert persisted_recurrence_signature([late])["until"] is None
+
+
+def test_rrule_text_renders_freq_interval_count():
+    rule = fake_rule(freq=1, interval=2, count=10)
+    assert rrule_text(rule) == "FREQ=WEEKLY;INTERVAL=2;COUNT=10"
+
+
+def test_rrule_text_omits_count_when_open_ended():
+    assert rrule_text(fake_rule(freq=0)) == "FREQ=DAILY;INTERVAL=1"
 
 
 def test_run_native_async_returns_result():
