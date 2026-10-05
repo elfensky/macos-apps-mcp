@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Gate — Land the Spiked Architecture Cuts** - Native seam fail-closed, module boundaries settled, one registration record, Mail's fixture and recoverable preflight fixed (completed 2026-09-26)
 - [x] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes (completed 2026-10-01)
-- [ ] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names
+- [x] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names (completed 2026-10-05)
 - [ ] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness
 - [ ] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
@@ -149,7 +149,7 @@ Plans:
   4. On a Mac with more than one account, `mail_reply` keeps the receiving account and the thread headers — checked on device and recorded in `docs/mail-applescript-facts.md`.
   5. A device probe runs first and settles what Mail does with a `from_address` that no account owns: reject it, fall back to the default, or keep a bare From header. The finding goes into `docs/mail-applescript-facts.md`. If Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and `send_mail`'s dry run still makes no native call.
 
-**Plans**: 7/8 plans executed in 7 waves
+**Plans**: 8/8 plans complete in 7 waves
 
 Plans:
 **Wave 1**
@@ -179,13 +179,13 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 02.1-08-PLAN.md — v0.13.0 release, owner-approved one-way cut, `doctor()` proof (D-17)
+- [x] 02.1-08-PLAN.md — v0.13.0 release, owner-approved one-way cut, `doctor()` proof (D-17)
 
 ### Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 
-**Goal**: The one native plane Calendar and Reminders share reaches Mail-level completeness — alarms and real recurrence on events, deletion, lists and subtasks on reminders.
+**Goal**: The one native plane Calendar and Reminders share reaches Mail-level completeness — alarms and real recurrence on events, deletion, lists and subtasks on reminders. The two Mail sweep findings carried over from Phase 02.1 (#229, #230) are settled first — email before features.
 **Depends on**: Phase 02.1
-**Requirements**: CAL-01, CAL-02, CAL-03, CAL-04, REM-01, REM-02, REM-03, REM-04, REM-06
+**Requirements**: CAL-01, CAL-02, CAL-03, CAL-04, REM-01, REM-02, REM-03, REM-04, REM-06, MAIL-05, MAIL-06
 **Success Criteria** (what must be TRUE):
 
   1. Creating or updating an event with a minutes-before alarm list lands `EKAlarm`s that verify-after-write reads back; an all-day event and a recurring all-day event created in a non-UTC timezone fire on the correct day on device, probed before the code is written rather than fixed after.
@@ -194,6 +194,8 @@ Plans:
   4. A reminder list can be created and the new list appears in the adapter's list read.
   5. Subtasks read and create through the public `parentReminder` route on macOS 14+ and read back under their parent; the tags probe runs as the phase's first task and its answer is the deliverable — tags ship read-only from the Reminders sqlite store with the write gap named in the tool docstring, or the probe's finding is documented and the surface is dropped. No private-API write in either outcome.
   6. `events()` and `reminders()` Pointers carry the owning calendar or list id in `folder` — the same container token `free_busy(calendars=…)` and the write tools already take; a unit test on `_event_pointer` and `_reminder_pointer` with a fake `calendar()` passes, and a caller filters by calendar without the per-calendar `free_busy` workaround (#207).
+  7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
+  8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
 **Plans**: TBD
 
@@ -252,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
-| 02.1. Mail Fixes (INSERTED) | 7/8 | In Progress|  |
+| 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |

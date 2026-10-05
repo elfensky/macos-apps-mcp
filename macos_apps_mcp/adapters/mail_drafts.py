@@ -35,6 +35,7 @@ from ..text import (
 from . import mail_addressing, mail_outgoing
 from .mail_addressing import _norm_mid, bare_id
 from .mail_index import _deeplink
+from .mail_outgoing import ORIGINAL_TIMEOUT
 
 # create_draft: draft-and-open, NEVER send. `make new outgoing message … visible:true`
 # opens a compose window for the HUMAN to review/send; there is deliberately no `send`
@@ -313,7 +314,7 @@ def reply(
         mail_outgoing.quoted_body(reply_body, mid, mb) if include_quote else reply_body
     )
     with runtime.body_file(body) as path:
-        runtime.run_osascript(_REPLY, mid, path, *mb)
+        runtime.run_osascript(_REPLY, mid, path, *mb, timeout=ORIGINAL_TIMEOUT)
     return {
         "created": True,
         "subject": "(reply)",

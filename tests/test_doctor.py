@@ -179,7 +179,19 @@ def test_shortcuts_missing(monkeypatch):
 def test_fda_granted(monkeypatch, tmp_path):
     probe = tmp_path / "TCC.db"
     probe.write_bytes(b"x")
-    monkeypatch.setattr(doc, "_FDA_PATH", probe)
+    monkeypatch.setattr(doc, "_FDA_PATHS", (probe,))
+    s = doc._fda_surface()
+    assert s["ok"] is True and s["status"] == "ok"
+
+
+def test_fda_falls_back_to_the_system_db_when_the_user_db_is_absent(
+    monkeypatch, tmp_path
+):
+    # #261: macOS 27 has no per-user TCC.db; the system db still answers the probe.
+    system = tmp_path / "system" / "TCC.db"
+    system.parent.mkdir()
+    system.write_bytes(b"x")
+    monkeypatch.setattr(doc, "_FDA_PATHS", (tmp_path / "user" / "TCC.db", system))
     s = doc._fda_surface()
     assert s["ok"] is True and s["status"] == "ok"
 
@@ -272,7 +284,7 @@ def _all_granted(monkeypatch, tmp_path):
     monkeypatch.setattr(doc.shutil, "which", lambda _: "/usr/bin/shortcuts")
     probe = tmp_path / "TCC.db"
     probe.write_bytes(b"x")
-    monkeypatch.setattr(doc, "_FDA_PATH", probe)
+    monkeypatch.setattr(doc, "_FDA_PATHS", (probe,))
     monkeypatch.setattr(doc.mail_index, "check_index_schema", lambda: "ok")
 
 
@@ -315,7 +327,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     # An unprobeable surface (ok=None) must not be counted as OK: FDA probe path
     # missing → ok=None → the request=True summary says unverified, never all-OK.
     _all_granted(monkeypatch, tmp_path)
-    monkeypatch.setattr(doc, "_FDA_PATH", tmp_path / "nope" / "TCC.db")
+    monkeypatch.setattr(doc, "_FDA_PATHS", (tmp_path / "nope" / "TCC.db",))
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]

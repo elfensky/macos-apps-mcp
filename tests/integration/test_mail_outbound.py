@@ -101,7 +101,10 @@ def test_send_to_self_and_delete_draft_round_trip():
     "02.1 sweep + its diagnostic re-run) — rollback() verified the windowless "
     "delete both times, showing the §3c zombie-delete state is intermittent, not "
     "permanent. Phase 2 rule: an intermittent device bug is held by a non-strict "
-    "xfail, not a strict one that flips the sweep gate on a pass.",
+    "xfail, not a strict one that flips the sweep gate on a pass. Decided "
+    "2026-10-05 (0.13.1): the loud leftover WARNING is the caller contract — the "
+    "state is Mail's, cannot be produced on demand, and a Mail restart clears "
+    "the windowless leftover (facts §3c); this test stays the detector.",
 )
 def test_rollback_verifies_a_real_delete():
     """The rollback handler run against live Mail: it deletes a freshly built outgoing

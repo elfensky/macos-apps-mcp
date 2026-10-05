@@ -1,44 +1,45 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "02.1"
-current_phase_name: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)
-status: executing
-stopped_at: Phase 02.1 context gathered (assumptions mode)
-last_updated: "2026-10-01T20:58:49.231Z"
-last_activity: 2026-10-01
-last_activity_desc: Phase 02.1 execution started
-state_head: e8454dff4922358e8498687bcd5e4b3266dbd0aa
+current_phase: 3
+current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+status: planning
+stopped_at: Phase 02.1 complete, ready to plan Phase 3
+last_updated: "2026-10-05T14:55:33.922Z"
+last_activity: 2026-10-05
+last_activity_desc: Phase 02.1 complete, transitioned to Phase 3
+state_head: 3e6aab6f2a6d56dce9995a11ce0dac610700656f
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 28
-  completed_plans: 20
+  completed_plans: 28
+  percent: 43
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-01)
+See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 02.1 — Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)
+**Current focus:** Phase 3 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 
 ## Current Position
 
-Phase: 02.1 (Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account (INSERTED)) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 02.1
-Last activity: 2026-10-01 — Phase 02.1 execution started
+Phase: 3 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-05 — Phase 02.1 complete, transitioned to Phase 3
 
-Progress: [███░░░░░░░] 29%
+Progress: [████░░░░░░] 43%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 20
+- Total plans completed: 28
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -48,6 +49,7 @@ Progress: [███░░░░░░░] 29%
 |-------|-------|-------|----------|
 | 01 | 14 | - | - |
 | 02 | 6 | - | - |
+| 02.1 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -82,6 +84,11 @@ Recent decisions affecting current work:
 - [Phase 02]: An intermittent device test is held by a non-strict xfail with evidence (#230): a strict mark flips the sweep gate on a pass; the mechanism question (content read of an undownloaded body) goes to 02.1.
 - [Phase 02]: A new session re-asks the owner before any device run; one diagnostic re-run per failed nodeid; the watchdog precondition before every Mail run; Mail is never force-quit on a timeout hint alone — a bare Apple Event decides whether it is wedged.
 - [Phase 02]: Planning records land by PR from a locked worktree like code (the main checkout had drifted 11 ahead / 8 behind by direct commits); `.planning/` is excluded from `ruff format` because ruff 0.16 formats Python fences in markdown.
+- [Phase 02.1]: Mail does not reject an unowned `from_address` — it sends from the default account. `send_mail`/`create_draft` refuse it before any native write; `owned_addresses()` fails closed (the opposite of `account_map()`'s fail-open label lookup).
+- [Phase 02.1]: Batch moves and trashes act by internal id from one bulk read (`«class mssg» id n of src`), behind a per-copy `considering case` identity guard; `ok` needs the source reference dead (-1728) plus a destination count rise.
+- [Phase 02.1]: A timeout receipt marks its targets `unknown`, and `undo_plan` replays `unknown` as well as `ok`.
+- [Phase 02.1]: No device probe targets a family account (Personal, Grandma, Mama) — this rule skipped the five #230 runs; both #229 and #230 stay open behind non-strict xfails with device evidence.
+- [Phase 02.1]: Phase close runs validate-phase and secure-phase from the verify:post hooks; their files land in the same records PR as the UAT.
 
 ### Pending Todos
 
@@ -92,9 +99,10 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- [Phase 2] The installed daemon is release v0.12.0 (build `5ce98ab`, installed 2026-10-01). The next dev build is needed only when 02.1 lands adapter code.
-- [Phase 2] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) are xfailed in the integration suite and owned by 02.1. The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
+- [Phase 02.1] The installed daemon is release v0.13.0 (build `23be4c2`, installed 2026-10-04; `doctor()` from a reconnected session proved it 2026-10-05).
+- [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
+- [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
 
@@ -104,6 +112,7 @@ Recent decisions affecting current work:
 - Phase 6 edited: edited fields: requirements (+DIST-06), success_criteria (+6: Intel build, #205)
 - Phase 02.1 inserted after Phase 2: Mail fixes (#206 move/trash timeout + receipt, #208 create_draft from_address) — email before any feature phase (owner, 2026-09-24) (URGENT)
 - Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
+- Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
 
 ## Deferred Items
 
@@ -115,6 +124,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-01T12:54:13.197Z
-Stopped at: Phase 02.1 context gathered (assumptions mode)
-Resume file: .planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/02.1-CONTEXT.md
+Last session: 2026-10-05T07:30:00Z
+Stopped at: Phase 02.1 complete, ready to plan Phase 3
+Resume file: None

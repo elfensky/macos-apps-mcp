@@ -6,6 +6,26 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-05 — Mail sweep fixes
+
+### Fixed
+
+- **Replies, reply-all and forwards wait 120 s for the original** (#230) — 0.13.0 gave
+  the quote read 120 s, but the reply itself still stopped at 30 s. On device a reply to
+  the newest inbox message takes 52–72 s; every script that acts on the original now has
+  the same 120 s cap as its own backstop.
+
+- **`doctor()` answers Full Disk Access on macOS 27** (#261) — macOS 27 has no per-user
+  TCC.db, so the probe reported `unknown`. It now falls back to the system TCC.db, and an
+  absent user db no longer marks the grant report as a partial read.
+
+### Changed
+
+- **The outbound leftover warning names its recovery** (#229) — when Mail ignores the
+  rollback delete of a windowless outgoing message (facts §3c), the warning now adds
+  "Quitting and reopening Mail clears it." This warning is the caller contract for that
+  Mail state, which cannot be produced on demand.
+
 ## [0.13.0] - 2026-10-03 — Mail fixes
 
 ### Added

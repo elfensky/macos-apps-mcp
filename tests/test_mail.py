@@ -431,7 +431,7 @@ def test_reply_without_quote_omits_original(monkeypatch):
 
     bodies = []
 
-    def fake(script, *args):
+    def fake(script, *args, **_):
         if _is_reply_script(script):
             with open(args[1], encoding="utf-8") as f:
                 bodies.append(f.read())
@@ -473,7 +473,7 @@ def test_reply_cleans_up_tempfile(monkeypatch):
 
     paths = []
 
-    def fake(script, *args):
+    def fake(script, *args, **_):
         if _is_reply_script(script):
             paths.append(args[1])
             return ""
@@ -774,7 +774,7 @@ def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
     # NEVER reach the send script (_REPLY_ALL) itself.
     seen = []
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen.append(script)
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             return (
@@ -898,7 +898,7 @@ def test_forward_sends_via_argv(monkeypatch):
     # recipients); no tempfile is ever created for it.
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         # #134: forward now also runs the outbox truth-check (_OUTBOX_COUNT) after
         # _FORWARD — it must return a real count, not the opaque "sent" _FORWARD uses.
@@ -1451,7 +1451,7 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
 
 
 def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         assert script is mail_outgoing._REPLY_ALL_RECIPIENTS
         assert argv == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
         return f"to{US}alice@corp.com{RS}sender{US}orig@corp.com{RS}"
@@ -1495,7 +1495,7 @@ def test_reply_all_send_passes_the_mailbox(monkeypatch):
 def test_forward_passes_the_mailbox(monkeypatch):
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         return "0" if script is mail_outgoing._OUTBOX_COUNT else "sent"
 

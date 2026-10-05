@@ -10,6 +10,8 @@ is why #157 rebuilds one and why the refusals exist at all.
 
 from __future__ import annotations
 
+import ast
+import inspect
 from contextlib import nullcontext
 
 import pytest
@@ -69,7 +71,7 @@ def test_every_send_path_previews_the_same_keys(monkeypatch):
     three shapes (`reply_to`/`reply_all`, `forwarding`, and the bare envelope), so a
     model had to branch on which tool it had called to read its own preview back."""
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             return f"to{US}a@x{RS}sender{US}s@x{RS}subject{US}Re: hi{RS}"
         if script is mail_outgoing._DRAFT_ENVELOPE:
@@ -127,7 +129,7 @@ def test_the_quote_preamble_exists_once(monkeypatch):
         def __exit__(self, *a):
             return False
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             return f"to{US}a@x{RS}sender{US}s@x{RS}subject{US}Re: hi{RS}"
         if script is mail_outgoing._OUTBOX_COUNT:
@@ -477,3 +479,29 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
     )
     mail.MailAdapter().send("x@y.com", "Hi", "body", from_address="   ", dry_run=False)
     assert seen[mail_outgoing._SEND][3] == ""
+
+
+def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
+    """#230: a reply, reply-all or forward acts on the ORIGINAL message, whose body may
+    still be on the IMAP server. On device the fetch ran past the 30s default with Mail
+    idle — first in `_ORIGINAL` (fixed in 0.13.0), then in `_REPLY`. Every such call
+    must carry the 120s cap that equals its script's own backstop."""
+    acting = {"_ORIGINAL", "_REPLY", "_REPLY_ALL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
+    found = set()
+    for module in (mail_outgoing, mail_drafts):
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if not (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", None) == "run_osascript"
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in acting
+            ):
+                continue
+            caps = [k.value for k in node.keywords if k.arg == "timeout"]
+            assert [getattr(c, "id", None) for c in caps] == ["ORIGINAL_TIMEOUT"], (
+                node.args[0].id
+            )
+            found.add(node.args[0].id)
+    assert found == acting
+    assert mail_outgoing.ORIGINAL_TIMEOUT == 120.0
