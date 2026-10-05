@@ -239,6 +239,42 @@ def test_rrule_spike_shape_round_trips_through_a_real_rule_object(rrule):
     assert persisted == recurrence_signature(r, include_until=True)
 
 
+def test_rrule_text_renders_byday_with_an_ordinal():
+    rule = fake_rule(freq=2, byday=[(2, "TU")], count=6)
+    assert rrule_text(rule) == "FREQ=MONTHLY;INTERVAL=1;BYDAY=2TU;COUNT=6"
+
+
+def test_rrule_text_renders_a_plain_weekday_without_zero():
+    rule = fake_rule(freq=1, byday=[(0, "MO"), (0, "WE")])
+    assert rrule_text(rule) == "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE"
+
+
+def test_rrule_text_orders_every_part_then_ends_with_until():
+    rule = fake_rule(
+        freq=3,
+        byday=[(-1, "FR")],
+        bymonthday=[1, 15],
+        bymonth=[3],
+        byyearday=[100],
+        bysetpos=[-1],
+        until=datetime(2027, 1, 15, 23, 59, 59),
+    )
+    assert rrule_text(rule) == (
+        "FREQ=YEARLY;INTERVAL=1;BYDAY=-1FR;BYMONTHDAY=1,15;BYMONTH=3;"
+        "BYYEARDAY=100;BYSETPOS=-1;UNTIL=20270115"
+    )
+
+
+@pytest.mark.parametrize("rrule", _SPIKE_RRULES)
+def test_rrule_text_reparses_to_the_persisted_rule(rrule):
+    # the RecurrenceRequired re-send text must carry the whole rule (D-11)
+    rule = to_recurrence_rule(Recurrence.from_rrule(rrule))
+    again = Recurrence.from_rrule(rrule_text(rule))
+    assert recurrence_signature(again, include_until=True) == (
+        persisted_recurrence_signature([rule], include_until=True)
+    )
+
+
 def test_run_native_async_returns_result():
     # start() invokes the completion immediately; the result flows back through finish.
     assert run_native_async(lambda finish: finish("ok")) == "ok"

@@ -322,6 +322,56 @@ def test_verify_reminder_matching_recurrence_passes():
     _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
+def test_verify_reminder_dropped_bymonthday_raises():
+    data = ReminderData(
+        title="Pay rent",
+        due=datetime(2026, 6, 25, 9, 0),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=1,15"),
+    )
+    fresh = _fake_persisted(
+        title="Pay rent", due=_comps(2026, 6, 25, 9, 0), rule=fake_rule(freq=2)
+    )
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_reminder(fresh, "R-1", data, "L-Home")
+
+
+def _until_data():
+    return ReminderData(
+        title="Gym",
+        due=datetime(2026, 6, 25, 9, 0),
+        recurrence=Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO;UNTIL=20270115"),
+    )
+
+
+def test_verify_reminder_until_on_another_day_raises():
+    # owner override of A5 (2026-10-06): a reminder's UNTIL is compared by day
+    rule = fake_rule(freq=1, byday=[(0, "MO")], until=datetime(2027, 1, 16, 9, 0))
+    fresh = _fake_persisted(title="Gym", due=_comps(2026, 6, 25, 9, 0), rule=rule)
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_reminder(fresh, "R-1", _until_data(), "L-Home")
+
+
+def test_verify_reminder_until_any_time_that_day_passes():
+    for end in (datetime(2027, 1, 15, 0, 0), datetime(2027, 1, 15, 23, 59, 59)):
+        rule = fake_rule(freq=1, byday=[(0, "MO")], until=end)
+        fresh = _fake_persisted(title="Gym", due=_comps(2026, 6, 25, 9, 0), rule=rule)
+        _verify_reminder(fresh, "R-1", _until_data(), "L-Home")  # no raise
+
+
+def test_update_reminder_resend_text_carries_the_byday_part(monkeypatch):
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.errors import RecurrenceRequired
+
+    target = SimpleNamespace(
+        recurrenceRules=lambda: [fake_rule(freq=1, byday=[(0, "MO"), (0, "WE")])]
+    )
+    s = SimpleNamespace(calendarItemWithIdentifier_=lambda _i: target)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    with pytest.raises(RecurrenceRequired, match="BYDAY=MO,WE"):
+        rem.RemindersAdapter().update_reminder("R-1", ReminderData(title="Renamed"))
+
+
 def test_verify_reminder_nfd_title_matches_nfc_persisted():
     # Cocoa normalizes to NFC on store — a byte-exact diff would false-fail a
     # correct write (#49).
