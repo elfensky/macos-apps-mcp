@@ -306,7 +306,26 @@ class Snapshotter(Protocol):
 
 Frequency = Literal["daily", "weekly", "monthly", "yearly"]
 _FREQUENCIES: tuple[str, ...] = get_args(Frequency)
-_RRULE_SUPPORTED = ("FREQ", "INTERVAL", "COUNT", "UNTIL", "BYDAY")
+_RRULE_SUPPORTED = (
+    "FREQ",
+    "INTERVAL",
+    "COUNT",
+    "UNTIL",
+    "BYDAY",
+    "BYMONTHDAY",
+    "BYMONTH",
+    "BYYEARDAY",
+    "BYSETPOS",
+)
+# Parts refused by name (D-06). BYWEEKNO is the trap: EventKit saves it without error
+# and then expands only DTSTART, so a "supported" BYWEEKNO would be a silent wrong rule.
+_RRULE_REJECTED = {
+    "BYWEEKNO": "EventKit saves it but expands only the first occurrence (spike 003)",
+    "BYHOUR": "EventKit has no field for it",
+    "BYMINUTE": "EventKit has no field for it",
+    "BYSECOND": "EventKit has no field for it",
+    "WKST": "EventKit has no field for it",
+}
 _WEEKDAY_CODES = ("SU", "MO", "TU", "WE", "TH", "FR", "SA")
 _BYDAY_ITEM = re.compile(r"^([+-]?\d+)?([A-Za-z]{2})$")
 
@@ -352,8 +371,31 @@ def _parse_byday(value: str) -> tuple[tuple[int, str], ...]:
                 f"RRULE BYDAY item {item.strip()!r} is not a weekday "
                 f"({', '.join(_WEEKDAY_CODES)}) with an optional ordinal such as 2TU"
             )
-        days.append((int(m.group(1) or 0), m.group(2).upper()))
+        ordinal = int(m.group(1) or 0)
+        if m.group(1) and ordinal == 0:  # "0MO" is not "every MO" — say so
+            raise ValueError(
+                f"RRULE BYDAY ordinal 0 in {item.strip()!r} is out of range "
+                "(omit the ordinal for every such weekday)"
+            )
+        days.append((ordinal, m.group(2).upper()))
     return tuple(days)
+
+
+def _by_ints(fields: dict[str, str], part: str) -> tuple[int, ...]:
+    return _parse_ints(part, fields[part]) if part in fields else ()
+
+
+def _parse_ints(part: str, value: str) -> tuple[int, ...]:
+    """Comma list of signed integers for a BY part; range checks are the dataclass's."""
+    out = []
+    for item in value.split(","):
+        try:
+            out.append(int(item.strip()))
+        except ValueError:
+            raise ValueError(
+                f"RRULE {part} item {item.strip()!r} is not an integer"
+            ) from None
+    return tuple(out)
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,14 +426,67 @@ class Recurrence:
         # canonical form: sorted unique, so equal rules compare equal however built
         for name in ("byday", "bymonthday", "bymonth", "byyearday", "bysetpos"):
             object.__setattr__(self, name, tuple(sorted(set(getattr(self, name)))))
+        self._validate_by_parts()
+
+    def _validate_by_parts(self) -> None:
+        """Ranges and RFC 5545 §3.3.10 combination bans. EventKit validates none of
+        this and saves a nonsense rule without error (RESEARCH Pitfall 3), so the
+        boundary does — on direct construction too."""
+        for name, limit in (("bymonthday", 31), ("byyearday", 366), ("bysetpos", 366)):
+            for v in getattr(self, name):
+                if v == 0 or abs(v) > limit:
+                    raise ValueError(
+                        f"{name.upper()} value {v} is out of range "
+                        f"(±1 to ±{limit}; 0 is not allowed)"
+                    )
+        for v in self.bymonth:
+            if not 1 <= v <= 12:
+                raise ValueError(f"BYMONTH value {v} is out of range (1 to 12)")
+        for ordinal, code in self.byday:
+            if code not in _WEEKDAY_CODES:
+                codes = ", ".join(_WEEKDAY_CODES)
+                raise ValueError(f"BYDAY code {code!r} is not a weekday ({codes})")
+            if abs(ordinal) > 53:
+                raise ValueError(f"BYDAY ordinal {ordinal} is out of range (±1 to ±53)")
+        freq = self.frequency.upper()
+        ordinals = [n for n, _ in self.byday if n]
+        if ordinals and self.frequency not in ("monthly", "yearly"):
+            raise ValueError(
+                "BYDAY with an ordinal such as 2TU is only valid with FREQ=MONTHLY "
+                f"or FREQ=YEARLY, not FREQ={freq} (RFC 5545)"
+            )
+        # a month has at most five of any weekday: a bigger ordinal saves a rule that
+        # never fires (Pitfall 3 warning sign). A YEARLY ordinal is per month only
+        # when BYMONTH narrows it.
+        if self.frequency == "monthly" or (self.frequency == "yearly" and self.bymonth):
+            for n in ordinals:
+                if abs(n) > 5:
+                    raise ValueError(
+                        f"BYDAY ordinal {n} is out of range for a month (±1 to ±5): "
+                        "a month has at most five of any weekday"
+                    )
+        if self.bymonthday and self.frequency == "weekly":
+            raise ValueError("BYMONTHDAY must not be used with FREQ=WEEKLY (RFC 5545)")
+        if self.byyearday and self.frequency in ("daily", "weekly", "monthly"):
+            raise ValueError(f"BYYEARDAY must not be used with FREQ={freq} (RFC 5545)")
+        if self.bysetpos and not (
+            self.byday or self.bymonthday or self.bymonth or self.byyearday
+        ):
+            raise ValueError(
+                "BYSETPOS must be used with another BY part such as BYDAY (RFC 5545)"
+            )
 
     @classmethod
     def from_rrule(cls, rrule: str) -> Recurrence:
         """Parse an RFC 5545 RRULE (the supported subset).
 
-        e.g. ``FREQ=WEEKLY;INTERVAL=2;COUNT=10``. FREQ is required; COUNT and UNTIL are
-        mutually exclusive. Unsupported parts (BYDAY, BYMONTHDAY, …) are rejected so a
-        rule never silently does the wrong thing.
+        e.g. ``FREQ=MONTHLY;INTERVAL=2;BYDAY=2TU;COUNT=10``. FREQ is required; COUNT and
+        UNTIL are mutually exclusive. Supported: FREQ, INTERVAL, COUNT, UNTIL, BYDAY
+        (with ordinals such as 2TU, -1FR), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS.
+        BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused *by name* (BYWEEKNO is
+        the trap: EventKit saves it and expands only DTSTART). EventKit validates no BY
+        value, so ranges and the RFC 5545 combination bans are checked here, before any
+        native call (RESEARCH Pitfall 3), so a rule never silently does the wrong thing.
         """
         body = rrule.strip()
         if body.upper().startswith("RRULE:"):
@@ -406,6 +501,11 @@ class Recurrence:
             key, _, val = token.partition("=")
             fields[key.strip().upper()] = val.strip()
 
+        for part in sorted(set(fields) & set(_RRULE_REJECTED)):
+            raise ValueError(
+                f"unsupported RRULE part {part}: {_RRULE_REJECTED[part]}; "
+                f"supported: {', '.join(_RRULE_SUPPORTED)}"
+            )
         extra = set(fields) - set(_RRULE_SUPPORTED)
         if extra:
             raise ValueError(
@@ -426,13 +526,16 @@ class Recurrence:
         if count is not None and count < 1:
             raise ValueError(f"RRULE COUNT must be >= 1; got {count}")
         until = _rrule_until(fields["UNTIL"]) if "UNTIL" in fields else None
-        byday = _parse_byday(fields["BYDAY"]) if "BYDAY" in fields else ()
         return cls(
             frequency=freq,
             interval=interval,
             count=count,
             until=until,
-            byday=byday,
+            byday=_parse_byday(fields["BYDAY"]) if "BYDAY" in fields else (),
+            bymonthday=_by_ints(fields, "BYMONTHDAY"),
+            bymonth=_by_ints(fields, "BYMONTH"),
+            byyearday=_by_ints(fields, "BYYEARDAY"),
+            bysetpos=_by_ints(fields, "BYSETPOS"),
         )
 
 
