@@ -65,11 +65,12 @@ _PROBE = (
 # runtime._ACCESS_TIMEOUT; already-granted/denied probes return in well under a second.
 _PROBE_TIMEOUT = 120.0
 
-# A read of this path is gated by Full Disk Access and it always exists on macOS, so a
-# PermissionError vs a clean read cleanly separates FDA-denied from FDA-granted. The
-# 0.5.0 sqlite read planes (chat.db, NoteStore.sqlite) need FDA — surface it now.
-# One declaration: deploy owns the user TCC.db path (it also reads grant rows from it).
-_FDA_PATH = deploy._TCC_DB
+# A read of a TCC.db is gated by Full Disk Access, so a PermissionError vs a clean read
+# cleanly separates FDA-denied from FDA-granted. The 0.5.0 sqlite read planes (chat.db,
+# NoteStore.sqlite) need FDA — surface it now. The probe takes the first db that exists:
+# macOS 27 has no per-user TCC.db at all (#261), only the system one. One declaration:
+# deploy owns both paths (it also reads grant rows from them).
+_FDA_PATHS = (deploy._TCC_DB, deploy._TCC_SYSTEM_DB)
 
 # EKAuthorizationStatus integer values (stable across SDKs — map by value, not by
 # constant name, so a missing WriteOnly symbol on an older pyobjc can't crash import).
@@ -189,30 +190,32 @@ def _shortcuts_surface() -> dict:
 
 
 def _fda_surface() -> dict:
-    try:
-        with open(_FDA_PATH, "rb") as f:
-            f.read(1)
-        return _surface("full_disk_access", "fda", True, "ok")
-    except PermissionError:
-        return _surface(
-            "full_disk_access",
-            "fda",
-            False,
-            "denied",
-            f"Grant Full Disk Access in {PRIVACY_PANE} → Full Disk Access to the "
-            "app that launched macos-apps-mcp, then restart it (needed for sqlite "
-            "read planes).",
-        )
-    except FileNotFoundError:
-        return _surface(
-            "full_disk_access",
-            "fda",
-            None,
-            "unknown",
-            f"{_FDA_PATH} not found to probe.",
-        )
-    except OSError as e:
-        return _surface("full_disk_access", "fda", None, "error", str(e))
+    for path in _FDA_PATHS:
+        try:
+            with open(path, "rb") as f:
+                f.read(1)
+            return _surface("full_disk_access", "fda", True, "ok")
+        except FileNotFoundError:
+            continue
+        except PermissionError:
+            return _surface(
+                "full_disk_access",
+                "fda",
+                False,
+                "denied",
+                f"Grant Full Disk Access in {PRIVACY_PANE} → Full Disk Access to the "
+                "app that launched macos-apps-mcp, then restart it (needed for sqlite "
+                "read planes).",
+            )
+        except OSError as e:
+            return _surface("full_disk_access", "fda", None, "error", str(e))
+    return _surface(
+        "full_disk_access",
+        "fda",
+        None,
+        "unknown",
+        f"no TCC.db found to probe ({', '.join(map(str, _FDA_PATHS))}).",
+    )
 
 
 def _mail_index_surface() -> dict:
@@ -380,10 +383,14 @@ def diagnose(request: bool = False) -> dict:
     # live only in the SYSTEM db (#123), so an unreadable system db yields an identity
     # map with no FDA row — indistinguishable, to the reader, from "FDA not granted".
     # That is the misdiagnosis C7 exists to end; reporting it only when BOTH dbs fail
-    # left it alive in exactly the case it started as.
-    if ids is not None and any(grants["reasons"].values()):
+    # left it alive in exactly the case it started as. An ABSENT user db is not a
+    # partial read: macOS 27 has no per-user TCC.db at all (#261).
+    failed = {
+        k: v for k, v in grants["reasons"].items() if v and (k, v) != ("user", "absent")
+    }
+    if ids is not None and failed:
         deployment["note"] += " PARTIAL read — " + ", ".join(
-            f"{k} db: {v}" for k, v in grants["reasons"].items() if v
+            f"{k} db: {v}" for k, v in failed.items()
         )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's

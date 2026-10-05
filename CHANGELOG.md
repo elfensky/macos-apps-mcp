@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`doctor()` answers Full Disk Access on macOS 27** (#261) — macOS 27 has no per-user
+  TCC.db, so the probe reported `unknown`. It now falls back to the system TCC.db, and an
+  absent user db no longer marks the grant report as a partial read.
+
 ## [0.13.0] - 2026-10-03 — Mail fixes
 
 ### Added

@@ -114,6 +114,24 @@ def test_deployment_note_has_no_partial_marker_when_both_dbs_read(monkeypatch):
     assert "PARTIAL" not in doctor.diagnose()["deployment"]["note"]
 
 
+def test_deployment_note_has_no_partial_marker_when_the_user_db_is_absent(
+    monkeypatch,
+):
+    # #261: macOS 27 has no per-user TCC.db. An absent USER db is the OS's shape, not
+    # a partial read; a failure of the system db still is.
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    _mock_grants(
+        monkeypatch,
+        {"kTCCServiceSystemPolicyAllFiles": []},
+        reasons={"user": "absent", "system": None},
+    )
+    monkeypatch.setattr(
+        "macos_apps_mcp.deploy.agent_status",
+        lambda: (_ for _ in ()).throw(Exception("no bundle")),
+    )
+    assert "PARTIAL" not in doctor.diagnose()["deployment"]["note"]
+
+
 @_gate_off_only
 def test_deployment_section_outbound_pending_when_configured_not_registered(
     monkeypatch,
