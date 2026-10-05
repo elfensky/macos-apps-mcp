@@ -195,7 +195,7 @@ _FREQUENCIES = {
 
 # EKWeekday numbers (SU=1 … SA=7) and back.
 _WEEKDAYS = {"SU": 1, "MO": 2, "TU": 3, "WE": 4, "TH": 5, "FR": 6, "SA": 7}
-_WEEKDAY_CODES = {v: k for k, v in _WEEKDAYS.items()}
+_CODE_OF_WEEKDAY = {v: k for k, v in _WEEKDAYS.items()}
 
 
 def to_recurrence_rule(r: Recurrence) -> EK.EKRecurrenceRule:
@@ -298,7 +298,7 @@ def persisted_recurrence_signature(
         rule.frequency(),
         rule.interval(),
         [
-            (d.weekNumber(), _WEEKDAY_CODES[int(d.dayOfTheWeek())])
+            (d.weekNumber(), _CODE_OF_WEEKDAY[int(d.dayOfTheWeek())])
             for d in rule.daysOfTheWeek() or ()
         ],
         rule.daysOfTheMonth(),
