@@ -21,7 +21,7 @@
     {
       "number": "3",
       "name": "EventKit Depth — Calendar & Reminders",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "4",
@@ -44,5 +44,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 03 of 7 · executing"
   },
-  "updated_at": "2026-10-05T23:03:33.834Z"
+  "updated_at": "2026-10-05T23:15:14.376Z"
 }
