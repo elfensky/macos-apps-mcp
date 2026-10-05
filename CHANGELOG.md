@@ -8,6 +8,11 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **Real recurrence on events and reminders** (#90) — BYDAY (with ordinals), BYMONTHDAY,
+  BYMONTH, BYYEARDAY, BYSETPOS; verified part by part after the write, a reminder's UNTIL
+  included (day precision); BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused by
+  name.
+
 - **`create_reminder_list(name)`** (#92) — creates a reminder list on the default
   Reminders account. An exact-name duplicate is refused before the save, because a second
   list with the same name would make every later `list_name=` write ambiguous.
@@ -16,6 +21,11 @@ surface may still shift between minor versions.
   or list id, the same token `free_busy(calendars=…)`, `create_event(calendar=…)` and
   `create_reminder(list_name=…)` take. It is never a title, and it is omitted when the
   item has no container.
+
+### Fixed
+
+- A reminder repeated in Reminders.app with a BYDAY rule no longer loses it when the
+  `RecurrenceRequired` re-send text is used.
 
 ## [0.13.1] - 2026-10-05 — Mail sweep fixes
 

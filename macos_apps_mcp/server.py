@@ -1101,7 +1101,10 @@ def create_reminder(
     recurrence: str | None = None,
 ) -> dict[str, str]:
     """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
-    first; `priority` 0–9; `recurrence` an RRULE.
+    first; `priority` 0–9; `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL,
+    BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
+    BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
+    refused.
     Side effect (creates); needs EventKit (Reminders) access. Target a list via
     `list_name` — a list name OR a list Pointer id (from reminder_lists). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1138,7 +1141,10 @@ def update_reminder(
     recurrence: str | None = None,
 ) -> dict[str, str]:
     """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
-    `recurrence`: RRULE to set; 'none' to stop repeating. REQUIRED (rule or 'none')
+    `recurrence`: RRULE to set ('none' to stop repeating) with FREQ, INTERVAL, COUNT,
+    UNTIL, BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
+    BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
+    refused. REQUIRED (rule or 'none')
     when the target reminder repeats — omitting it is refused so a rename can't
     silently kill the series.
     Side effect (full-replace update); needs EventKit (Reminders) access. `id` from
@@ -1174,8 +1180,11 @@ def create_event(
     recurrence: str | None = None,
 ) -> dict[str, str]:
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
-    first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
-    with a UTC offset is rejected.
+    first; `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals
+    such as 2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY,
+    BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day`
+    takes a DATE
+    (2026-07-01); a timestamp with a UTC offset is rejected.
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1206,7 +1215,11 @@ def update_event(
     span: str | None = None,
 ) -> dict[str, str]:
     """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
-    `all_day` takes a DATE (2026-07-01); a timestamp with a UTC offset is rejected.
+    `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals such as
+    2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS;
+    BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day` takes a
+    DATE (2026-07-01); a timestamp with a UTC offset
+    is rejected.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from

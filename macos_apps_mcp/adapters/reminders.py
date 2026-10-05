@@ -183,8 +183,10 @@ def _verify_reminder(fresh, ident: str, data: ReminderData, list_id: str) -> Non
         "due": _expected_due_tuple(data.due),
         "start": _expected_due_tuple(data.start),
         "list": list_id,  # opaque UUID handle — compared raw, not norm_text
-        # full-replace: None clears the rule, so verify the exact cadence both ways
-        "recurs": recurrence_signature(data.recurrence),
+        # full-replace: None clears the rule, so verify the exact cadence both ways.
+        # UNTIL is compared by day (D-09): a tool-created reminder always has a timed
+        # due, and 03-01 probe 2 measured the day surviving on device (owner, A5).
+        "recurs": recurrence_signature(data.recurrence, include_until=True),
     }
     actual = {
         "title": norm_text(fresh.title()),
@@ -193,7 +195,9 @@ def _verify_reminder(fresh, ident: str, data: ReminderData, list_id: str) -> Non
         "due": _due_tuple(fresh.dueDateComponents()),
         "start": _due_tuple(fresh.startDateComponents()),
         "list": fresh.calendar().calendarIdentifier(),
-        "recurs": persisted_recurrence_signature(fresh.recurrenceRules()),
+        "recurs": persisted_recurrence_signature(
+            fresh.recurrenceRules(), include_until=True
+        ),
     }
     verify_persisted("reminder", expected, actual)
 

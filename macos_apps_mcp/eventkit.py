@@ -315,12 +315,24 @@ _FREQUENCY_NAMES = {int(v): k.upper() for k, v in _FREQUENCIES.items()}
 
 def rrule_text(rule) -> str:
     """Render a persisted EKRecurrenceRule as RRULE text for agent-facing messages,
-    e.g. ``FREQ=WEEKLY;INTERVAL=2;COUNT=10``."""
-    parts = [
-        f"FREQ={_FREQUENCY_NAMES[int(rule.frequency())]}",
-        f"INTERVAL={int(rule.interval())}",
-    ]
-    end = rule.recurrenceEnd()
-    if end is not None and end.occurrenceCount() > 0:
-        parts.append(f"COUNT={int(end.occurrenceCount())}")
+    e.g. ``FREQ=MONTHLY;INTERVAL=1;BYDAY=2TU;COUNT=6``.
+
+    Every part ``Recurrence.from_rrule`` accepts is rendered, in the order FREQ,
+    INTERVAL, BYDAY, BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS, then COUNT or
+    ``UNTIL=YYYYMMDD``. The output re-parses to the same rule, so an agent can re-send
+    it verbatim (the ``RecurrenceRequired`` message does) without losing a part (D-11).
+    """
+    sig = persisted_recurrence_signature([rule], include_until=True)
+    parts = [f"FREQ={_FREQUENCY_NAMES[sig['freq']]}", f"INTERVAL={sig['interval']}"]
+    if sig["byday"]:
+        parts.append(
+            "BYDAY=" + ",".join(f"{n or ''}{code}" for n, code in sig["byday"])
+        )
+    for name in ("bymonthday", "bymonth", "byyearday", "bysetpos"):
+        if sig[name]:
+            parts.append(f"{name.upper()}=" + ",".join(str(v) for v in sig[name]))
+    if sig["count"] > 0:
+        parts.append(f"COUNT={sig['count']}")
+    elif sig["until"]:
+        parts.append(f"UNTIL={sig['until']}")
     return ";".join(parts)

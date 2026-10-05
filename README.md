@@ -76,9 +76,12 @@ Event and reminder pointers carry `folder` = the calendar or list id, which
 `free_busy(calendars=…)` and the write tools (`calendar=`, `list_name=`) take.
 
 A write targets its container by **name or `Pointer.id`**; an ambiguous name raises rather than
-guessing. **Recurrence** is an RFC 5545 `RRULE` (`FREQ`/`INTERVAL`/`COUNT`/`UNTIL` subset, e.g.
-`FREQ=WEEKLY;INTERVAL=2;COUNT=10`); a recurring reminder needs a due date; unsupported parts
-(`BYDAY`, …) are rejected, not ignored.
+guessing. **Recurrence** is an RFC 5545 `RRULE`: `FREQ`, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (with
+ordinals such as `2TU` or `-1FR` for monthly and yearly rules), `BYMONTHDAY`, `BYMONTH`,
+`BYYEARDAY` and `BYSETPOS`, e.g. `FREQ=MONTHLY;BYDAY=2TU;COUNT=6`. A recurring reminder needs a
+due date. `BYWEEKNO`, `BYHOUR`, `BYMINUTE`, `BYSECOND` and `WKST` are refused by name (EventKit
+saves `BYWEEKNO` but expands only the first date), and so is any value out of range or any
+combination RFC 5545 forbids; each part is checked again after the write.
 
 ### Mail — id-first read + draft-and-open (Automation)
 

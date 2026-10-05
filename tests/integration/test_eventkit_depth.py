@@ -151,3 +151,61 @@ def test_event_pointer_folder_is_its_calendar_id(icloud_scratch, ek_items):
         calendars=[folder],
     )
     assert len(window["busy"]) == 1
+
+
+def _second_tuesday(on_or_after):
+    """The first second-Tuesday of a month that is ``on_or_after`` (a date)."""
+    first = on_or_after.replace(day=1)
+    while True:
+        tuesday = first + timedelta(days=(1 - first.weekday()) % 7)
+        second = tuesday + timedelta(days=7)
+        if second >= on_or_after:
+            return second
+        first = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def test_reminder_byday_round_trip(ek_items):
+    """D-11: a reminder takes BYDAY through the shared parser; a rename without
+    ``recurrence`` is refused with re-send text that carries BYDAY, and that text is
+    accepted back."""
+    import re
+
+    from macos_apps_mcp.contracts import Recurrence
+    from macos_apps_mcp.errors import RecurrenceRequired
+
+    rem = RemindersAdapter()
+    made_list = rem.create_reminder_list(PREFIX + "byday")
+    ek_items.lists.append(made_list.id)
+    due = datetime.combine(
+        _second_tuesday((datetime.now() + timedelta(days=7)).date()),
+        datetime.min.time(),
+    ).replace(hour=9)
+
+    made = rem.create_reminder(  # returns, so verify-after-write passed
+        ReminderData(
+            title=PREFIX + "byday",
+            due=due,
+            list_name=made_list.id,
+            recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU;COUNT=6"),
+        )
+    )
+    ek_items.reminders.append(made.id)
+
+    renamed = ReminderData(
+        title=PREFIX + "byday (renamed)", due=due, list_name=made_list.id
+    )
+    with pytest.raises(RecurrenceRequired) as refused:
+        rem.update_reminder(made.id, renamed)
+    text = re.search(r"\((FREQ=[^)]+)\)", str(refused.value)).group(1)
+    assert "BYDAY=2TU" in text
+
+    again = rem.update_reminder(
+        made.id,
+        ReminderData(
+            title=renamed.title,
+            due=due,
+            list_name=made_list.id,
+            recurrence=Recurrence.from_rrule(text),
+        ),
+    )
+    ek_items.reminders.append(again.id)
