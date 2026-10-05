@@ -69,7 +69,11 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 | `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence` | `update` is a full replace by id |
 | `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting |
 | `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
+| `create_reminder_list` | name | new list on the default account; an exact duplicate name is refused |
 | `complete_reminder` | id | marks complete |
+
+Event and reminder pointers carry `folder` = the calendar or list id, which
+`free_busy(calendars=…)` and the write tools (`calendar=`, `list_name=`) take.
 
 A write targets its container by **name or `Pointer.id`**; an ambiguous name raises rather than
 guessing. **Recurrence** is an RFC 5545 `RRULE` (`FREQ`/`INTERVAL`/`COUNT`/`UNTIL` subset, e.g.

@@ -6,6 +6,17 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **`create_reminder_list(name)`** (#92) — creates a reminder list on the default
+  Reminders account. An exact-name duplicate is refused before the save, because a second
+  list with the same name would make every later `list_name=` write ambiguous.
+
+- **Event and reminder pointers name their container** (#207) — `folder` is the calendar
+  or list id, the same token `free_busy(calendars=…)`, `create_event(calendar=…)` and
+  `create_reminder(list_name=…)` take. It is never a title, and it is omitted when the
+  item has no container.
+
 ## [0.13.1] - 2026-10-05 — Mail sweep fixes
 
 ### Fixed
