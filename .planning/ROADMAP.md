@@ -183,9 +183,9 @@ Plans:
 
 ### Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 
-**Goal**: The one native plane Calendar and Reminders share reaches Mail-level completeness — alarms and real recurrence on events, deletion, lists and subtasks on reminders.
+**Goal**: The one native plane Calendar and Reminders share reaches Mail-level completeness — alarms and real recurrence on events, deletion, lists and subtasks on reminders. The two Mail sweep findings carried over from Phase 02.1 (#229, #230) are settled first — email before features.
 **Depends on**: Phase 02.1
-**Requirements**: CAL-01, CAL-02, CAL-03, CAL-04, REM-01, REM-02, REM-03, REM-04, REM-06
+**Requirements**: CAL-01, CAL-02, CAL-03, CAL-04, REM-01, REM-02, REM-03, REM-04, REM-06, MAIL-05, MAIL-06
 **Success Criteria** (what must be TRUE):
 
   1. Creating or updating an event with a minutes-before alarm list lands `EKAlarm`s that verify-after-write reads back; an all-day event and a recurring all-day event created in a non-UTC timezone fire on the correct day on device, probed before the code is written rather than fixed after.
@@ -194,6 +194,8 @@ Plans:
   4. A reminder list can be created and the new list appears in the adapter's list read.
   5. Subtasks read and create through the public `parentReminder` route on macOS 14+ and read back under their parent; the tags probe runs as the phase's first task and its answer is the deliverable — tags ship read-only from the Reminders sqlite store with the write gap named in the tool docstring, or the probe's finding is documented and the surface is dropped. No private-API write in either outcome.
   6. `events()` and `reminders()` Pointers carry the owning calendar or list id in `folder` — the same container token `free_busy(calendars=…)` and the write tools already take; a unit test on `_event_pointer` and `_reminder_pointer` with a fake `calendar()` passes, and a caller filters by calendar without the per-calendar `free_busy` workaround (#207).
+  7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
+  8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
 **Plans**: TBD
 

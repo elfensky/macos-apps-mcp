@@ -40,7 +40,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 <!-- Current scope, in the order the phases run. -->
 
 **Mail fixes — email work comes before any new or additional feature (owner, 2026-09-24)**
-- [ ] From the Phase 2 sweep: `rollback()` verifies the delete of a windowless outgoing message (#229); the reply quote's content read no longer times out on messages whose body is not downloaded (#230). Both stay open after Phase 02.1, each held by a non-strict xfail with device evidence
+- [ ] From the Phase 2 sweep: `rollback()` verifies the delete of a windowless outgoing message (#229); the reply quote's content read no longer times out on messages whose body is not downloaded (#230). Both stay open after Phase 02.1, each held by a non-strict xfail with device evidence; Phase 3 settles them first (MAIL-05/06)
 - [ ] `doctor()` gives a real Full Disk Access answer on macOS 27, where the per-user TCC.db no longer exists (#261)
 
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**

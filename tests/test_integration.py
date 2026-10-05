@@ -1397,7 +1397,7 @@ def _family_account_skip_reason(mid: str) -> str | None:
     strict=False,
     reason="#230 — intermittent: quoted_body() content read exceeds the 30 s cap "
     "on some inbox messages (4 of 5 device runs failed, Mail not wedged); "
-    "strict=False because it also passes — Phase 02.1 investigates",
+    "strict=False because it also passes — Phase 3 decides it (MAIL-06)",
 )
 def test_mail_reply_opens_threaded_draft_and_never_sends():
     """#42/#46: reply to a real inbox message → a draft exists UNSENT (outgoing

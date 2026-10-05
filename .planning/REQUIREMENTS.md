@@ -29,6 +29,8 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **MAIL-02**: A timeout inside `recoverable()` still leaves a receipt — a `done` record with the unfinished ids as `unknown`, and an error that names the receipt and the safe next steps (re-run the batch; `mail_undo(<receipt>)`), never the generic `NativeTimeout` text (#206)
 - [x] **MAIL-03**: `create_draft` takes an optional `from_address`, applied the way `send_mail` applies it; the locator reports `from`; the docstring says a new draft is unthreaded and routes replies to `mail_reply`; device-verified with a non-default account, and `mail_reply` keeps the receiving account on a multi-account Mac (#208)
 - [x] **MAIL-04**: A device probe settles what Mail does with a `from_address` that no account owns; the finding lands in `docs/mail-applescript-facts.md`; if Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and the outbound dry run still makes no native call (#208)
+- [ ] **MAIL-05**: `rollback()`'s unverified delete of a windowless outgoing message has a decided, device-probed handling (retry, another mitigation, or a documented caller contract); an outbound call that leaves a message behind says so loudly; the #229 xfail is removed or its reason names the decision (#229)
+- [ ] **MAIL-06**: Five dedicated device runs, on a message in an account a probe may target, decide the reply quote's read of the original: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation and a facts entry that separates a transient event-queue stall from the permanent wedge (#230)
 
 ### Calendar
 
@@ -156,6 +158,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MAIL-02 | Phase 02.1 | Complete |
 | MAIL-03 | Phase 02.1 | Complete |
 | MAIL-04 | Phase 02.1 | Complete |
+| MAIL-05 | Phase 3 | Pending |
+| MAIL-06 | Phase 3 | Pending |
 | CAL-01 | Phase 3 | Pending |
 | CAL-02 | Phase 3 | Pending |
 | CAL-03 | Phase 3 | Pending |
@@ -182,14 +186,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 40 total
-- Mapped to phases: 40
+- v1 requirements: 42 total
+- Mapped to phases: 42
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 9 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-09-24 — #206/#208 added as MAIL-01..04 (Phase 02.1, email before features), #207 as CAL-04/REM-06; 40/40 mapped across 7 phases*
+*Last updated: 2026-10-05 — #229/#230 added as MAIL-05/06 (carried from Phase 02.1 into Phase 3); 42/42 mapped across 7 phases*
