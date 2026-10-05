@@ -33,15 +33,15 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - ✓ Gate architecture landed (spike cards 1, 3, 4, 5, 7, 9 and 2): native seam fail-closed for every adapter + `doctor` + `tracked_run`; `runtime.py` an 11-name native door with EventKit in `eventkit.py`; tier policy and the notice middleware in their own modules, nothing below `server` imports it; one `ToolRecord` per tool drives tier, audit verb, notice and snapshot; every content-removing tool defaults `dry_run=True` (live-verified 2026-09-26); script-timeout tripwire; shared Sequoia-shaped envelope fixture with a full `HEADER_FINGERPRINT`; `recoverable()` owns its dry-run preflight (device-verified) — Phase 1 (GATE-01..06, 08, 09, 10, 13)
 - ✓ Device-verified Mail facts (`docs/mail-applescript-facts.md`) and the probe-first discipline: ten consecutive 0.9.x cuts had their premise revised on device before code was written
 - ✓ Gate close — the suite fails closed in every deployment shape: the `MACOS_APPS_READ_ONLY=1` run is green with gated-off tools absent (CI runs it as a second step); doctor's process probes go through the locked `tracked_run` seam with an AST tripwire against direct spawns; the full 80-test device sweep is green on macOS 27.0 against the daemon built from the gate (0 failed, 0 errors; #229/#230 xfailed and routed to 02.1) — released and installed as 0.12.0 — Phase 2 (GATE-07, GATE-11, GATE-12)
+- ✓ Mail fixes — a 25-message `move_mail`/`trash_mail`, their dry runs and `mail_undo` finish inside scaled host caps on a 9k+ IMAP mailbox (by-ID acts from one bulk read; device worst ratio 0.092 of cap); a timeout inside `recoverable()` still writes a receipt whose `unknown` targets `mail_undo` replays; `create_draft` takes `from_address`; `send_mail` and `create_draft` refuse an address no account owns before any native write, and the read behind the refusal fails closed — released and installed as 0.13.0 — Phase 02.1 (MAIL-01..04, #206, #208)
 
 ### Active
 
 <!-- Current scope, in the order the phases run. -->
 
 **Mail fixes — email work comes before any new or additional feature (owner, 2026-09-24)**
-- [ ] A full 25-message `move_mail`/`trash_mail` batch and its dry run finish inside their timeout on a large IMAP mailbox, and a timeout still leaves a receipt (#206)
-- [ ] `create_draft` takes `from_address` and routes replies to `mail_reply`; a device probe settles what Mail does with an address no account owns (#208)
-- [ ] From the Phase 2 sweep: `rollback()` verifies the delete of a windowless outgoing message (#229); the reply quote's content read no longer times out on messages whose body is not downloaded (#230, intermittent — a non-strict xfail holds it meanwhile)
+- [ ] From the Phase 2 sweep: `rollback()` verifies the delete of a windowless outgoing message (#229); the reply quote's content read no longer times out on messages whose body is not downloaded (#230). Both stay open after Phase 02.1, each held by a non-strict xfail with device evidence
+- [ ] `doctor()` gives a real Full Disk Access answer on macOS 27, where the per-user TCC.db no longer exists (#261)
 
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
 - [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
@@ -94,7 +94,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Core value is safe writes, not read breadth | Reads that are slow or missing are gaps; an unsafe write is a failure the caller cannot recover from | — Pending |
 | Gate first: land the spiked review before any feature work | Cards 1/7/5 are green pure moves that rot if left; card 1 makes the whole suite fail-closed before server.py/runtime.py are reshaped; Contacts work would touch the same files | ✓ Good — all cuts landed in order 1 → 7 → 5 → 2 (Phase 1, 2026-09-26) |
 | Existing nine adapters stable and full-featured before new domains | Owner's call 2026-08-28: "make sure the ones we have now are all working, stable, and as fully featured as possible" | — Pending |
-| Email work takes priority over new and additional features; Mail fixes run right after the gate (Phase 02.1) | Owner's call 2026-09-24. The gate still runs first: it is not a feature, and its card 4 rewrites `recoverable()`, the function #206 fixes — landing #206 first would fix it twice | — Pending |
+| Email work takes priority over new and additional features; Mail fixes run right after the gate (Phase 02.1) | Owner's call 2026-09-24. The gate still runs first: it is not a feature, and its card 4 rewrites `recoverable()`, the function #206 fixes — landing #206 first would fix it twice | ✓ Good — Phase 02.1 closed #206/#208 and shipped as 0.13.0 (2026-10-04) |
 | Phase order: Gate → adapter depth → new domains → platform | Platform (#127 network transport, menubar) is the largest job and benefits from a settled registry/tier module | — Pending |
 | Contacts and Messages depth deferred to v2 | Owner's call at roadmap review 2026-08-28: v1 depth is Calendar/Reminders, Notes, Photos | — Pending |
 | Apps MCP, not a Mac-control MCP | Capture and system utilities (#101/#102) are out; Bash and the host already cover them | ✓ Good |
@@ -105,6 +105,9 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | New `mail_index` reads are written single — one `query_*` tested through the envelope fixture, no new `build_*` twin; old pairs collapse only when a cut already touches them (#180) | Checking answers through the real fingerprinted schema beats asserting SQL text; no dedicated refactor pass — nothing is broken, the win is interface width. Depends on the shared fixture (GATE-08) | — Pending |
 | An intermittent device test is held by a non-strict xfail with evidence, not a strict mark and not a timeout change | #230 failed 4 of 5 device runs and passed once; a strict mark flips the sweep gate on a pass, and a timeout change is Mail-timing semantics without a verified mechanism; the evidence and the IMAP-fetch hypothesis go to 02.1 | ✓ Good — the final sweep was green on the first run after the mark (Phase 2, 2026-09-30) |
 | Release 0.12.0 at the gate close, not 0.11.1 | `feat` commits and the dry-run contract change since 0.11.0; the daemon under the vault session should be a tagged build, not a dev build | ✓ Good — cut, installed and proven by `doctor()` 2026-10-01 (D-09) |
+| An unowned `from_address` is refused in Python before any native write; the owned-address read fails closed | Mail does not reject an address no account owns — it silently sends from the default account (spike 005). An unreadable Mail or an empty list must refuse, not pass | ✓ Good — MAIL-04, device-verified (Phase 02.1) |
+| Batch moves and trashes act by internal id from one bulk read, behind a per-copy identity guard | Per-id `whose` scans did not fit the cap on a 9k+ mailbox; `ok` needs every source reference dead (-1728) and a destination count rise | ✓ Good — MAIL-01, 25-message device run at 0.092 of cap (Phase 02.1) |
+| A timeout receipt marks its targets `unknown`, and `mail_undo` replays `unknown` as well as `ok` | The act may still finish in Mail after the host gives up, so "do not know" must read as "may have moved" | ✓ Good — MAIL-02 (Phase 02.1) |
 | `dry_run=True` on every destructive tool, enforced from the registry | Before Phase 1, `delete_event`/`delete_draft` defaulted False and `delete_note` had none — three safety contracts for one class of call | ✓ Good — GATE-05, a registry test fails closed on a new `delete_*`; live client check 2026-09-26 |
 
 ## Evolution
@@ -125,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-01 after Phase 2 — gate close validated (fail-closed in all three shapes, device sweep green), 0.12.0 released and installed, sweep findings #229/#230 added to the Mail fixes*
+*Last updated: 2026-10-05 after Phase 02.1 — Mail fixes validated (MAIL-01..04 device-verified), 0.13.0 released and installed, #229/#230 still open behind non-strict xfails, #261 (FDA probe on macOS 27) added*

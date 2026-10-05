@@ -25,10 +25,10 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Mail — email work comes before any new or additional feature (owner, 2026-09-24)
 
-- [ ] **MAIL-01**: A full batch within the documented cap (25) finishes on a large IMAP mailbox: the host timeout for `_MOVE`, `_TRASH` and every `_PRESENT` call scales with the batch size (per-message budget × ids), each script's `with timeout` backstop stays ≥ its host cap, and `mail_undo` of a 25-message receipt finishes; device-verified on a 9k+ message mailbox with the watchdog running (#206)
-- [ ] **MAIL-02**: A timeout inside `recoverable()` still leaves a receipt — a `done` record with the unfinished ids as `unknown`, and an error that names the receipt and the safe next steps (re-run the batch; `mail_undo(<receipt>)`), never the generic `NativeTimeout` text (#206)
-- [ ] **MAIL-03**: `create_draft` takes an optional `from_address`, applied the way `send_mail` applies it; the locator reports `from`; the docstring says a new draft is unthreaded and routes replies to `mail_reply`; device-verified with a non-default account, and `mail_reply` keeps the receiving account on a multi-account Mac (#208)
-- [ ] **MAIL-04**: A device probe settles what Mail does with a `from_address` that no account owns; the finding lands in `docs/mail-applescript-facts.md`; if Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and the outbound dry run still makes no native call (#208)
+- [x] **MAIL-01**: A full batch within the documented cap (25) finishes on a large IMAP mailbox: the host timeout for `_MOVE`, `_TRASH` and every `_PRESENT` call scales with the batch size (per-message budget × ids), each script's `with timeout` backstop stays ≥ its host cap, and `mail_undo` of a 25-message receipt finishes; device-verified on a 9k+ message mailbox with the watchdog running (#206)
+- [x] **MAIL-02**: A timeout inside `recoverable()` still leaves a receipt — a `done` record with the unfinished ids as `unknown`, and an error that names the receipt and the safe next steps (re-run the batch; `mail_undo(<receipt>)`), never the generic `NativeTimeout` text (#206)
+- [x] **MAIL-03**: `create_draft` takes an optional `from_address`, applied the way `send_mail` applies it; the locator reports `from`; the docstring says a new draft is unthreaded and routes replies to `mail_reply`; device-verified with a non-default account, and `mail_reply` keeps the receiving account on a multi-account Mac (#208)
+- [x] **MAIL-04**: A device probe settles what Mail does with a `from_address` that no account owns; the finding lands in `docs/mail-applescript-facts.md`; if Mail does not reject it, `send_mail` and `create_draft` refuse an unowned address before any native write, and the outbound dry run still makes no native call (#208)
 
 ### Calendar
 
@@ -152,10 +152,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | GATE-11 | Phase 2 | Complete |
 | GATE-12 | Phase 2 | Complete |
 | GATE-13 | Phase 1 | Complete |
-| MAIL-01 | Phase 02.1 | Pending |
-| MAIL-02 | Phase 02.1 | Pending |
-| MAIL-03 | Phase 02.1 | Pending |
-| MAIL-04 | Phase 02.1 | Pending |
+| MAIL-01 | Phase 02.1 | Complete |
+| MAIL-02 | Phase 02.1 | Complete |
+| MAIL-03 | Phase 02.1 | Complete |
+| MAIL-04 | Phase 02.1 | Complete |
 | CAL-01 | Phase 3 | Pending |
 | CAL-02 | Phase 3 | Pending |
 | CAL-03 | Phase 3 | Pending |
