@@ -59,6 +59,7 @@ def _reminder_pointer(item) -> Pointer:
         id=ident,
         summary=clean_summary(_reminder_summary(item)),
         deeplink=_reminder_deeplink(ident),
+        folder=container_id(item),  # the list identifier, never its title (D-12)
     )
 
 

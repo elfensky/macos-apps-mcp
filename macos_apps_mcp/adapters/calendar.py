@@ -83,6 +83,7 @@ def _event_pointer(item) -> Pointer:
         id=_event_id(item),
         summary=clean_summary(_event_summary(item)),
         deeplink=_event_deeplink(item),
+        folder=container_id(item),  # the calendar identifier, never its title (D-12)
     )
 
 

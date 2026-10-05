@@ -219,7 +219,10 @@ class Pointer:
     summary: str
     deeplink: str
     # notes reads (notes_all, search): "Account / Folder"; create_note: the requested
-    # bare folder name; mail reads: the round-trip mailbox token; None elsewhere
+    # bare folder name; mail reads: the round-trip mailbox token; events/reminders
+    # reads: the owning calendar or list identifier — the token free_busy(calendars=…),
+    # create_event(calendar=…) and create_reminder(list_name=…) take (#207); unset for
+    # reads that have no container
     folder: str | None = None
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
     # mail reads: the owning account's id — the uuid segment of ``folder``'s url, so it

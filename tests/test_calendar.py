@@ -655,6 +655,7 @@ def test_get_pointers_folder_round_trips_into_free_busy(monkeypatch):
 
     start = datetime(2026, 6, 23, 9, 0)
     event = _fake_event("Standup", "E-1", start, start, calendar_id="C-Work")
+    event.availability = lambda: EK.EKEventAvailabilityBusy
     seen = {}
 
     def predicate(_s, _e, cals):

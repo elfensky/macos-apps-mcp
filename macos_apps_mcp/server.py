@@ -277,14 +277,18 @@ async def usage() -> dict:
 @_read_tool(adapter="reminders", permission="EventKit")
 def reminders(due: str = "today") -> list[dict[str, str]]:
     """List reminders as pointers. `due`: today | overdue | this-week | a list name.
-    Read-only; needs EventKit (Reminders) access. Hydrate none — pointers only."""
+    Each result's `folder` is its list's id (from `reminder_lists`); pass it as
+    `list_name=`. Read-only; needs EventKit (Reminders) access. Hydrate none —
+    pointers only."""
     return [p.as_dict() for p in _reminders.get_pointers(due)]
 
 
 @_read_tool(adapter="calendar", permission="EventKit")
 def events(when: str = "today") -> list[dict[str, str]]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD.
-    Read-only; needs EventKit (Calendar) access."""
+    Each result's `folder` is its calendar's id (from `calendars`); pass it to
+    `free_busy(calendars=…)` or as `calendar=`. Read-only; needs EventKit (Calendar)
+    access."""
     return [p.as_dict() for p in _calendar.get_pointers(when)]
 
 
@@ -299,15 +303,17 @@ def free_busy(start: str, end: str, calendars: list[str] | None = None) -> dict:
 
 @_read_tool(adapter="reminders", permission="EventKit")
 def reminder_lists() -> list[dict[str, str]]:
-    """List reminder lists as pointers (id + name); use a name to target writes.
-    Read-only; needs EventKit (Reminders) access. See create_reminder to write."""
+    """List reminder lists as pointers (id + name); use a name to target writes. The
+    `id` is the `folder` that reminders carry. Read-only; needs EventKit (Reminders)
+    access. See create_reminder to write."""
     return [p.as_dict() for p in _reminders.get_lists()]
 
 
 @_read_tool(adapter="calendar", permission="EventKit")
 def calendars() -> list[dict[str, str]]:
-    """List calendars as pointers (id + name); use a name to target writes.
-    Read-only; needs EventKit (Calendar) access. See create_event to write."""
+    """List calendars as pointers (id + name); use a name to target writes. The `id`
+    is the `folder` that events carry. Read-only; needs EventKit (Calendar) access.
+    See create_event to write."""
     return [p.as_dict() for p in _calendar.get_calendars()]
 
 
