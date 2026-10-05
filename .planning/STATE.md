@@ -4,17 +4,16 @@ milestone: v0.11.0
 current_phase: 3
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: planning
-stopped_at: Phase 02.1 complete, ready to plan Phase 3
-last_updated: "2026-10-05T14:55:33.922Z"
+stopped_at: Phase 3 context gathered (assumptions mode)
+last_updated: "2026-10-05T19:03:11.225Z"
 last_activity: 2026-10-05
 last_activity_desc: Phase 02.1 complete, transitioned to Phase 3
-state_head: 3e6aab6f2a6d56dce9995a11ce0dac610700656f
+state_head: 03949b8343e677e5f10a07eeebff7cdab82cfc9c
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 28
   completed_plans: 28
-  percent: 43
 ---
 
 # Project State
@@ -113,6 +112,7 @@ Recent decisions affecting current work:
 - Phase 02.1 inserted after Phase 2: Mail fixes (#206 move/trash timeout + receipt, #208 create_draft from_address) — email before any feature phase (owner, 2026-09-24) (URGENT)
 - Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
 - Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
+- Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
 
 ## Deferred Items
 
@@ -124,6 +124,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T07:30:00Z
-Stopped at: Phase 02.1 complete, ready to plan Phase 3
-Resume file: None
+Last session: 2026-10-05T19:03:11.152Z
+Stopped at: Phase 3 context gathered (assumptions mode)
+Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-CONTEXT.md
