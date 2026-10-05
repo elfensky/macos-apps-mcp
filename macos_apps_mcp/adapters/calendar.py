@@ -352,9 +352,14 @@ def _verify_event(fresh, ident: str, data: CalendarEventData, cal_id: str) -> No
         actual["end"] = int(from_nsdate(fresh.endDate()).timestamp())
     if data.recurrence is not None:  # None = "leave series untouched" (_apply_event)
         # verify the exact cadence, not just presence — a wrong-frequency series is a
-        # changed field #49 must name (UNTIL deferred; see recurrence_signature).
-        expected["recurs"] = recurrence_signature(data.recurrence)
-        actual["recurs"] = persisted_recurrence_signature(fresh.recurrenceRules())
+        # changed field #49 must name. UNTIL is compared (day granularity) on timed
+        # events only; all-day keeps the omission (D-09, #49).
+        expected["recurs"] = recurrence_signature(
+            data.recurrence, include_until=not data.all_day
+        )
+        actual["recurs"] = persisted_recurrence_signature(
+            fresh.recurrenceRules(), include_until=not data.all_day
+        )
     verify_persisted("event", expected, actual)
 
 

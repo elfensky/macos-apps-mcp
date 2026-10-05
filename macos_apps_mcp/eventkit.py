@@ -193,49 +193,121 @@ _FREQUENCIES = {
 }
 
 
+# EKWeekday numbers (SU=1 … SA=7) and back.
+_WEEKDAYS = {"SU": 1, "MO": 2, "TU": 3, "WE": 4, "TH": 5, "FR": 6, "SA": 7}
+_WEEKDAY_CODES = {v: k for k, v in _WEEKDAYS.items()}
+
+
 def to_recurrence_rule(r: Recurrence) -> EK.EKRecurrenceRule:
     """Map a Recurrence (RFC-5545 subset) to a native EKRecurrenceRule.
 
     A value object (no store / thread affinity), so adapters build it inside their
     run_native work block alongside the EKEvent/EKReminder it attaches to.
+
+    Built with the 9-argument initializer (D-07): the 3-argument one drops every BY
+    part. An absent part is ``None``, not ``[]``; ``weeksOfTheYear`` is always ``None``
+    (BYWEEKNO is refused at parse — EventKit saves it but expands only DTSTART).
     """
     end = None
     if r.count is not None:
         end = EK.EKRecurrenceEnd.recurrenceEndWithOccurrenceCount_(r.count)
     elif r.until is not None:
         end = EK.EKRecurrenceEnd.recurrenceEndWithEndDate_(to_nsdate(r.until))
-    return EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_end_(
-        _FREQUENCIES[r.frequency], r.interval, end
+    days = [
+        EK.EKRecurrenceDayOfWeek.dayOfWeek_weekNumber_(_WEEKDAYS[code], ordinal)
+        for ordinal, code in r.byday
+    ]
+    return EK.EKRecurrenceRule.alloc().initRecurrenceWithFrequency_interval_daysOfTheWeek_daysOfTheMonth_monthsOfTheYear_weeksOfTheYear_daysOfTheYear_setPositions_end_(  # noqa: E501
+        _FREQUENCIES[r.frequency],
+        r.interval,
+        days or None,
+        list(r.bymonthday) or None,
+        list(r.bymonth) or None,
+        None,
+        list(r.byyearday) or None,
+        list(r.bysetpos) or None,
+        end,
     )
 
 
-def recurrence_signature(recurrence: Recurrence | None) -> tuple | None:
-    """Comparable ``(frequency, interval, count)`` of a *requested* recurrence (#49).
+def _canonical(
+    freq, interval, byday, bymonthday, bymonth, byyearday, bysetpos, count, until
+) -> dict:
+    """The one comparable shape for a requested and a persisted rule (D-08)."""
+    return {
+        "freq": int(freq),
+        "interval": int(interval),
+        "byday": sorted((int(n), str(code)) for n, code in byday),
+        "bymonthday": sorted(int(x) for x in bymonthday or ()),
+        "bymonth": sorted(int(x) for x in bymonth or ()),
+        "byyearday": sorted(int(x) for x in byyearday or ()),
+        "bysetpos": sorted(int(x) for x in bysetpos or ()),
+        "count": int(count or 0),
+        "until": until,
+    }
 
-    Verify-after-write diffs this against what persisted, so a *changed* cadence (not
-    just a dropped rule) fails loudly. UNTIL is omitted on purpose: its endDate carries
-    the same inclusive/exclusive ambiguity as an all-day end, so diffing it would
-    false-fail a correct write. ``count`` and "no count" both normalize to 0 (a
-    date-based/open-ended rule reports 0), so an until rule still matches on count.
+
+def recurrence_signature(
+    recurrence: Recurrence | None, *, include_until: bool = False
+) -> dict | None:
+    """Canonical dict of a *requested* recurrence for verify-after-write (#49, D-08).
+
+    Verify diffs this against ``persisted_recurrence_signature``, so a dropped or
+    changed BY part, cadence or count fails loudly instead of passing as "a rule is
+    there". ``count`` 0 means none (an open-ended or date-ended rule).
+
+    UNTIL is opt-in and day-granular (``YYYYMMDD``, D-09): EventKit stores its endDate
+    with an inclusive/exclusive ambiguity, so a timestamp compare would false-fail a
+    correct write, while the day survives on device. Callers pass ``include_until``
+    for timed items and leave it off for all-day events (#49).
     """
     if recurrence is None or recurrence is CLEAR_RECURRENCE:
         return None
-    return (
-        int(_FREQUENCIES[recurrence.frequency]),
+    until = None
+    if include_until and recurrence.until is not None:
+        until = recurrence.until.strftime("%Y%m%d")
+    return _canonical(
+        _FREQUENCIES[recurrence.frequency],
         recurrence.interval,
-        recurrence.count or 0,
+        recurrence.byday,
+        recurrence.bymonthday,
+        recurrence.bymonth,
+        recurrence.byyearday,
+        recurrence.bysetpos,
+        recurrence.count,
+        until,
     )
 
 
-def persisted_recurrence_signature(rules) -> tuple | None:
-    """The same ``(frequency, interval, count)`` read back from a persisted
-    EKRecurrenceRule list (the first rule); ``None``/empty → ``None``."""
+def persisted_recurrence_signature(
+    rules, *, include_until: bool = False
+) -> dict | None:
+    """The same canonical dict read back from a persisted EKRecurrenceRule list (the
+    first rule); ``None``/empty → ``None``. ``include_until`` as in
+    ``recurrence_signature``: the persisted endDate is read in local time, to the
+    day."""
     if not rules:
         return None
     rule = rules[0]
     end = rule.recurrenceEnd()
     count = end.occurrenceCount() if end is not None else 0
-    return (int(rule.frequency()), int(rule.interval()), int(count))
+    until = None
+    if include_until and end is not None and end.endDate() is not None:
+        until = from_nsdate(end.endDate()).strftime("%Y%m%d")
+    return _canonical(
+        rule.frequency(),
+        rule.interval(),
+        [
+            (d.weekNumber(), _WEEKDAY_CODES[int(d.dayOfTheWeek())])
+            for d in rule.daysOfTheWeek() or ()
+        ],
+        rule.daysOfTheMonth(),
+        rule.monthsOfTheYear(),
+        rule.daysOfTheYear(),
+        rule.setPositions(),
+        count,
+        until,
+    )
 
 
 _FREQUENCY_NAMES = {int(v): k.upper() for k, v in _FREQUENCIES.items()}

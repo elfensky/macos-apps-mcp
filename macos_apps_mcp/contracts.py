@@ -19,6 +19,7 @@ never the full body.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol, get_args, runtime_checkable
@@ -305,7 +306,9 @@ class Snapshotter(Protocol):
 
 Frequency = Literal["daily", "weekly", "monthly", "yearly"]
 _FREQUENCIES: tuple[str, ...] = get_args(Frequency)
-_RRULE_SUPPORTED = ("FREQ", "INTERVAL", "COUNT", "UNTIL")
+_RRULE_SUPPORTED = ("FREQ", "INTERVAL", "COUNT", "UNTIL", "BYDAY")
+_WEEKDAY_CODES = ("SU", "MO", "TU", "WE", "TH", "FR", "SA")
+_BYDAY_ITEM = re.compile(r"^([+-]?\d+)?([A-Za-z]{2})$")
 
 
 def _rrule_until(v: str) -> datetime:
@@ -339,24 +342,48 @@ def _rrule_until(v: str) -> datetime:
     return parsed
 
 
+def _parse_byday(value: str) -> tuple[tuple[int, str], ...]:
+    """BYDAY list → ``(ordinal, code)`` pairs; ordinal 0 for a plain weekday."""
+    days = []
+    for item in value.split(","):
+        m = _BYDAY_ITEM.match(item.strip())
+        if m is None or m.group(2).upper() not in _WEEKDAY_CODES:
+            raise ValueError(
+                f"RRULE BYDAY item {item.strip()!r} is not a weekday "
+                f"({', '.join(_WEEKDAY_CODES)}) with an optional ordinal such as 2TU"
+            )
+        days.append((int(m.group(1) or 0), m.group(2).upper()))
+    return tuple(days)
+
+
 @dataclass(frozen=True, slots=True)
 class Recurrence:
-    """A repeat rule — the FREQ/INTERVAL/COUNT/UNTIL subset of RFC 5545.
+    """A repeat rule — the FREQ/INTERVAL/COUNT/UNTIL/BY* subset of RFC 5545.
 
     Pure data: the EventKit ``EKRecurrenceRule`` mapping lives in
     ``eventkit.to_recurrence_rule``, so this module stays free of native imports.
+    ``byday`` holds sorted unique ``(ordinal, code)`` pairs (ordinal 0 = every such
+    weekday); the other BY parts are sorted unique ints. All default to ``()``.
     """
 
     frequency: Frequency
     interval: int = 1  # every N periods
     count: int | None = None  # end after N occurrences …
     until: datetime | None = None  # … or end on a date (mutually exclusive with count)
+    byday: tuple[tuple[int, str], ...] = ()
+    bymonthday: tuple[int, ...] = ()
+    bymonth: tuple[int, ...] = ()
+    byyearday: tuple[int, ...] = ()
+    bysetpos: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         # Enforce the documented invariant on the contract itself, so it holds however
         # a Recurrence is built (direct construction included), not only via from_rrule.
         if self.count is not None and self.until is not None:
             raise ValueError("recurrence count and until are mutually exclusive")
+        # canonical form: sorted unique, so equal rules compare equal however built
+        for name in ("byday", "bymonthday", "bymonth", "byyearday", "bysetpos"):
+            object.__setattr__(self, name, tuple(sorted(set(getattr(self, name)))))
 
     @classmethod
     def from_rrule(cls, rrule: str) -> Recurrence:
@@ -399,7 +426,14 @@ class Recurrence:
         if count is not None and count < 1:
             raise ValueError(f"RRULE COUNT must be >= 1; got {count}")
         until = _rrule_until(fields["UNTIL"]) if "UNTIL" in fields else None
-        return cls(frequency=freq, interval=interval, count=count, until=until)
+        byday = _parse_byday(fields["BYDAY"]) if "BYDAY" in fields else ()
+        return cls(
+            frequency=freq,
+            interval=interval,
+            count=count,
+            until=until,
+            byday=byday,
+        )
 
 
 class _ClearRecurrence:

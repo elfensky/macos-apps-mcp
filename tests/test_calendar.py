@@ -423,19 +423,19 @@ def _timed_until_event():
         title="Standup",
         start=datetime(2026, 6, 24, 9, 0),
         end=datetime(2026, 6, 24, 9, 15),
-        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115"),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU;UNTIL=20270115"),
     )
 
 
 def test_verify_event_timed_until_compared_at_day_granularity():
-    ok = fake_rule(freq=2, bymonthday=[15], until=datetime(2027, 1, 15, 9, 0))
+    ok = fake_rule(freq=2, byday=[(2, "TU")], until=datetime(2027, 1, 15, 9, 0))
     _verify_event(
         _fake_persisted_event(rule=ok), "E-1|x", _timed_until_event(), "C-Work"
     )
 
 
 def test_verify_event_timed_until_on_another_day_raises():
-    bad = fake_rule(freq=2, bymonthday=[15], until=datetime(2027, 1, 16, 9, 0))
+    bad = fake_rule(freq=2, byday=[(2, "TU")], until=datetime(2027, 1, 16, 9, 0))
     with pytest.raises(VerificationFailed, match="recurs"):
         _verify_event(
             _fake_persisted_event(rule=bad), "E-1|x", _timed_until_event(), "C-Work"
