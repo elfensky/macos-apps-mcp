@@ -154,7 +154,8 @@ end rollback
 
 on outgoingLeftover()
   return " (WARNING: a partial outgoing message may remain; check Mail's " & ¬
-    "Outbox before retrying, so a retry cannot send twice)"
+    "Outbox before retrying, so a retry cannot send twice. Quitting and " & ¬
+    "reopening Mail clears it.)"
 end outgoingLeftover
 
 on draftLeftover()
