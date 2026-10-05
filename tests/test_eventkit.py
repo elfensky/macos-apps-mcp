@@ -204,6 +204,41 @@ def test_rrule_text_omits_count_when_open_ended():
     assert rrule_text(fake_rule(freq=0)) == "FREQ=DAILY;INTERVAL=1"
 
 
+# The spike 003 matrix (22 shapes, 21 exact on device); BYWEEKNO is refused, so the
+# accepted set is the other 21. Each must survive the value-object round trip.
+_SPIKE_RRULES = [
+    "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+    "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH",
+    "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5",
+    "FREQ=MONTHLY;BYDAY=2TU",
+    "FREQ=MONTHLY;BYDAY=-1FR",
+    "FREQ=MONTHLY;BYDAY=5FR",
+    "FREQ=MONTHLY;BYDAY=MO",
+    "FREQ=MONTHLY;BYMONTHDAY=15",
+    "FREQ=MONTHLY;BYMONTHDAY=1,15",
+    "FREQ=MONTHLY;BYMONTHDAY=-1",
+    "FREQ=MONTHLY;BYMONTHDAY=31",
+    "FREQ=MONTHLY;BYMONTHDAY=29",
+    "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115T235959",
+    "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+    "FREQ=MONTHLY;BYMONTH=1,4,7,10;BYMONTHDAY=1",
+    "FREQ=DAILY;BYMONTH=12",
+    "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+    "FREQ=YEARLY;BYMONTH=1,7;BYMONTHDAY=1",
+    "FREQ=YEARLY;BYYEARDAY=100",
+    "FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4",
+]
+
+
+@pytest.mark.parametrize("rrule", _SPIKE_RRULES)
+def test_rrule_spike_shape_round_trips_through_a_real_rule_object(rrule):
+    r = Recurrence.from_rrule(rrule)
+    persisted = persisted_recurrence_signature(
+        [to_recurrence_rule(r)], include_until=True
+    )
+    assert persisted == recurrence_signature(r, include_until=True)
+
+
 def test_run_native_async_returns_result():
     # start() invokes the completion immediately; the result flows back through finish.
     assert run_native_async(lambda finish: finish("ok")) == "ok"

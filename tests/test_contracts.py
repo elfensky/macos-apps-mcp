@@ -128,6 +128,105 @@ def test_recurrence_parsing_is_idempotent():
     assert Recurrence.from_rrule(rule) == Recurrence.from_rrule(rule)
 
 
+# --- Task 2: the other BY parts, named rejections, ranges, RFC 5545 bans (D-06) -------
+
+
+def test_rrule_parses_the_integer_by_parts():
+    r = Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=15,1;BYMONTH=10,1")
+    assert r.bymonthday == (1, 15)
+    assert r.bymonth == (1, 10)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=-1").bymonthday == (-1,)
+    assert Recurrence.from_rrule("FREQ=YEARLY;BYYEARDAY=100").byyearday == (100,)
+    r = Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1")
+    assert r.bysetpos == (-1,)
+
+
+def test_rrule_duplicate_values_collapse():
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=1,1").bymonthday == (1,)
+
+
+def test_rrule_byday_order_does_not_change_the_value():
+    a = Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=FR,MO")
+    assert a == Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO,FR")
+
+
+@pytest.mark.parametrize(
+    ("part", "reason"),
+    [
+        ("BYWEEKNO=20", "expands only"),
+        ("BYHOUR=9", "no field"),
+        ("BYMINUTE=30", "no field"),
+        ("BYSECOND=0", "no field"),
+        ("WKST=MO", "no field"),
+    ],
+)
+def test_rrule_rejects_unsupported_parts_by_name(part, reason):
+    name = part.split("=")[0]
+    with pytest.raises(ValueError, match="unsupported RRULE") as e:
+        Recurrence.from_rrule(f"FREQ=YEARLY;{part}")
+    assert name in str(e.value)
+    assert reason in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    [
+        "FREQ=MONTHLY;BYMONTHDAY=0",
+        "FREQ=MONTHLY;BYMONTHDAY=32",
+        "FREQ=MONTHLY;BYMONTHDAY=-32",
+        "FREQ=YEARLY;BYMONTH=0",
+        "FREQ=YEARLY;BYMONTH=13",
+        "FREQ=YEARLY;BYYEARDAY=0",
+        "FREQ=YEARLY;BYYEARDAY=367",
+        "FREQ=YEARLY;BYDAY=MO;BYSETPOS=0",
+        "FREQ=YEARLY;BYDAY=MO;BYSETPOS=367",
+        "FREQ=MONTHLY;BYDAY=0MO",
+        "FREQ=YEARLY;BYDAY=54MO",
+        "FREQ=MONTHLY;BYDAY=XX",
+        "FREQ=MONTHLY;BYMONTHDAY=x",
+        "FREQ=MONTHLY;BYDAY=6MO",
+        "FREQ=YEARLY;BYMONTH=3;BYDAY=6SU",
+    ],
+)
+def test_rrule_rejects_out_of_range_values(rrule):
+    with pytest.raises(ValueError, match="out of range|not a weekday|not an integer"):
+        Recurrence.from_rrule(rrule)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    [
+        "FREQ=WEEKLY;BYDAY=2MO",
+        "FREQ=DAILY;BYDAY=1MO",
+        "FREQ=WEEKLY;BYMONTHDAY=1",
+        "FREQ=MONTHLY;BYYEARDAY=100",
+        "FREQ=DAILY;BYYEARDAY=1",
+        "FREQ=WEEKLY;BYYEARDAY=1",
+        "FREQ=MONTHLY;BYSETPOS=1",
+    ],
+)
+def test_rrule_rejects_rfc_5545_combination_bans(rrule):
+    with pytest.raises(ValueError, match="RFC 5545"):
+        Recurrence.from_rrule(rrule)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    ["FREQ=DAILY;BYMONTH=12", "FREQ=YEARLY;BYDAY=20MO", "FREQ=MONTHLY;BYDAY=5FR"],
+)
+def test_rrule_accepts_legal_edges(rrule):
+    Recurrence.from_rrule(rrule)
+
+
+def test_recurrence_direct_construction_validates_by_parts():
+    with pytest.raises(ValueError, match="RFC 5545"):
+        Recurrence(frequency="weekly", bymonthday=(1,))
+    with pytest.raises(ValueError, match="out of range"):
+        Recurrence(frequency="monthly", bymonth=(13,))
+    with pytest.raises(ValueError, match="not a weekday"):
+        Recurrence(frequency="monthly", byday=((0, "XX"),))
+
+
 def test_recurrence_rejects_count_and_until_together():
     with pytest.raises(ValueError, match="mutually exclusive"):
         Recurrence.from_rrule("FREQ=DAILY;COUNT=5;UNTIL=2026-12-31")
