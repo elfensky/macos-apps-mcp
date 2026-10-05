@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 3
+current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: executing
-stopped_at: Phase 3 context gathered (assumptions mode)
-last_updated: "2026-10-05T20:25:05.185Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-10-05T23:03:40.934Z"
 last_activity: 2026-10-05
-last_activity_desc: Phase 02.1 complete, transitioned to Phase 3
-state_head: 4d53d5096bcde2504295614a6079a688accba5a4
+last_activity_desc: Phase 03 execution started
+state_head: 56b9fa35a191df054a9e94d61f0dfc38e4e26f7c
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 38
-  completed_plans: 28
+  completed_plans: 29
 ---
 
 # Project State
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 3 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+**Current focus:** Phase 03 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 
 ## Current Position
 
-Phase: 3 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — READY TO EXECUTE
-Plan: Not started
+Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
-Last activity: 2026-10-05 — Phase 02.1 complete, transitioned to Phase 3
+Last activity: 2026-10-05 — Phase 03 execution started
 
 Progress: [████░░░░░░] 43%
 
@@ -61,6 +61,7 @@ Progress: [████░░░░░░] 43%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 11min | 3 tasks | 0 files |
+| Phase 03 P01 | 20min | 3 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,7 @@ Recent decisions affecting current work:
 - [Phase 02.1]: A timeout receipt marks its targets `unknown`, and `undo_plan` replays `unknown` as well as `ok`.
 - [Phase 02.1]: No device probe targets a family account (Personal, Grandma, Mama) — this rule skipped the five #230 runs; both #229 and #230 stay open behind non-strict xfails with device evidence.
 - [Phase 02.1]: Phase close runs validate-phase and secure-phase from the verify:post hooks; their files land in the same records PR as the UAT.
+- [Phase 03]: Pre-code probes (03-01) overturned no premise: reminder lists save on the default source; Google refuses a list save with EKErrorDomain 24; reminder BY* parts and UNTIL (day granularity) round-trip; Google alarms unchanged from spike 008. — Measured on device 2026-10-06 before any Phase 3 code (D-23).
 
 ### Pending Todos
 
@@ -124,6 +126,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T19:03:11.152Z
-Stopped at: Phase 3 context gathered (assumptions mode)
-Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-CONTEXT.md
+Last session: 2026-10-05T23:03:34.269Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
