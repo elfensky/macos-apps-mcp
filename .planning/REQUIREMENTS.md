@@ -43,7 +43,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 - [ ] **REM-01**: User can delete a reminder by id (`dry_run=True` default, verify-after-write, mirrors `delete_event`) (#92)
 - [ ] **REM-02**: User can create a reminder list (#92)
-- [ ] **REM-03**: User can read and create subtasks via the public `parentReminder` route (macOS 14+) (#91)
+- [ ] **REM-03**: User can read subtasks — `reminders()` Pointers carry the parent's id, read from the Reminders sqlite store and joined by id; no public write route exists (spike 002), so the write gap is named in the docstring (#91)
 - [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write (#91)
 - [ ] **REM-06**: `reminders()` Pointers carry the owning list's id in `Pointer.folder` — same rule and test shape as CAL-04; `reminder_lists()` maps ids to names (#207)
 
