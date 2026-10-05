@@ -33,6 +33,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - ✓ Gate architecture landed (spike cards 1, 3, 4, 5, 7, 9 and 2): native seam fail-closed for every adapter + `doctor` + `tracked_run`; `runtime.py` an 11-name native door with EventKit in `eventkit.py`; tier policy and the notice middleware in their own modules, nothing below `server` imports it; one `ToolRecord` per tool drives tier, audit verb, notice and snapshot; every content-removing tool defaults `dry_run=True` (live-verified 2026-09-26); script-timeout tripwire; shared Sequoia-shaped envelope fixture with a full `HEADER_FINGERPRINT`; `recoverable()` owns its dry-run preflight (device-verified) — Phase 1 (GATE-01..06, 08, 09, 10, 13)
 - ✓ Device-verified Mail facts (`docs/mail-applescript-facts.md`) and the probe-first discipline: ten consecutive 0.9.x cuts had their premise revised on device before code was written
 - ✓ Gate close — the suite fails closed in every deployment shape: the `MACOS_APPS_READ_ONLY=1` run is green with gated-off tools absent (CI runs it as a second step); doctor's process probes go through the locked `tracked_run` seam with an AST tripwire against direct spawns; the full 80-test device sweep is green on macOS 27.0 against the daemon built from the gate (0 failed, 0 errors; #229/#230 xfailed and routed to 02.1) — released and installed as 0.12.0 — Phase 2 (GATE-07, GATE-11, GATE-12)
+- ✓ Phase 2 sweep findings settled in 0.13.1 — replies, reply-all and forwards wait 120 s for the original, the same cap as their script backstop (#230: 5 of 5 device runs at 52–72 s, xfail removed); the outbound leftover warning is the caller contract for Mail's windowless-delete state and names its recovery (#229) — MAIL-05/06; `doctor()` answers Full Disk Access on macOS 27, which has no per-user TCC.db (#261)
 - ✓ Mail fixes — a 25-message `move_mail`/`trash_mail`, their dry runs and `mail_undo` finish inside scaled host caps on a 9k+ IMAP mailbox (by-ID acts from one bulk read; device worst ratio 0.092 of cap); a timeout inside `recoverable()` still writes a receipt whose `unknown` targets `mail_undo` replays; `create_draft` takes `from_address`; `send_mail` and `create_draft` refuse an address no account owns before any native write, and the read behind the refusal fails closed — released and installed as 0.13.0 — Phase 02.1 (MAIL-01..04, #206, #208)
 
 ### Active
@@ -40,8 +41,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 <!-- Current scope, in the order the phases run. -->
 
 **Mail fixes — email work comes before any new or additional feature (owner, 2026-09-24)**
-- [ ] From the Phase 2 sweep: `rollback()` verifies the delete of a windowless outgoing message (#229); the reply quote's content read no longer times out on messages whose body is not downloaded (#230). Both stay open after Phase 02.1, each held by a non-strict xfail with device evidence; Phase 3 settles them first (MAIL-05/06)
-- [ ] `doctor()` gives a real Full Disk Access answer on macOS 27, where the per-user TCC.db no longer exists (#261)
+- (none open — #206/#208 shipped in 0.13.0; #229/#230/#261 in 0.13.1)
 
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
 - [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
