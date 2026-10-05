@@ -652,6 +652,16 @@ def build_quote(sender: str, date_str: str, original_body: str) -> str:
     return f"On {date_str}, {sender} wrote:\n{quoted}"
 
 
+# #230: every script that acts on the ORIGINAL message (read it, reply to it, forward
+# it) finds it with a `whose message id is` scan and can run past the 30s default on
+# device, with Mail mostly idle in the watchdog samples: `_ORIGINAL` did (02.1), then
+# `_REPLY` once `_ORIGINAL` had its 120s (2026-10-05). With every such call at 120s, a
+# reply to the newest inbox message took 52-72s end to end, 5 of 5. 120.0 equals each
+# script's own `with timeout of 120 seconds` backstop (GATE-10 is >=, so equality
+# passes).
+ORIGINAL_TIMEOUT = 120.0
+
+
 def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> str:
     """``body`` plus the quoted original — the 10-line preamble ``reply`` and
     ``reply_all`` each carried their own copy of (fetch, guard missing value, partition
@@ -662,11 +672,9 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     carry, so the quote header stays clean even when the script side is bypassed (a
     mocked ``_ORIGINAL`` in tests). An original that cannot be read degrades to an
     unquoted body — the reply is the deliverable, the quote is decoration."""
-    # #230: a body that is not downloaded makes this read an IMAP fetch that ran past
-    # the 30s default on device; 120.0 equals the script's own backstop (GATE-10 is
-    # >=, so equality passes). 02.1-06 observes on device which error surfaces if the
-    # read still reaches the cap.
-    raw = runtime.run_osascript(_ORIGINAL, message_id, *mailbox_args, timeout=120.0)
+    raw = runtime.run_osascript(
+        _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
+    )
     if not raw.strip() or raw.strip() == _MISSING_VALUE:
         return body
     sender, _, rest = raw.partition(US)
@@ -765,13 +773,13 @@ def reply_all_to(
         raise ValueError("reply_all needs a non-empty body")
     mb = mail_addressing.mailbox_args(mailbox)
     seen = _parse_reply_all_recipients(
-        runtime.run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb)
+        runtime.run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb, timeout=ORIGINAL_TIMEOUT)
     )
 
     def dispatch() -> None:
         text = quoted_body(body, mid, mb) if include_quote else body
         with runtime.body_file(text) as path:
-            runtime.run_osascript(_REPLY_ALL, mid, path, *mb)
+            runtime.run_osascript(_REPLY_ALL, mid, path, *mb, timeout=ORIGINAL_TIMEOUT)
 
     return Outgoing(
         action="reply_all",
@@ -800,7 +808,9 @@ def forward_of(message_id: str, mailbox: str, to) -> Outgoing:
     mb = mail_addressing.mailbox_args(mailbox)
 
     def dispatch() -> None:
-        runtime.run_osascript(_FORWARD, mid, US.join(to_list), *mb)
+        runtime.run_osascript(
+            _FORWARD, mid, US.join(to_list), *mb, timeout=ORIGINAL_TIMEOUT
+        )
 
     return Outgoing(
         action="forward",

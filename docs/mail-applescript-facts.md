@@ -465,3 +465,13 @@ point: the Mail integration sweep's own invocation of the reply test (predating 
 family-account guard) XPASSed once, in 96.8 s, under the new 120 s cap — consistent with the
 transient-stall reading above, not a reproduction of the permanent wedge. The xfail stays
 non-strict; the issue stays open.
+
+**#230 settled (2026-10-05, macOS 27.0.1, watchdog running).** The first dedicated run
+failed one step later than before: `_ORIGINAL` finished under its 120 s cap, then `_REPLY`
+— still on the 30 s default — hit its host cap, 83 s in total, with Mail at ~0% CPU in
+every watchdog sample. The newest inbox message's body was on disk (all 411 newest inbox
+rows had a `.emlx`), so "the body is not downloaded" is not the trigger here. With every
+script that acts on the original (`_ORIGINAL`, `_REPLY`, `_REPLY_ALL`,
+`_REPLY_ALL_RECIPIENTS`, `_FORWARD`) at 120 s, the reply test passed 5 of 5 in 52–72 s
+each, and two replies to `.partial.emlx` messages took 5–7 s. No marker draft, outgoing
+message or compose window was left 60 s later. The xfail is removed (0.13.1).

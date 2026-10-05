@@ -8,6 +8,11 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **Replies, reply-all and forwards wait 120 s for the original** (#230) — 0.13.0 gave
+  the quote read 120 s, but the reply itself still stopped at 30 s. On device a reply to
+  the newest inbox message takes 52–72 s; every script that acts on the original now has
+  the same 120 s cap as its own backstop.
+
 - **`doctor()` answers Full Disk Access on macOS 27** (#261) — macOS 27 has no per-user
   TCC.db, so the probe reported `unknown`. It now falls back to the system TCC.db, and an
   absent user db no longer marks the grant report as a partial read.
