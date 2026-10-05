@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: executing
 stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-10-05T23:03:40.934Z"
+last_updated: "2026-10-05T23:10:26.161Z"
 last_activity: 2026-10-05
 last_activity_desc: Phase 03 execution started
-state_head: 56b9fa35a191df054a9e94d61f0dfc38e4e26f7c
+state_head: 7689cbce6ab13105f1aead45b24fb5e73a0f299e
 progress:
   total_phases: 7
   completed_phases: 3
@@ -90,6 +90,7 @@ Recent decisions affecting current work:
 - [Phase 02.1]: No device probe targets a family account (Personal, Grandma, Mama) — this rule skipped the five #230 runs; both #229 and #230 stay open behind non-strict xfails with device evidence.
 - [Phase 02.1]: Phase close runs validate-phase and secure-phase from the verify:post hooks; their files land in the same records PR as the UAT.
 - [Phase 03]: Pre-code probes (03-01) overturned no premise: reminder lists save on the default source; Google refuses a list save with EKErrorDomain 24; reminder BY* parts and UNTIL (day granularity) round-trip; Google alarms unchanged from spike 008. — Measured on device 2026-10-06 before any Phase 3 code (D-23).
+- [Phase 03]: Owner rulings after the 03-01 probes: A3 and A4 confirmed (alarms refuse a negative value on a timed event and a duplicate offset); A5 changed — reminders compare UNTIL at day granularity too (03-03); A9 changed — complete_reminder refuses with WriteRefused, no save, when the Reminders store cannot be read (03-08). — Probe 2 showed reminders keep UNTIL exactly; the owner prefers a refusal to a blind completion of a possible parent.
 
 ### Pending Todos
 
