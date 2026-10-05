@@ -197,7 +197,38 @@ Plans:
   7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
   8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
-**Plans**: TBD
+**Plans**: 0/10 plans complete in 10 waves
+
+Plans:
+**Wave 1**
+- [ ] 03-01-PLAN.md — Device probes first: list save on the default source, reminder BY* round trip, spike 008 alarm harness on Google (D-23)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 03-02-PLAN.md — Container ids in `Pointer.folder` for events and reminders (#207) and `create_reminder_list` (#92)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 03-03-PLAN.md — BY* recurrence: parse, validate, 9-argument build, part-by-part verify, reminder BY* (#90)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 03-04-PLAN.md — DTSTART membership note and six-month RFC 5545 expansion test; python-dateutil dev-only after owner verify (#90)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 03-05-PLAN.md — Event alarms: minutes before the start, all-day counted from local midnight, at most 5, tri-state on update (#89)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 03-06-PLAN.md — Tags and parent links read-only from the Reminders sqlite store; `coverage` when the store is unreadable (#91)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 03-07-PLAN.md — `delete_reminder` with dry-run default, gone-check and the subtask guard (#92)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 03-08-PLAN.md — Parent-aware `complete_reminder`; gone-check added to `delete_event`
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [ ] 03-09-PLAN.md — Device sweep on iCloud and Google; owner builds the cascade fixture in Reminders.app
+
+**Wave 10** *(blocked on Wave 9 completion)*
+- [ ] 03-10-PLAN.md — Cascade proof on the fixture; MAIL-05/06 confirmed from the record; issues #89/#90/#91/#92/#207 closed
 
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
