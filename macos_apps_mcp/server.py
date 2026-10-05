@@ -1117,6 +1117,15 @@ def create_reminder(
     return _reminders.create_reminder(data).as_dict()
 
 
+@_additive_tool(adapter="reminders", permission="EventKit")
+def create_reminder_list(name: str) -> dict[str, str]:
+    """Create a reminder list in the default Reminders account. An exact-name duplicate
+    is refused (it would make `list_name=` ambiguous). Returns the list pointer (id +
+    name); use the id as `list_name=`. Side effect (creates); needs EventKit
+    (Reminders) access."""
+    return _reminders.create_reminder_list(name).as_dict()
+
+
 @_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
 def update_reminder(
     id: str,

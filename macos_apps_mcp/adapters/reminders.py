@@ -6,6 +6,7 @@ Reads return Pointers; writes take ``ReminderData``. All EventKit access goes th
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import datetime, timedelta
 
 import EventKit as EK
@@ -14,6 +15,7 @@ from ..contracts import Pointer, Recurrence, ReminderData
 from ..errors import (
     RecurrenceRequired,
     VerificationFailed,
+    WriteRefused,
     refused_write,
     resolve_container,
     verify_persisted,
@@ -274,6 +276,66 @@ class RemindersAdapter:
             fresh = _fresh_item(s, ident)
             _verify_reminder(fresh, ident, data, list_id)
             return _reminder_pointer(fresh)
+
+        return run_native(work)
+
+    def create_reminder_list(self, name: str) -> Pointer:
+        """Create a reminder list on the default Reminders account (D-22, #92).
+
+        No account parameter: the new list takes the source of the default list. An
+        exact-name duplicate is refused before the save, because a second same-named
+        list would make every later ``list_name=`` write ambiguous."""
+        if not name.strip() or any(unicodedata.category(c) == "Cc" for c in name):
+            raise ValueError(
+                f"name must be non-empty text without control characters — got {name!r}"
+            )
+
+        def work():  # scan, save and verify on one worker turn: nothing interleaves
+            s = store()
+            lists = s.calendarsForEntityType_(EK.EKEntityTypeReminder)
+            same = [c.calendarIdentifier() for c in lists if c.title() == name]
+            if same:
+                raise ValueError(
+                    f"a reminder list named {name!r} already exists (id "
+                    f"{', '.join(same)}) — a second one would make every later "
+                    "`list_name=` write ambiguous. Use the existing id as `list_name`."
+                )
+            default = s.defaultCalendarForNewReminders()
+            if default is None:
+                raise WriteRefused(
+                    "no default Reminders account to create the list in — set one in "
+                    "Reminders settings, then retry. No list was created."
+                )
+            cal = EK.EKCalendar.calendarForEntityType_eventStore_(
+                EK.EKEntityTypeReminder, s
+            )
+            cal.setTitle_(name)
+            cal.setSource_(default.source())
+            ok, err = s.saveCalendar_commit_error_(cal, True, None)
+            if not ok:
+                # 03-01 probe 1 (device): the default (CalDAV) source saves a list;
+                # a Google source refuses with EKErrorDomain code 24, an int. 17 stays
+                # in the set because the refusal code can differ by account type.
+                code = int(err.code()) if err is not None else None
+                if code in (
+                    EK.EKErrorSourceDoesNotAllowCalendarAddDelete,  # 17
+                    EK.EKErrorSourceDoesNotAllowReminders,  # 24
+                ):
+                    raise WriteRefused(
+                        f"the default Reminders account {default.source().title()!r} "
+                        "does not allow creating lists; no list was created."
+                    )
+                raise refused_write("reminder list create", "account", err)
+            ident = cal.calendarIdentifier()
+            if ident not in {
+                c.calendarIdentifier()
+                for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
+            }:
+                raise VerificationFailed(
+                    f"reminder list {name!r} (id {ident!r}) is not in the store after "
+                    "the save — the write did not persist. Do not trust the id."
+                )
+            return _list_pointer(cal)
 
         return run_native(work)
 
