@@ -78,6 +78,11 @@ def store_path() -> Path:
         ) from e
     except FileNotFoundError:
         sizes = {}
+    except OSError as e:  # ENOTDIR, EIO … stay typed: never a raw error past `read()`
+        raise NativeError(
+            f"the Reminders store directory {_STORES} could not be listed: {e}. "
+            "Do not retry."
+        ) from e
     if not sizes:
         raise NativeError(
             f"Reminders store not found under {_STORES} (Reminders may never have "

@@ -158,3 +158,15 @@ def test_an_unreadable_directory_is_a_full_disk_access_denial_not_not_found(
             reminders_store.store_path()
     finally:
         locked.chmod(0o700)
+
+
+def test_store_path_on_something_that_is_not_a_directory_stays_typed(
+    tmp_path, monkeypatch
+):
+    # any other OSError (here ENOTDIR) must reach the adapter as a NativeError so
+    # `reminders()` can name it in `coverage` instead of losing the EventKit pointers
+    afile = tmp_path / "Stores"
+    afile.write_bytes(b"x")
+    monkeypatch.setattr(reminders_store, "_STORES", afile)
+    with pytest.raises(NativeError, match="could not be listed"):
+        reminders_store.store_path()
