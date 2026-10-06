@@ -1149,27 +1149,55 @@ def query_mailbox_urls() -> list[str]:
     return _read_index(path, read)
 
 
+def _label_key(url: str) -> tuple[str, str] | None:
+    """``(account uuid, decoded path)``, case-folded — the key ``mailbox_args``
+    addresses. None for a non-url (a canonical name). A physical folder whose key
+    case-folds to a label's reads as a label: the safe direction (refused, nothing
+    changed)."""
+    parsed = mailbox_url.parse(url)
+    return (parsed[1].casefold(), parsed[2].casefold()) if parsed else None
+
+
+def _label_keys() -> frozenset[tuple[str, str]]:
+    """Every label mailbox's key, from ONE read of ``mailboxes.source IS NOT NULL``.
+    Raises on a missing store, like the other raising reads."""
+    path = require_index_path()
+
+    def read(conn):
+        rows = conn.execute("SELECT url FROM mailboxes WHERE source IS NOT NULL")
+        return frozenset(k for (u,) in rows if (k := _label_key(u)) is not None)
+
+    return _read_index(path, read)
+
+
 def is_label_mailbox(url: str) -> bool:
     """True when ``url`` is a Gmail label mailbox (``mailboxes.source`` set, facts §5f).
 
     A label mailbox is a view of label membership, not a place a message is stored,
     so a write that names one as its SOURCE does not do what it reports: device-
     verified 2026-10-06, a move from a label added the destination label and kept the
-    source label (#287). Exact equality on the raw percent-encoded url, the ``folder``
-    token every read returns; an unknown url is not a label. Raises on a missing
-    store — a write cannot prove its source is no label without it, and the
+    source label (#287). Matches on the key ``mailbox_args`` addresses (account uuid +
+    decoded path), case-insensitively, so a decoded or re-cased url cannot skip the
+    guard (#291); an unknown url or a canonical name is not a label. Raises on a
+    missing store — a write cannot prove its source is no label without it, and the
     recoverable plane's locate needs the same store a moment later.
     """
-    path = require_index_path()
+    key = _label_key(url)
+    if key is None:
+        return False
+    return key in _label_keys()
 
-    def read(conn):
-        row = conn.execute(
-            "SELECT 1 FROM mailboxes WHERE url = ? AND source IS NOT NULL LIMIT 1",
-            (url.strip(),),
-        ).fetchone()
-        return row is not None
 
-    return _read_index(path, read)
+def account_has_labels(account: str | None) -> bool:
+    """True when ``account`` (a uuid) owns at least one Gmail label mailbox.
+
+    A unified destination files into the source account's mailbox of that role
+    (facts §5e), which in a Gmail account can be a label (#291). No account, no read.
+    """
+    if not account:
+        return False
+    wanted = account.casefold()
+    return any(uuid == wanted for uuid, _ in _label_keys())
 
 
 def query_thread(message_id: str, limit: int) -> list[Pointer]:

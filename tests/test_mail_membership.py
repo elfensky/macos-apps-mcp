@@ -267,6 +267,26 @@ def test_trash_mail_from_a_physical_source_still_previews(gmail_envelope, monkey
     assert mail._PRESENT in seen
 
 
+# --- #291: label spelling, canonical source, move into a label ---------------------
+
+
+def test_is_label_mailbox_matches_any_spelling(gmail_envelope):
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/Sent Mail")
+    assert mail_index.is_label_mailbox(
+        f"imap://{ACCT_A.lower()}/%5bgmail%5d/sent%20mail"
+    )
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/inbox")
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/All Mail")
+    assert not mail_index.is_label_mailbox("inbox")
+
+
+def test_account_has_labels(gmail_envelope):
+    assert mail_index.account_has_labels(ACCT_A)
+    assert mail_index.account_has_labels(ACCT_A.lower())
+    assert not mail_index.account_has_labels(ACCT_B)
+    assert not mail_index.account_has_labels(None)
+
+
 # --- thread, sent triage and stats follow logical membership (#287) -----------------
 
 
