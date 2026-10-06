@@ -611,3 +611,11 @@ def test_event_alarms_refused_at_the_boundary(alarms, message):
 )
 def test_event_alarms_accepted(alarms, all_day):
     assert _event(all_day=all_day, alarms=alarms).alarms == alarms
+
+
+def test_pointer_as_dict_emits_tags_and_parent_only_when_set():
+    # reminders reads only (#91): list-valued `tags`, scalar `parent`, never as nulls
+    bare = Pointer(id="x", summary="s", deeplink="d").as_dict()
+    assert "tags" not in bare and "parent" not in bare
+    full = Pointer(id="x", summary="s", deeplink="d", tags=("a",), parent="P").as_dict()
+    assert full["tags"] == ["a"] and full["parent"] == "P"

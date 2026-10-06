@@ -73,7 +73,7 @@ _DEVELOP_PERMISSION = {
     "doctor": None,
     "audit": None,
     "usage": None,
-    "reminders": "EventKit",
+    "reminders": ("EventKit", "Full Disk Access"),
     "events": "EventKit",
     "free_busy": "EventKit",
     "reminder_lists": "EventKit",
