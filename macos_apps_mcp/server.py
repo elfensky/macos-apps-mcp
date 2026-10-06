@@ -1189,6 +1189,10 @@ def create_event(
     (2026-07-01); a timestamp with a UTC offset is rejected. A `start` that does not
     match its `recurrence` is accepted (RFC 5545 counts it as the first occurrence) and
     the result's summary says so.
+    `alarms` are minutes before the start, as in the Google Calendar API. For an all-day
+    event the offset counts from local midnight: `-540` is 09:00 on the day, `900` is
+    09:00 the day before. On a DST-change day the alert shifts an hour, the same as
+    Calendar's own alerts. At most 5.
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1227,6 +1231,11 @@ def update_event(
     DATE (2026-07-01); a timestamp with a UTC offset
     is rejected. A `start` that does not match its `recurrence` is accepted (RFC 5545
     counts it as the first occurrence) and the result's summary says so.
+    `alarms` are minutes before the start, as in the Google Calendar API. For an all-day
+    event the offset counts from local midnight: `-540` is 09:00 on the day, `900` is
+    09:00 the day before. On a DST-change day the alert shifts an hour, the same as
+    Calendar's own alerts. At most 5. Omit `alarms` to keep the
+    event's alarms; `[]` removes them all.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from

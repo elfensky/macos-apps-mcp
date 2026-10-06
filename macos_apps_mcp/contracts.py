@@ -687,10 +687,29 @@ class CalendarEventData:
     alarms: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
-        if self.alarms is not None and len(self.alarms) > 5:
+        if self.alarms is None:
+            return
+        if len(self.alarms) > 5:
             raise ValueError(
                 "at most 5 alarms: Google keeps 5 and silently drops a different one "
                 "after the save"
+            )
+        for m in self.alarms:
+            if not isinstance(m, int) or isinstance(m, bool):
+                raise ValueError(
+                    "alarms are whole minutes before the start, e.g. [15, 60]; "
+                    f"got {m!r}"
+                )
+            if m < 0 and not self.all_day:
+                raise ValueError(
+                    "a timed event's alarm is minutes BEFORE the start, 0 or more; "
+                    f"got {m}. Negative minutes are for all-day events, counted from "
+                    "local midnight"
+                )
+        if len(set(self.alarms)) != len(self.alarms):
+            raise ValueError(
+                "give each alarm offset once; duplicates are never useful and were "
+                "never probed"
             )
 
 
