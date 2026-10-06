@@ -247,11 +247,14 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     if data.recurrence is not None:
         e.setRecurrenceRules_([to_recurrence_rule(data.recurrence)])
     e.setCalendar_(_resolve_calendar(s, data.calendar))
-    # ponytail: all-day alarm 1440-gotcha (#51) — EKAlarm relativeOffset for an all-day
-    # event is measured from MIDNIGHT, so "9am the day before" is -1440+540 = -900 min,
-    # NOT -900 from an implicit 9am. We set no alarms yet (no alarm field on
-    # CalendarEventData), so nothing can go wrong; wire the -1440 base in with the alarm
-    # field, and test it then.
+    # Relative offsets only: an absolute alarm is rewritten by Google and lands on the
+    # wrong day of a floating all-day event. On an all-day event they count from local
+    # midnight (#51, D-02). None, never [], clears.
+    if data.alarms is not None:
+        e.setAlarms_(
+            [EK.EKAlarm.alarmWithRelativeOffset_(-m * 60.0) for m in data.alarms]
+            or None
+        )
 
 
 # The closed span vocabulary (#51). The tool boundary passes caller strings through
@@ -383,6 +386,14 @@ def _verify_event(fresh, ident: str, data: CalendarEventData, cal_id: str) -> No
         actual["recurs"] = persisted_recurrence_signature(
             fresh.recurrenceRules(), include_until=not data.all_day
         )
+    if data.alarms is not None:  # None = "leave alarms untouched" (_apply_event)
+        # minutes-before, the caller's convention, so a mismatch message is readable;
+        # sorted: EventKit returns alarms in no stable order
+        persisted = fresh.alarms() or []
+        expected["alarms"] = sorted(data.alarms)
+        actual["alarms"] = sorted(-round(a.relativeOffset() / 60) for a in persisted)
+        expected["absolute_alarms"] = 0
+        actual["absolute_alarms"] = sum(a.absoluteDate() is not None for a in persisted)
     verify_persisted("event", expected, actual)
 
 

@@ -1179,6 +1179,7 @@ def create_event(
     notes: str | None = None,
     all_day: bool = False,
     recurrence: str | None = None,
+    alarms: list[int] | None = None,
 ) -> dict[str, str]:
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
     first; `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals
@@ -1200,6 +1201,7 @@ def create_event(
         notes=notes,
         all_day=all_day,
         recurrence=parse_recurrence(recurrence),
+        alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.create_event(data).as_dict()
 
@@ -1216,6 +1218,7 @@ def update_event(
     all_day: bool = False,
     recurrence: str | None = None,
     span: str | None = None,
+    alarms: list[int] | None = None,
 ) -> dict[str, str]:
     """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
     `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals such as
@@ -1237,6 +1240,7 @@ def update_event(
         notes=notes,
         all_day=all_day,
         recurrence=parse_recurrence(recurrence),
+        alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.update_event(id, data, span=span).as_dict()
 

@@ -682,6 +682,16 @@ class CalendarEventData:
     # case, an event can't be safely un-recurred through the occurrence-edit path —
     # delete the series instead). See calendar._apply_event.
     recurrence: Recurrence | None = None
+    # alarms, as minutes BEFORE the start (the Google Calendar API convention). None =
+    # leave the event's alarms untouched, () = clear them, (15, 60) = exactly those.
+    alarms: tuple[int, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.alarms is not None and len(self.alarms) > 5:
+            raise ValueError(
+                "at most 5 alarms: Google keeps 5 and silently drops a different one "
+                "after the save"
+            )
 
 
 @dataclass(frozen=True, slots=True)
