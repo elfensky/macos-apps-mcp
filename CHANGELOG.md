@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`doctor()` reports the bundled `mcp` and `fastmcp` versions** (#285) — under `libs`,
+  so a bundle built with other library versions than the tests is visible without
+  opening it.
+
 ## [0.14.0] - 2026-10-07 — EventKit depth
 
 ### Added
