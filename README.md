@@ -66,7 +66,7 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 | `free_busy` | `start`, `end` (ISO), optional `calendars` ids | merged busy intervals + free gaps in the window; no event details |
 | `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as pointers |
 | `calendars` / `reminder_lists` | — | containers (id + name) to target writes |
-| `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence` | `update` is a full replace by id |
+| `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence`, `alarms` (minutes before the start, at most 5; all-day: from local midnight, `-540` = 09:00 on the day) | `update` is a full replace by id |
 | `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting |
 | `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
 | `create_reminder_list` | name | new list on the default account; an exact duplicate name is refused |

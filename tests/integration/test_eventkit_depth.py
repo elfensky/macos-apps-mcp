@@ -30,7 +30,7 @@ from macos_apps_mcp.contracts import (
     ReminderData,
     dtstart_in_rule,
 )
-from macos_apps_mcp.eventkit import from_nsdate, store, to_nsdate
+from macos_apps_mcp.eventkit import epoch_nsdate, from_nsdate, store, to_nsdate
 from macos_apps_mcp.runtime import run_native
 
 # Every test in this module touches real EventKit/TCC — mark them all at module level
@@ -411,3 +411,172 @@ def test_recurrence_expansion_matches_rfc5545(target_calendar, ek_items):
                 )
             )
     assert problems == []
+
+
+# --- alarms on iCloud and Google (CAL-01, CAL-02, #89) -------------------------------
+
+
+def _read_alarms(calendar_id, title, lo, hi):
+    """Every occurrence of ``title`` in [lo, hi) as ``(start, minutes_before, fires,
+    absolute)`` read fresh from the store: ``minutes_before`` sorted, ``fires`` the
+    fire instants (``startDate`` plus ``relativeOffset``, spike 008) as naive local
+    datetimes, ``absolute`` how many alarms carry an absolute date."""
+
+    def work():
+        s = store()
+        s.refreshSourcesIfNecessary()
+        cal = s.calendarWithIdentifier_(calendar_id)
+        pred = s.predicateForEventsWithStartDate_endDate_calendars_(
+            to_nsdate(lo), to_nsdate(hi), [cal]
+        )
+        out = []
+        for e in s.eventsMatchingPredicate_(pred) or []:
+            if e.title() != title:
+                continue
+            start = e.startDate().timeIntervalSince1970()
+            alarms = e.alarms() or []
+            out.append(
+                (
+                    int(start),
+                    sorted(-round(a.relativeOffset() / 60) for a in alarms),
+                    sorted(int(start + a.relativeOffset()) for a in alarms),
+                    sum(a.absoluteDate() is not None for a in alarms),
+                )
+            )
+        return sorted(out)
+
+    return [
+        (
+            from_nsdate(epoch_nsdate(start)),
+            minutes,
+            [from_nsdate(epoch_nsdate(f)) for f in fires],
+            absolute,
+        )
+        for start, minutes, fires, absolute in run_native(work)
+    ]
+
+
+def _dst_change_day(day: datetime) -> bool:
+    """True when the local UTC offset differs between this midnight and the next."""
+    return (
+        day.astimezone().utcoffset()
+        != (day + timedelta(days=1)).astimezone().utcoffset()
+    )
+
+
+def test_timed_alarms_round_trip(target_calendar, ek_items):
+    """D-01, D-04: ``alarms=[15, 60]`` lands as two relative alarms and survives the
+    sync; an update that omits ``alarms`` keeps them; ``alarms=[]`` removes them."""
+    calendar_id, sync_wait = target_calendar
+    cal = CalendarAdapter()
+    start = datetime(2027, 2, 15, 10)
+    end = start + timedelta(hours=1)
+    title = PREFIX + "timed alarms"
+    day = (start.replace(hour=0), start.replace(hour=0) + timedelta(days=1))
+
+    made = cal.create_event(  # returns, so verify-after-write passed
+        CalendarEventData(
+            title=title,
+            start=start,
+            end=end,
+            calendar=calendar_id,
+            alarms=(15, 60),
+        )
+    )
+    ek_items.events.append(made.id)
+    time.sleep(sync_wait)
+    ((_, minutes, _, absolute),) = _read_alarms(calendar_id, title, *day)
+    assert minutes == [15, 60] and absolute == 0
+
+    renamed = PREFIX + "timed alarms (renamed)"
+    cal.update_event(  # alarms omitted: the event's own alarms stay
+        made.id,
+        CalendarEventData(title=renamed, start=start, end=end, calendar=calendar_id),
+    )
+    ((_, minutes, _, absolute),) = _read_alarms(calendar_id, renamed, *day)
+    assert minutes == [15, 60] and absolute == 0
+
+    cal.update_event(
+        made.id,
+        CalendarEventData(
+            title=renamed, start=start, end=end, calendar=calendar_id, alarms=()
+        ),
+    )
+    time.sleep(sync_wait)
+    ((_, minutes, _, _),) = _read_alarms(calendar_id, renamed, *day)
+    assert minutes == []
+
+
+def test_all_day_alarms_fire_on_the_right_day(target_calendar, ek_items):
+    """D-02, D-05: all-day offsets count from local midnight of the event's day, on a
+    floating event, across a DST change."""
+    calendar_id, sync_wait = target_calendar
+    cal = CalendarAdapter()
+
+    single = PREFIX + "all-day alarms"
+    day = datetime(2027, 2, 15)
+    made = cal.create_event(
+        CalendarEventData(
+            title=single,
+            start=day,
+            end=day,
+            all_day=True,
+            calendar=calendar_id,
+            alarms=(-540, 900),
+        )
+    )
+    ek_items.events.append(made.id)
+
+    series = PREFIX + "all-day alarm series"
+    first = datetime(2027, 3, 15)  # weekly: 15, 22, 29 (after the EU DST start), 5 Apr
+    made = cal.create_event(
+        CalendarEventData(
+            title=series,
+            start=first,
+            end=first,
+            all_day=True,
+            calendar=calendar_id,
+            recurrence=Recurrence.from_rrule("FREQ=WEEKLY;COUNT=4"),
+            alarms=(-540,),
+        )
+    )
+    ek_items.events.append(made.id)
+    time.sleep(sync_wait)
+
+    ((_, minutes, fires, absolute),) = _read_alarms(
+        calendar_id, single, day - timedelta(days=2), day + timedelta(days=2)
+    )
+    assert minutes == [-540, 900] and absolute == 0
+    assert fires == [datetime(2027, 2, 14, 9), datetime(2027, 2, 15, 9)]
+
+    occurrences = _read_alarms(calendar_id, series, first, first + timedelta(days=30))
+    assert len(occurrences) == 4
+    for start, minutes, (fire,), absolute in occurrences:
+        assert minutes == [-540] and absolute == 0
+        assert fire.date() == start.date(), f"{start}: fires on {fire}"
+        if not _dst_change_day(start):
+            assert fire.hour == 9, f"{start}: fires at {fire}"
+
+
+def test_all_day_without_alarms_reads_back_empty(target_calendar, ek_items):
+    """D-04: ``alarms=[]`` on an all-day event leaves none — Google injects no
+    default."""
+    calendar_id, sync_wait = target_calendar
+    day = datetime(2027, 2, 15)
+    title = PREFIX + "all-day no alarms"
+    made = CalendarAdapter().create_event(
+        CalendarEventData(
+            title=title,
+            start=day,
+            end=day,
+            all_day=True,
+            calendar=calendar_id,
+            alarms=(),
+        )
+    )
+    ek_items.events.append(made.id)
+    time.sleep(sync_wait)
+    ((_, minutes, _, _),) = _read_alarms(
+        calendar_id, title, day - timedelta(days=1), day + timedelta(days=2)
+    )
+    assert minutes == []

@@ -8,6 +8,10 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **Alarms on events** (#89) — `alarms=[15, 60]` (minutes before the start) on
+  `create_event` and `update_event`; all-day offsets count from local midnight; at most
+  5; verified after the write.
+
 - A recurring event whose start does not match its rule is accepted (RFC 5545 counts
   the start as the first occurrence) and the result says so (#90).
 
