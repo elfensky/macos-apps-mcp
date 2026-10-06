@@ -1962,6 +1962,11 @@ class MailAdapter:
         behavior, now stated. A receipt whose targets recorded ``unknown`` (a timeout
         mid-act, #206/D-06) is replayed the same as ``ok``.
 
+        A receipt whose destination is a Gmail label folder, or a canonical name, is
+        refused (``WriteRefused``) before the replay, dry runs included: no route out of
+        a label is proven (#287), and a unified name cannot be a move source (#291). The
+        error names the source folder and how to restore by hand.
+
         ponytail: every receipt today comes from ``move_mail``, which takes ONE source
         mailbox, so a receipt has exactly one source and the undo is one move. Group by
         ``Target.folder`` here if an op ever gathers targets from several mailboxes.
@@ -1974,10 +1979,30 @@ class MailAdapter:
                 "this undo cannot replay as one move. Restore them by hand from "
                 f"{rec.get('backup_dir')}. Do not retry."
             )
+        source = folders.pop()
+        dest = rec["destination"]
+        # #291: the replay is a move FROM the destination, and the caller never named a
+        # source, so move_mail's own refusals would mislead. Canonical first (pure).
+        if mail_index.account_of(dest) is None:
+            raise WriteRefused(
+                f"receipt {receipt_id!r} names the unified mailbox {dest!r} as its "
+                "destination, and a unified name cannot be a move source (#291). "
+                "Nothing was changed. Find each message's current `folder` with "
+                f"mail_search, then move_mail it back to {source!r}."
+            )
+        if mail_index.is_label_mailbox(dest):
+            backup = rec.get("backup_dir") or "(no backup was taken)"
+            raise WriteRefused(
+                f"receipt {receipt_id!r} moved these messages into the Gmail label "
+                f"folder {dest!r}, and no proven route moves a message out of a Gmail "
+                "label (#287, #291). Nothing was changed. The messages came from "
+                f"{source!r}, and their backed-up bytes are in {backup}. Remove the "
+                "label, or move them back, in Mail by hand. Do not retry."
+            )
         return self.move_mail(
             [t.id for t in targets],
-            rec["destination"],
-            folders.pop(),
+            dest,
+            source,
             dry_run=dry_run,
         )
 

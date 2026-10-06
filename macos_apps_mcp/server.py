@@ -871,6 +871,8 @@ def mail_undo(receipt: str, dry_run: bool = True) -> dict:
     same Message-ID moves those copies back too — the by-ID act moves every copy of a
     Message-ID, and undo is an ordinary move. A receipt whose targets recorded
     `unknown` (a timeout mid-act) is replayed the same as `ok`.
+    A move into a Gmail label folder or a unified mailbox name cannot be replayed; the
+    error names the source folder and how to restore by hand.
     Destructive (it moves mail); needs Automation access for Mail and Full Disk Access.
     """
     return _mail.undo(receipt, dry_run=dry_run)
