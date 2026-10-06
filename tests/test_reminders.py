@@ -1112,3 +1112,12 @@ def test_complete_reminder_with_an_unreadable_store_refuses_before_any_save(
     assert "No change was made" in str(exc.value)
     assert world.saved == []
     assert world.items["P2"].isCompleted() is False
+
+
+def test_complete_reminder_never_completes_a_calendar_event(monkeypatch, tmp_path):
+    # the base id of an event resolves through calendarItemWithIdentifier_ too
+    world = _CompleteWorld(_ek_item("E-1", reminder=False))
+    adapter = _wire_complete(monkeypatch, tmp_path, world, rows=())
+    with pytest.raises(ValueError, match="not a reminder"):
+        adapter.complete_reminder("E-1")
+    assert world.saved == []

@@ -456,6 +456,11 @@ class RemindersAdapter:
             r = s.calendarItemWithIdentifier_(ident)
             if r is None:
                 raise ValueError(f"no reminder with id {ident!r}")
+            if not _is_reminder(r):
+                raise ValueError(
+                    f"{ident!r} is a calendar event, not a reminder — nothing to "
+                    "complete. Nothing was changed."
+                )
             try:
                 child_ids = reminders_store.subtasks_of(ident)
             except NativeError as e:
