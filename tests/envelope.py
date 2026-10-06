@@ -49,6 +49,8 @@ MSG_COLS = (
 # global_message_id), recipients gains `type`/`position`, and message_references is
 # new — all four read by build_duplicate_rows_query/build_sent_triage_query/
 # build_sent_recipients_query, none of them covered by the old fingerprint.
+# `mailboxes` gains `source` and `labels` is new (#251): the Gmail label membership
+# `_MAILBOX_MEMBERSHIP_CTE` reads.
 SCHEMA = """
 CREATE TABLE subjects(ROWID INTEGER PRIMARY KEY, subject TEXT);
 CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);

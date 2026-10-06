@@ -421,8 +421,9 @@ def test_thread_query_binds_message_id_and_limit():
 
 
 def test_overview_query_counts_live_not_stored():
-    # mailboxes.unread_count is trigger-maintained and STALE on a real Mac — the Gmail
-    # INBOX row claims 1 unread where a live count returns 0. Never read that column.
+    # Mail's stored counters count stored rows and do not dedupe by Message-ID; this
+    # query does. The old "stale Gmail INBOX" reading was this query ignoring `labels`
+    # (#251); live 2026-10-06 the stored counters match the #251 counts.
     sql, params = mail_index.build_overview_query()
     low = sql.lower()
     assert params == []

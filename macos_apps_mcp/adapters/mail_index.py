@@ -52,6 +52,9 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
+    # mailboxes.source + labels (#251): Gmail label membership, read by
+    # _MAILBOX_MEMBERSHIP_CTE (overview + search); a mailbox with a `source` is a label
+    # backed by that store (facts §5f).
     "mailboxes": {"ROWID", "url", "source"},
     "labels": {"message_id", "mailbox_id"},
     "message_global_data": {"ROWID", "message_id_header", "message_id"},
@@ -150,18 +153,22 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        mb.url               AS mailbox_url,
        m.date_received      AS date_received"""
 
-# Logical mailbox membership differs from the physical .emlx location on Gmail.
+# Logical mailbox membership differs from the physical .emlx location on Gmail (#251).
 # Mail's own counter triggers use source IS NULL for direct mailboxes, and
-# source = messages.mailbox for label mailboxes (schema observed 2026-10-02).
-# Keep this read projection separate from build_message_location_query: backup
+# source = messages.mailbox for label mailboxes (device-verified 2026-10-06, facts
+# §5f). Keep this read projection separate from build_message_location_query: backup
 # and body-file lookup still need the physical messages.mailbox, not a label.
+# UNION ALL is safe: arm 1 requires mb.source IS NULL, arm 2 requires
+# mb.source = m.mailbox (non-NULL), so the arms are disjoint, and the labels primary
+# key (message_id, mailbox_id) rules out repeats inside arm 2. It skips the dedup sort
+# (measured: identical counts, about half the added search latency recovered).
 _MAILBOX_MEMBERSHIP_CTE = """
 WITH mailbox_membership(message_rowid, mailbox_id) AS (
     SELECT m.ROWID, mb.ROWID
     FROM messages m
     JOIN mailboxes mb ON mb.ROWID = m.mailbox AND mb.source IS NULL
     WHERE m.deleted = 0
-    UNION
+    UNION ALL
     SELECT m.ROWID, l.mailbox_id
     FROM labels l
     JOIN messages m ON m.ROWID = l.message_id
@@ -170,10 +177,13 @@ WITH mailbox_membership(message_rowid, mailbox_id) AS (
 )
 """
 
+# With label membership one stored row appears once per label (#251), so m.ROWID ties
+# across equal-rank labels; mb.ROWID makes the cited folder independent of the plan.
 _BASE_SQL = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT {_DEDUP_SELECT_COLS},
        ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                          ORDER BY {_MAILBOX_RANK}, m.date_received DESC, m.ROWID) AS rn
+                          ORDER BY {_MAILBOX_RANK},
+                                   m.date_received DESC, m.ROWID, mb.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
@@ -399,9 +409,12 @@ def build_duplicate_summary_query():
 
     This is the table the issue asks a dry run to reproduce, and it is deliberately the
     same arithmetic ``build_overview_query`` uses for its counts — ``total`` here is the
-    RAW row count and ``distinct_`` is what ``mail_overview`` reports, so the two tools
-    can be read side by side and their difference IS ``redundant``. Measured on this
-    store 2026-08-05: 9,879 redundant rows, matching the issue's re-measurement.
+    RAW row count and ``distinct_`` is what ``mail_overview`` reports for a direct
+    (physical) mailbox, so the two tools can be read side by side there and their
+    difference IS ``redundant``. For a Gmail label mailbox (``mailboxes.source`` set,
+    #251) ``mail_overview`` counts label memberships, which this physical-row table
+    never sees. Measured on this store 2026-08-05: 9,879 redundant rows, matching the
+    issue's re-measurement.
     """
     sql = f"""
 SELECT mb.url                     AS mailbox_url,
@@ -720,10 +733,11 @@ def build_overview_query():
     """Build (sql, params) for per-mailbox totals and unread counts.
 
     Counts are computed LIVE rather than read from mailboxes.unread_count: that column
-    is trigger-maintained and device-verified stale — on a real Mac the Gmail INBOX row
-    reports 1 unread where a live count returns 0, and
-    unread_count_adjusted_for_duplicates carries the same wrong value. A live count over
-    36k rows measured 16 ms, backed by the partial index on (read = 0 AND deleted = 0).
+    is trigger-maintained per stored row and does not dedupe by Message-ID the way this
+    count does. (An earlier "stale Gmail INBOX" reading was this query ignoring
+    ``labels`` (#251); live 2026-10-06 Mail's stored counters equal these counts on
+    every label-backed mailbox.) A live count over 36k rows measured 16 ms, backed by
+    the partial index on (read = 0 AND deleted = 0).
 
     Counted per DISTINCT Message-ID, not per row. A raw COUNT(m.ROWID) is inflated by
     the same duplication the search plane dedups — device-verified against a 36k store,
@@ -733,9 +747,11 @@ def build_overview_query():
     still counts (keyed on its ROWID) — it has no citation, but it is genuinely in the
     mailbox, and a count that silently omits it is the same class of lie.
 
-    Count logical memberships, including Gmail labels backed by All Mail. Joining
-    messages.mailbox alone incorrectly reports those mailboxes as empty.
-    LEFT JOINs preserve empty mailboxes and messages without global data.
+    Count logical memberships, including Gmail labels (#251) backed by All Mail.
+    Joining messages.mailbox alone incorrectly reports those mailboxes as empty. The
+    LEFT JOIN chain must stay outer all the way — all three LEFT JOINs (membership,
+    messages, message_global_data); none may become inner — so an empty mailbox or a
+    label with no live members reads 0/0 instead of vanishing.
     """
     # One expression, used twice: the dedup key. COUNT(DISTINCT …) ignores NULLs, so
     # the unread count is the same key wrapped in a CASE with no ELSE.

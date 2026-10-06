@@ -123,6 +123,38 @@ def test_search_ranks_inbox_and_limits_distinct_messages(gmail_envelope):
     assert mail_index.query_search(account=ACCT_B) == []
 
 
+def test_unscoped_search_breaks_an_equal_rank_label_tie_by_mailbox_rowid(
+    gmail_envelope,
+):
+    db, boxes, _ = gmail_envelope
+    # One stored row appears once per label membership (#251), so m.ROWID no longer
+    # ends the window order. Zeta/Alpha are named against url order so a url sort
+    # cannot pass by accident: Zeta has the lower mailboxes.ROWID and must win.
+    zeta = f"imap://{ACCT_A}/Zeta"
+    zeta_id = db.add_mailbox(zeta, source=boxes["all"])
+    alpha_id = db.add_mailbox(f"imap://{ACCT_A}/Alpha", source=boxes["all"])
+    db.execute(
+        "INSERT INTO message_global_data(ROWID, message_id_header) VALUES (510, ?)",
+        ("<tie@example.test>",),
+    )
+    db.add_message(
+        ROWID=110,
+        subject=1,
+        global_message_id=510,
+        message_id=910,
+        mailbox=boxes["all"],
+        date_received=2000,
+        read=0,
+        deleted=0,
+    )
+    for box in (zeta_id, alpha_id):
+        db.execute("INSERT INTO labels VALUES (110, ?)", (box,))
+    assert "m.ROWID, mb.ROWID) AS rn" in " ".join(mail_index._BASE_SQL.split())
+    for _ in range(2):
+        [p] = mail_index.query_search(message_ids=["<tie@example.test>"])
+        assert p.folder == zeta
+
+
 def test_membership_obeys_the_mailbox_source(gmail_envelope):
     db, boxes, urls = gmail_envelope
     # Existing label rows can refer to a different backing store or to an
