@@ -3,7 +3,7 @@ EventKit writes)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import EventKit as EK
@@ -749,3 +749,87 @@ def test_delete_event_dry_run_preview_carries_folder(monkeypatch):
 
     out = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
     assert out["would_delete"]["folder"] == "C-Work"
+
+
+# --- DTSTART outside its rule is stated on the pointer (D-10, CAL-03, #90) -----------
+
+
+def _write_world(monkeypatch, persisted):
+    """Fake store + EventKit seams so create_event / update_event run end to end on the
+    real pointer and verify code. Returns the adapter."""
+    import macos_apps_mcp.adapters.calendar as cal
+
+    s = SimpleNamespace(saveEvent_span_commit_error_=lambda *a: (True, None))
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(
+        cal.EK,
+        "EKEvent",
+        SimpleNamespace(eventWithEventStore_=lambda _s: persisted),
+    )
+    monkeypatch.setattr(cal, "_resolve_span", lambda *a, **k: "span")
+    monkeypatch.setattr(cal, "_apply_event", lambda *a, **k: None)
+    monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: persisted)
+    monkeypatch.setattr(cal, "_refetch_event", lambda _s, _i: persisted)
+    return cal.CalendarAdapter()
+
+
+def _monthly_2tu_world(monkeypatch, start, title="Standup"):
+    end = start + timedelta(minutes=15)
+    persisted = _fake_persisted_event(
+        title=title, start=start, end=end, rule=fake_rule(freq=2, byday=[(2, "TU")])
+    )
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    data = CalendarEventData(
+        title=title,
+        start=start,
+        end=end,
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"),
+    )
+    return _write_world(monkeypatch, persisted), data
+
+
+def test_dtstart_outside_rule_create_event_states_the_extra_occurrence(monkeypatch):
+    # tracer: 2027-01-04 is a Monday, not the 2nd Tuesday
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 4, 10))
+    p = adapter.create_event(data)
+    assert isinstance(p, Pointer)
+    assert p.summary.startswith("Standup 10:00")
+    assert "one extra first occurrence" in p.summary
+    assert p.summary.endswith("(RFC 5545)")
+
+
+def test_dtstart_inside_rule_create_event_has_no_note(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 12, 10))
+    assert "extra first occurrence" not in adapter.create_event(data).summary
+
+
+def test_dtstart_outside_rule_update_event_states_the_extra_occurrence(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 4, 10))
+    p = adapter.update_event("E-1|1", data, span="future-events")
+    assert p.summary.endswith("(RFC 5545)")
+    assert "one extra first occurrence" in p.summary
+
+
+def test_dtstart_inside_rule_update_event_has_no_note(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 12, 10))
+    p = adapter.update_event("E-1|1", data, span="future-events")
+    assert "extra first occurrence" not in p.summary
+
+
+def test_dtstart_note_survives_a_title_that_fills_the_summary(monkeypatch):
+    # the summary is bounded: a long title must be cut, never the note
+    adapter, data = _monthly_2tu_world(
+        monkeypatch, datetime(2027, 1, 4, 10), title="T" * 400
+    )
+    assert adapter.create_event(data).summary.endswith("(RFC 5545)")
+
+
+def test_dtstart_no_recurrence_has_no_note(monkeypatch):
+    start = datetime(2027, 1, 4, 10)
+    end = start + timedelta(minutes=15)
+    persisted = _fake_persisted_event(start=start, end=end)
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    adapter = _write_world(monkeypatch, persisted)
+    data = CalendarEventData(title="Standup", start=start, end=end)
+    assert "extra first occurrence" not in adapter.create_event(data).summary

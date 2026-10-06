@@ -3,10 +3,14 @@ adapter boundary."""
 
 from __future__ import annotations
 
+import ast
 import dataclasses
-from datetime import UTC, datetime, timedelta, timezone
+import tomllib
+from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+from dateutil.rrule import rrulestr
 
 from macos_apps_mcp.contracts import (
     CalendarEventData,
@@ -453,3 +457,125 @@ def test_deletion_result_is_the_one_delete_envelope():
         "would_delete": {"id": "X-1", "summary": "s", "deeplink": "d"},
     }
     assert deletion_result("X-1", None) == {"deleted": "X-1"}
+
+
+# --- DTSTART membership (D-10, CAL-03, #90) ------------------------------------------
+
+
+def _in_rule(rrule: str, start: date) -> bool:
+    from macos_apps_mcp.contracts import dtstart_in_rule
+
+    return dtstart_in_rule(Recurrence.from_rrule(rrule), start)
+
+
+# all 2027; every row computed by hand from the 2027 calendar (1 Jan is a Friday)
+_DTSTART_TABLE = [
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 12), True),
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 5), False),  # the 1st Tuesday
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 13), False),  # a Wednesday
+    ("FREQ=MONTHLY;INTERVAL=2;COUNT=3;BYDAY=2TU", date(2027, 1, 12), True),
+    ("FREQ=MONTHLY;BYDAY=2TU;UNTIL=20270301", date(2027, 1, 5), False),
+    ("FREQ=MONTHLY;BYDAY=-1FR", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYDAY=-1FR", date(2027, 1, 22), False),
+    ("FREQ=MONTHLY;BYDAY=5FR", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=-1", date(2027, 2, 28), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=-1", date(2027, 2, 27), False),
+    ("FREQ=MONTHLY;BYMONTHDAY=1,15;BYSETPOS=-1", date(2027, 1, 15), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=1,15;BYSETPOS=-1", date(2027, 1, 1), False),
+    ("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", date(2027, 1, 28), False),
+    ("FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4", date(2027, 11, 25), True),
+    ("FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4", date(2027, 11, 18), False),
+    ("FREQ=YEARLY;BYYEARDAY=100", date(2027, 4, 10), True),
+    ("FREQ=YEARLY;BYYEARDAY=-1", date(2027, 12, 31), True),
+    ("FREQ=YEARLY;BYYEARDAY=-1", date(2027, 12, 30), False),
+    # YEARLY without BYMONTH counts an ordinal inside the year, not the month
+    ("FREQ=YEARLY;BYDAY=20MO", date(2027, 5, 17), True),
+    ("FREQ=YEARLY;BYDAY=20MO", date(2027, 5, 24), False),
+    ("FREQ=YEARLY;BYDAY=-1MO", date(2027, 12, 27), True),
+    ("FREQ=YEARLY;BYDAY=-1MO", date(2027, 12, 20), False),
+    ("FREQ=DAILY;BYMONTH=12", date(2027, 12, 5), True),
+    ("FREQ=DAILY;BYMONTH=12", date(2027, 11, 30), False),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR", date(2027, 1, 6), True),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR", date(2027, 1, 7), False),
+    # the shapes where dateutil diverges from RFC 5545: hand-computed
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 4), True),  # the 1st Monday
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 8), True),  # a plain Friday
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 11), False),  # the 2nd Monday
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=-1", date(2027, 1, 8), True),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=-1", date(2027, 1, 6), False),
+    # a week runs Monday to Sunday (WKST=MO): Sunday 10 Jan closes the week of 4 Jan
+    ("FREQ=WEEKLY;BYDAY=SU,MO;BYSETPOS=1", date(2027, 1, 4), True),
+    ("FREQ=WEEKLY;BYDAY=SU,MO;BYSETPOS=1", date(2027, 1, 10), False),
+    # no BY part: DTSTART implies the rule, any date is in it
+    ("FREQ=WEEKLY", date(2027, 1, 7), True),
+    ("FREQ=DAILY;INTERVAL=3", date(2027, 1, 7), True),
+]
+
+
+@pytest.mark.parametrize(("rrule", "start", "expected"), _DTSTART_TABLE)
+def test_dtstart_in_rule_hand_computed(rrule, start, expected):
+    assert _in_rule(rrule, start) is expected
+
+
+# the spike 003 device matrix minus BYWEEKNO (a rejected part): (name, RRULE)
+_SPIKE_SHAPES = [
+    ("weekly-byday", "FREQ=WEEKLY;BYDAY=MO,WE,FR"),
+    ("weekly-int2", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH"),
+    ("weekly-count", "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"),
+    ("monthly-2tu", "FREQ=MONTHLY;BYDAY=2TU"),
+    ("monthly-last-fr", "FREQ=MONTHLY;BYDAY=-1FR"),
+    ("monthly-5fr", "FREQ=MONTHLY;BYDAY=5FR"),
+    ("monthly-every-mo", "FREQ=MONTHLY;BYDAY=MO"),
+    ("monthly-15", "FREQ=MONTHLY;BYMONTHDAY=15"),
+    ("monthly-1-15", "FREQ=MONTHLY;BYMONTHDAY=1,15"),
+    ("monthly-last-day", "FREQ=MONTHLY;BYMONTHDAY=-1"),
+    ("monthly-31", "FREQ=MONTHLY;BYMONTHDAY=31"),
+    ("monthly-29", "FREQ=MONTHLY;BYMONTHDAY=29"),
+    ("monthly-until", "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115T235959"),
+    ("monthly-last-wkday", "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"),
+    ("monthly-bymonth", "FREQ=MONTHLY;BYMONTH=1,4,7,10;BYMONTHDAY=1"),
+    ("daily-bymonth", "FREQ=DAILY;BYMONTH=12"),
+    ("dtstart-mismatch", "FREQ=MONTHLY;BYDAY=2TU"),
+    ("yearly-last-su-mar", "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU"),
+    ("yearly-jan-jul-1", "FREQ=YEARLY;BYMONTH=1,7;BYMONTHDAY=1"),
+    ("yearly-yearday", "FREQ=YEARLY;BYYEARDAY=100"),
+    ("yearly-4th-thu-nov", "FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4"),
+]
+
+
+@pytest.mark.parametrize(("name", "rrule"), _SPIKE_SHAPES)
+def test_dtstart_in_rule_agrees_with_the_dateutil_oracle(name, rrule):
+    # dateutil drops a DTSTART outside its rule, so "its first occurrence IS the
+    # DTSTART" is exactly membership (an empty expansion counts as no match).
+    for offset in range(7):
+        d = date(2027, 1, 4) + timedelta(days=offset)
+        dts = datetime(d.year, d.month, d.day, 10)
+        first = next(iter(rrulestr(rrule, dtstart=dts)), None)
+        assert _in_rule(rrule, d) is (first == dts), f"{name} {d}"
+
+
+def test_dtstart_reference_library_is_never_imported_by_the_package():
+    # D-10 / T-3-13: dateutil is the test reference only. It drops a non-matching
+    # DTSTART and diverges from RFC 5545 on two shapes, so the runtime must not use it.
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in (root / "macos_apps_mcp").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            if any(n.split(".")[0] == "dateutil" for n in names):
+                offenders.append(str(path.relative_to(root)))
+    assert offenders == []
+
+
+def test_dtstart_reference_library_is_a_dev_dependency_only():
+    root = Path(__file__).resolve().parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    assert not any(
+        "dateutil" in dep for dep in project["project"].get("dependencies", [])
+    )
+    assert any("python-dateutil" in d for d in project["dependency-groups"]["dev"])
