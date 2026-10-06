@@ -53,8 +53,8 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
     # mailboxes.source + labels (#251): Gmail label membership, read by
-    # _MAILBOX_MEMBERSHIP_CTE (overview + search); a mailbox with a `source` is a label
-    # backed by that store (facts §5f).
+    # _MAILBOX_MEMBERSHIP_CTE (overview, search, thread, sent triage, stats); a mailbox
+    # with a `source` is a label backed by that store (facts §5f).
     "mailboxes": {"ROWID", "url", "source"},
     "labels": {"message_id", "mailbox_id"},
     "message_global_data": {"ROWID", "message_id_header", "message_id"},
@@ -154,6 +154,7 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        m.date_received      AS date_received"""
 
 # Logical mailbox membership differs from the physical .emlx location on Gmail (#251).
+# Every logical read joins it: overview, search, thread, sent triage, stats (#287).
 # Mail's own counter triggers use source IS NULL for direct mailboxes, and
 # source = messages.mailbox for label mailboxes (device-verified 2026-10-06, facts
 # §5f). Keep this read projection separate from build_message_location_query: backup
@@ -328,21 +329,25 @@ def build_thread_query(message_id: str, limit: int):
     happily. Which one won was up to SQLite's query plan and could flip on an OS
     upgrade. Deleted copies are excluded from the seed for the same reason.
 
+    The cited folder follows logical membership, Gmail labels included, so thread and
+    search cite the same folder (#287).
+
     ``sort_date`` guards a date_sent of 0 (not just NULL): a zero sorts to the very
     front of an oldest-first transcript and would be the first message dropped under
     truncation.
     """
-    sql = f"""
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT message_id_header, subject, mailbox_url, date_received FROM (
   SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
     SELECT {_DEDUP_SELECT_COLS},
            COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
            ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
                               ORDER BY {_MAILBOX_RANK},
-                                       m.date_received DESC, m.ROWID) AS rn
+                                       m.date_received DESC, m.ROWID, mb.ROWID) AS rn
     FROM messages m
     JOIN subjects s ON s.ROWID = m.subject
-    JOIN mailboxes mb ON mb.ROWID = m.mailbox
+    JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+    JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
     JOIN message_global_data gd ON gd.ROWID = m.global_message_id
     WHERE m.deleted = 0
       AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -611,21 +616,23 @@ def build_sent_triage_query(limit: int):
     integer (device-verified 2026-08-20 against a live reply), and the citing message
     is required to sit in an ``%/INBOX`` mailbox — the exact semantics the AppleScript
     scan had (unified inbox only), which is also what keeps a reply DRAFT (it cites
-    the original too, from Drafts) from clearing a send prematurely.
+    the original too, from Drafts) from clearing a send prematurely. Both the sent scan
+    and the INBOX check follow logical membership, so Gmail's label-only Sent Mail and
+    INBOX count (#287).
 
     ``MIN(COALESCE(m.subject_prefix,'') || s.subject)``: subjects.subject stores the
     stripped subject and the "Re: "/"Fwd: " lives in subject_prefix — concatenated so
     the record reads like AppleScript's ``subject of m`` did."""
     clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
-    sql = f"""
-WITH sent AS (
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}, sent AS (
   SELECT m.message_id AS mid_int,
          MIN(m.ROWID) AS rowid,
          MIN(g.message_id_header) AS mid,
          MIN(COALESCE(m.subject_prefix, '') || s.subject) AS subject,
          MAX(m.date_sent) AS date_sent
   FROM messages m
-  JOIN mailboxes mb ON mb.ROWID = m.mailbox
+  JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+  JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
   JOIN subjects s ON s.ROWID = m.subject
   LEFT JOIN message_global_data g ON g.message_id = m.message_id
   WHERE m.deleted = 0 AND m.message_id != 0 AND ({clauses})
@@ -636,7 +643,8 @@ SELECT mid, subject, date_sent, rowid,
   EXISTS (
     SELECT 1 FROM message_references r
     JOIN messages cm ON cm.ROWID = r.message
-    JOIN mailboxes cmb ON cmb.ROWID = cm.mailbox
+    JOIN mailbox_membership cmm ON cmm.message_rowid = cm.ROWID
+    JOIN mailboxes cmb ON cmb.ROWID = cmm.mailbox_id
     WHERE r.reference = sent.mid_int AND cm.deleted = 0
       AND cmb.url LIKE '%/INBOX'
   ) AS answered
@@ -695,6 +703,11 @@ def build_stats_query(since: int, account: str | None = None):
     not disagree about it. The sender/mailbox columns still come from the winning row,
     because those are properties of a copy and there is nothing to aggregate.
 
+    The mailbox follows logical membership (#287): a Gmail message is attributed to
+    its INBOX or Sent Mail label. The in-row rank and ``mb.ROWID`` order keys come
+    after ``m.ROWID``, so they only choose among memberships of ONE stored row and the
+    newest-copy rule between distinct rows is unchanged.
+
     ponytail: no LIMIT — a "last 3650 days" call materialises the whole store (~36k
     six-column rows, a few MB). Add a cap if a caller ever asks for that AND it bites;
     a bounded window is the normal use and the honest one.
@@ -709,10 +722,12 @@ SELECT lower(COALESCE(a.address, ''))            AS sender,
            OVER (PARTITION BY {key})             AS has_document,
        m.date_received                           AS date_received,
        ROW_NUMBER() OVER (PARTITION BY {key}
-                          ORDER BY m.date_received DESC, m.ROWID) AS rn
+                          ORDER BY m.date_received DESC, m.ROWID,
+                                   {_MAILBOX_RANK}, mb.ROWID) AS rn
 FROM messages m
 LEFT JOIN addresses a ON a.ROWID = m.sender
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0 AND m.date_received >= ?
 """
@@ -723,6 +738,7 @@ WHERE m.deleted = 0 AND m.date_received >= ?
         inner += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
         params.append(like_escape(account))
     sql = (
+        f"{_MAILBOX_MEMBERSHIP_CTE}"
         "SELECT sender, mailbox_url, is_read, flagged, has_document, date_received"
         f" FROM ({inner}) WHERE rn = 1"
     )
