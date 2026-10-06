@@ -729,3 +729,86 @@ def test_cascade_delete_with_subtasks(cascade_fixture):
     record = next(r for r in asyncio.run(_audit()) if r["tool"] == "delete_reminder")
     assert record["op"] == "delete" and record["target_id"] == p1
     assert {s["id"] for s in record["before"]["subtasks"]} == set(kids)
+
+
+# --- delete_event gone-check and parent completion (D-17, D-21, #91, #92) ------------
+
+
+def _occurrence_id(cal, base, day):
+    """The pointer id of the occurrence of the series ``base`` on ``day`` (ISO date)."""
+    return next(p.id for p in cal.get_pointers(day) if p.id.rpartition("|")[0] == base)
+
+
+def test_delete_event_is_gone_on_device(icloud_scratch, ek_items):
+    cal = CalendarAdapter()
+    start = datetime(2027, 2, 1, 10, 0)  # a Monday
+    one_hour = timedelta(hours=1)
+
+    # a single timed event
+    single = cal.create_event(
+        CalendarEventData(
+            title=PREFIX + "single",
+            start=start,
+            end=start + one_hour,
+            calendar=icloud_scratch,
+        )
+    )
+    ek_items.events.append(single.id)
+    assert cal.delete_event(single.id, dry_run=False) == {"deleted": single.id}
+    assert _eventually(
+        lambda: single.id not in {p.id for p in cal.get_pointers("2027-02-01")}
+    )
+
+    # a weekly series, COUNT=4: occurrences on Feb 1, 8, 15 and 22
+    series = cal.create_event(
+        CalendarEventData(
+            title=PREFIX + "series",
+            start=start,
+            end=start + one_hour,
+            calendar=icloud_scratch,
+            recurrence=Recurrence.from_rrule("FREQ=WEEKLY;COUNT=4"),
+        )
+    )
+    ek_items.events.append(series.id)
+    base = series.id.rpartition("|")[0]
+    weeks = [start + timedelta(weeks=n) for n in range(4)]
+    lo, hi = start, start + timedelta(days=45)
+
+    def seen():
+        return _read_occurrences(icloud_scratch, PREFIX + "series", lo, hi)
+
+    assert seen() == set(weeks)
+
+    # this-event: the second occurrence goes, the master and the others stay
+    second = _occurrence_id(cal, base, "2027-02-08")
+    assert cal.delete_event(second, span="this-event", dry_run=False) == {
+        "deleted": second
+    }
+    assert _eventually(lambda: seen() == {weeks[0], weeks[2], weeks[3]})
+
+    # future-events: the third occurrence and everything after it go
+    third = _occurrence_id(cal, base, "2027-02-15")
+    assert cal.delete_event(third, span="future-events", dry_run=False) == {
+        "deleted": third
+    }
+    assert _eventually(lambda: seen() == {weeks[0]})
+
+
+def test_cascade_complete_reports_open_subtasks(cascade_fixture):
+    fx = cascade_fixture
+
+    def _completed(ident):
+        return run_native(
+            lambda: store().calendarItemWithIdentifier_(ident).isCompleted()
+        )
+
+    assert not _completed(fx["d1"])
+    out = RemindersAdapter().complete_reminder(fx["p2"])
+    assert out["id"] == fx["p2"]
+    assert [s["id"] for s in out["subtasks"]] == [fx["d1"]]
+    assert _completed(fx["p2"])
+    assert not _completed(fx["d1"])  # D-21: completing a parent never touches a child
+    # ...and the link survives: d1 is still p2's subtask in the store
+    assert _eventually(
+        lambda: reminders_store.tags_and_parents()[1].get(fx["d1"]) == fx["p2"]
+    )

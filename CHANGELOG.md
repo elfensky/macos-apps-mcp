@@ -8,6 +8,10 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **`complete_reminder` on a parent lists the subtasks it leaves open** (#91) — under
+  `subtasks` in the result; it now needs Full Disk Access and refuses, changing nothing,
+  when the Reminders store cannot be read.
+
 - **`delete_reminder(id)`** (#92) — `dry_run=True` by default; verified gone after the
   delete; a parent with subtasks is refused unless `with_subtasks=True`, and the result
   and the audit log name every subtask that goes with it.
@@ -43,6 +47,9 @@ surface may still shift between minor versions.
   `results`; `coverage` appears when the Reminders store cannot be read.
 
 ### Fixed
+
+- `delete_event` now verifies the event is gone after the delete (the same contract as
+  `delete_reminder`).
 
 - A reminder repeated in Reminders.app with a BYDAY rule no longer loses it when the
   `RecurrenceRequired` re-send text is used.

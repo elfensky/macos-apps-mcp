@@ -67,10 +67,10 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 | `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as `{results, coverage?}`; each result carries `folder`, `tags` and `parent` (read-only; needs EventKit and Full Disk Access) |
 | `calendars` / `reminder_lists` | — | containers (id + name) to target writes |
 | `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence`, `alarms` (minutes before the start, at most 5; all-day: from local midnight, `-540` = 09:00 on the day) | `update` is a full replace by id |
-| `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting |
+| `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting; a real delete is verified gone (the occurrence, not the series) |
 | `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
 | `create_reminder_list` | name | new list on the default account; an exact duplicate name is refused |
-| `complete_reminder` | id | marks complete |
+| `complete_reminder` | id | marks complete; completing a parent lists the subtasks it leaves open under `subtasks`; refused, changing nothing, when the Reminders store cannot be read (needs EventKit and Full Disk Access) |
 | `delete_reminder` | id, `dry_run` (default **true**), `with_subtasks` | deletes by id and proves it gone; a parent with subtasks is refused unless `with_subtasks=true`, since deleting it deletes them too (needs EventKit and Full Disk Access) |
 
 Event and reminder pointers carry `folder` = the calendar or list id, which
