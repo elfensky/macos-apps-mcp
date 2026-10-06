@@ -20,8 +20,9 @@ never the full body.
 from __future__ import annotations
 
 import re
+from calendar import isleap, monthrange
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Protocol, get_args, runtime_checkable
 
 
@@ -537,6 +538,79 @@ class Recurrence:
             byyearday=_by_ints(fields, "BYYEARDAY"),
             bysetpos=_by_ints(fields, "BYSETPOS"),
         )
+
+
+def _is_nth(n: int, size: int, wanted: tuple[int, ...]) -> bool:
+    """``n`` (1-based) or its from-the-end form (``n - size - 1``) is in ``wanted``."""
+    return n in wanted or n - size - 1 in wanted
+
+
+def _passes_by_filters(rule: Recurrence, d: date) -> bool:
+    """Whether ``d`` survives every BY filter of ``rule`` (BYSETPOS aside)."""
+    if rule.bymonth and d.month not in rule.bymonth:
+        return False
+    year_size = 366 if isleap(d.year) else 365
+    yday = d.timetuple().tm_yday
+    if rule.byyearday and not _is_nth(yday, year_size, rule.byyearday):
+        return False
+    month_size = monthrange(d.year, d.month)[1]
+    if rule.bymonthday and not _is_nth(d.day, month_size, rule.bymonthday):
+        return False
+    if not rule.byday:
+        return True
+    code = _WEEKDAY_CODES[(d.weekday() + 1) % 7]  # _WEEKDAY_CODES starts on Sunday
+    # an ordinal counts inside the month for MONTHLY and YEARLY+BYMONTH, else the year
+    in_month = rule.frequency == "monthly" or (
+        rule.frequency == "yearly" and bool(rule.bymonth)
+    )
+    pos, size = (d.day, month_size) if in_month else (yday, year_size)
+    nth = (pos - 1) // 7 + 1
+    from_end = -((size - pos) // 7 + 1)
+    return any(
+        wd == code and ordinal in (0, nth, from_end) for ordinal, wd in rule.byday
+    )
+
+
+def dtstart_in_rule(rule: Recurrence, start: date) -> bool:
+    """Whether ``start`` itself is one of the dates ``rule`` describes (D-10).
+
+    RFC 5545 §3.3.10 counts DTSTART as the first instance even when it does not match
+    the rule, and EventKit agrees, so this check only decides whether that first
+    occurrence is *extra*. Pure stdlib over the supported parts: an absent part is
+    implied by DTSTART and never fails; INTERVAL, COUNT and UNTIL do not affect
+    membership. BYSETPOS picks from the candidates of ``start``'s own period — the
+    month, the year, or the Monday-to-Sunday week (RFC default WKST=MO; EventKit reads
+    2 for ``firstDayOfTheWeek``).
+
+    python-dateutil is not used: it drops a non-matching DTSTART and diverges from RFC
+    5545 on mixed plain/ordinal BYDAY and on WEEKLY+BYSETPOS.
+    """
+    d = date(start.year, start.month, start.day)  # a datetime is accepted too
+    if not _passes_by_filters(rule, d):
+        return False
+    if not rule.bysetpos:
+        return True
+    lo, hi = _period(rule.frequency, d)
+    candidates = [
+        x
+        for x in (lo + timedelta(days=i) for i in range((hi - lo).days))
+        if _passes_by_filters(rule, x)
+    ]
+    position = candidates.index(d) + 1
+    return _is_nth(position, len(candidates), rule.bysetpos)
+
+
+def _period(frequency: str, d: date) -> tuple[date, date]:
+    """The half-open ``[lo, hi)`` date range BYSETPOS counts inside."""
+    if frequency == "daily":
+        return d, d + timedelta(days=1)
+    if frequency == "weekly":
+        lo = d - timedelta(days=d.weekday())
+        return lo, lo + timedelta(days=7)
+    if frequency == "monthly":
+        lo = d.replace(day=1)
+        return lo, (lo + timedelta(days=32)).replace(day=1)
+    return date(d.year, 1, 1), date(d.year + 1, 1, 1)
 
 
 class _ClearRecurrence:

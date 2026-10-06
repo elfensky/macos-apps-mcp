@@ -7,12 +7,19 @@ reached-into).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
 import EventKit as EK
 
-from ..contracts import CalendarEventData, Pointer, deletion_result, parse_datetime
+from ..contracts import (
+    CalendarEventData,
+    Pointer,
+    deletion_result,
+    dtstart_in_rule,
+    parse_datetime,
+)
 from ..errors import (
     SpanRequired,
     VerificationFailed,
@@ -85,6 +92,22 @@ def _event_pointer(item) -> Pointer:
         deeplink=_event_deeplink(item),
         folder=container_id(item),  # the calendar identifier, never its title (D-12)
     )
+
+
+# D-10: RFC 5545 counts DTSTART as the first instance even when it does not match the
+# rule, and EventKit agrees. The caller asked for a series that starts elsewhere, so the
+# write result says the first occurrence is an extra one.
+_DTSTART_NOTE = " — starts outside its rule: one extra first occurrence (RFC 5545)"
+
+
+def _with_dtstart_note(p: Pointer, data: CalendarEventData) -> Pointer:
+    """``p``, with the D-10 note when ``data``'s start is outside its own rule.
+
+    The note is appended to the already-bounded summary, not re-run through
+    ``clean_summary``: a second cut would drop the note from a long title."""
+    if data.recurrence is None or dtstart_in_rule(data.recurrence, data.start.date()):
+        return p
+    return replace(p, summary=p.summary + _DTSTART_NOTE)
 
 
 def _calendar_pointer(cal) -> Pointer:
@@ -448,7 +471,7 @@ class CalendarAdapter:
             ident = _event_id(e)
             fresh = _refetch_event(s, ident)
             _verify_event(fresh, ident, data, cal_id)
-            return _event_pointer(fresh)
+            return _with_dtstart_note(_event_pointer(fresh), data)
 
         return run_native(work)
 
@@ -474,7 +497,7 @@ class CalendarAdapter:
             ident_after = _event_id(e)
             fresh = _refetch_event(s, ident_after)
             _verify_event(fresh, ident_after, data, cal_id)
-            return _event_pointer(fresh)
+            return _with_dtstart_note(_event_pointer(fresh), data)
 
         return run_native(work)
 

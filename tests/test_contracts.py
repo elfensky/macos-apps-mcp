@@ -19,6 +19,7 @@ from macos_apps_mcp.contracts import (
     Recurrence,
     ReminderData,
     _format_offset,
+    dtstart_in_rule,
     now_local,
     parse_all_day,
     parse_bound,
@@ -463,8 +464,6 @@ def test_deletion_result_is_the_one_delete_envelope():
 
 
 def _in_rule(rrule: str, start: date) -> bool:
-    from macos_apps_mcp.contracts import dtstart_in_rule
-
     return dtstart_in_rule(Recurrence.from_rrule(rrule), start)
 
 
