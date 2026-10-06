@@ -19,6 +19,7 @@ from macos_apps_mcp.contracts import (
     Recurrence,
     ReminderData,
     _format_offset,
+    deletion_result,
     dtstart_in_rule,
     now_local,
     parse_all_day,
@@ -619,3 +620,37 @@ def test_pointer_as_dict_emits_tags_and_parent_only_when_set():
     assert "tags" not in bare and "parent" not in bare
     full = Pointer(id="x", summary="s", deeplink="d", tags=("a",), parent="P").as_dict()
     assert full["tags"] == ["a"] and full["parent"] == "P"
+
+
+# --- Pointer.subtasks and the cascade envelope (D-19, D-20) ---------------------------
+
+
+def test_pointer_subtasks_serialize_as_a_list_of_dicts_only_when_set():
+    child = Pointer(id="C", summary="child", deeplink="d")
+    parent = Pointer(id="P", summary="parent", deeplink="d", subtasks=(child,))
+    assert parent.as_dict()["subtasks"] == [child.as_dict()]
+    assert "subtasks" not in Pointer(id="P", summary="s", deeplink="d").as_dict()
+
+
+def test_deletion_result_without_subtasks_keeps_its_two_shapes():
+    assert deletion_result("P", None, subtasks=()) == {"deleted": "P"}
+    preview = Pointer(id="P", summary="s", deeplink="d")
+    assert set(deletion_result("P", preview)) == {"dry_run", "would_delete"}
+
+
+def test_deletion_result_with_subtasks_names_them_and_the_cascade():
+    c1 = Pointer(id="C1", summary="one", deeplink="d")
+    c2 = Pointer(id="C2", summary="two", deeplink="d")
+    done = deletion_result("P", None, subtasks=(c1, c2))
+    assert done["deleted"] == "P" and [s["id"] for s in done["subtasks"]] == [
+        "C1",
+        "C2",
+    ]
+    assert done["cascade"].startswith("and 2 subtasks")
+    assert "3" in done["cascade"]  # the audit log keeps all N+1
+    one = deletion_result("P", None, subtasks=(c1,))
+    assert one["cascade"].startswith("and 1 subtask ")
+    parent = Pointer(id="P", summary="s", deeplink="d", subtasks=(c1, c2))
+    preview = deletion_result("P", parent, subtasks=(c1, c2))
+    assert preview["would_delete"]["subtasks"][0]["id"] == "C1"
+    assert preview["cascade"].startswith("and 2 subtasks") and "subtasks" not in preview

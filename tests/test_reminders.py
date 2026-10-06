@@ -848,3 +848,147 @@ def test_delete_snapshotter_returns_the_pointer_or_none(monkeypatch):
     assert snap.snapshot("P0").id == "P0"
     assert snap.snapshot("absent") is None
     assert snap.snapshot("E-1") is None  # an event is no reminder: no before-state
+
+
+# --- delete_reminder: the subtask guard (D-19, D-20) ---------------------------------
+
+_P1_ROWS = [  # a parent with three live subtasks, in creation order
+    (10, "P1", None, 0),
+    (11, "C1", 10, 0),
+    (12, "C2", 10, 0),
+    (13, "C3", 10, 0),
+]
+
+
+def _parent_world(*, survivors=(), missing=()):
+    """P1 with children C1..C3 in EventKit; ``missing`` children EventKit cannot fetch
+    (the store lists them, EventKit does not — spike 007)."""
+    kids = [_ek_item(c, f"child {c}") for c in ("C1", "C2", "C3") if c not in missing]
+    return _EKWorld(
+        _ek_item("P1", "Parent task"),
+        *kids,
+        cascade={"P1": ["C1", "C2", "C3"]},
+        survivors=survivors,
+    )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_parent_with_subtasks_is_refused_unless_confirmed(
+    monkeypatch, tmp_path, dry_run
+):
+    from macos_apps_mcp.errors import SubtasksRequired
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    with pytest.raises(SubtasksRequired) as exc:
+        adapter.delete_reminder("P1", dry_run=dry_run)
+    text = str(exc.value)
+    assert "3 subtasks" in text and "with_subtasks=True" in text
+    assert "No change was made" in text
+    for kid in ("C1", "C2", "C3"):
+        assert f"child {kid} [{kid}]" in text  # each subtask as `summary [id]`
+    assert world.removed == []  # not removed, in the dry run or the real call
+    assert SubtasksRequired.kind == "subtasks_required"
+
+
+def test_confirmed_dry_run_lists_every_subtask_and_removes_nothing(
+    monkeypatch, tmp_path
+):
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    assert out["dry_run"] is True
+    assert [s["id"] for s in out["would_delete"]["subtasks"]] == ["C1", "C2", "C3"]
+    assert out["cascade"].startswith("and 3 subtasks")
+    assert world.removed == []
+
+
+def test_confirmed_delete_names_every_removed_reminder(monkeypatch, tmp_path):
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", dry_run=False, with_subtasks=True)
+    assert out["deleted"] == "P1"
+    assert [s["id"] for s in out["subtasks"]] == ["C1", "C2", "C3"]
+    assert out["cascade"].startswith("and 3 subtasks")
+    assert world.removed == ["P1"]  # one remove call; EventKit takes the children
+
+
+def test_a_subtask_that_is_still_there_after_the_delete_is_named(monkeypatch, tmp_path):
+    world = _parent_world(survivors={"C2"})
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    with pytest.raises(VerificationFailed, match="C2"):
+        adapter.delete_reminder("P1", dry_run=False, with_subtasks=True)
+
+
+def test_a_store_subtask_eventkit_cannot_fetch_is_still_counted(monkeypatch, tmp_path):
+    # RESEARCH Pitfall 7: dropping it would report fewer reminders than were removed
+    world = _parent_world(missing={"C3"})
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    ghost = out["would_delete"]["subtasks"][2]
+    assert ghost["id"] == "C3"
+    assert ghost["summary"] == "(subtask not visible to EventKit)"
+    assert out["cascade"].startswith("and 3 subtasks")
+
+
+def test_a_parent_without_subtasks_needs_no_confirmation(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    out = adapter.delete_reminder("P0", dry_run=False)
+    assert out == {"deleted": "P0"}  # no `subtasks`, no `cascade`
+
+
+def test_the_delete_snapshotter_records_the_parent_and_every_subtask(
+    monkeypatch, tmp_path
+):
+    import macos_apps_mcp.adapters.reminders as rem
+
+    world = _parent_world(missing={"C3"})
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    before = rem.ReminderDeleteSnapshotter().snapshot("P1").as_dict()
+    assert [s["id"] for s in before["subtasks"]] == ["C1", "C2", "C3"]
+
+
+def test_the_shared_snapshot_makes_no_store_read(monkeypatch, tmp_path):
+    # D-20: update/complete share this snapshot; a store read there would log
+    # before=None whenever the grant is missing
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("no grant")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    assert adapter.snapshot("P1").id == "P1"
+
+
+def test_the_audit_before_state_records_all_the_reminders_a_delete_removes(
+    monkeypatch, tmp_path
+):
+    import asyncio
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.audit as au
+    import macos_apps_mcp.server as srv
+
+    world = _parent_world()
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            await c.call_tool(
+                "delete_reminder",
+                {"id": "P1", "dry_run": False, "with_subtasks": True},
+            )
+            return await c.call_tool("audit", {})
+
+    records = asyncio.run(_run()).data
+    newest = next(r for r in records if r["tool"] == "delete_reminder")
+    assert newest["op"] == "delete"
+    assert [s["id"] for s in newest["before"]["subtasks"]] == ["C1", "C2", "C3"]
+    assert world.removed == ["P1"]
