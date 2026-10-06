@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
-stopped_at: Completed 03-10-PLAN.md
-last_updated: "2026-10-06T13:41:49.553Z"
+stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
+last_updated: "2026-10-06T18:44:26.455Z"
 last_activity: 2026-10-05
 last_activity_desc: Phase 03 execution started
-state_head: 4868eba0f318340df52800db981f43e1c034940a
+state_head: 9b4bfbfd144a8046dc1cf6a6dc82a83042d50aba
 progress:
   total_phases: 7
   completed_phases: 3
@@ -103,6 +103,8 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
+- Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
+- Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
 - The installed daemon bundle's code seal breaks after first launch: the daemon's Python writes `__pycache__/*.pyc` into the signed `Contents/lib`. Nothing fails today (launch and TCC use the main executable's signature). Fix in `scripts/build_app.sh`: precompile `.pyc` before signing, or run the interpreter with `-B`. Found in plan 01-10.
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
@@ -136,6 +138,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T13:41:49.506Z
-Stopped at: Completed 03-10-PLAN.md
-Resume file: None
+Last session: 2026-10-06T18:44:26.378Z
+Stopped at: Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)
+Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-UAT.md
