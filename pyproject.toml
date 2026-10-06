@@ -52,6 +52,7 @@ macos-apps-mcp = "macos_apps_mcp:main"
 dev = [
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
+    "python-dateutil>=2.9.0.post0",
     "ruff>=0.15,<0.17",
 ]
 
