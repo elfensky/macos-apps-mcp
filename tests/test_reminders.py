@@ -694,3 +694,157 @@ def test_read_never_folds_an_eventkit_failure_into_coverage(monkeypatch):
     monkeypatch.setattr(RemindersAdapter, "get_pointers", boom)
     with pytest.raises(AccessDenied):
         RemindersAdapter().read("today")
+
+
+# --- delete_reminder (REM-01, #92) -----------------------------------------------------
+
+
+class _EKWorld:
+    """An EKEventStore stand-in for the delete tests: it answers the by-id fetch and the
+    remove, records every remove call, and can make a removal NOT stick.
+
+    ``cascade``   parent id -> ids EventKit removes with it (the subtasks).
+    ``survivors`` ids that stay fetchable after the remove (an iCloud restore)."""
+
+    def __init__(self, *items, cascade=None, survivors=()):
+        self.items = {i.calendarItemIdentifier(): i for i in items}
+        self.cascade = cascade or {}
+        self.survivors = set(survivors)
+        self.removed: list[str] = []
+
+    def calendarItemWithIdentifier_(self, ident):
+        return self.items.get(ident)
+
+    def removeReminder_commit_error_(self, r, commit, err):
+        ident = r.calendarItemIdentifier()
+        self.removed.append(ident)
+        for gone in (ident, *self.cascade.get(ident, ())):
+            if gone not in self.survivors:
+                self.items.pop(gone, None)
+        return True, None
+
+
+def _ek_item(ident, title="Item", *, reminder=True):
+    item = SimpleNamespace(
+        title=lambda: title,
+        calendarItemIdentifier=lambda: ident,
+        dueDateComponents=lambda: None,
+        calendar=lambda: SimpleNamespace(calendarIdentifier=lambda: "L-1"),
+        refresh=lambda: True,
+    )
+    if reminder:
+        item.isCompleted = lambda: False  # only an EKReminder has it
+    return item
+
+
+def _wire_delete(monkeypatch, tmp_path, world, *, rows=()):
+    """Patch the adapter's store and worker, and point the store plane at a fixture
+    Reminders store carrying ``rows`` (pk, ckid, parent pk, tombstone)."""
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _add_reminders, _make_reminders_store
+
+    path = _make_reminders_store(tmp_path / "Data-del.sqlite")
+    _add_reminders(path, list(rows))
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(rem, "store", lambda: world)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    return rem.RemindersAdapter()
+
+
+_P0 = [(30, "P0", None, 0)]  # a reminder with no subtasks
+
+
+def test_delete_reminder_dry_run_previews_and_removes_nothing(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0", "Water plants"))
+    out = _wire_delete(monkeypatch, tmp_path, world, rows=_P0).delete_reminder("P0")
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "P0" and out["would_delete"]["folder"] == "L-1"
+    assert world.removed == []
+
+
+def test_delete_reminder_removes_once_and_proves_it_gone(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    out = _wire_delete(monkeypatch, tmp_path, world, rows=_P0).delete_reminder(
+        "P0", dry_run=False
+    )
+    assert out == {"deleted": "P0"}
+    assert world.removed == ["P0"]
+
+
+def test_delete_reminder_still_there_after_the_remove_is_not_reported_deleted(
+    monkeypatch, tmp_path
+):
+    world = _EKWorld(_ek_item("P0"), survivors={"P0"})  # iCloud put it back
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    with pytest.raises(VerificationFailed, match="still present"):
+        adapter.delete_reminder("P0", dry_run=False)
+
+
+def test_delete_reminder_unknown_id_is_refused(monkeypatch, tmp_path):
+    world = _EKWorld()
+    adapter = _wire_delete(monkeypatch, tmp_path, world)
+    with pytest.raises(ValueError, match="no reminder with id"):
+        adapter.delete_reminder("nope", dry_run=False)
+    assert world.removed == []
+
+
+def test_delete_reminder_never_removes_a_calendar_event(monkeypatch, tmp_path):
+    # the base id of an event resolves through calendarItemWithIdentifier_ too
+    world = _EKWorld(_ek_item("E-1", reminder=False))
+    adapter = _wire_delete(monkeypatch, tmp_path, world)
+    with pytest.raises(ValueError, match="not a reminder"):
+        adapter.delete_reminder("E-1", dry_run=False)
+    assert world.removed == []
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_delete_reminder_with_an_unreadable_store_refuses_and_changes_nothing(
+    monkeypatch, tmp_path, dry_run
+):
+    # D-18: without the store the cascade is unknowable — a blind delete is refused
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied, WriteRefused
+
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("grant Full Disk Access to the launcher")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    with pytest.raises(WriteRefused) as exc:
+        adapter.delete_reminder("P0", dry_run=dry_run)
+    assert "grant Full Disk Access" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.removed == []
+
+
+def test_second_real_delete_of_the_same_id_is_an_error_not_a_second_success(
+    monkeypatch, tmp_path
+):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    assert adapter.delete_reminder("P0", dry_run=False) == {"deleted": "P0"}
+    with pytest.raises(ValueError, match="no reminder with id"):
+        adapter.delete_reminder("P0", dry_run=False)
+    assert world.removed == ["P0"]
+
+
+def test_two_dry_runs_agree_and_change_nothing(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    assert adapter.delete_reminder("P0") == adapter.delete_reminder("P0")
+    assert world.removed == []
+
+
+def test_delete_snapshotter_returns_the_pointer_or_none(monkeypatch):
+    import macos_apps_mcp.adapters.reminders as rem
+
+    world = _EKWorld(_ek_item("P0", "Water plants"), _ek_item("E-1", reminder=False))
+    monkeypatch.setattr(rem, "store", lambda: world)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    snap = rem.ReminderDeleteSnapshotter()
+    assert snap.snapshot("P0").id == "P0"
+    assert snap.snapshot("absent") is None
+    assert snap.snapshot("E-1") is None  # an event is no reminder: no before-state

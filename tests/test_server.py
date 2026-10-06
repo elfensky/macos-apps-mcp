@@ -426,6 +426,21 @@ def test_delete_event_bare_call_previews(monkeypatch):
     assert calls == [("E-1", None, True)]
 
 
+def test_delete_reminder_dispatches_with_the_dry_run_default(monkeypatch):
+    # REM-01 (#92): a bare call previews; the tool is one line to the adapter
+    calls = []
+
+    class _Rem:
+        def delete_reminder(self, ident, *, dry_run=True, with_subtasks=False):
+            calls.append((ident, dry_run, with_subtasks))
+            return {"dry_run": True, "would_delete": {}}
+
+    monkeypatch.setattr(srv, "_reminders", _Rem())
+    srv.delete_reminder("R-1")
+    srv.delete_reminder("R-1", dry_run=False, with_subtasks=True)
+    assert calls == [("R-1", True, False), ("R-1", False, True)]
+
+
 def test_update_event_passes_span(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)

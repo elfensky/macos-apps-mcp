@@ -119,6 +119,40 @@ def test_a_tag_reaches_the_caller_as_one_clean_line(tmp_path, monkeypatch):
     assert tags == {"R1": ("dup", "line one line two")}
 
 
+def _add_reminders(path, rows):
+    """Append reminder rows ``(pk, ckid, parent pk, tombstone)`` to a built store."""
+    conn = sqlite3.connect(path)
+    conn.executemany("INSERT INTO ZREMCDREMINDER VALUES (?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_subtasks_of_lists_live_children_of_a_live_parent(store_file):
+    _add_reminders(
+        store_file,
+        [
+            (10, "P1", None, 0),
+            (11, "C1", 10, 0),
+            (12, "C2", 10, 0),
+            (13, "C3", 10, 1),  # tombstoned child: not a subtask any more
+        ],
+    )
+    assert reminders_store.subtasks_of("P1") == ["C1", "C2"]
+    assert reminders_store.subtasks_of("R2") == []  # a leaf
+    assert reminders_store.subtasks_of("absent") == []
+
+
+def test_subtasks_of_a_tombstoned_parent_is_empty(store_file):
+    # R3 is a child of the tombstoned RP: no live parent, so no link to report
+    assert reminders_store.subtasks_of("RP") == []
+
+
+def test_subtasks_of_binds_the_id_never_formats_it_into_the_sql(store_file):
+    assert reminders_store.subtasks_of("R1' OR '1'='1") == []
+    assert reminders_store.subtasks_of("R1") == ["R2"]
+
+
 # --- store_path: the directory listing (RESEARCH Pitfall 5) ---------------------------
 
 
