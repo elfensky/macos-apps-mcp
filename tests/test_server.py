@@ -283,9 +283,9 @@ class _FakeWriter:
         self.calls.append(("update_reminder", ident, data))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def complete_reminder(self, ident: str) -> Pointer:
+    def complete_reminder(self, ident: str) -> dict:
         self.calls.append(("complete_reminder", ident))
-        return Pointer(id=ident, summary="done", deeplink="d")
+        return Pointer(id=ident, summary="done", deeplink="d").as_dict()
 
     def create_event(self, data: CalendarEventData) -> Pointer:
         self.calls.append(("create_event", data))

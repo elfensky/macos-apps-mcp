@@ -997,3 +997,118 @@ def test_the_audit_before_state_records_all_the_reminders_a_delete_removes(
     assert newest["op"] == "delete"
     assert [s["id"] for s in newest["before"]["subtasks"]] == ["C1", "C2", "C3"]
     assert world.removed == ["P1"]
+
+
+# --- complete_reminder: the open-subtask report (D-21, #91) --------------------------
+
+
+class _CompleteWorld(_EKWorld):
+    """``_EKWorld`` plus the save ``complete_reminder`` makes; records every save."""
+
+    def __init__(self, *items):
+        super().__init__(*items)
+        self.saved: list[str] = []
+
+    def saveReminder_commit_error_(self, r, commit, err):
+        self.saved.append(r.calendarItemIdentifier())
+        return True, None
+
+
+def _open_item(ident, title="Item", *, done=False):
+    """An EKReminder stand-in whose completed state ``setCompleted_`` flips."""
+    item = _ek_item(ident, title)
+    state = {"done": done}
+    item.isCompleted = lambda: state["done"]
+    item.setCompleted_ = lambda v: state.update(done=bool(v))
+    return item
+
+
+_P2_ROWS = [(20, "P2", None, 0), (21, "D1", 20, 0), (22, "D2", 20, 0)]
+
+
+def _wire_complete(monkeypatch, tmp_path, world, *, rows=_P2_ROWS):
+    return _wire_delete(monkeypatch, tmp_path, world, rows=rows)
+
+
+def _complete_world(*, d1_done=False, d2_done=True):
+    return _CompleteWorld(
+        _open_item("P2", "Parent task"),
+        _open_item("D1", "child one", done=d1_done),
+        _open_item("D2", "child two", done=d2_done),
+    )
+
+
+@pytest.mark.skipif(
+    tiers.read_only(),
+    reason="complete_reminder is a write tool — absent under MACOS_APPS_READ_ONLY",
+)
+def test_complete_reminder_over_the_client_lists_the_open_subtask(
+    monkeypatch, tmp_path
+):
+    # the tracer: the dict with a `subtasks` list must pass FastMCP's output validation
+    import asyncio
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.audit as au
+    import macos_apps_mcp.server as srv
+
+    world = _complete_world()
+    _wire_complete(monkeypatch, tmp_path, world)
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("complete_reminder", {"id": "P2"})
+
+    data = asyncio.run(_run()).data
+    assert world.saved == ["P2"]
+    assert data["id"] == "P2"
+    assert [s["id"] for s in data["subtasks"]] == ["D1"]  # D2 is completed already
+
+
+def test_complete_reminder_leaves_the_subtasks_open(monkeypatch, tmp_path):
+    world = _complete_world()
+    adapter = _wire_complete(monkeypatch, tmp_path, world)
+    out = adapter.complete_reminder("P2")
+    assert [s["summary"] for s in out["subtasks"]] == ["child one"]
+    assert world.saved == ["P2"]  # the parent only: never a child (D-21)
+    assert world.items["D1"].isCompleted() is False
+
+
+def test_complete_reminder_with_only_completed_subtasks_has_no_subtasks_key(
+    monkeypatch, tmp_path
+):
+    world = _complete_world(d1_done=True)
+    out = _wire_complete(monkeypatch, tmp_path, world).complete_reminder("P2")
+    assert out["id"] == "P2" and "subtasks" not in out and "coverage" not in out
+
+
+def test_complete_reminder_without_subtasks_has_no_subtasks_key(monkeypatch, tmp_path):
+    world = _CompleteWorld(_open_item("P0"))
+    out = _wire_complete(monkeypatch, tmp_path, world, rows=_P0).complete_reminder("P0")
+    assert out["id"] == "P0" and "subtasks" not in out and "coverage" not in out
+
+
+def test_complete_reminder_with_an_unreadable_store_refuses_before_any_save(
+    monkeypatch, tmp_path
+):
+    # owner override of A9, 2026-10-06: a parent cannot be told from a plain reminder
+    # without the store, so the completion is refused and nothing is saved
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied, WriteRefused
+
+    world = _complete_world()
+    adapter = _wire_complete(monkeypatch, tmp_path, world)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("grant Full Disk Access to the launcher")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    with pytest.raises(WriteRefused) as exc:
+        adapter.complete_reminder("P2")
+    assert "complete_reminder refused" in str(exc.value)
+    assert "grant Full Disk Access" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.saved == []
+    assert world.items["P2"].isCompleted() is False

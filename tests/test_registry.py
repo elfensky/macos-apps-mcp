@@ -82,7 +82,7 @@ _DEVELOP_PERMISSION = {
     "create_reminder": "EventKit",
     "create_reminder_list": "EventKit",
     "update_reminder": "EventKit",
-    "complete_reminder": "EventKit",
+    "complete_reminder": ("EventKit", "Full Disk Access"),
     "delete_reminder": ("EventKit", "Full Disk Access"),
     "create_event": "EventKit",
     "update_event": "EventKit",

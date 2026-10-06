@@ -115,7 +115,7 @@ def test_reminder_create_update_complete(created):
     assert "due" not in p2.summary  # full-replace cleared the due date
 
     p3 = a.complete_reminder(p.id)
-    assert p3.id == p.id
+    assert p3["id"] == p.id
 
 
 def test_event_create_update_delete(created):
