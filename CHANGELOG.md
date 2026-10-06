@@ -48,6 +48,12 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **The daemon shim no longer reports a TypeError on streamed responses** (#286) — the
+  daemon completed the call while the shim raised (0.13.1 affected), because the `.app`
+  build ignored `uv.lock` and shipped mcp 2 / fastmcp 4. The bundle now builds from
+  `uv.lock`, mcp and fastmcp are capped at the tested majors (`mcp<2`, `fastmcp<4`), and
+  the build smoke-tests one streamed call.
+
 - `delete_event` now verifies the event is gone after the delete (the same contract as
   `delete_reminder`).
 
