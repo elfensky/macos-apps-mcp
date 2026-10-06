@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-06T21:32:25.477Z"
+last_updated: "2026-10-06T22:42:39.417Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 03 execution started
-state_head: 328ccec2a78e2e0f989b8f567c86446de3c7eb6f
+state_head: 26baa9a613f35dd46facab2bbedb10978e48beef
 progress:
   total_phases: 7
   completed_phases: 3
@@ -105,7 +105,6 @@ Recent decisions affecting current work:
 
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
 - Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
-- The installed daemon bundle's code seal breaks after first launch: the daemon's Python writes `__pycache__/*.pyc` into the signed `Contents/lib`. Nothing fails today (launch and TCC use the main executable's signature). Fix in `scripts/build_app.sh`: precompile `.pyc` before signing, or run the interpreter with `-B`. Found in plan 01-10.
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
 ### Blockers/Concerns
@@ -126,6 +125,7 @@ Recent decisions affecting current work:
 | 261006-uff | Harden PR #251 (Gmail label membership): locate backs up the target account's copy, deterministic label citation, UNION ALL, docs + device-verified facts | 2026-10-06 | 9de12e5 | [261006-uff-harden-pr-251-gmail-label-membership-bef](./quick/261006-uff-harden-pr-251-gmail-label-membership-bef/) |
 | 261006-vu3 | Build the daemon bundle from uv.lock; cap mcp<2/fastmcp<4; smoke a streamed call in the build (#286, PR #288) | 2026-10-06 | 328ccec | [261006-vu3-build-the-daemon-bundle-from-uv-lock-and](./quick/261006-vu3-build-the-daemon-bundle-from-uv-lock-and/) |
 | 261006-wa0 | Gmail follow-ups: refuse label-folder write sources; labels in thread, sent triage, stats; parity guard (#287, PR #289) | 2026-10-06 | 328ccec | [261006-wa0-gmail-follow-ups-to-251-label-source-gua](./quick/261006-wa0-gmail-follow-ups-to-251-label-source-gua/) |
+| 4 | Precompile the daemon bundle's bytecode before signing so its code seal survives first launch | 2026-10-07 | 26baa9a | — |
 
 ### Roadmap Evolution
 

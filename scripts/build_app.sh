@@ -51,6 +51,11 @@ env -i "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
 # libraries — CI tests uv.lock, this tests what ships (#286).
 "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P "$REPO/scripts/smoke_stream.py" \
   || { echo "STREAM SMOKE FAILED: bundled mcp/fastmcp break the shim (#286)"; exit 1; }
+# Precompile every module BEFORE signing: otherwise the daemon writes .pyc into the
+# signed Contents/lib on its first imports and breaks the seal (codesign --strict).
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -m compileall -q -j 0 \
+  "$APP/Contents/lib/python${PYVER}" >/dev/null \
+  || { echo "BYTECODE PRECOMPILE FAILED"; exit 1; }
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"
