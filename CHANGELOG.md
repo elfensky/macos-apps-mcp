@@ -8,6 +8,10 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **`delete_reminder(id)`** (#92) — `dry_run=True` by default; verified gone after the
+  delete; a parent with subtasks is refused unless `with_subtasks=True`, and the result
+  and the audit log name every subtask that goes with it.
+
 - **Reminder tags and subtasks, read-only** (#91) — `reminders()` results carry `tags`
   and `parent` from the Reminders store (needs Full Disk Access); there is no public API
   to write them.

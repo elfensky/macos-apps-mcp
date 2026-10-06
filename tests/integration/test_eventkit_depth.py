@@ -12,6 +12,8 @@ module with their own device tests.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 import time
@@ -21,7 +23,9 @@ from types import SimpleNamespace
 import EventKit as EK
 import pytest
 from dateutil.rrule import rrulestr
+from fastmcp import Client
 
+import macos_apps_mcp.server as srv
 from macos_apps_mcp.adapters import reminders_store
 from macos_apps_mcp.adapters.calendar import CalendarAdapter
 from macos_apps_mcp.adapters.reminders import RemindersAdapter
@@ -31,6 +35,7 @@ from macos_apps_mcp.contracts import (
     ReminderData,
     dtstart_in_rule,
 )
+from macos_apps_mcp.errors import SubtasksRequired
 from macos_apps_mcp.eventkit import epoch_nsdate, from_nsdate, store, to_nsdate
 from macos_apps_mcp.runtime import run_native
 
@@ -604,3 +609,123 @@ def test_all_day_without_alarms_reads_back_empty(target_calendar, ek_items):
         calendar_id, title, day - timedelta(days=1), day + timedelta(days=2)
     )
     assert minutes == []
+
+
+# --- delete_reminder (REM-01, #92) ---------------------------------------------------
+
+
+def _is_gone(ident):
+    """True when a fresh EventKit fetch (refreshed from the database) finds nothing."""
+
+    def _check():
+        item = store().calendarItemWithIdentifier_(ident)
+        return item is None or not item.refresh()
+
+    return run_native(_check)
+
+
+def test_delete_reminder_is_gone_on_device(ek_items):
+    rem = RemindersAdapter()
+    pointer = rem.create_reminder_list(PREFIX + "delete")
+    ek_items.lists.append(pointer.id)
+    made = rem.create_reminder(
+        ReminderData(title=PREFIX + "delete r", list_name=pointer.id)
+    )
+    ek_items.reminders.append(made.id)
+
+    preview = rem.delete_reminder(made.id)  # the default is a dry run
+    assert preview["dry_run"] is True and preview["would_delete"]["id"] == made.id
+    assert not _is_gone(made.id)
+
+    assert rem.delete_reminder(made.id, dry_run=False) == {"deleted": made.id}
+    assert _is_gone(made.id)
+    with pytest.raises(ValueError, match="no reminder with id"):
+        rem.delete_reminder(made.id, dry_run=False)
+
+
+@pytest.fixture(scope="module")
+def cascade_fixture():
+    """The owner-built subtask fixture (03-09 builds it, 03-10 runs against it).
+
+    ``MACOS_APPS_IT_CASCADE_FIXTURE`` names a JSON file with ``list_id``,
+    ``list_title``, ``p1``, ``children`` (3 ids under p1), ``p2``, ``d1`` (1 id under
+    p2) and ``tag`` (the tag the owner added to ``children[0]``). EventKit cannot make
+    a subtask, so the owner indents them by hand in Reminders. Skips when the variable
+    is unset."""
+    path = os.environ.get("MACOS_APPS_IT_CASCADE_FIXTURE")
+    if not path:
+        pytest.skip("MACOS_APPS_IT_CASCADE_FIXTURE is unset — no owner-built fixture")
+    with open(path, encoding="utf-8") as f:
+        fx = json.load(f)
+    yield fx
+
+    def _cleanup():  # once per module: whatever the tests left, by id
+        s = store()
+        for ident in (fx["p2"], fx["d1"], fx["p1"], *fx["children"]):
+            item = s.calendarItemWithIdentifier_(ident)
+            if item is not None:
+                s.removeReminder_commit_error_(item, True, None)
+        for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder):
+            if c.calendarIdentifier() == fx["list_id"]:
+                s.removeCalendar_commit_error_(c, True, None)
+
+    run_native(_cleanup)
+
+
+def _eventually(check, timeout=20.0):
+    """Poll ``check`` until it returns truthy: the Reminders store trails EventKit by a
+    moment after a write."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = check()
+        if value or time.monotonic() >= deadline:
+            return value
+        time.sleep(1.0)
+
+
+def test_cascade_delete_with_subtasks(cascade_fixture):
+    fx = cascade_fixture
+    p1, kids = fx["p1"], list(fx["children"])
+
+    # (1) the store sees the fixture
+    tags, parents = reminders_store.tags_and_parents()
+    linked = (
+        all(parents.get(k) == p1 for k in kids) and parents.get(fx["d1"]) == fx["p2"]
+    )
+    if not (linked and fx["tag"] in tags.get(kids[0], ())):
+        pytest.fail("the fixture is not in the Reminders store yet — wait and re-run")
+
+    # (2) the read carries the parent link and the tag, with no coverage warning
+    out = RemindersAdapter().read(fx["list_title"])
+    assert "coverage" not in out, out.get("coverage")
+    by_id = {r["id"]: r for r in out["results"]}
+    assert all(by_id[k]["parent"] == p1 for k in kids)
+    assert fx["tag"] in by_id[kids[0]]["tags"]
+
+    # (3) an unconfirmed parent delete is refused and removes nothing
+    with pytest.raises(SubtasksRequired, match="3 subtasks"):
+        RemindersAdapter().delete_reminder(p1)
+    assert not _is_gone(p1) and not any(_is_gone(k) for k in kids)
+
+    # (4) through the client: the confirmed preview, then the confirmed delete
+    async def _call(**args):
+        async with Client(srv.mcp) as c:
+            return (await c.call_tool("delete_reminder", args)).data
+
+    preview = asyncio.run(_call(id=p1, with_subtasks=True))
+    assert {s["id"] for s in preview["would_delete"]["subtasks"]} == set(kids)
+    done = asyncio.run(_call(id=p1, dry_run=False, with_subtasks=True))
+    assert done["deleted"] == p1 and len(done["subtasks"]) == 3 and "cascade" in done
+
+    # (5) the parent and all three children are gone, and the store agrees
+    assert _is_gone(p1) and all(_is_gone(k) for k in kids)
+    assert _eventually(lambda: reminders_store.subtasks_of(p1) == [])
+
+    # (6) the audit log's newest delete record kept all N+1 as before-state
+    async def _audit():
+        async with Client(srv.mcp) as c:
+            return (await c.call_tool("audit", {})).data
+
+    record = next(r for r in asyncio.run(_audit()) if r["tool"] == "delete_reminder")
+    assert record["op"] == "delete" and record["target_id"] == p1
+    assert {s["id"] for s in record["before"]["subtasks"]} == set(kids)

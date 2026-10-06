@@ -71,6 +71,7 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 | `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
 | `create_reminder_list` | name | new list on the default account; an exact duplicate name is refused |
 | `complete_reminder` | id | marks complete |
+| `delete_reminder` | id, `dry_run` (default **true**), `with_subtasks` | deletes by id and proves it gone; a parent with subtasks is refused unless `with_subtasks=true`, since deleting it deletes them too (needs EventKit and Full Disk Access) |
 
 Event and reminder pointers carry `folder` = the calendar or list id, which
 `free_busy(calendars=…)` and the write tools (`calendar=`, `list_name=`) take.
