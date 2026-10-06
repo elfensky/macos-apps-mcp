@@ -186,9 +186,13 @@ def locate(targets) -> list[Target]:
 
     A target whose folder is a mailbox url is matched to the row in THAT mailbox — a
     Message-ID has several rows and only one of them is the copy about to be acted on.
-    A canonical-name folder (a unified accessor) has no url to match, so the first row
-    wins; that is the honest best available, and the fidelity stamp still describes
-    whatever file was actually copied.
+    A Gmail label folder (#251) is a mailbox url but never a physical row —
+    ``query_message_locations`` reads ``messages.mailbox`` only — so it matches nothing;
+    the row in the target's own account (its All Mail copy) wins next (live 2026-10-06:
+    272 of 1,056 label members had a copy in another account that the bare first-row
+    fallback picked). A canonical-name folder (a unified accessor) has no url to match
+    and no account, so the first row wins; that is the honest best available, and the
+    fidelity stamp still describes whatever file was actually copied.
 
     Never raises on a miss: a target we cannot locate is stamped ``absent`` and carries
     on. Refusing the whole batch because one message has no full local copy would make
@@ -209,10 +213,18 @@ def locate(targets) -> list[Target]:
     out = []
     for t in items:
         candidates = by_id.get(mail_addressing.bare_id(t.id), [])
-        row = next(
-            (c for c in candidates if c["mailbox_url"] == t.folder),
-            candidates[0] if candidates else None,
-        )
+        row = next((c for c in candidates if c["mailbox_url"] == t.folder), None)
+        if row is None and t.account is not None:
+            row = next(
+                (
+                    c
+                    for c in candidates
+                    if mail_index.account_of(c["mailbox_url"]) == t.account
+                ),
+                None,
+            )
+        if row is None and candidates:
+            row = candidates[0]
         if row is None:
             out.append(replace(t, fidelity=_ABSENT))
             continue
