@@ -54,6 +54,11 @@ surface may still shift between minor versions.
   `uv.lock`, mcp and fastmcp are capped at the tested majors (`mcp<2`, `fastmcp<4`), and
   the build smoke-tests one streamed call.
 
+- **The signed `.app` keeps its code seal after the first launch** — the daemon wrote
+  `.pyc` files into the signed bundle on its first imports, so `codesign --verify
+  --strict` failed on every installed build; the build now precompiles all modules
+  before signing.
+
 - **Gmail Inbox, Sent Mail and labels no longer read empty** (#251) — in `mail_overview`
   and `mail_search`: Mail stores a Gmail message once, under All Mail, and records the
   rest as label membership.
