@@ -324,6 +324,18 @@ not a verification of deduplicated totals or of a patched live server.
   `messages.mailbox`; expanding backup/file-location queries to label URLs would
   point at files that need not exist there.
 
+**Device-verified 2026-10-06** on macOS 27.0.1 against one Gmail account:
+
+- Mail's own triggers `after_insert_message`, `after_insert_label` and
+  `before_delete_message` use exactly this membership rule.
+- With the rule, overview counts equal `mailboxes.total_count` / `unread_count` on all
+  4 label-backed mailboxes (Inbox, Sent Mail and 2 custom labels); the other 152
+  mailboxes read unchanged.
+- Backup consequence: a label folder is never a physical row, so the recover plane's
+  location query never matches it; `locate` now prefers the row in the target's own
+  account and only then the first row — 272 of 1,056 label members had a copy in
+  another account that the old fallback picked.
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably

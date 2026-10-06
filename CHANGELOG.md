@@ -54,10 +54,10 @@ surface may still shift between minor versions.
   `uv.lock`, mcp and fastmcp are capped at the tested majors (`mcp<2`, `fastmcp<4`), and
   the build smoke-tests one streamed call.
 
-- Mail overview and indexed search now include Gmail Inbox, Sent, and custom label
-  memberships stored separately from the message's All Mail location. Counts keep
-  their existing per-mailbox deduplication, and search results carry the matching
-  mailbox URL. Physical file-location queries are unchanged.
+- **Gmail Inbox, Sent Mail and labels no longer read empty** (#251) — in `mail_overview`
+  and `mail_search`: Mail stores a Gmail message once, under All Mail, and records the
+  rest as label membership. A move or trash from a Gmail label folder now backs up the
+  target account's own copy.
 
 - `delete_event` now verifies the event is gone after the delete (the same contract as
   `delete_reminder`).
