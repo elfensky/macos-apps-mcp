@@ -533,13 +533,14 @@ class ReminderDeleteSnapshotter:
 
     def snapshot(self, ident: str) -> Pointer | None:
         def work():
-            r = store().calendarItemWithIdentifier_(ident)
+            s = store()
+            r = s.calendarItemWithIdentifier_(ident)
             if r is None or not _is_reminder(r):
                 return None
             # A store error propagates: the audit layer then records before=None, and
             # the delete itself refuses anyway (D-18).
             sub_ids = reminders_store.subtasks_of(ident)
-            subs = _subtask_pointers(store(), sub_ids)
+            subs = _subtask_pointers(s, sub_ids)
             return dataclasses.replace(_reminder_pointer(r), subtasks=subs or None)
 
         return run_native(work)
