@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-06T18:44:26.455Z"
-last_activity: 2026-10-05
+last_updated: "2026-10-06T20:10:01.766Z"
+last_activity: 2026-10-06
 last_activity_desc: Phase 03 execution started
-state_head: 9b4bfbfd144a8046dc1cf6a6dc82a83042d50aba
+state_head: 9de12e59364401287f235d2409e6fdbf85f8404c
 progress:
   total_phases: 7
   completed_phases: 3
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
 Plan: 10 of 10
 Status: Phase complete — ready for verification
-Last activity: 2026-10-05 — Phase 03 execution started
+Last activity: 2026-10-06 - Completed quick task 261006-uff: Harden PR #251 (Gmail label membership) before merge
 
 Progress: [████░░░░░░] 43%
 
@@ -118,6 +118,12 @@ Recent decisions affecting current work:
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261006-uff | Harden PR #251 (Gmail label membership): locate backs up the target account's copy, deterministic label citation, UNION ALL, docs + device-verified facts | 2026-10-06 | 9de12e5 | [261006-uff-harden-pr-251-gmail-label-membership-bef](./quick/261006-uff-harden-pr-251-gmail-label-membership-bef/) |
 
 ### Roadmap Evolution
 
