@@ -544,6 +544,17 @@ class CalendarAdapter:
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise refused_write("event delete", "calendar", err)
-            return deletion_result(ident, None)
+            # D-17: "deleted" is never reported for an event that is still there (a
+            # CalDAV server may restore it after the commit). Occurrence-aware on
+            # purpose: a base-id lookup would still find the series master after a
+            # this-event delete and false-fail every recurring delete (Pitfall 6).
+            try:
+                _resolve_event(s, ident)
+            except ValueError:
+                return deletion_result(ident, None)  # gone, as it should be
+            raise VerificationFailed(
+                f"event {ident!r} still resolves after the delete — it may have been "
+                "restored by iCloud or Google; re-read before retrying"
+            )
 
         return run_native(work)
