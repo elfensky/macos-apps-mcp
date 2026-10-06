@@ -364,6 +364,28 @@ not a verification of deduplicated totals or of a patched live server.
   refused, with how to restore by hand.
 - A route into a label ships only after a device run.
 
+**Device-verified 2026-10-07 (#291) — the other Mail tools on a label folder.** Code at
+develop 70186a1, one Gmail account, macOS 27.0.1, Mail watchdog running.
+
+- `mail_body` reads a message from the INBOX label, the `[Gmail]/Sent Mail` label and a
+  custom label: `whose message id` inside the label mailbox finds it.
+- `mail_attachments` with `message_id` lists the attachments from the INBOX and Sent
+  Mail labels.
+- `update_mail_status` sets and clears `flagged` on a message in a custom label; a fresh
+  read confirms each state. The message was restored.
+- `save_mail_attachment` from the INBOX label writes the whole file (79,229 bytes, equal
+  to the reported size).
+- Not run: `mail_reply` and `reply_all` (each opens a compose window and leaves a draft,
+  §3c) and `forward_mail` (outbound). They find the message with the same `whose
+  message id` lookup as `mail_body`; the compose half does not depend on the folder.
+- Seen once: Mail can disagree with itself about a message that earlier label moves
+  touched. In the test label, the index gave row 77215 the subject and Message-ID of one
+  message, and its `.emlx` held another. The first `mail_body` for the index's id
+  returned the other message's body; one minute later the same call answered "no
+  message with that message id". This tool never writes into `~/Library/Mail`, so the
+  wrong body came from Mail. A check of Mail's own `message id` cannot catch it: the
+  `whose` filter matched, so Mail reported the stale id at that moment.
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
