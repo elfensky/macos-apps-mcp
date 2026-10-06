@@ -340,6 +340,49 @@ def test_move_mail_allows_a_canonical_destination_from_an_unlabelled_account(
     assert mail._PRESENT in seen
 
 
+def _receipt(monkeypatch, dest, source):
+    rec = {"destination": dest, "backup_dir": "/tmp/backup-291"}
+    target = mail_recover.Target(
+        id="gmail-2@example.test", folder=source, account=ACCT_A
+    )
+    monkeypatch.setattr(mail_recover, "undo_plan", lambda rid: (rec, [target]))
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_undo_refuses_a_receipt_into_a_label_folder(
+    gmail_envelope, monkeypatch, dry_run
+):
+    _, _, urls = gmail_envelope
+    # No osascript ran, or the conftest native seam would have raised AssertionError.
+    for dest in (urls["label"], f"imap://{ACCT_A}/[Gmail]/Sent Mail"):
+        _receipt(monkeypatch, dest, urls["all"])
+        with pytest.raises(WriteRefused) as err:
+            MailAdapter().undo("r", dry_run=dry_run)
+        for part in (urls["all"], "/tmp/backup-291", "by hand"):
+            assert part in str(err.value)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_undo_refuses_a_receipt_into_a_canonical_name(
+    gmail_envelope, monkeypatch, dry_run
+):
+    _, _, urls = gmail_envelope
+    _receipt(monkeypatch, "inbox", urls["all"])
+    with pytest.raises(WriteRefused) as err:
+        MailAdapter().undo("r", dry_run=dry_run)
+    assert "mail_search" in str(err.value)
+    assert urls["all"] in str(err.value)
+
+
+def test_undo_replays_a_receipt_into_a_physical_folder(gmail_envelope, monkeypatch):
+    _, _, urls = gmail_envelope
+    _receipt(monkeypatch, urls["other"], urls["all"])
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().undo("r")
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen
+
+
 # --- thread, sent triage and stats follow logical membership (#287) -----------------
 
 
