@@ -596,6 +596,45 @@ def test_refetch_event_missing_is_rollback():
         _refetch_event(store, "E-404")
 
 
+def _event_data():
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+
+
+@pytest.mark.parametrize("tool", ["update_event", "delete_event"])
+def test_event_writes_refuse_a_reminder_id_before_any_mutation(monkeypatch, tool):
+    # one id space: a plain (suffix-less) id can name an EKReminder (WR-01)
+    import macos_apps_mcp.adapters.calendar as cal
+
+    touched = []
+    reminder = SimpleNamespace(
+        isCompleted=lambda: False,
+        setTitle_=lambda v: touched.append(v),
+        recurrenceRules=lambda: None,
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: reminder,
+        saveEvent_span_commit_error_=lambda *a: touched.append(a),
+        removeEvent_span_commit_error_=lambda *a: touched.append(a),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+    adapter = cal.CalendarAdapter()
+    call = (
+        (lambda: adapter.update_event("R-1", _event_data()))
+        if tool == "update_event"
+        else (lambda: adapter.delete_event("R-1", dry_run=True))
+    )
+    with pytest.raises(ValueError, match="reminder, not a calendar event") as exc:
+        call()
+    assert "update_reminder / delete_reminder" in str(exc.value)
+    assert "Nothing was changed" in str(exc.value)
+    assert touched == []
+
+
 # --- dry_run delete (#54) ------------------------------------------------------------
 
 

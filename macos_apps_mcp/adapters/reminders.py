@@ -421,6 +421,11 @@ class RemindersAdapter:
             r = s.calendarItemWithIdentifier_(ident)
             if r is None:
                 raise ValueError(f"no reminder with id {ident!r}")
+            if not _is_reminder(r):  # before any setter touches an EKEvent
+                raise ValueError(
+                    f"{ident!r} is a calendar event, not a reminder — use update_event "
+                    "for events. Nothing was changed."
+                )
             # Repeating target + omitted recurrence → refuse BEFORE any mutation, so
             # a rename can't silently clear the series (mirror of SpanRequired, #51).
             rules = r.recurrenceRules()

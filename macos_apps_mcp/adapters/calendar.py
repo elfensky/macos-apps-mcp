@@ -318,6 +318,12 @@ def _resolve_event(s, ident: str):
         e = s.calendarItemWithIdentifier_(ident)
         if e is None:
             raise ValueError(f"no event with id {ident!r}")
+        # one id space for events and reminders: only an EKReminder answers isCompleted
+        if hasattr(e, "isCompleted"):
+            raise ValueError(
+                f"{ident!r} is a reminder, not a calendar event — use update_reminder "
+                "/ delete_reminder. Nothing was changed."
+            )
         return e
     occ_epoch = int(occ)
     # ±1s window built straight from the epoch: datetime±timedelta resets the PEP-495

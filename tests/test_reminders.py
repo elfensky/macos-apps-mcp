@@ -364,13 +364,34 @@ def test_update_reminder_resend_text_carries_the_byday_part(monkeypatch):
     from macos_apps_mcp.errors import RecurrenceRequired
 
     target = SimpleNamespace(
-        recurrenceRules=lambda: [fake_rule(freq=1, byday=[(0, "MO"), (0, "WE")])]
+        isCompleted=lambda: False,  # an EKReminder
+        recurrenceRules=lambda: [fake_rule(freq=1, byday=[(0, "MO"), (0, "WE")])],
     )
     s = SimpleNamespace(calendarItemWithIdentifier_=lambda _i: target)
     monkeypatch.setattr(rem, "store", lambda: s)
     monkeypatch.setattr(rem, "run_native", lambda f: f())
     with pytest.raises(RecurrenceRequired, match="BYDAY=MO,WE"):
         rem.RemindersAdapter().update_reminder("R-1", ReminderData(title="Renamed"))
+
+
+def test_update_reminder_refuses_a_calendar_event_before_any_setter(monkeypatch):
+    # an EKEvent has no isCompleted; the setters must never run on it (WR-01)
+    import macos_apps_mcp.adapters.reminders as rem
+
+    touched = []
+    event = SimpleNamespace(
+        recurrenceRules=lambda: None,
+        setTitle_=lambda v: touched.append(("title", v)),
+        setNotes_=lambda v: touched.append(("notes", v)),
+        setPriority_=lambda v: touched.append(("priority", v)),
+    )
+    s = SimpleNamespace(calendarItemWithIdentifier_=lambda _i: event)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    with pytest.raises(ValueError, match="not a reminder.*update_event") as exc:
+        rem.RemindersAdapter().update_reminder("E-1", ReminderData(title="Renamed"))
+    assert "Nothing was changed" in str(exc.value)
+    assert touched == []
 
 
 def test_verify_reminder_nfd_title_matches_nfc_persisted():
