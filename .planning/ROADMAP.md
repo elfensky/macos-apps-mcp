@@ -197,7 +197,7 @@ Plans:
   7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
   8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
-**Plans**: 7/10 plans executed in 10 waves
+**Plans**: 8/10 plans executed in 10 waves
 
 Plans:
 **Wave 1**
@@ -222,7 +222,7 @@ Plans:
 - [x] 03-07-PLAN.md — `delete_reminder` with dry-run default, gone-check and the subtask guard (#92)
 
 **Wave 8** *(blocked on Wave 7 completion)*
-- [ ] 03-08-PLAN.md — Parent-aware `complete_reminder`; gone-check added to `delete_event`
+- [x] 03-08-PLAN.md — Parent-aware `complete_reminder`; gone-check added to `delete_event`
 
 **Wave 9** *(blocked on Wave 8 completion)*
 - [ ] 03-09-PLAN.md — Device sweep on iCloud and Google; owner builds the cascade fixture in Reminders.app
@@ -286,7 +286,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
-| 3. EventKit Depth — Calendar & Reminders | 7/10 | In Progress | - |
+| 3. EventKit Depth — Calendar & Reminders | 8/10 | In Progress | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
