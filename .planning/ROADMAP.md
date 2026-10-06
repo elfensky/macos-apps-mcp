@@ -197,7 +197,7 @@ Plans:
   7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
   8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
-**Plans**: 4/10 plans executed in 10 waves
+**Plans**: 5/10 plans executed in 10 waves
 
 Plans:
 **Wave 1**
@@ -213,7 +213,7 @@ Plans:
 - [x] 03-04-PLAN.md — DTSTART membership note and six-month RFC 5545 expansion test; python-dateutil dev-only after owner verify (#90)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 03-05-PLAN.md — Event alarms: minutes before the start, all-day counted from local midnight, at most 5, tri-state on update (#89)
+- [x] 03-05-PLAN.md — Event alarms: minutes before the start, all-day counted from local midnight, at most 5, tri-state on update (#89)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 03-06-PLAN.md — Tags and parent links read-only from the Reminders sqlite store; `coverage` when the store is unreadable (#91)
@@ -286,7 +286,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
-| 3. EventKit Depth — Calendar & Reminders | 4/10 | In Progress | - |
+| 3. EventKit Depth — Calendar & Reminders | 5/10 | In Progress | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
