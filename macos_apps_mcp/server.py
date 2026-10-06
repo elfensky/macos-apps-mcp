@@ -767,14 +767,18 @@ def move_mail(
     `dry_run` DEFAULTS TO TRUE — the preview reads Mail and reports, per id, whether it
     is actually `present` in from_mailbox. Pass `dry_run=False` to move.
     `ids` are RFC822 message-ids from a mail read, comma-separated; max 25 per call and
-    the cap is not overridable. BOTH mailboxes are required and are address tokens: the
-    `folder` value from the read that produced the ids, passed back VERBATIM (an opaque
-    `imap://<uuid>/<path>` token, not a name to retype), or one of the canonical
-    "inbox"/"sent"/"drafts"/"trash"/"junk". A canonical name as `to_mailbox` files into
-    the SOURCE message's own account (it names Mail's cross-account accessor, not one
-    mailbox), so it is refused for an On My Mac source — that store has none of the
-    five. Pass a `folder` url from mail_overview when in doubt. To archive, move into a
-    mailbox named Archive — there is no separate archive tool.
+    the cap is not overridable. BOTH mailboxes are required and are address tokens.
+    `from_mailbox` must be the `folder` value from the read that produced the ids,
+    passed back VERBATIM (an opaque `imap://<uuid>/<path>` token, not a name to
+    retype); a canonical name there is refused. `to_mailbox` may also be one of the
+    canonical "inbox"/"sent"/"drafts"/"trash"/"junk", which files into the SOURCE
+    message's own account (it names Mail's cross-account accessor, not one mailbox),
+    so it is refused for an On My Mac source — that store has none of the five. A
+    Gmail label folder is refused as either end (a move from a label is a copy, a
+    move into one is not verified), and a canonical `to_mailbox` is refused when the
+    source account has Gmail label folders. Pass a `folder` url from mail_overview
+    when in doubt. To archive, move into a mailbox named Archive — there is no
+    separate archive tool.
     Cross-account moves are supported and leave exactly ONE copy. Verification is
     by-ID (#206): each copy's internal reference must go dead after the move, and the
     destination's count of that Message-ID must rise — presence alone can't tell a
