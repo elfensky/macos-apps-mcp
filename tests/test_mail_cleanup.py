@@ -58,8 +58,8 @@ def wired(monkeypatch):
     # no store on disk: locate stamps every target `absent`, backups write nothing
     monkeypatch.setattr(mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail_index, "query_message_locations", lambda ids: [])
-    # keeps the label-source check (#287) off the real Envelope Index
-    monkeypatch.setattr(mail_index, "is_label_mailbox", lambda url: False)
+    # keeps the label checks (#287, #291) off the real Envelope Index
+    monkeypatch.setattr(mail_index, "_label_keys", lambda: frozenset())
     return MailAdapter(), calls, fake
 
 

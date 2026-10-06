@@ -1620,8 +1620,8 @@ def no_backup(monkeypatch):
     """
     monkeypatch.setattr(mail.mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail.mail_index, "query_message_locations", lambda ids: [])
-    # keeps the label-source check (#287) off the real Envelope Index
-    monkeypatch.setattr(mail.mail_index, "is_label_mailbox", lambda url: False)
+    # keeps the label checks (#287, #291) off the real Envelope Index
+    monkeypatch.setattr(mail.mail_index, "_label_keys", lambda: frozenset())
 
 
 def test_split_ids_dedupes_and_strips_framing_bytes():
@@ -1799,6 +1799,19 @@ def test_move_mail_refuses_a_unified_destination_from_on_my_mac(monkeypatch, no_
     for dest in ("inbox", "sent", "drafts", "trash", "junk"):
         with pytest.raises(ValueError, match="On My Mac"):
             MailAdapter().move_mail("a@x", "local://LOCAL-UUID/Notes", dest)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_canonical_source(monkeypatch, no_backup, dry_run):
+    # #291: a unified name spans accounts and, for a Gmail message, resolves to a label
+    # folder (a move there is a copy, #287). Refused before Mail is touched.
+    def boom(*a, **kw):
+        raise AssertionError("must refuse before Mail is touched")
+
+    _patch_run(monkeypatch, boom)
+    for name in ("inbox", "sent", "drafts", "trash", "junk"):
+        with pytest.raises(ValueError, match="unified"):
+            MailAdapter().move_mail("a@x", name, _ARCHIVE, dry_run=dry_run)
 
 
 def test_move_mail_allows_a_unified_destination_from_an_imap_source(

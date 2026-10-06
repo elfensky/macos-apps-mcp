@@ -287,6 +287,59 @@ def test_account_has_labels(gmail_envelope):
     assert not mail_index.account_has_labels(None)
 
 
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_and_trash_refuse_a_label_source_in_any_spelling(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # No osascript ran, or the conftest native seam would have raised AssertionError.
+    with pytest.raises(WriteRefused, match=r"#287"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>",
+            f"imap://{ACCT_A}/[Gmail]/Sent Mail",
+            urls["other"],
+            dry_run=dry_run,
+        )
+    with pytest.raises(WriteRefused, match=r"#287"):
+        MailAdapter().trash_mail(
+            "<gmail-2@example.test>", f"imap://{ACCT_A.lower()}/inbox", dry_run=dry_run
+        )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_label_destination(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # Same seam argument: a WriteRefused proves the refusal came before any osascript.
+    for source, dest in (
+        (urls["all"], urls["label"]),
+        (urls["all"], f"imap://{ACCT_A}/[Gmail]/Sent Mail"),
+        (urls["other"], urls["inbox"]),
+    ):
+        with pytest.raises(WriteRefused, match=r"label.*#291"):
+            MailAdapter().move_mail(
+                "<gmail-2@example.test>", source, dest, dry_run=dry_run
+            )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_canonical_destination_into_a_labelled_account(
+    gmail_envelope, dry_run
+):
+    _, _, urls = gmail_envelope
+    with pytest.raises(WriteRefused, match=r"unified.*#291"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>", urls["all"], "inbox", dry_run=dry_run
+        )
+
+
+def test_move_mail_allows_a_canonical_destination_from_an_unlabelled_account(
+    gmail_envelope, monkeypatch
+):
+    _, _, urls = gmail_envelope
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().move_mail("<gmail-2@example.test>", urls["other"], "drafts")
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen
+
+
 # --- thread, sent triage and stats follow logical membership (#287) -----------------
 
 

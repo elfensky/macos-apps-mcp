@@ -876,19 +876,45 @@ end run"""
 )
 
 
-def _refuse_label_source(mailbox: str) -> None:
-    """Refuse a Gmail label folder as the source of a destructive write (#287).
+def _refuse_label_route(source: str, destination: str | None = None) -> None:
+    """Refuse a write that routes through a Gmail label folder, before any native call
+    (dry runs included).
 
-    Raises before any native call, dry runs included.
+    SOURCE a label folder (#287): device-verified 2026-10-06, a move from a label adds
+    the destination label and keeps the source one. DESTINATION a label folder, or a
+    canonical name while the source account has label folders (#291): a unified name
+    files into the source account's own mailbox of that role (facts §5e), which in
+    Gmail can be a label. A move into a label is not device-verified.
     """
-    if mail_index.is_label_mailbox(mailbox):
+    if mail_index.is_label_mailbox(source):
         raise WriteRefused(
-            f"{mailbox!r} is a Gmail label folder: a view of label membership, not "
+            f"{source!r} is a Gmail label folder: a view of label membership, not "
             "where the message is stored. A move from a label adds the destination "
             "label and keeps this one (device-verified 2026-10-06), so no write route "
             "from a label folder is proven yet (#287). Nothing was changed. Do not "
             "retry from this folder; tell the user."
         )
+    if destination is None:
+        return
+    if mail_index.is_label_mailbox(destination):
+        why = f"{destination!r} is a Gmail label folder"
+    elif mail_index.account_of(destination) is None and mail_index.account_has_labels(
+        mail_index.account_of(source)
+    ):
+        why = (
+            f"{destination!r} is a unified name, which files into the source "
+            "account's own mailbox of that role (facts §5e), and that account has "
+            "Gmail label folders"
+        )
+    else:
+        return
+    raise WriteRefused(
+        f"{why}. A move into a Gmail label is not device-verified: within Gmail it "
+        "may add a label (a copy) or, out of All Mail, may trash the message, "
+        "depending on the account's Gmail IMAP settings (#291). Nothing was changed. "
+        "Pass a physical folder url as to_mailbox, or do this move in Mail by hand; "
+        "a route ships only after a device run."
+    )
 
 
 def _tri(value: bool | None) -> str:
@@ -1500,8 +1526,9 @@ class MailAdapter:
 
         TWO mailboxes are required, not one: #146 established that a message id alone
         does not locate a message, so the source is part of the address. Both are
-        address tokens — a ``folder`` value from a read passed back VERBATIM, or one of
-        the five canonical names.
+        address tokens — a ``folder`` value from a read passed back VERBATIM. The
+        SOURCE must be such a url (a canonical name is refused, #291); the DESTINATION
+        may also be one of the five canonical names.
 
         Batch-capped at 25 and ``dry_run=True`` by DEFAULT (unlike ``delete_draft``): a
         move is reversible in principle, but reversing 200 misfiled messages by hand is
@@ -1546,16 +1573,25 @@ class MailAdapter:
           exactly the per-locale name table #61 deleted. Nothing moves and nothing is
           lost, and the status is loud and factual.
 
-        A Gmail label folder as ``from_mailbox`` is refused (``WriteRefused``) before
-        any native call, dry runs included: on device a move from a label is a copy
-        (#287).
+        A Gmail label folder is refused (``WriteRefused``) as either end, before any
+        native call, dry runs included: on device a move from a label is a copy (#287),
+        and a move into one is not device-verified (#291). A canonical ``to_mailbox``
+        is refused for the same reason when the source account has label folders.
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any
         # native call — that is the whole point of enforcing them in one place.
         mail_recover.check_batch(mids)
-        _refuse_label_source(from_mailbox)
         src = mail_addressing.mailbox_args(from_mailbox)
+        if not src[0]:
+            raise ValueError(
+                f"from_mailbox {from_mailbox!r} is a unified mailbox name and cannot "
+                "be a move source: a unified name spans every account, for a Gmail "
+                "message it resolves to a label folder (a move from a label is a "
+                "copy, #287), and a move out of the unified Trash crashes Mail "
+                "(facts §5c). Nothing was changed. Pass the `folder` url from the "
+                "read that produced these ids (#291)."
+            )
         dst = mail_addressing.mailbox_args(to_mailbox)
         if src == dst:
             raise ValueError(
@@ -1574,6 +1610,7 @@ class MailAdapter:
                 "the destination's `folder` url instead (mail_overview lists them). Do "
                 "not retry with a canonical name."
             )
+        _refuse_label_route(from_mailbox, to_mailbox)
         targets = [
             mail_recover.Target(
                 id=mid,
@@ -1687,7 +1724,7 @@ class MailAdapter:
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
-        _refuse_label_source(mailbox)
+        _refuse_label_route(mailbox)
         src = mail_addressing.mailbox_args(mailbox)
         account = mail_index.account_of(mailbox)
         if account is None:
