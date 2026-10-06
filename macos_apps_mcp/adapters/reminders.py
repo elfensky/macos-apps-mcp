@@ -14,6 +14,7 @@ import EventKit as EK
 
 from ..contracts import Pointer, Recurrence, ReminderData, read_result
 from ..errors import (
+    NativeError,
     RecurrenceRequired,
     VerificationFailed,
     WriteRefused,
@@ -266,7 +267,15 @@ class RemindersAdapter:
         # EventKit first and outside any `try`: its errors are the read's own and must
         # never be folded into `coverage`.
         pointers = self.get_pointers(query)
-        tags, parents = reminders_store.tags_and_parents()
+        # The store is optional enrichment: a missing grant, a drifted schema or a store
+        # that fails mid-read leaves the EventKit pointers intact and is named in
+        # `coverage` — loud, never an empty list or a swallowed error (D-15, Pitfall 5).
+        try:
+            tags, parents = reminders_store.tags_and_parents()
+        except NativeError as e:
+            return read_result(
+                pointers, coverage=f"tags and parent links unavailable: {e}"
+            )
         pointers = [
             dataclasses.replace(p, tags=tags.get(p.id), parent=parents.get(p.id))
             for p in pointers

@@ -280,8 +280,11 @@ def reminders(due: str = "today") -> dict:
     this-week | a list name. Each result may carry `folder` (its list's id, from
     `reminder_lists`; pass it as `list_name=`), `tags` and `parent` (the parent
     reminder's id, for a subtask). Requires EventKit and Full Disk Access (tags and
-    parent links come from the Reminders store). Read-only. Hydrate none — pointers
-    only."""
+    parent links come from the Reminders store). Tags and subtasks are read-only:
+    macOS has no public API that writes them, so no tool here can add a tag or nest a
+    reminder — do that in Reminders.app. If the Reminders store cannot be read, results
+    still come back and `coverage` says why tags and parent links are missing.
+    Read-only. Hydrate none — pointers only."""
     return _reminders.read(due)
 
 
@@ -1108,6 +1111,8 @@ def create_reminder(
     BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
     BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
     refused.
+    This tool cannot set tags or make a subtask (no public API; read-only via
+    `reminders()`).
     Side effect (creates); needs EventKit (Reminders) access. Target a list via
     `list_name` — a list name OR a list Pointer id (from reminder_lists). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1150,6 +1155,8 @@ def update_reminder(
     refused. REQUIRED (rule or 'none')
     when the target reminder repeats — omitting it is refused so a rename can't
     silently kill the series.
+    This tool cannot set tags or make a subtask (no public API; read-only via
+    `reminders()`).
     Side effect (full-replace update); needs EventKit (Reminders) access. `id` from
     reminders."""
     data = ReminderData(
