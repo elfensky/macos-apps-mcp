@@ -265,3 +265,74 @@ def test_trash_mail_from_a_physical_source_still_previews(gmail_envelope, monkey
     out = MailAdapter().trash_mail("<gmail-2@example.test>", urls["all"])
     assert mail_recover.is_preview(out)
     assert mail._PRESENT in seen
+
+
+# --- thread, sent triage and stats follow logical membership (#287) -----------------
+
+
+def _sent_triage_setup(db):
+    db.execute("UPDATE message_global_data SET message_id = 903 WHERE ROWID = 503")
+
+
+def _add_reply(db, boxes, *names):
+    """Row 106: a physical All Mail row citing row 103, labelled with ``names``."""
+    db.add_message(
+        ROWID=106,
+        subject=1,
+        global_message_id=506,
+        message_id=906,
+        mailbox=boxes["all"],
+        date_received=1006,
+        deleted=0,
+    )
+    for name in names:
+        db.execute("INSERT INTO labels VALUES (106, ?)", (boxes[name],))
+    db.execute("INSERT INTO message_references(message, reference) VALUES (106, 903)")
+
+
+def test_sent_triage_counts_a_label_only_sent_message(gmail_envelope):
+    db, _, _ = gmail_envelope
+    _sent_triage_setup(db)
+    [row] = mail_index.query_sent_triage(10)
+    assert (row["rowid"], row["mid"], row["answered"]) == (
+        103,
+        "<gmail-3@example.test>",
+        0,
+    )
+
+
+def test_sent_triage_answered_needs_a_reply_under_the_inbox_label(gmail_envelope):
+    db, boxes, _ = gmail_envelope
+    _sent_triage_setup(db)
+    _add_reply(db, boxes, "inbox")
+    [row] = mail_index.query_sent_triage(10)
+    assert row["answered"] == 1
+
+
+def test_sent_triage_reply_under_another_label_does_not_answer(gmail_envelope):
+    db, boxes, _ = gmail_envelope
+    _sent_triage_setup(db)
+    _add_reply(db, boxes, "label")
+    [row] = mail_index.query_sent_triage(10)
+    assert row["answered"] == 0
+
+
+def test_thread_cites_the_same_folder_search_cites(gmail_envelope):
+    db, _, urls = gmail_envelope
+    db.execute("UPDATE messages SET conversation_id = 7 WHERE ROWID IN (101, 102)")
+    thread = mail_index.query_thread("<gmail-1@example.test>", 10)
+    assert {p.id for p in thread} == {
+        "<gmail-1@example.test>",
+        "<gmail-2@example.test>",
+    }
+    for p in thread:
+        assert p.folder == urls["inbox"]
+        assert p.folder == mail_index.query_search(message_ids=[p.id])[0].folder
+
+
+def test_stats_attribute_gmail_messages_to_inbox_and_sent(gmail_envelope):
+    _, _, urls = gmail_envelope
+    rows = mail_index.query_stats_rows(0)
+    assert sorted(r["mailbox_url"] for r in rows) == sorted(
+        [urls["inbox"], urls["inbox"], urls["sent"]]
+    )
