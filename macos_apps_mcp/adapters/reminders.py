@@ -444,19 +444,45 @@ class RemindersAdapter:
 
         return run_native(work)
 
-    def complete_reminder(self, ident: str) -> Pointer:
+    def complete_reminder(self, ident: str) -> dict:
+        """Complete a reminder → its Pointer dict, plus ``subtasks`` when it is a parent
+        that still has open children (D-21: completing a parent leaves them open and
+        Reminders.app hides them). The store read comes FIRST (D-18's order): without
+        it a parent cannot be told from a plain reminder, so an unreadable store
+        refuses the completion and nothing is saved."""
+
         def work():
             s = store()
             r = s.calendarItemWithIdentifier_(ident)
             if r is None:
                 raise ValueError(f"no reminder with id {ident!r}")
+            try:
+                child_ids = reminders_store.subtasks_of(ident)
+            except NativeError as e:
+                raise WriteRefused(
+                    "complete_reminder refused: the Reminders store could not be read "
+                    f"to find this reminder's subtasks ({e}). No change was made."
+                ) from e
             r.setCompleted_(True)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:
                 raise refused_write("reminder completion", "list", err)
             fresh = _fresh_item(s, ident)
             _verify_completed(fresh, ident)
-            return _reminder_pointer(fresh)
+            out = _reminder_pointer(fresh)
+            # a child EventKit cannot fetch stays in the report (Pitfall 7): it is not
+            # known to be completed
+            still_open = [
+                c
+                for c in child_ids
+                if (kid := s.calendarItemWithIdentifier_(c)) is None
+                or not kid.isCompleted()
+            ]
+            if still_open:
+                out = dataclasses.replace(
+                    out, subtasks=_subtask_pointers(s, still_open)
+                )
+            return out.as_dict()
 
         return run_native(work)
 

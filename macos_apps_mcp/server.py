@@ -1172,11 +1172,18 @@ def update_reminder(
     return _reminders.update_reminder(id, data).as_dict()
 
 
-@_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
-def complete_reminder(id: str) -> dict[str, str]:
-    """Mark a reminder complete by id.
-    Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
-    return _reminders.complete_reminder(id).as_dict()
+@_write_tool(
+    snapshot=_reminders,
+    adapter="reminders",
+    permission=("EventKit", "Full Disk Access"),
+)
+def complete_reminder(id: str) -> dict:
+    """Mark a reminder complete by id. Completing a parent leaves its subtasks open
+    (Reminders.app hides them under a completed parent); the result lists them under
+    `subtasks`. Side effect (completes). Requires **EventKit** and **Full Disk Access**:
+    the subtask check reads the Reminders store first, and when the store cannot be
+    read the completion is refused and nothing changes. `id` from reminders."""
+    return _reminders.complete_reminder(id)
 
 
 @_write_tool(
