@@ -40,6 +40,10 @@ cp "$REPO/packaging/Info.plist" "$APP/Contents/Info.plist"
 # Smoke: env-free import through the bundled interpreter (getpath layout claim).
 env -i "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
   || { echo "BUNDLE SMOKE FAILED: getpath layout wrong"; exit 1; }
+# Smoke: one streamed tool call through the shim's transport, on the bundled
+# libraries — CI tests uv.lock, this tests what ships (#286).
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P "$REPO/scripts/smoke_stream.py" \
+  || { echo "STREAM SMOKE FAILED: bundled mcp/fastmcp break the shim (#286)"; exit 1; }
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"
