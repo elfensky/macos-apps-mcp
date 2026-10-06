@@ -9,8 +9,7 @@ surface may still shift between minor versions.
 ### Added
 
 - **`complete_reminder` on a parent lists the subtasks it leaves open** (#91) — under
-  `subtasks` in the result; it now needs Full Disk Access and refuses, changing nothing,
-  when the Reminders store cannot be read.
+  `subtasks` in the result.
 
 - **`delete_reminder(id)`** (#92) — `dry_run=True` by default; verified gone after the
   delete; a parent with subtasks is refused unless `with_subtasks=True`, and the result
@@ -22,15 +21,18 @@ surface may still shift between minor versions.
 
 - **Alarms on events** (#89) — `alarms=[15, 60]` (minutes before the start) on
   `create_event` and `update_event`; all-day offsets count from local midnight; at most
-  5; verified after the write.
-
-- A recurring event whose start does not match its rule is accepted (RFC 5545 counts
-  the start as the first occurrence) and the result says so (#90).
+  5; verified after the write. On `update_event` an omitted `alarms` keeps the event's
+  alarms and `[]` removes them (the one exception to full replace); a timed event
+  refuses negative minutes, and duplicate offsets are refused.
 
 - **Real recurrence on events and reminders** (#90) — BYDAY (with ordinals), BYMONTHDAY,
-  BYMONTH, BYYEARDAY, BYSETPOS; verified part by part after the write, a reminder's UNTIL
-  included (day precision); BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused by
-  name.
+  BYMONTH, BYYEARDAY, BYSETPOS; verified part by part after the write, UNTIL included
+  (day precision) for reminders and timed events, all-day events skip it; BYWEEKNO,
+  BYHOUR, BYMINUTE, BYSECOND and WKST are refused by name.
+
+- **A recurring event whose start is outside its rule is accepted and stated** (#90) —
+  RFC 5545 counts the start as the first occurrence, so the write result says that
+  first occurrence is an extra one.
 
 - **`create_reminder_list(name)`** (#92) — creates a reminder list on the default
   Reminders account. An exact-name duplicate is refused before the save, because a second
@@ -43,8 +45,17 @@ surface may still shift between minor versions.
 
 ### Changed
 
-- **Breaking: `reminders()` returns `{results, coverage?}`** instead of a list. Read
-  `results`; `coverage` appears when the Reminders store cannot be read.
+- **Breaking: `reminders()` returns `{results, coverage?}` instead of a list** (#91) —
+  read `results` (the same pointers, now with `folder`, `tags` and `parent`); `coverage`
+  appears when the Reminders store cannot be read, or when some reminders are not in it
+  yet, and says that their tags and parent links are unknown. The life-cockpit
+  projection command (`docs/projection-contract.md`) reads `reminders` and must read
+  `results`.
+
+- **Breaking: `complete_reminder` needs Full Disk Access** (#91) — it reads the
+  Reminders store first to find open subtasks; without the grant, or for a reminder the
+  store does not have yet, it refuses and changes nothing (0.13.1 completed it with
+  EventKit alone).
 
 ### Fixed
 
@@ -61,7 +72,9 @@ surface may still shift between minor versions.
 
 - **Gmail Inbox, Sent Mail and labels no longer read empty** (#251) — in `mail_overview`
   and `mail_search`: Mail stores a Gmail message once, under All Mail, and records the
-  rest as label membership.
+  rest as label membership. `mail_body`, `mail_attachments`, `save_mail_attachment` and
+  `update_mail_status` given an id without `mailbox` now resolve a Gmail message to its
+  Inbox or label folder, the same folder `mail_search` cites.
 
 - **`move_mail` and `trash_mail` refuse a Gmail label folder as the source** (#287) — on
   device a move from a label added the destination label and kept the source label (a
@@ -72,11 +85,19 @@ surface may still shift between minor versions.
   under the Gmail Inbox never marked a send answered; `mail_thread` cited All Mail where
   `mail_search` cites Inbox; `mail_stats` never listed Gmail Inbox or Sent Mail.
 
-- `delete_event` now verifies the event is gone after the delete (the same contract as
-  `delete_reminder`).
+- **`delete_event` proves the event is gone** (#92) — the same contract as
+  `delete_reminder`; it checks the occurrence, so a this-event delete does not
+  false-fail on the series master.
 
-- A reminder repeated in Reminders.app with a BYDAY rule no longer loses it when the
-  `RecurrenceRequired` re-send text is used.
+- **Event writes refuse a reminder id, and reminder writes refuse an event id**
+  (#279, #281) — `update_event` and `delete_event` refuse a reminder id;
+  `update_reminder` and `complete_reminder` refuse a calendar event id. EventKit looks
+  both kinds up by one id, so before, a reminder id reached the event write path. Each
+  refusal comes before any change and says which kind the id is.
+
+- **The `RecurrenceRequired` re-send text keeps the whole rule** (#90) — it dropped the
+  BY parts and the UNTIL end date, so re-sending it turned a date-bounded series into
+  an endless one; it now renders every supported part and ends in COUNT or UNTIL.
 
 ## [0.13.1] - 2026-10-05 — Mail sweep fixes
 
