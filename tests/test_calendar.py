@@ -612,6 +612,9 @@ def _fake_event_full(title, ident, start, end, *, recurring=False, calendar_id="
     )
 
 
+_EPOCH = 1782205200  # an arbitrary occurrence start; only equality matters
+
+
 def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
     import macos_apps_mcp.adapters.calendar as cal
 
@@ -641,15 +644,88 @@ def test_delete_event_real_returns_deletion_envelope(monkeypatch):
     event = _fake_event_full(
         "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
     )
+    live = [event]  # the remove takes the event out; the gone-check re-resolves it
     store = SimpleNamespace(
-        calendarItemWithIdentifier_=lambda i: event,
-        removeEvent_span_commit_error_=lambda *a: (removed.append(a), (True, None))[1],
+        calendarItemWithIdentifier_=lambda i: live[0] if live else None,
+        removeEvent_span_commit_error_=lambda *a: (
+            removed.append(a),
+            live.clear(),
+            (True, None),
+        )[2],
     )
     monkeypatch.setattr(cal, "run_native", lambda fn: fn())
     monkeypatch.setattr(cal, "store", lambda: store)
 
     assert cal.CalendarAdapter().delete_event("E-1") == {"deleted": "E-1"}
     assert removed  # the event actually got removed
+
+
+def test_delete_event_that_still_resolves_after_the_remove_is_not_reported_deleted(
+    monkeypatch,
+):
+    # D-17: iCloud / Google may restore the event after the commit
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,  # still there after the remove
+        removeEvent_span_commit_error_=lambda *a: (True, None),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    with pytest.raises(VerificationFailed, match="still resolves after the delete"):
+        cal.CalendarAdapter().delete_event("E-1")
+
+
+def test_delete_event_this_event_passes_while_the_series_master_lives_on(monkeypatch):
+    # Pitfall 6: the gone-check is occurrence-aware. After a this-event delete of one
+    # occurrence the base id still fetches the master, but the occurrence is gone.
+    import macos_apps_mcp.adapters.calendar as cal
+
+    start = datetime(2026, 6, 23, 9, 0)
+    occ = _fake_event_full("Weekly", "E-3", start, datetime(2026, 6, 23, 9, 30))
+    occ.recurrenceRules = lambda: [object()]
+    occ.startDate = lambda: SimpleNamespace(timeIntervalSince1970=lambda: float(_EPOCH))
+    live = [occ]
+    removed = []
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: occ,  # the master survives the delete
+        predicateForEventsWithStartDate_endDate_calendars_=lambda *a: None,
+        eventsMatchingPredicate_=lambda pred: list(live),
+        removeEvent_span_commit_error_=lambda *a: (
+            removed.append(a),
+            live.clear(),
+            (True, None),
+        )[2],
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    ident = f"E-3|{_EPOCH}"
+    out = cal.CalendarAdapter().delete_event(ident, span="this-event")
+    assert out == {"deleted": ident}
+    assert len(removed) == 1
+
+
+def test_delete_event_dry_run_makes_no_remove_and_no_gone_check(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    lookups = []
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: (lookups.append(i), event)[1],
+        removeEvent_span_commit_error_=lambda *a: pytest.fail("dry run removed"),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert lookups == ["E-1"]  # the one resolve; no second look after a remove
 
 
 def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
