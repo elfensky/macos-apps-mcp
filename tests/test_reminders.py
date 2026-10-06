@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from macos_apps_mcp import tiers
 from macos_apps_mcp.adapters.reminders import (
     _due_tuple,
     _expected_due_tuple,
@@ -838,12 +839,11 @@ def test_two_dry_runs_agree_and_change_nothing(monkeypatch, tmp_path):
     assert world.removed == []
 
 
-def test_delete_snapshotter_returns_the_pointer_or_none(monkeypatch):
+def test_delete_snapshotter_returns_the_pointer_or_none(monkeypatch, tmp_path):
     import macos_apps_mcp.adapters.reminders as rem
 
     world = _EKWorld(_ek_item("P0", "Water plants"), _ek_item("E-1", reminder=False))
-    monkeypatch.setattr(rem, "store", lambda: world)
-    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
     snap = rem.ReminderDeleteSnapshotter()
     assert snap.snapshot("P0").id == "P0"
     assert snap.snapshot("absent") is None
@@ -965,6 +965,11 @@ def test_the_shared_snapshot_makes_no_store_read(monkeypatch, tmp_path):
     assert adapter.snapshot("P1").id == "P1"
 
 
+@pytest.mark.skipif(
+    tiers.read_only(),
+    reason="delete_reminder is a write tool — absent under MACOS_APPS_READ_ONLY, so "
+    "the live MCP Client cannot call it (its absence is test_registry's concern)",
+)
 def test_the_audit_before_state_records_all_the_reminders_a_delete_removes(
     monkeypatch, tmp_path
 ):

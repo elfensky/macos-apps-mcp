@@ -22,6 +22,7 @@ from ..contracts import (
 from ..errors import (
     NativeError,
     RecurrenceRequired,
+    SubtasksRequired,
     VerificationFailed,
     WriteRefused,
     refused_write,
@@ -141,6 +142,25 @@ def _fresh_item(s, ident):
     if fresh is not None and not fresh.refresh():
         return None  # gone from the DB between save and verify
     return fresh
+
+
+def _subtask_pointers(s, sub_ids: list[str]) -> tuple[Pointer, ...]:
+    """A Pointer per store subtask id. An id the store lists but EventKit cannot fetch
+    (a store-ahead lag) still counts, as a placeholder — dropping it would report fewer
+    reminders than the delete removes (RESEARCH Pitfall 7)."""
+    out = []
+    for sid in sub_ids:
+        item = s.calendarItemWithIdentifier_(sid)
+        out.append(
+            _reminder_pointer(item)
+            if item is not None
+            else Pointer(
+                id=sid,
+                summary="(subtask not visible to EventKit)",
+                deeplink=_reminder_deeplink(sid),
+            )
+        )
+    return tuple(out)
 
 
 def _is_reminder(item) -> bool:
@@ -467,23 +487,41 @@ class RemindersAdapter:
             # Read them first; if the store is unreadable the cascade is unknowable, so
             # nothing is removed.
             try:
-                reminders_store.subtasks_of(ident)
+                sub_ids = reminders_store.subtasks_of(ident)
             except NativeError as e:
                 raise WriteRefused(
                     "delete_reminder refused: the Reminders store could not be read to "
                     f"find this reminder's subtasks ({e}). No change was made."
                 ) from e
+            subs = _subtask_pointers(s, sub_ids)
+            # D-19, before the dry-run branch (Pitfall 8): the preview of an unconfirmed
+            # parent delete must refuse exactly as the real call would.
+            if subs and not with_subtasks:
+                listed = ", ".join(f"{p.summary} [{p.id}]" for p in subs)
+                title = clean_summary(r.title())
+                noun = "subtask" if len(subs) == 1 else "subtasks"
+                raise SubtasksRequired(
+                    f"{title!r} has {len(subs)} {noun} ({listed}). Deleting it "
+                    "deletes them too. Call again with `with_subtasks=True`. "
+                    "No change was made."
+                )
             if dry_run:
-                return deletion_result(ident, _reminder_pointer(r))
+                parent = dataclasses.replace(
+                    _reminder_pointer(r), subtasks=subs or None
+                )
+                return deletion_result(ident, parent, subtasks=subs)
             ok, err = s.removeReminder_commit_error_(r, True, None)
             if not ok:
                 raise refused_write("reminder delete", "list", err)
-            if _fresh_item(s, ident) is not None:
-                raise VerificationFailed(
-                    f"reminder {ident!r} is still present after the delete — it may "
-                    "have been restored by iCloud; re-read before retrying."
-                )
-            return deletion_result(ident, None)
+            # the parent and every subtask must be gone — "deleted" is never reported
+            # for a reminder that is still there (iCloud may restore one)
+            for gone in (ident, *(p.id for p in subs)):
+                if _fresh_item(s, gone) is not None:
+                    raise VerificationFailed(
+                        f"reminder {gone!r} is still present after the delete — it "
+                        "may have been restored by iCloud; re-read before retrying."
+                    )
+            return deletion_result(ident, None, subtasks=subs)
 
         return run_native(work)
 
@@ -498,6 +536,10 @@ class ReminderDeleteSnapshotter:
             r = store().calendarItemWithIdentifier_(ident)
             if r is None or not _is_reminder(r):
                 return None
-            return _reminder_pointer(r)
+            # A store error propagates: the audit layer then records before=None, and
+            # the delete itself refuses anyway (D-18).
+            sub_ids = reminders_store.subtasks_of(ident)
+            subs = _subtask_pointers(store(), sub_ids)
+            return dataclasses.replace(_reminder_pointer(r), subtasks=subs or None)
 
         return run_native(work)

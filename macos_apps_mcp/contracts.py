@@ -92,14 +92,32 @@ def parse_all_day(value: str) -> datetime:
     return dt
 
 
-def deletion_result(ident: str, preview: Pointer | None) -> dict:
+def deletion_result(
+    ident: str, preview: Pointer | None, *, subtasks: tuple[Pointer, ...] = ()
+) -> dict:
     """The ONE wire shape for every delete tool (C5d): a dry run answers
     ``{"dry_run": True, "would_delete": <pointer dict>}``; a real delete answers
     ``{"deleted": ident}``. Adapters own ``dry_run`` and build this envelope —
-    tools stay one-line delegations."""
+    tools stay one-line delegations.
+
+    ``subtasks`` (a reminder delete that takes subtasks with it, D-19/D-20): both
+    shapes add ``cascade``, and the confirmation adds ``subtasks``. A preview's own
+    ``would_delete`` already carries them — the caller built it with
+    ``Pointer.subtasks``. Without subtasks neither key appears."""
     if preview is not None:
-        return {"dry_run": True, "would_delete": preview.as_dict()}
-    return {"deleted": ident}
+        out: dict = {"dry_run": True, "would_delete": preview.as_dict()}
+    else:
+        out = {"deleted": ident}
+        if subtasks:
+            out["subtasks"] = [p.as_dict() for p in subtasks]
+    if subtasks:
+        n = len(subtasks)
+        out["cascade"] = (
+            f"and {n} subtask{'' if n == 1 else 's'} — deleting a parent deletes its "
+            f"subtasks; the audit log keeps all {n + 1}, and a re-create brings them "
+            "back as flat reminders (no public API re-nests them)"
+        )
+    return out
 
 
 def read_result(
@@ -243,6 +261,9 @@ class Pointer:
     # reminders reads only: the parent reminder's EventKit id when this is a subtask
     # (same store plane and the same read-only rule as ``tags``, #91)
     parent: str | None = None
+    # delete previews, confirmations and audit before-state for a parent reminder: the
+    # subtasks the delete takes with it (D-20); 03-08's complete report reuses it
+    subtasks: tuple[Pointer, ...] | None = None
 
     def as_dict(self) -> dict:
         """The wire shape: required fields always; optional fields only when set.
@@ -261,6 +282,8 @@ class Pointer:
             d["tags"] = list(self.tags)
         if self.parent is not None:
             d["parent"] = self.parent
+        if self.subtasks is not None:
+            d["subtasks"] = [p.as_dict() for p in self.subtasks]
         return d
 
 
