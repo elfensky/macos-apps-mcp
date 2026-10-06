@@ -56,8 +56,16 @@ surface may still shift between minor versions.
 
 - **Gmail Inbox, Sent Mail and labels no longer read empty** (#251) — in `mail_overview`
   and `mail_search`: Mail stores a Gmail message once, under All Mail, and records the
-  rest as label membership. A move or trash from a Gmail label folder now backs up the
-  target account's own copy.
+  rest as label membership.
+
+- **`move_mail` and `trash_mail` refuse a Gmail label folder as the source** (#287) — on
+  device a move from a label added the destination label and kept the source label (a
+  copy). The refusal comes before any change, dry runs included.
+
+- **Gmail Sent Mail and Inbox now count in `mail_awaiting_reply`, `mail_thread` and
+  `mail_stats`** (#287) — awaiting-reply saw none of the Gmail sent mail and a reply
+  under the Gmail Inbox never marked a send answered; `mail_thread` cited All Mail where
+  `mail_search` cites Inbox; `mail_stats` never listed Gmail Inbox or Sent Mail.
 
 - `delete_event` now verifies the event is gone after the delete (the same contract as
   `delete_reminder`).
