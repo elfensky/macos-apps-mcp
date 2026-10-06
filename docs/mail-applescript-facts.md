@@ -347,6 +347,23 @@ not a verification of deduplicated totals or of a patched live server.
 - `trash_mail` from a label was not run; it is refused by extension.
 - A route from a label ships only after a device run shows the source label gone.
 
+**Decided 2026-10-07, not device-verified (#291) — refusals around label folders.**
+
+- A label folder is matched on account uuid + decoded path, case-insensitively — the key
+  `mailbox_args` addresses — so `%5BGmail%5D/Sent%20Mail`, `[Gmail]/Sent Mail` and a
+  re-cased url are one folder.
+- A canonical name is refused as the `move_mail` source: a unified name spans accounts,
+  resolves to a label folder for a Gmail message, and a move out of the unified Trash
+  crashes Mail (§5c).
+- A label folder is refused as the `move_mail` destination, and so is a canonical
+  destination when the source account has label folders (§5e: a unified name files into
+  the source account's mailbox of that role). Within Gmail such a move may be a label add
+  (a copy) or, out of All Mail, may trash the message, depending on the Gmail IMAP
+  settings; no device run has shown which.
+- `mail_undo` of a receipt whose destination is a label folder or a canonical name is
+  refused, with how to restore by hand.
+- A route into a label ships only after a device run.
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
