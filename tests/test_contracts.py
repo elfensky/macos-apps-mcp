@@ -578,3 +578,36 @@ def test_dtstart_reference_library_is_a_dev_dependency_only():
         "dateutil" in dep for dep in project["project"].get("dependencies", [])
     )
     assert any("python-dateutil" in d for d in project["dependency-groups"]["dev"])
+
+
+# --- CalendarEventData.alarms: the boundary refuses what a source would rewrite -------
+
+
+def _event(*, all_day=False, **kw):
+    day = datetime(2027, 2, 15) if all_day else datetime(2027, 2, 15, 10)
+    end = day if all_day else datetime(2027, 2, 15, 11)
+    return CalendarEventData("x", day, end, all_day=all_day, **kw)
+
+
+@pytest.mark.parametrize(
+    ("alarms", "message"),
+    [
+        ((1, 2, 3, 4, 5, 6), "at most 5"),
+        ((15, 15), "once"),
+        ((True,), "True"),
+        ((1.5,), "1.5"),
+        (("15",), "15"),
+        ((-5,), "BEFORE"),
+    ],
+)
+def test_event_alarms_refused_at_the_boundary(alarms, message):
+    with pytest.raises(ValueError, match=message):
+        _event(alarms=alarms)
+
+
+@pytest.mark.parametrize(
+    ("alarms", "all_day"),
+    [((0,), False), ((-540, 900), True), ((0,), True), ((), False), (None, False)],
+)
+def test_event_alarms_accepted(alarms, all_day):
+    assert _event(all_day=all_day, alarms=alarms).alarms == alarms

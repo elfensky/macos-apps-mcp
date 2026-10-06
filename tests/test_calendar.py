@@ -926,3 +926,61 @@ def test_verify_event_alarms_wrong_offset_raises():
     fresh = _fake_persisted_event(alarms=[_alarm(-1800.0)])
     with pytest.raises(VerificationFailed, match="alarms"):
         _verify_event(fresh, "E-1|x", _timed(alarms=(15,)), "C-Work")
+
+
+@pytest.mark.parametrize(
+    ("minutes", "offset"),
+    [(-540, 32400.0), (900, -54000.0), (0, 0.0), (1440, -86400.0)],
+)
+def test_all_day_alarm_offsets_count_from_local_midnight(minutes, offset):
+    # D-02: -540 is 09:00 on the day, 900 is 09:00 the day before, 1440 is midnight
+    # the day before — real EKAlarm value objects, built through the real _apply_event
+    from macos_apps_mcp.adapters.calendar import _apply_event
+
+    day = datetime(2027, 2, 15)
+    data = CalendarEventData("x", day, day, all_day=True, alarms=(minutes,))
+    event = _fake_persisted_event()
+    store = SimpleNamespace(defaultCalendarForNewEvents=lambda: None)
+    _apply_event(store, event, data)
+    (built,) = event.set_alarms_calls
+    assert [a.relativeOffset() for a in built] == [offset]
+
+
+def test_update_event_alarms_omitted_leaves_them_untouched(monkeypatch):
+    # D-04: None is "not given" — no setAlarms_ call, and verify does not look at them
+    persisted = _fake_persisted_event(alarms=[_alarm(-900.0)])
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(), span="future-events"
+    )
+    assert persisted.set_alarms_calls == []
+
+
+def test_update_event_alarms_empty_clears_them(monkeypatch):
+    persisted = _fake_persisted_event(alarms=None)
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(alarms=()), span="future-events"
+    )
+    assert persisted.set_alarms_calls == [None]  # None, never [], clears
+
+
+def test_update_event_alarms_replace_them(monkeypatch):
+    persisted = _fake_persisted_event(alarms=[_alarm(-3600.0)])
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(alarms=(60,)), span="future-events"
+    )
+    ((built,),) = persisted.set_alarms_calls
+    assert built.relativeOffset() == -3600.0
+
+
+def test_verify_event_all_day_alarms_pass_in_either_order():
+    day = datetime(2027, 2, 15)
+    want = CalendarEventData("Holiday", day, day, all_day=True, alarms=(-540, 900))
+    for got in ([32400.0, -54000.0], [-54000.0, 32400.0]):
+        fresh = _fake_persisted_event(
+            title="Holiday",
+            start=day,
+            end=day + timedelta(days=1),
+            all_day=True,
+            alarms=[_alarm(o) for o in got],
+        )
+        _verify_event(fresh, "E-1|x", want, "C-Work")  # no raise
