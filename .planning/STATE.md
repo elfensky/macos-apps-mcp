@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-06T22:42:39.417Z"
+last_updated: "2026-10-06T22:57:08.339Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 03 execution started
-state_head: 26baa9a613f35dd46facab2bbedb10978e48beef
+state_head: e672a4b35baf05bb1b3747b58fe9ec61e159c695
 progress:
   total_phases: 7
   completed_phases: 3
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
 Plan: 10 of 10
 Status: Phase complete — ready for verification
-Last activity: 2026-10-06 - Completed quick tasks 261006-vu3 (#286 bundle from uv.lock) and 261006-wa0 (#287 Gmail follow-ups)
+Last activity: 2026-10-07 - Completed quick task 261007-11j: release bump 0.14.0 (EventKit depth)
 
 Progress: [████░░░░░░] 43%
 
@@ -126,6 +126,7 @@ Recent decisions affecting current work:
 | 261006-vu3 | Build the daemon bundle from uv.lock; cap mcp<2/fastmcp<4; smoke a streamed call in the build (#286, PR #288) | 2026-10-06 | 328ccec | [261006-vu3-build-the-daemon-bundle-from-uv-lock-and](./quick/261006-vu3-build-the-daemon-bundle-from-uv-lock-and/) |
 | 261006-wa0 | Gmail follow-ups: refuse label-folder write sources; labels in thread, sent triage, stats; parity guard (#287, PR #289) | 2026-10-06 | 328ccec | [261006-wa0-gmail-follow-ups-to-251-label-source-gua](./quick/261006-wa0-gmail-follow-ups-to-251-label-source-gua/) |
 | 4 | Precompile the daemon bundle's bytecode before signing so its code seal survives first launch | 2026-10-07 | 26baa9a | — |
+| 261007-11j | Release bump 0.14.0 (EventKit depth): changelog corrections, version sites, Phase 3 device re-run record | 2026-10-07 | e672a4b | [261007-11j-release-bump-0-14-0-with-changelog-corre](./quick/261007-11j-release-bump-0-14-0-with-changelog-corre/) |
 
 ### Roadmap Evolution
 
