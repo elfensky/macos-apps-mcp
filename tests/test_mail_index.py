@@ -421,8 +421,9 @@ def test_thread_query_binds_message_id_and_limit():
 
 
 def test_overview_query_counts_live_not_stored():
-    # mailboxes.unread_count is trigger-maintained and STALE on a real Mac — the Gmail
-    # INBOX row claims 1 unread where a live count returns 0. Never read that column.
+    # Mail's stored counters count stored rows and do not dedupe by Message-ID; this
+    # query does. The old "stale Gmail INBOX" reading was this query ignoring `labels`
+    # (#251); live 2026-10-06 the stored counters match the #251 counts.
     sql, params = mail_index.build_overview_query()
     low = sql.lower()
     assert params == []
@@ -485,7 +486,10 @@ def _fingerprint_index(path, *, message_id_header=True, subjects_table=True):
             subject_prefix TEXT);
         {subjects}
         CREATE TABLE addresses(ROWID INTEGER PRIMARY KEY, address TEXT, comment TEXT);
-        CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT);
+        CREATE TABLE mailboxes(ROWID INTEGER PRIMARY KEY, url TEXT, source INTEGER);
+        CREATE TABLE labels(
+            message_id INTEGER, mailbox_id INTEGER,
+            PRIMARY KEY(message_id, mailbox_id)) WITHOUT ROWID;
         CREATE TABLE message_global_data(
             ROWID INTEGER PRIMARY KEY, message_id INTEGER{header_col});
         CREATE TABLE recipients(
@@ -650,7 +654,7 @@ def test_sidecar_mode_serves_the_native_fingerprint_and_queries(tmp_path, monkey
     conn.executescript(
         """
         INSERT INTO subjects VALUES (1, 'Invoice 42');
-        INSERT INTO mailboxes VALUES (1, 'imap://A/INBOX');
+        INSERT INTO mailboxes(ROWID, url) VALUES (1, 'imap://A/INBOX');
         INSERT INTO message_global_data (ROWID) VALUES (100);
         INSERT INTO messages
             VALUES (10,1,NULL,100,1,1700000000,1700000000,0,0,0,7,0,0,NULL);

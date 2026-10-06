@@ -7,12 +7,19 @@ reached-into).
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
 import EventKit as EK
 
-from ..contracts import CalendarEventData, Pointer, deletion_result, parse_datetime
+from ..contracts import (
+    CalendarEventData,
+    Pointer,
+    deletion_result,
+    dtstart_in_rule,
+    parse_datetime,
+)
 from ..errors import (
     SpanRequired,
     VerificationFailed,
@@ -83,7 +90,24 @@ def _event_pointer(item) -> Pointer:
         id=_event_id(item),
         summary=clean_summary(_event_summary(item)),
         deeplink=_event_deeplink(item),
+        folder=container_id(item),  # the calendar identifier, never its title (D-12)
     )
+
+
+# D-10: RFC 5545 counts DTSTART as the first instance even when it does not match the
+# rule, and EventKit agrees. The caller asked for a series that starts elsewhere, so the
+# write result says the first occurrence is an extra one.
+_DTSTART_NOTE = " — starts outside its rule: one extra first occurrence (RFC 5545)"
+
+
+def _with_dtstart_note(p: Pointer, data: CalendarEventData) -> Pointer:
+    """``p``, with the D-10 note when ``data``'s start is outside its own rule.
+
+    The note is appended to the already-bounded summary, not re-run through
+    ``clean_summary``: a second cut would drop the note from a long title."""
+    if data.recurrence is None or dtstart_in_rule(data.recurrence, data.start.date()):
+        return p
+    return replace(p, summary=p.summary + _DTSTART_NOTE)
 
 
 def _calendar_pointer(cal) -> Pointer:
@@ -223,11 +247,14 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     if data.recurrence is not None:
         e.setRecurrenceRules_([to_recurrence_rule(data.recurrence)])
     e.setCalendar_(_resolve_calendar(s, data.calendar))
-    # ponytail: all-day alarm 1440-gotcha (#51) — EKAlarm relativeOffset for an all-day
-    # event is measured from MIDNIGHT, so "9am the day before" is -1440+540 = -900 min,
-    # NOT -900 from an implicit 9am. We set no alarms yet (no alarm field on
-    # CalendarEventData), so nothing can go wrong; wire the -1440 base in with the alarm
-    # field, and test it then.
+    # Relative offsets only: an absolute alarm is rewritten by Google and lands on the
+    # wrong day of a floating all-day event. On an all-day event they count from local
+    # midnight (#51, D-02). None, never [], clears.
+    if data.alarms is not None:
+        e.setAlarms_(
+            [EK.EKAlarm.alarmWithRelativeOffset_(-m * 60.0) for m in data.alarms]
+            or None
+        )
 
 
 # The closed span vocabulary (#51). The tool boundary passes caller strings through
@@ -291,6 +318,12 @@ def _resolve_event(s, ident: str):
         e = s.calendarItemWithIdentifier_(ident)
         if e is None:
             raise ValueError(f"no event with id {ident!r}")
+        # one id space for events and reminders: only an EKReminder answers isCompleted
+        if hasattr(e, "isCompleted"):
+            raise ValueError(
+                f"{ident!r} is a reminder, not a calendar event — use update_reminder "
+                "/ delete_reminder. Nothing was changed."
+            )
         return e
     occ_epoch = int(occ)
     # ±1s window built straight from the epoch: datetime±timedelta resets the PEP-495
@@ -351,9 +384,22 @@ def _verify_event(fresh, ident: str, data: CalendarEventData, cal_id: str) -> No
         actual["end"] = int(from_nsdate(fresh.endDate()).timestamp())
     if data.recurrence is not None:  # None = "leave series untouched" (_apply_event)
         # verify the exact cadence, not just presence — a wrong-frequency series is a
-        # changed field #49 must name (UNTIL deferred; see recurrence_signature).
-        expected["recurs"] = recurrence_signature(data.recurrence)
-        actual["recurs"] = persisted_recurrence_signature(fresh.recurrenceRules())
+        # changed field #49 must name. UNTIL is compared (day granularity) on timed
+        # events only; all-day keeps the omission (D-09, #49).
+        expected["recurs"] = recurrence_signature(
+            data.recurrence, include_until=not data.all_day
+        )
+        actual["recurs"] = persisted_recurrence_signature(
+            fresh.recurrenceRules(), include_until=not data.all_day
+        )
+    if data.alarms is not None:  # None = "leave alarms untouched" (_apply_event)
+        # minutes-before, the caller's convention, so a mismatch message is readable;
+        # sorted: EventKit returns alarms in no stable order
+        persisted = fresh.alarms() or []
+        expected["alarms"] = sorted(data.alarms)
+        actual["alarms"] = sorted(-round(a.relativeOffset() / 60) for a in persisted)
+        expected["absolute_alarms"] = 0
+        actual["absolute_alarms"] = sum(a.absoluteDate() is not None for a in persisted)
     verify_persisted("event", expected, actual)
 
 
@@ -442,7 +488,7 @@ class CalendarAdapter:
             ident = _event_id(e)
             fresh = _refetch_event(s, ident)
             _verify_event(fresh, ident, data, cal_id)
-            return _event_pointer(fresh)
+            return _with_dtstart_note(_event_pointer(fresh), data)
 
         return run_native(work)
 
@@ -468,7 +514,7 @@ class CalendarAdapter:
             ident_after = _event_id(e)
             fresh = _refetch_event(s, ident_after)
             _verify_event(fresh, ident_after, data, cal_id)
-            return _event_pointer(fresh)
+            return _with_dtstart_note(_event_pointer(fresh), data)
 
         return run_native(work)
 
@@ -504,6 +550,17 @@ class CalendarAdapter:
             ok, err = s.removeEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
                 raise refused_write("event delete", "calendar", err)
-            return deletion_result(ident, None)
+            # D-17: "deleted" is never reported for an event that is still there (a
+            # CalDAV server may restore it after the commit). Occurrence-aware on
+            # purpose: a base-id lookup would still find the series master after a
+            # this-event delete and false-fail every recurring delete (Pitfall 6).
+            try:
+                _resolve_event(s, ident)
+            except ValueError:
+                return deletion_result(ident, None)  # gone, as it should be
+            raise VerificationFailed(
+                f"event {ident!r} still resolves after the delete — it may have been "
+                "restored by iCloud or Google; re-read before retrying"
+            )
 
         return run_native(work)

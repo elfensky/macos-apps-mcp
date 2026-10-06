@@ -1,0 +1,689 @@
+[
+ {
+  "name": "weekly-byday",
+  "rrule": "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+  "dtstart": "2026-10-05T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-05T10:00:00",
+  "saved_rule": {
+   "freq": "WEEKLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "FR"
+    ],
+    [
+     0,
+     "MO"
+    ],
+    [
+     0,
+     "WE"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 79,
+  "n_ref": 79,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "weekly-int2",
+  "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH",
+  "dtstart": "2026-10-06T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-06T10:00:00",
+  "saved_rule": {
+   "freq": "WEEKLY",
+   "interval": 2,
+   "byday": [
+    [
+     0,
+     "TH"
+    ],
+    [
+     0,
+     "TU"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 27,
+  "n_ref": 27,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "weekly-count",
+  "rrule": "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5",
+  "dtstart": "2026-10-05T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-05T10:00:00",
+  "saved_rule": {
+   "freq": "WEEKLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ],
+    [
+     0,
+     "WE"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 5,
+   "until": null
+  },
+  "n_ek": 5,
+  "n_ref": 5,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-2tu",
+  "rrule": "FREQ=MONTHLY;BYDAY=2TU",
+  "dtstart": "2026-10-13T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-13T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     2,
+     "TU"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 7,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-last-fr",
+  "rrule": "FREQ=MONTHLY;BYDAY=-1FR",
+  "dtstart": "2026-10-30T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-30T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     -1,
+     "FR"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 7,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-5fr",
+  "rrule": "FREQ=MONTHLY;BYDAY=5FR",
+  "dtstart": "2026-10-30T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-30T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     5,
+     "FR"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 3,
+  "n_ref": 3,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-every-mo",
+  "rrule": "FREQ=MONTHLY;BYDAY=MO",
+  "dtstart": "2026-10-05T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-05T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 27,
+  "n_ref": 27,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-15",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=15",
+  "dtstart": "2026-10-15T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-15T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    15
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 7,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-1-15",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=1,15",
+  "dtstart": "2026-10-01T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-01T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    1,
+    15
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 13,
+  "n_ref": 13,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-last-day",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=-1",
+  "dtstart": "2026-10-31T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-31T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    -1
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 7,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-31",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=31",
+  "dtstart": "2026-10-31T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-31T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    31
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 4,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-29",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=29",
+  "dtstart": "2026-10-29T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-29T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    29
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 6,
+  "n_ref": 6,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-until",
+  "rrule": "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115T235959",
+  "dtstart": "2026-10-15T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-15T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    15
+   ],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": "20270115"
+  },
+  "n_ek": 4,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-last-wkday",
+  "rrule": "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1",
+  "dtstart": "2026-10-30T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-30T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "FR"
+    ],
+    [
+     0,
+     "MO"
+    ],
+    [
+     0,
+     "TH"
+    ],
+    [
+     0,
+     "TU"
+    ],
+    [
+     0,
+     "WE"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [
+    -1
+   ],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 7,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "monthly-bymonth",
+  "rrule": "FREQ=MONTHLY;BYMONTH=1,4,7,10;BYMONTHDAY=1",
+  "dtstart": "2026-10-01T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-10-01T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    1
+   ],
+   "bymonth": [
+    1,
+    4,
+    7,
+    10
+   ],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 3,
+  "n_ref": 3,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "daily-bymonth",
+  "rrule": "FREQ=DAILY;BYMONTH=12",
+  "dtstart": "2026-12-01T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-12-01T10:00:00",
+  "saved_rule": {
+   "freq": "DAILY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [],
+   "bymonth": [
+    12
+   ],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 31,
+  "n_ref": 31,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "dtstart-mismatch",
+  "rrule": "FREQ=MONTHLY;BYDAY=2TU",
+  "dtstart": "2026-10-01T10:00",
+  "verdict": "EXACT (DTSTART counted, RFC)",
+  "saved_start": "2026-10-01T10:00:00",
+  "saved_rule": {
+   "freq": "MONTHLY",
+   "interval": 1,
+   "byday": [
+    [
+     2,
+     "TU"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 7,
+  "n_ref": 6,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [
+   "2026-10-01T10:00:00"
+  ],
+  "after_sync": "same"
+ },
+ {
+  "name": "yearly-last-su-mar",
+  "rrule": "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU",
+  "dtstart": "2027-03-28T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2027-03-28T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     -1,
+     "SU"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [
+    3
+   ],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 4,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "yearly-jan-jul-1",
+  "rrule": "FREQ=YEARLY;BYMONTH=1,7;BYMONTHDAY=1",
+  "dtstart": "2027-01-01T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2027-01-01T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [
+    1
+   ],
+   "bymonth": [
+    1,
+    7
+   ],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 8,
+  "n_ref": 8,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "yearly-weekno",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO",
+  "dtstart": "2027-05-17T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2027-05-17T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    20
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [
+   "2028-05-15T10:00:00",
+   "2029-05-14T10:00:00",
+   "2030-05-13T10:00:00"
+  ],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "yearly-yearday",
+  "rrule": "FREQ=YEARLY;BYYEARDAY=100",
+  "dtstart": "2027-04-10T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2027-04-10T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [],
+   "byyearday": [
+    100
+   ],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 4,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ },
+ {
+  "name": "yearly-4th-thu-nov",
+  "rrule": "FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4",
+  "dtstart": "2026-11-26T10:00",
+  "verdict": "EXACT",
+  "saved_start": "2026-11-26T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "TH"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [
+    11
+   ],
+   "byweekno": [],
+   "byyearday": [],
+   "bysetpos": [
+    4
+   ],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 4,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [],
+  "extra": [],
+  "after_sync": "same"
+ }
+]

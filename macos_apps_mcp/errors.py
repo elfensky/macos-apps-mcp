@@ -81,6 +81,14 @@ class SpanRequired(NativeError):
     kind = "span_required"
 
 
+class SubtasksRequired(NativeError):
+    """A reminder with subtasks would take them with it: EventKit removes the subtasks
+    at once and cannot see them, so the caller must confirm with
+    ``with_subtasks=True`` before the delete (or its preview) goes ahead (D-19)."""
+
+    kind = "subtasks_required"
+
+
 class WriteRefused(NativeError):
     """The store refused a save/remove — a read-only or subscribed calendar/list, or
     the account rejected the change."""

@@ -1,0 +1,76 @@
+{
+ "created": {
+  "Europe/Brussels": [
+   {
+    "title": "allday-Europe/Brussels",
+    "id": "30D52A3D-2B13-45BE-AD7C-8EDFB4B6F10E|1792969200"
+   },
+   {
+    "title": "allday-rec-Europe/Brussels",
+    "id": "92C1F0AB-79A8-4A88-887C-5B5CD73B8FF6|1792360800"
+   }
+  ],
+  "Pacific/Auckland": [
+   {
+    "title": "allday-Pacific/Auckland",
+    "id": "9489AAB2-48DF-4C72-BA88-86F241F94708|1792926000"
+   },
+   {
+    "title": "allday-rec-Pacific/Auckland",
+    "id": "9A170138-67E1-4E51-AE6A-2191A961C3DC|1792321200"
+   }
+  ],
+  "America/Los_Angeles": [
+   {
+    "title": "allday-America/Los_Angeles",
+    "id": "FC18C309-7B1E-4458-A08B-49BE79CD7577|1792998000"
+   },
+   {
+    "title": "allday-rec-America/Los_Angeles",
+    "id": "67983CAD-8187-416A-A8E8-3D0D3803C24D|1792393200"
+   }
+  ]
+ },
+ "verdicts": {
+  "single created Europe/Brussels     read Europe/Brussels": "OK",
+  "weekly created Europe/Brussels     read Europe/Brussels": "OK",
+  "single created Pacific/Auckland    read Europe/Brussels": "OK",
+  "weekly created Pacific/Auckland    read Europe/Brussels": "OK",
+  "single created America/Los_Angeles read Europe/Brussels": "OK",
+  "weekly created America/Los_Angeles read Europe/Brussels": "OK",
+  "single created Europe/Brussels     read Pacific/Auckland": "OK",
+  "weekly created Europe/Brussels     read Pacific/Auckland": "OK",
+  "single created Pacific/Auckland    read Pacific/Auckland": "OK",
+  "weekly created Pacific/Auckland    read Pacific/Auckland": "OK",
+  "single created America/Los_Angeles read Pacific/Auckland": "OK",
+  "weekly created America/Los_Angeles read Pacific/Auckland": "OK",
+  "single created Europe/Brussels     read America/Los_Angeles": "OK",
+  "weekly created Europe/Brussels     read America/Los_Angeles": "OK",
+  "single created Pacific/Auckland    read America/Los_Angeles": "OK",
+  "weekly created Pacific/Auckland    read America/Los_Angeles": "OK",
+  "single created America/Los_Angeles read America/Los_Angeles": "OK",
+  "weekly created America/Los_Angeles read America/Los_Angeles": "OK",
+  "single created Europe/Brussels     read UTC": "OK",
+  "weekly created Europe/Brussels     read UTC": "OK",
+  "single created Pacific/Auckland    read UTC": "OK",
+  "weekly created Pacific/Auckland    read UTC": "OK",
+  "single created America/Los_Angeles read UTC": "OK",
+  "weekly created America/Los_Angeles read UTC": "OK"
+ },
+ "sample_read": [
+  {
+   "title": "allday-rec-America/Los_Angeles",
+   "all_day": true,
+   "tz": null,
+   "start": "2026-10-19T00:00:00",
+   "end": "2026-10-19T23:59:59"
+  },
+  {
+   "title": "allday-rec-Europe/Brussels",
+   "all_day": true,
+   "tz": null,
+   "start": "2026-10-19T00:00:00",
+   "end": "2026-10-19T23:59:59"
+  }
+ ]
+}

@@ -1,0 +1,104 @@
+{
+ "Asia/Beirut": {
+  "midnight_exists": false,
+  "created": [
+   {
+    "title": "gap-Asia/Beirut",
+    "id": "A536333C-8994-4B0F-94F7-F81B27ADEB2B|1806184800"
+   }
+  ],
+  "read": {
+   "Asia/Beirut": {
+    "ok": true,
+    "events": [
+     [
+      "2027-03-28T01:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "America/Santiago": {
+    "ok": true,
+    "events": [
+     [
+      "2027-03-28T00:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "Europe/Brussels": {
+    "ok": true,
+    "events": [
+     [
+      "2027-03-28T00:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "UTC": {
+    "ok": true,
+    "events": [
+     [
+      "2027-03-28T00:00:00",
+      true,
+      null
+     ]
+    ]
+   }
+  }
+ },
+ "America/Santiago": {
+  "midnight_exists": false,
+  "created": [
+   {
+    "title": "gap-America/Santiago",
+    "id": "AAB7D1E5-1843-44D6-9ED8-5E28B8D870C4|1820116800"
+   }
+  ],
+  "read": {
+   "Asia/Beirut": {
+    "ok": true,
+    "events": [
+     [
+      "2027-09-05T00:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "America/Santiago": {
+    "ok": true,
+    "events": [
+     [
+      "2027-09-05T01:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "Europe/Brussels": {
+    "ok": true,
+    "events": [
+     [
+      "2027-09-05T00:00:00",
+      true,
+      null
+     ]
+    ]
+   },
+   "UTC": {
+    "ok": true,
+    "events": [
+     [
+      "2027-09-05T00:00:00",
+      true,
+      null
+     ]
+    ]
+   }
+  }
+ }
+}

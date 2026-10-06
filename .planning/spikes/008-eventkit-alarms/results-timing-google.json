@@ -1,0 +1,130 @@
+[
+  {
+    "t": 0,
+    "timed-six": [
+      {
+        "rel_min": -30
+      },
+      {
+        "rel_min": -5
+      },
+      {
+        "rel_min": -120
+      },
+      {
+        "rel_min": -60
+      },
+      {
+        "rel_min": -15
+      },
+      {
+        "rel_min": -10
+      }
+    ],
+    "timed-abs": [
+      {
+        "abs": "2026-10-30T08:00"
+      }
+    ]
+  },
+  {
+    "t": 10,
+    "timed-six": [
+      {
+        "rel_min": -10
+      },
+      {
+        "rel_min": -120
+      },
+      {
+        "rel_min": -5
+      },
+      {
+        "rel_min": -60
+      },
+      {
+        "rel_min": -15
+      }
+    ],
+    "timed-abs": [
+      {
+        "rel_min": -120
+      }
+    ]
+  },
+  {
+    "t": 30,
+    "timed-six": [
+      {
+        "rel_min": -15
+      },
+      {
+        "rel_min": -10
+      },
+      {
+        "rel_min": -5
+      },
+      {
+        "rel_min": -120
+      },
+      {
+        "rel_min": -60
+      }
+    ],
+    "timed-abs": [
+      {
+        "rel_min": -120
+      }
+    ]
+  },
+  {
+    "t": 60,
+    "timed-six": [
+      {
+        "rel_min": -120
+      },
+      {
+        "rel_min": -5
+      },
+      {
+        "rel_min": -60
+      },
+      {
+        "rel_min": -15
+      },
+      {
+        "rel_min": -10
+      }
+    ],
+    "timed-abs": [
+      {
+        "rel_min": -120
+      }
+    ]
+  },
+  {
+    "t": 120,
+    "timed-six": [
+      {
+        "rel_min": -10
+      },
+      {
+        "rel_min": -5
+      },
+      {
+        "rel_min": -60
+      },
+      {
+        "rel_min": -15
+      },
+      {
+        "rel_min": -120
+      }
+    ],
+    "timed-abs": [
+      {
+        "rel_min": -120
+      }
+    ]
+  }
+]

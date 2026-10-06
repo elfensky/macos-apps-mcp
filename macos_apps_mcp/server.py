@@ -19,7 +19,7 @@ from .adapters.messages import MessagesAdapter
 from .adapters.music import MusicAdapter
 from .adapters.notes import NotesAdapter
 from .adapters.photos import PhotosAdapter
-from .adapters.reminders import RemindersAdapter
+from .adapters.reminders import ReminderDeleteSnapshotter, RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
 from .audit import AuditMiddleware, audit_read, usage_report
@@ -43,6 +43,7 @@ from .lifecycle import install_lifecycle_guards
 mcp = FastMCP("macos-apps-mcp")
 
 _reminders = RemindersAdapter()
+_reminder_delete_snapshot = ReminderDeleteSnapshotter()
 _calendar = CalendarAdapter()
 _contacts = ContactsAdapter()
 _mail = MailAdapter()
@@ -274,17 +275,27 @@ async def usage() -> dict:
     return usage_report({t.name for t in await mcp.list_tools()})
 
 
-@_read_tool(adapter="reminders", permission="EventKit")
-def reminders(due: str = "today") -> list[dict[str, str]]:
-    """List reminders as pointers. `due`: today | overdue | this-week | a list name.
-    Read-only; needs EventKit (Reminders) access. Hydrate none — pointers only."""
-    return [p.as_dict() for p in _reminders.get_pointers(due)]
+@_read_tool(adapter="reminders", permission=("EventKit", "Full Disk Access"))
+def reminders(due: str = "today") -> dict:
+    """List reminders as pointers in `{results, coverage?}`. `due`: today | overdue |
+    this-week | a list name. Each result may carry `folder` (its list's id, from
+    `reminder_lists`; pass it as `list_name=`), `tags` and `parent` (the parent
+    reminder's id, for a subtask). Requires EventKit and Full Disk Access (tags and
+    parent links come from the Reminders store). Tags and subtasks are read-only:
+    macOS has no public API that writes them, so no tool here can add a tag or nest a
+    reminder — do that in Reminders.app. If the Reminders store cannot be read, results
+    still come back and `coverage` says why tags and parent links are missing.
+    Read-only. Hydrate none — pointers only."""
+    return _reminders.read(due)
 
 
 @_read_tool(adapter="calendar", permission="EventKit")
 def events(when: str = "today") -> list[dict[str, str]]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD.
-    Read-only; needs EventKit (Calendar) access."""
+    Each result's `folder` is its calendar's id (from `calendars`); pass it to
+    `free_busy(calendars=…)` or as `calendar=`. A read cannot tell that a series'
+    first occurrence is extra (each result holds its own occurrence start); the
+    create/update result says so. Read-only; needs EventKit (Calendar) access."""
     return [p.as_dict() for p in _calendar.get_pointers(when)]
 
 
@@ -299,15 +310,17 @@ def free_busy(start: str, end: str, calendars: list[str] | None = None) -> dict:
 
 @_read_tool(adapter="reminders", permission="EventKit")
 def reminder_lists() -> list[dict[str, str]]:
-    """List reminder lists as pointers (id + name); use a name to target writes.
-    Read-only; needs EventKit (Reminders) access. See create_reminder to write."""
+    """List reminder lists as pointers (id + name); use a name to target writes. The
+    `id` is the `folder` that reminders carry. Read-only; needs EventKit (Reminders)
+    access. See create_reminder to write."""
     return [p.as_dict() for p in _reminders.get_lists()]
 
 
 @_read_tool(adapter="calendar", permission="EventKit")
 def calendars() -> list[dict[str, str]]:
-    """List calendars as pointers (id + name); use a name to target writes.
-    Read-only; needs EventKit (Calendar) access. See create_event to write."""
+    """List calendars as pointers (id + name); use a name to target writes. The `id`
+    is the `folder` that events carry. Read-only; needs EventKit (Calendar) access.
+    See create_event to write."""
     return [p.as_dict() for p in _calendar.get_calendars()]
 
 
@@ -1095,7 +1108,12 @@ def create_reminder(
     recurrence: str | None = None,
 ) -> dict[str, str]:
     """Create a reminder. `due`/`start` ISO datetime — naive = local time, call now()
-    first; `priority` 0–9; `recurrence` an RRULE.
+    first; `priority` 0–9; `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL,
+    BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
+    BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
+    refused.
+    This tool cannot set tags or make a subtask (no public API; read-only via
+    `reminders()`).
     Side effect (creates); needs EventKit (Reminders) access. Target a list via
     `list_name` — a list name OR a list Pointer id (from reminder_lists). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1111,6 +1129,15 @@ def create_reminder(
     return _reminders.create_reminder(data).as_dict()
 
 
+@_additive_tool(adapter="reminders", permission="EventKit")
+def create_reminder_list(name: str) -> dict[str, str]:
+    """Create a reminder list in the default Reminders account. An exact-name duplicate
+    is refused (it would make `list_name=` ambiguous). Returns the list pointer (id +
+    name); use the id as `list_name=`. Side effect (creates); needs EventKit
+    (Reminders) access."""
+    return _reminders.create_reminder_list(name).as_dict()
+
+
 @_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
 def update_reminder(
     id: str,
@@ -1123,9 +1150,14 @@ def update_reminder(
     recurrence: str | None = None,
 ) -> dict[str, str]:
     """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
-    `recurrence`: RRULE to set; 'none' to stop repeating. REQUIRED (rule or 'none')
+    `recurrence`: RRULE to set ('none' to stop repeating) with FREQ, INTERVAL, COUNT,
+    UNTIL, BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
+    BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
+    refused. REQUIRED (rule or 'none')
     when the target reminder repeats — omitting it is refused so a rename can't
     silently kill the series.
+    This tool cannot set tags or make a subtask (no public API; read-only via
+    `reminders()`).
     Side effect (full-replace update); needs EventKit (Reminders) access. `id` from
     reminders."""
     data = ReminderData(
@@ -1140,11 +1172,34 @@ def update_reminder(
     return _reminders.update_reminder(id, data).as_dict()
 
 
-@_write_tool(snapshot=_reminders, adapter="reminders", permission="EventKit")
-def complete_reminder(id: str) -> dict[str, str]:
-    """Mark a reminder complete by id.
-    Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
-    return _reminders.complete_reminder(id).as_dict()
+@_write_tool(
+    snapshot=_reminders,
+    adapter="reminders",
+    permission=("EventKit", "Full Disk Access"),
+)
+def complete_reminder(id: str) -> dict:
+    """Mark a reminder complete by id. Completing a parent leaves its subtasks open
+    (Reminders.app hides them under a completed parent); the result lists them under
+    `subtasks`. Side effect (completes). Requires **EventKit** and **Full Disk Access**:
+    the subtask check reads the Reminders store first, and when the store cannot be
+    read the completion is refused and nothing changes. `id` from reminders."""
+    return _reminders.complete_reminder(id)
+
+
+@_write_tool(
+    snapshot=_reminder_delete_snapshot,
+    adapter="reminders",
+    permission=("EventKit", "Full Disk Access"),
+)
+def delete_reminder(id: str, dry_run: bool = True, with_subtasks: bool = False) -> dict:
+    """Delete a reminder by id. `dry_run` DEFAULTS TO TRUE — previews the reminder that
+    WOULD be deleted (pointer, no mutation); pass `dry_run=false` to delete. A parent
+    with subtasks is refused unless `with_subtasks=true`, because deleting a parent
+    deletes its subtasks too. A subtask indented in Reminders in the last few minutes
+    may not be visible yet.
+    Destructive; needs EventKit and Full Disk Access (the subtask check reads the
+    Reminders store). `id` from reminders."""
+    return _reminders.delete_reminder(id, dry_run=dry_run, with_subtasks=with_subtasks)
 
 
 @_additive_tool(adapter="calendar", permission="EventKit")
@@ -1157,10 +1212,20 @@ def create_event(
     notes: str | None = None,
     all_day: bool = False,
     recurrence: str | None = None,
+    alarms: list[int] | None = None,
 ) -> dict[str, str]:
     """Create an event. `start`/`end` ISO datetime — naive = local time, call now()
-    first; `recurrence` an RRULE. `all_day` takes a DATE (2026-07-01); a timestamp
-    with a UTC offset is rejected.
+    first; `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals
+    such as 2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY,
+    BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day`
+    takes a DATE
+    (2026-07-01); a timestamp with a UTC offset is rejected. A `start` that does not
+    match its `recurrence` is accepted (RFC 5545 counts it as the first occurrence) and
+    the result's summary says so.
+    `alarms` are minutes before the start, as in the Google Calendar API. For an all-day
+    event the offset counts from local midnight: `-540` is 09:00 on the day, `900` is
+    09:00 the day before. On a DST-change day the alert shifts an hour, the same as
+    Calendar's own alerts. At most 5.
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1173,6 +1238,7 @@ def create_event(
         notes=notes,
         all_day=all_day,
         recurrence=parse_recurrence(recurrence),
+        alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.create_event(data).as_dict()
 
@@ -1189,9 +1255,20 @@ def update_event(
     all_day: bool = False,
     recurrence: str | None = None,
     span: str | None = None,
+    alarms: list[int] | None = None,
 ) -> dict[str, str]:
     """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
-    `all_day` takes a DATE (2026-07-01); a timestamp with a UTC offset is rejected.
+    `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals such as
+    2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS;
+    BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day` takes a
+    DATE (2026-07-01); a timestamp with a UTC offset
+    is rejected. A `start` that does not match its `recurrence` is accepted (RFC 5545
+    counts it as the first occurrence) and the result's summary says so.
+    `alarms` are minutes before the start, as in the Google Calendar API. For an all-day
+    event the offset counts from local midnight: `-540` is 09:00 on the day, `900` is
+    09:00 the day before. On a DST-change day the alert shifts an hour, the same as
+    Calendar's own alerts. At most 5. Omit `alarms` to keep the event's alarms; `[]`
+    removes them all.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
@@ -1205,6 +1282,7 @@ def update_event(
         notes=notes,
         all_day=all_day,
         recurrence=parse_recurrence(recurrence),
+        alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.update_event(id, data, span=span).as_dict()
 

@@ -3,10 +3,14 @@ adapter boundary."""
 
 from __future__ import annotations
 
+import ast
 import dataclasses
-from datetime import UTC, datetime, timedelta, timezone
+import tomllib
+from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+from dateutil.rrule import rrulestr
 
 from macos_apps_mcp.contracts import (
     CalendarEventData,
@@ -15,6 +19,8 @@ from macos_apps_mcp.contracts import (
     Recurrence,
     ReminderData,
     _format_offset,
+    deletion_result,
+    dtstart_in_rule,
     now_local,
     parse_all_day,
     parse_bound,
@@ -109,7 +115,122 @@ def test_recurrence_rejects_unknown_freq():
 
 def test_recurrence_rejects_unsupported_part():
     with pytest.raises(ValueError, match="unsupported RRULE"):
-        Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO")
+        Recurrence.from_rrule("FREQ=YEARLY;BYWEEKNO=20")
+
+
+def test_recurrence_parses_byday_plain_weekdays_sorted():
+    r = Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=WE,MO,FR")
+    assert r.byday == ((0, "FR"), (0, "MO"), (0, "WE"))
+
+
+def test_recurrence_parses_byday_ordinals():
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=-1FR").byday == ((-1, "FR"),)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=+2TU").byday == ((2, "TU"),)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU").byday == ((2, "TU"),)
+
+
+def test_recurrence_parsing_is_idempotent():
+    rule = "FREQ=MONTHLY;BYDAY=2TU;COUNT=6"
+    assert Recurrence.from_rrule(rule) == Recurrence.from_rrule(rule)
+
+
+# --- Task 2: the other BY parts, named rejections, ranges, RFC 5545 bans (D-06) -------
+
+
+def test_rrule_parses_the_integer_by_parts():
+    r = Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=15,1;BYMONTH=10,1")
+    assert r.bymonthday == (1, 15)
+    assert r.bymonth == (1, 10)
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=-1").bymonthday == (-1,)
+    assert Recurrence.from_rrule("FREQ=YEARLY;BYYEARDAY=100").byyearday == (100,)
+    r = Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1")
+    assert r.bysetpos == (-1,)
+
+
+def test_rrule_duplicate_values_collapse():
+    assert Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=1,1").bymonthday == (1,)
+
+
+def test_rrule_byday_order_does_not_change_the_value():
+    a = Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=FR,MO")
+    assert a == Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO,FR")
+
+
+@pytest.mark.parametrize(
+    ("part", "reason"),
+    [
+        ("BYWEEKNO=20", "expands only"),
+        ("BYHOUR=9", "no field"),
+        ("BYMINUTE=30", "no field"),
+        ("BYSECOND=0", "no field"),
+        ("WKST=MO", "no field"),
+    ],
+)
+def test_rrule_rejects_unsupported_parts_by_name(part, reason):
+    name = part.split("=")[0]
+    with pytest.raises(ValueError, match="unsupported RRULE") as e:
+        Recurrence.from_rrule(f"FREQ=YEARLY;{part}")
+    assert name in str(e.value)
+    assert reason in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    [
+        "FREQ=MONTHLY;BYMONTHDAY=0",
+        "FREQ=MONTHLY;BYMONTHDAY=32",
+        "FREQ=MONTHLY;BYMONTHDAY=-32",
+        "FREQ=YEARLY;BYMONTH=0",
+        "FREQ=YEARLY;BYMONTH=13",
+        "FREQ=YEARLY;BYYEARDAY=0",
+        "FREQ=YEARLY;BYYEARDAY=367",
+        "FREQ=YEARLY;BYDAY=MO;BYSETPOS=0",
+        "FREQ=YEARLY;BYDAY=MO;BYSETPOS=367",
+        "FREQ=MONTHLY;BYDAY=0MO",
+        "FREQ=YEARLY;BYDAY=54MO",
+        "FREQ=MONTHLY;BYDAY=XX",
+        "FREQ=MONTHLY;BYMONTHDAY=x",
+        "FREQ=MONTHLY;BYDAY=6MO",
+        "FREQ=YEARLY;BYMONTH=3;BYDAY=6SU",
+    ],
+)
+def test_rrule_rejects_out_of_range_values(rrule):
+    with pytest.raises(ValueError, match="out of range|not a weekday|not an integer"):
+        Recurrence.from_rrule(rrule)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    [
+        "FREQ=WEEKLY;BYDAY=2MO",
+        "FREQ=DAILY;BYDAY=1MO",
+        "FREQ=WEEKLY;BYMONTHDAY=1",
+        "FREQ=MONTHLY;BYYEARDAY=100",
+        "FREQ=DAILY;BYYEARDAY=1",
+        "FREQ=WEEKLY;BYYEARDAY=1",
+        "FREQ=MONTHLY;BYSETPOS=1",
+    ],
+)
+def test_rrule_rejects_rfc_5545_combination_bans(rrule):
+    with pytest.raises(ValueError, match="RFC 5545"):
+        Recurrence.from_rrule(rrule)
+
+
+@pytest.mark.parametrize(
+    "rrule",
+    ["FREQ=DAILY;BYMONTH=12", "FREQ=YEARLY;BYDAY=20MO", "FREQ=MONTHLY;BYDAY=5FR"],
+)
+def test_rrule_accepts_legal_edges(rrule):
+    Recurrence.from_rrule(rrule)
+
+
+def test_recurrence_direct_construction_validates_by_parts():
+    with pytest.raises(ValueError, match="RFC 5545"):
+        Recurrence(frequency="weekly", bymonthday=(1,))
+    with pytest.raises(ValueError, match="out of range"):
+        Recurrence(frequency="monthly", bymonth=(13,))
+    with pytest.raises(ValueError, match="not a weekday"):
+        Recurrence(frequency="monthly", byday=((0, "XX"),))
 
 
 def test_recurrence_rejects_count_and_until_together():
@@ -127,6 +248,27 @@ def test_recurrence_rejects_nonpositive_count():
     # COUNT must be validated like INTERVAL — a zero/negative count isn't a valid series
     with pytest.raises(ValueError, match="COUNT must be"):
         Recurrence.from_rrule("FREQ=DAILY;COUNT=0")
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"interval": 0}, "INTERVAL must be >= 1"),
+        ({"interval": -2}, "INTERVAL must be >= 1"),
+        ({"count": 0}, "COUNT must be >= 1"),
+        ({"count": -1}, "COUNT must be >= 1"),
+    ],
+)
+def test_recurrence_direct_construction_rejects_nonpositive_interval_and_count(
+    kwargs, match
+):
+    with pytest.raises(ValueError, match=match):
+        Recurrence(frequency="daily", **kwargs)
+
+
+def test_recurrence_from_rrule_rejects_a_zero_interval():
+    with pytest.raises(ValueError, match="INTERVAL must be >= 1"):
+        Recurrence.from_rrule("FREQ=DAILY;INTERVAL=0")
 
 
 def test_recurrence_rejects_malformed_part():
@@ -338,3 +480,198 @@ def test_deletion_result_is_the_one_delete_envelope():
         "would_delete": {"id": "X-1", "summary": "s", "deeplink": "d"},
     }
     assert deletion_result("X-1", None) == {"deleted": "X-1"}
+
+
+# --- DTSTART membership (D-10, CAL-03, #90) ------------------------------------------
+
+
+def _in_rule(rrule: str, start: date) -> bool:
+    return dtstart_in_rule(Recurrence.from_rrule(rrule), start)
+
+
+# all 2027; every row computed by hand from the 2027 calendar (1 Jan is a Friday)
+_DTSTART_TABLE = [
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 12), True),
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 5), False),  # the 1st Tuesday
+    ("FREQ=MONTHLY;BYDAY=2TU", date(2027, 1, 13), False),  # a Wednesday
+    ("FREQ=MONTHLY;INTERVAL=2;COUNT=3;BYDAY=2TU", date(2027, 1, 12), True),
+    ("FREQ=MONTHLY;BYDAY=2TU;UNTIL=20270301", date(2027, 1, 5), False),
+    ("FREQ=MONTHLY;BYDAY=-1FR", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYDAY=-1FR", date(2027, 1, 22), False),
+    ("FREQ=MONTHLY;BYDAY=5FR", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=-1", date(2027, 2, 28), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=-1", date(2027, 2, 27), False),
+    ("FREQ=MONTHLY;BYMONTHDAY=1,15;BYSETPOS=-1", date(2027, 1, 15), True),
+    ("FREQ=MONTHLY;BYMONTHDAY=1,15;BYSETPOS=-1", date(2027, 1, 1), False),
+    ("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", date(2027, 1, 29), True),
+    ("FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1", date(2027, 1, 28), False),
+    ("FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4", date(2027, 11, 25), True),
+    ("FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4", date(2027, 11, 18), False),
+    ("FREQ=YEARLY;BYYEARDAY=100", date(2027, 4, 10), True),
+    ("FREQ=YEARLY;BYYEARDAY=-1", date(2027, 12, 31), True),
+    ("FREQ=YEARLY;BYYEARDAY=-1", date(2027, 12, 30), False),
+    # YEARLY without BYMONTH counts an ordinal inside the year, not the month
+    ("FREQ=YEARLY;BYDAY=20MO", date(2027, 5, 17), True),
+    ("FREQ=YEARLY;BYDAY=20MO", date(2027, 5, 24), False),
+    ("FREQ=YEARLY;BYDAY=-1MO", date(2027, 12, 27), True),
+    ("FREQ=YEARLY;BYDAY=-1MO", date(2027, 12, 20), False),
+    ("FREQ=DAILY;BYMONTH=12", date(2027, 12, 5), True),
+    ("FREQ=DAILY;BYMONTH=12", date(2027, 11, 30), False),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR", date(2027, 1, 6), True),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR", date(2027, 1, 7), False),
+    # the shapes where dateutil diverges from RFC 5545: hand-computed
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 4), True),  # the 1st Monday
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 8), True),  # a plain Friday
+    ("FREQ=MONTHLY;BYDAY=1MO,FR", date(2027, 1, 11), False),  # the 2nd Monday
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=-1", date(2027, 1, 8), True),
+    ("FREQ=WEEKLY;BYDAY=MO,WE,FR;BYSETPOS=-1", date(2027, 1, 6), False),
+    # a week runs Monday to Sunday (WKST=MO): Sunday 10 Jan closes the week of 4 Jan
+    ("FREQ=WEEKLY;BYDAY=SU,MO;BYSETPOS=1", date(2027, 1, 4), True),
+    ("FREQ=WEEKLY;BYDAY=SU,MO;BYSETPOS=1", date(2027, 1, 10), False),
+    # no BY part: DTSTART implies the rule, any date is in it
+    ("FREQ=WEEKLY", date(2027, 1, 7), True),
+    ("FREQ=DAILY;INTERVAL=3", date(2027, 1, 7), True),
+]
+
+
+@pytest.mark.parametrize(("rrule", "start", "expected"), _DTSTART_TABLE)
+def test_dtstart_in_rule_hand_computed(rrule, start, expected):
+    assert _in_rule(rrule, start) is expected
+
+
+# the spike 003 device matrix minus BYWEEKNO (a rejected part): (name, RRULE)
+_SPIKE_SHAPES = [
+    ("weekly-byday", "FREQ=WEEKLY;BYDAY=MO,WE,FR"),
+    ("weekly-int2", "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,TH"),
+    ("weekly-count", "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"),
+    ("monthly-2tu", "FREQ=MONTHLY;BYDAY=2TU"),
+    ("monthly-last-fr", "FREQ=MONTHLY;BYDAY=-1FR"),
+    ("monthly-5fr", "FREQ=MONTHLY;BYDAY=5FR"),
+    ("monthly-every-mo", "FREQ=MONTHLY;BYDAY=MO"),
+    ("monthly-15", "FREQ=MONTHLY;BYMONTHDAY=15"),
+    ("monthly-1-15", "FREQ=MONTHLY;BYMONTHDAY=1,15"),
+    ("monthly-last-day", "FREQ=MONTHLY;BYMONTHDAY=-1"),
+    ("monthly-31", "FREQ=MONTHLY;BYMONTHDAY=31"),
+    ("monthly-29", "FREQ=MONTHLY;BYMONTHDAY=29"),
+    ("monthly-until", "FREQ=MONTHLY;BYMONTHDAY=15;UNTIL=20270115T235959"),
+    ("monthly-last-wkday", "FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1"),
+    ("monthly-bymonth", "FREQ=MONTHLY;BYMONTH=1,4,7,10;BYMONTHDAY=1"),
+    ("daily-bymonth", "FREQ=DAILY;BYMONTH=12"),
+    ("dtstart-mismatch", "FREQ=MONTHLY;BYDAY=2TU"),
+    ("yearly-last-su-mar", "FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU"),
+    ("yearly-jan-jul-1", "FREQ=YEARLY;BYMONTH=1,7;BYMONTHDAY=1"),
+    ("yearly-yearday", "FREQ=YEARLY;BYYEARDAY=100"),
+    ("yearly-4th-thu-nov", "FREQ=YEARLY;BYMONTH=11;BYDAY=TH;BYSETPOS=4"),
+]
+
+
+@pytest.mark.parametrize(("name", "rrule"), _SPIKE_SHAPES)
+def test_dtstart_in_rule_agrees_with_the_dateutil_oracle(name, rrule):
+    # dateutil drops a DTSTART outside its rule, so "its first occurrence IS the
+    # DTSTART" is exactly membership (an empty expansion counts as no match).
+    for offset in range(7):
+        d = date(2027, 1, 4) + timedelta(days=offset)
+        dts = datetime(d.year, d.month, d.day, 10)
+        first = next(iter(rrulestr(rrule, dtstart=dts)), None)
+        assert _in_rule(rrule, d) is (first == dts), f"{name} {d}"
+
+
+def test_dtstart_reference_library_is_never_imported_by_the_package():
+    # D-10 / T-3-13: dateutil is the test reference only. It drops a non-matching
+    # DTSTART and diverges from RFC 5545 on two shapes, so the runtime must not use it.
+    root = Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in (root / "macos_apps_mcp").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            if any(n.split(".")[0] == "dateutil" for n in names):
+                offenders.append(str(path.relative_to(root)))
+    assert offenders == []
+
+
+def test_dtstart_reference_library_is_a_dev_dependency_only():
+    root = Path(__file__).resolve().parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text())
+    assert not any(
+        "dateutil" in dep for dep in project["project"].get("dependencies", [])
+    )
+    assert any("python-dateutil" in d for d in project["dependency-groups"]["dev"])
+
+
+# --- CalendarEventData.alarms: the boundary refuses what a source would rewrite -------
+
+
+def _event(*, all_day=False, **kw):
+    day = datetime(2027, 2, 15) if all_day else datetime(2027, 2, 15, 10)
+    end = day if all_day else datetime(2027, 2, 15, 11)
+    return CalendarEventData("x", day, end, all_day=all_day, **kw)
+
+
+@pytest.mark.parametrize(
+    ("alarms", "message"),
+    [
+        ((1, 2, 3, 4, 5, 6), "at most 5"),
+        ((15, 15), "once"),
+        ((True,), "True"),
+        ((1.5,), "1.5"),
+        (("15",), "15"),
+        ((-5,), "BEFORE"),
+    ],
+)
+def test_event_alarms_refused_at_the_boundary(alarms, message):
+    with pytest.raises(ValueError, match=message):
+        _event(alarms=alarms)
+
+
+@pytest.mark.parametrize(
+    ("alarms", "all_day"),
+    [((0,), False), ((-540, 900), True), ((0,), True), ((), False), (None, False)],
+)
+def test_event_alarms_accepted(alarms, all_day):
+    assert _event(all_day=all_day, alarms=alarms).alarms == alarms
+
+
+def test_pointer_as_dict_emits_tags_and_parent_only_when_set():
+    # reminders reads only (#91): list-valued `tags`, scalar `parent`, never as nulls
+    bare = Pointer(id="x", summary="s", deeplink="d").as_dict()
+    assert "tags" not in bare and "parent" not in bare
+    full = Pointer(id="x", summary="s", deeplink="d", tags=("a",), parent="P").as_dict()
+    assert full["tags"] == ["a"] and full["parent"] == "P"
+
+
+# --- Pointer.subtasks and the cascade envelope (D-19, D-20) ---------------------------
+
+
+def test_pointer_subtasks_serialize_as_a_list_of_dicts_only_when_set():
+    child = Pointer(id="C", summary="child", deeplink="d")
+    parent = Pointer(id="P", summary="parent", deeplink="d", subtasks=(child,))
+    assert parent.as_dict()["subtasks"] == [child.as_dict()]
+    assert "subtasks" not in Pointer(id="P", summary="s", deeplink="d").as_dict()
+
+
+def test_deletion_result_without_subtasks_keeps_its_two_shapes():
+    assert deletion_result("P", None, subtasks=()) == {"deleted": "P"}
+    preview = Pointer(id="P", summary="s", deeplink="d")
+    assert set(deletion_result("P", preview)) == {"dry_run", "would_delete"}
+
+
+def test_deletion_result_with_subtasks_names_them_and_the_cascade():
+    c1 = Pointer(id="C1", summary="one", deeplink="d")
+    c2 = Pointer(id="C2", summary="two", deeplink="d")
+    done = deletion_result("P", None, subtasks=(c1, c2))
+    assert done["deleted"] == "P" and [s["id"] for s in done["subtasks"]] == [
+        "C1",
+        "C2",
+    ]
+    assert done["cascade"].startswith("and 2 subtasks")
+    assert "3" in done["cascade"]  # the audit log keeps all N+1
+    one = deletion_result("P", None, subtasks=(c1,))
+    assert one["cascade"].startswith("and 1 subtask ")
+    parent = Pointer(id="P", summary="s", deeplink="d", subtasks=(c1, c2))
+    preview = deletion_result("P", parent, subtasks=(c1, c2))
+    assert preview["would_delete"]["subtasks"][0]["id"] == "C1"
+    assert preview["cascade"].startswith("and 2 subtasks") and "subtasks" not in preview

@@ -1,20 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 3
+current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
-status: planning
-stopped_at: Phase 02.1 complete, ready to plan Phase 3
-last_updated: "2026-10-05T14:55:33.922Z"
-last_activity: 2026-10-05
-last_activity_desc: Phase 02.1 complete, transitioned to Phase 3
-state_head: 3e6aab6f2a6d56dce9995a11ce0dac610700656f
+status: verifying
+stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
+last_updated: "2026-10-06T22:57:08.339Z"
+last_activity: 2026-10-06
+last_activity_desc: Phase 03 execution started
+state_head: e672a4b35baf05bb1b3747b58fe9ec61e159c695
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 28
-  completed_plans: 28
-  percent: 43
+  total_plans: 38
+  completed_plans: 38
 ---
 
 # Project State
@@ -24,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 3 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+**Current focus:** Phase 03 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 
 ## Current Position
 
-Phase: 3 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-05 — Phase 02.1 complete, transitioned to Phase 3
+Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
+Plan: 10 of 10
+Status: Phase complete — ready for verification
+Last activity: 2026-10-07 - Completed quick task 261007-11j: release bump 0.14.0 (EventKit depth)
 
 Progress: [████░░░░░░] 43%
 
@@ -62,6 +61,16 @@ Progress: [████░░░░░░] 43%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 11min | 3 tasks | 0 files |
+| Phase 03 P01 | 20min | 3 tasks | 0 files |
+| Phase 03 P02 | 9min | 3 tasks | 11 files |
+| Phase 03 P03 | 14min | 3 tasks | 13 files |
+| Phase 03 P04 | 11min | 3 tasks | 10 files |
+| Phase 03 P05 | 9min | 3 tasks | 9 files |
+| Phase 03 P06 | 11min | 3 tasks | 11 files |
+| Phase 03 P07 | 23min | 3 tasks | 13 files |
+| Phase 03 P08 | 8min | 2 tasks | 11 files |
+| Phase 03 P09 | 15min | 3 tasks | 0 files |
+| Phase 03 P10 | 25min | 2 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -89,22 +98,35 @@ Recent decisions affecting current work:
 - [Phase 02.1]: A timeout receipt marks its targets `unknown`, and `undo_plan` replays `unknown` as well as `ok`.
 - [Phase 02.1]: No device probe targets a family account (Personal, Grandma, Mama) — this rule skipped the five #230 runs; both #229 and #230 stay open behind non-strict xfails with device evidence.
 - [Phase 02.1]: Phase close runs validate-phase and secure-phase from the verify:post hooks; their files land in the same records PR as the UAT.
+- [Phase 03]: Pre-code probes (03-01) overturned no premise: reminder lists save on the default source; Google refuses a list save with EKErrorDomain 24; reminder BY* parts and UNTIL (day granularity) round-trip; Google alarms unchanged from spike 008. — Measured on device 2026-10-06 before any Phase 3 code (D-23).
+- [Phase 03]: Owner rulings after the 03-01 probes: A3 and A4 confirmed (alarms refuse a negative value on a timed event and a duplicate offset); A5 changed — reminders compare UNTIL at day granularity too (03-03); A9 changed — complete_reminder refuses with WriteRefused, no save, when the Reminders store cannot be read (03-08). — Probe 2 showed reminders keep UNTIL exactly; the owner prefers a refusal to a blind completion of a possible parent.
 
 ### Pending Todos
 
-- The installed daemon bundle's code seal breaks after first launch: the daemon's Python writes `__pycache__/*.pyc` into the signed `Contents/lib`. Nothing fails today (launch and TCC use the main executable's signature). Fix in `scripts/build_app.sh`: precompile `.pyc` before signing, or run the interpreter with `-B`. Found in plan 01-10.
+- Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
+- Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
 ### Blockers/Concerns
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- [Phase 02.1] The installed daemon is release v0.13.0 (build `23be4c2`, installed 2026-10-04; `doctor()` from a reconnected session proved it 2026-10-05).
+- The installed daemon is release v0.13.1 (build `4b13dba`, installed and probe-proven 2026-10-05; on PyPI too). It carries #229, #230 and #261.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
 - The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.
 - Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261006-uff | Harden PR #251 (Gmail label membership): locate backs up the target account's copy, deterministic label citation, UNION ALL, docs + device-verified facts | 2026-10-06 | 9de12e5 | [261006-uff-harden-pr-251-gmail-label-membership-bef](./quick/261006-uff-harden-pr-251-gmail-label-membership-bef/) |
+| 261006-vu3 | Build the daemon bundle from uv.lock; cap mcp<2/fastmcp<4; smoke a streamed call in the build (#286, PR #288) | 2026-10-06 | 328ccec | [261006-vu3-build-the-daemon-bundle-from-uv-lock-and](./quick/261006-vu3-build-the-daemon-bundle-from-uv-lock-and/) |
+| 261006-wa0 | Gmail follow-ups: refuse label-folder write sources; labels in thread, sent triage, stats; parity guard (#287, PR #289) | 2026-10-06 | 328ccec | [261006-wa0-gmail-follow-ups-to-251-label-source-gua](./quick/261006-wa0-gmail-follow-ups-to-251-label-source-gua/) |
+| 4 | Precompile the daemon bundle's bytecode before signing so its code seal survives first launch | 2026-10-07 | 26baa9a | — |
+| 261007-11j | Release bump 0.14.0 (EventKit depth): changelog corrections, version sites, Phase 3 device re-run record | 2026-10-07 | e672a4b | [261007-11j-release-bump-0-14-0-with-changelog-corre](./quick/261007-11j-release-bump-0-14-0-with-changelog-corre/) |
 
 ### Roadmap Evolution
 
@@ -113,6 +135,7 @@ Recent decisions affecting current work:
 - Phase 02.1 inserted after Phase 2: Mail fixes (#206 move/trash timeout + receipt, #208 create_draft from_address) — email before any feature phase (owner, 2026-09-24) (URGENT)
 - Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
 - Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
+- Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
 
 ## Deferred Items
 
@@ -124,6 +147,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-05T07:30:00Z
-Stopped at: Phase 02.1 complete, ready to plan Phase 3
-Resume file: None
+Last session: 2026-10-06T18:44:26.378Z
+Stopped at: Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)
+Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-UAT.md

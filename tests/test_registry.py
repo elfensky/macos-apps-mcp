@@ -32,6 +32,7 @@ import macos_apps_mcp.tiers as tiers
 _DEVELOP_ADDITIVE = frozenset(
     {
         "create_reminder",
+        "create_reminder_list",
         "create_event",
         "create_contact",
         "safari_open",
@@ -51,6 +52,7 @@ _DEVELOP_DESTRUCTIVE = frozenset(
     {
         "update_reminder",
         "complete_reminder",
+        "delete_reminder",
         "update_event",
         "delete_event",
         "delete_note",
@@ -72,14 +74,16 @@ _DEVELOP_PERMISSION = {
     "doctor": None,
     "audit": None,
     "usage": None,
-    "reminders": "EventKit",
+    "reminders": ("EventKit", "Full Disk Access"),
     "events": "EventKit",
     "free_busy": "EventKit",
     "reminder_lists": "EventKit",
     "calendars": "EventKit",
     "create_reminder": "EventKit",
+    "create_reminder_list": "EventKit",
     "update_reminder": "EventKit",
-    "complete_reminder": "EventKit",
+    "complete_reminder": ("EventKit", "Full Disk Access"),
+    "delete_reminder": ("EventKit", "Full Disk Access"),
     "create_event": "EventKit",
     "update_event": "EventKit",
     "delete_event": "EventKit",
@@ -274,7 +278,7 @@ def test_tier_reproduces_the_develop_era_additive_and_destructive_sets():
 
 
 def test_permission_reproduces_the_develop_era_hand_map():
-    # Same pin for the 65-entry permission map — registry.ToolRecord.permission
+    # Same pin for the 67-entry permission map — registry.ToolRecord.permission
     # normalises a single grant to a 1-tuple and "none" (a meta tool) to ().
     want = {
         n: (() if p is None else (p,) if isinstance(p, str) else tuple(p))
@@ -394,13 +398,14 @@ def test_dry_run_rule_catches_offenders():
 
 
 def test_removes_content_class_is_exactly_the_named_tools():
-    # D-02/D-03/D-04: exactly the seven tools CONTEXT.md names — no more, no fewer.
+    # D-02/D-03/D-04: exactly the eight tools CONTEXT.md names — no more, no fewer.
     # update_note joins here (D-02): a full-replace write with no recoverable
     # before-state (notes.snapshot is title-only) is exactly the "removes or
     # replaces content" class D-04 exists to catch.
     assert reg.removes_content_tools() == frozenset(
         {
             "delete_event",
+            "delete_reminder",
             "delete_draft",
             "delete_note",
             "update_note",
@@ -423,3 +428,17 @@ def test_unrelated_write_tools_are_not_in_the_removes_content_class():
         "run_shortcut",
     ):
         assert name not in excluded, name
+
+
+def test_delete_reminder_registration_record():
+    # REM-01 (D-17, D-20): destructive, audit verb "delete", dry_run=True by default,
+    # in the removes-content class, with its OWN snapshotter — never the adapter shared
+    # by update/complete, whose before-state must stay EventKit-only.
+    from macos_apps_mcp.adapters.reminders import ReminderDeleteSnapshotter
+
+    r = reg.TOOLS["delete_reminder"]
+    assert r.tier == "destructive" and r.audit_verb == "delete" and r.removes_content
+    assert r.permission == ("EventKit", "Full Disk Access")
+    assert isinstance(r.snapshot, ReminderDeleteSnapshotter)
+    assert inspect.signature(r.fn).parameters["dry_run"].default is True
+    assert "delete_reminder" in reg.removes_content_tools()

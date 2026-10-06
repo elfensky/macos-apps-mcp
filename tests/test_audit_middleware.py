@@ -176,6 +176,7 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
         "delete_event",
         "update_reminder",
         "complete_reminder",
+        "delete_reminder",
         "update_note",
         "delete_note",
         "delete_draft",

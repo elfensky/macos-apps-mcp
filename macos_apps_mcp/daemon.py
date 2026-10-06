@@ -118,7 +118,11 @@ def fail_loud_on_dead_stream() -> None:
     answering — so the caller waits forever on a request that will never come back,
     indistinguishable from a hang. That is what turned a 5s timeout into a 1800s
     client abort. Answer the dead stream with a JSON-RPC error instead: loud, and
-    pointing at the record that says whether the work actually happened."""
+    pointing at the record that says whether the work actually happened.
+
+    Written against mcp 1.x; mcp 2 changed `_handle_sse_response` and
+    `JSONRPCMessage`, so `pyproject.toml` caps mcp below 2 and the build's stream
+    smoke catches drift (#286)."""
     from mcp.client import streamable_http
 
     original = streamable_http.StreamableHTTPTransport._handle_sse_response

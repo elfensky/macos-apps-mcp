@@ -52,7 +52,11 @@ HEADER_FINGERPRINT: dict[str, set[str]] = {
     },
     "subjects": {"ROWID", "subject"},
     "addresses": {"ROWID", "address", "comment"},
-    "mailboxes": {"ROWID", "url"},
+    # mailboxes.source + labels (#251): Gmail label membership, read by
+    # _MAILBOX_MEMBERSHIP_CTE (overview, search, thread, sent triage, stats); a mailbox
+    # with a `source` is a label backed by that store (facts §5f).
+    "mailboxes": {"ROWID", "url", "source"},
+    "labels": {"message_id", "mailbox_id"},
     "message_global_data": {"ROWID", "message_id_header", "message_id"},
     "recipients": {"message", "address", "type", "position"},
     # conversation_id: Mail's own threading key (five dedicated indexes on it),
@@ -149,14 +153,43 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
        mb.url               AS mailbox_url,
        m.date_received      AS date_received"""
 
-_BASE_SQL = f"""
+# Logical mailbox membership differs from the physical .emlx location on Gmail (#251).
+# Every logical read joins it: overview, search, thread, sent triage, stats (#287).
+# Mail's own counter triggers use source IS NULL for direct mailboxes, and
+# source = messages.mailbox for label mailboxes (device-verified 2026-10-06, facts
+# §5f). Keep this read projection separate from build_message_location_query: backup
+# and body-file lookup still need the physical messages.mailbox, not a label.
+# UNION ALL is safe: arm 1 requires mb.source IS NULL, arm 2 requires
+# mb.source = m.mailbox (non-NULL), so the arms are disjoint, and the labels primary
+# key (message_id, mailbox_id) rules out repeats inside arm 2. It skips the dedup sort
+# (measured: identical counts, about half the added search latency recovered).
+_MAILBOX_MEMBERSHIP_CTE = """
+WITH mailbox_membership(message_rowid, mailbox_id) AS (
+    SELECT m.ROWID, mb.ROWID
+    FROM messages m
+    JOIN mailboxes mb ON mb.ROWID = m.mailbox AND mb.source IS NULL
+    WHERE m.deleted = 0
+    UNION ALL
+    SELECT m.ROWID, l.mailbox_id
+    FROM labels l
+    JOIN messages m ON m.ROWID = l.message_id
+    JOIN mailboxes mb ON mb.ROWID = l.mailbox_id AND mb.source = m.mailbox
+    WHERE m.deleted = 0
+)
+"""
+
+# With label membership one stored row appears once per label (#251), so m.ROWID ties
+# across equal-rank labels; mb.ROWID makes the cited folder independent of the plan.
+_BASE_SQL = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT {_DEDUP_SELECT_COLS},
        ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                          ORDER BY {_MAILBOX_RANK}, m.date_received DESC, m.ROWID) AS rn
+                          ORDER BY {_MAILBOX_RANK},
+                                   m.date_received DESC, m.ROWID, mb.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
   AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -296,21 +329,25 @@ def build_thread_query(message_id: str, limit: int):
     happily. Which one won was up to SQLite's query plan and could flip on an OS
     upgrade. Deleted copies are excluded from the seed for the same reason.
 
+    The cited folder follows logical membership, Gmail labels included, so thread and
+    search cite the same folder (#287).
+
     ``sort_date`` guards a date_sent of 0 (not just NULL): a zero sorts to the very
     front of an oldest-first transcript and would be the first message dropped under
     truncation.
     """
-    sql = f"""
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT message_id_header, subject, mailbox_url, date_received FROM (
   SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
     SELECT {_DEDUP_SELECT_COLS},
            COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
            ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
                               ORDER BY {_MAILBOX_RANK},
-                                       m.date_received DESC, m.ROWID) AS rn
+                                       m.date_received DESC, m.ROWID, mb.ROWID) AS rn
     FROM messages m
     JOIN subjects s ON s.ROWID = m.subject
-    JOIN mailboxes mb ON mb.ROWID = m.mailbox
+    JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+    JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
     JOIN message_global_data gd ON gd.ROWID = m.global_message_id
     WHERE m.deleted = 0
       AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -377,9 +414,12 @@ def build_duplicate_summary_query():
 
     This is the table the issue asks a dry run to reproduce, and it is deliberately the
     same arithmetic ``build_overview_query`` uses for its counts — ``total`` here is the
-    RAW row count and ``distinct_`` is what ``mail_overview`` reports, so the two tools
-    can be read side by side and their difference IS ``redundant``. Measured on this
-    store 2026-08-05: 9,879 redundant rows, matching the issue's re-measurement.
+    RAW row count and ``distinct_`` is what ``mail_overview`` reports for a direct
+    (physical) mailbox, so the two tools can be read side by side there and their
+    difference IS ``redundant``. For a Gmail label mailbox (``mailboxes.source`` set,
+    #251) ``mail_overview`` counts label memberships, which this physical-row table
+    never sees. Measured on this store 2026-08-05: 9,879 redundant rows, matching the
+    issue's re-measurement.
     """
     sql = f"""
 SELECT mb.url                     AS mailbox_url,
@@ -576,21 +616,23 @@ def build_sent_triage_query(limit: int):
     integer (device-verified 2026-08-20 against a live reply), and the citing message
     is required to sit in an ``%/INBOX`` mailbox — the exact semantics the AppleScript
     scan had (unified inbox only), which is also what keeps a reply DRAFT (it cites
-    the original too, from Drafts) from clearing a send prematurely.
+    the original too, from Drafts) from clearing a send prematurely. Both the sent scan
+    and the INBOX check follow logical membership, so Gmail's label-only Sent Mail and
+    INBOX count (#287).
 
     ``MIN(COALESCE(m.subject_prefix,'') || s.subject)``: subjects.subject stores the
     stripped subject and the "Re: "/"Fwd: " lives in subject_prefix — concatenated so
     the record reads like AppleScript's ``subject of m`` did."""
     clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
-    sql = f"""
-WITH sent AS (
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}, sent AS (
   SELECT m.message_id AS mid_int,
          MIN(m.ROWID) AS rowid,
          MIN(g.message_id_header) AS mid,
          MIN(COALESCE(m.subject_prefix, '') || s.subject) AS subject,
          MAX(m.date_sent) AS date_sent
   FROM messages m
-  JOIN mailboxes mb ON mb.ROWID = m.mailbox
+  JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+  JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
   JOIN subjects s ON s.ROWID = m.subject
   LEFT JOIN message_global_data g ON g.message_id = m.message_id
   WHERE m.deleted = 0 AND m.message_id != 0 AND ({clauses})
@@ -601,7 +643,8 @@ SELECT mid, subject, date_sent, rowid,
   EXISTS (
     SELECT 1 FROM message_references r
     JOIN messages cm ON cm.ROWID = r.message
-    JOIN mailboxes cmb ON cmb.ROWID = cm.mailbox
+    JOIN mailbox_membership cmm ON cmm.message_rowid = cm.ROWID
+    JOIN mailboxes cmb ON cmb.ROWID = cmm.mailbox_id
     WHERE r.reference = sent.mid_int AND cm.deleted = 0
       AND cmb.url LIKE '%/INBOX'
   ) AS answered
@@ -660,6 +703,11 @@ def build_stats_query(since: int, account: str | None = None):
     not disagree about it. The sender/mailbox columns still come from the winning row,
     because those are properties of a copy and there is nothing to aggregate.
 
+    The mailbox follows logical membership (#287): a Gmail message is attributed to
+    its INBOX or Sent Mail label. The in-row rank and ``mb.ROWID`` order keys come
+    after ``m.ROWID``, so they only choose among memberships of ONE stored row and the
+    newest-copy rule between distinct rows is unchanged.
+
     ponytail: no LIMIT — a "last 3650 days" call materialises the whole store (~36k
     six-column rows, a few MB). Add a cap if a caller ever asks for that AND it bites;
     a bounded window is the normal use and the honest one.
@@ -674,10 +722,12 @@ SELECT lower(COALESCE(a.address, ''))            AS sender,
            OVER (PARTITION BY {key})             AS has_document,
        m.date_received                           AS date_received,
        ROW_NUMBER() OVER (PARTITION BY {key}
-                          ORDER BY m.date_received DESC, m.ROWID) AS rn
+                          ORDER BY m.date_received DESC, m.ROWID,
+                                   {_MAILBOX_RANK}, mb.ROWID) AS rn
 FROM messages m
 LEFT JOIN addresses a ON a.ROWID = m.sender
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
+JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
+JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0 AND m.date_received >= ?
 """
@@ -688,6 +738,7 @@ WHERE m.deleted = 0 AND m.date_received >= ?
         inner += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
         params.append(like_escape(account))
     sql = (
+        f"{_MAILBOX_MEMBERSHIP_CTE}"
         "SELECT sender, mailbox_url, is_read, flagged, has_document, date_received"
         f" FROM ({inner}) WHERE rn = 1"
     )
@@ -698,10 +749,11 @@ def build_overview_query():
     """Build (sql, params) for per-mailbox totals and unread counts.
 
     Counts are computed LIVE rather than read from mailboxes.unread_count: that column
-    is trigger-maintained and device-verified stale — on a real Mac the Gmail INBOX row
-    reports 1 unread where a live count returns 0, and
-    unread_count_adjusted_for_duplicates carries the same wrong value. A live count over
-    36k rows measured 16 ms, backed by the partial index on (read = 0 AND deleted = 0).
+    is trigger-maintained per stored row and does not dedupe by Message-ID the way this
+    count does. (An earlier "stale Gmail INBOX" reading was this query ignoring
+    ``labels`` (#251); live 2026-10-06 Mail's stored counters equal these counts on
+    every label-backed mailbox.) A live count over 36k rows measured 16 ms, backed by
+    the partial index on (read = 0 AND deleted = 0).
 
     Counted per DISTINCT Message-ID, not per row. A raw COUNT(m.ROWID) is inflated by
     the same duplication the search plane dedups — device-verified against a 36k store,
@@ -711,19 +763,22 @@ def build_overview_query():
     still counts (keyed on its ROWID) — it has no citation, but it is genuinely in the
     mailbox, and a count that silently omits it is the same class of lie.
 
-    Mailboxes with no messages are included via the LEFT JOINs (both of them — the
-    message_global_data join must not turn the outer join inner), so a newly-created
-    folder shows as 0/0 rather than vanishing.
+    Count logical memberships, including Gmail labels (#251) backed by All Mail.
+    Joining messages.mailbox alone incorrectly reports those mailboxes as empty. The
+    LEFT JOIN chain must stay outer all the way — all three LEFT JOINs (membership,
+    messages, message_global_data); none may become inner — so an empty mailbox or a
+    label with no live members reads 0/0 instead of vanishing.
     """
     # One expression, used twice: the dedup key. COUNT(DISTINCT …) ignores NULLs, so
     # the unread count is the same key wrapped in a CASE with no ELSE.
     key = "COALESCE(NULLIF(gd.message_id_header, ''), 'rowid:' || m.ROWID)"
-    sql = f"""
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
 SELECT mb.url                                       AS mailbox_url,
        COUNT(DISTINCT {key})                        AS total,
        COUNT(DISTINCT CASE WHEN m.read = 0 THEN {key} END) AS unread
 FROM mailboxes mb
-LEFT JOIN messages m ON m.mailbox = mb.ROWID AND m.deleted = 0
+LEFT JOIN mailbox_membership mm ON mm.mailbox_id = mb.ROWID
+LEFT JOIN messages m ON m.ROWID = mm.message_rowid
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 GROUP BY mb.ROWID
 ORDER BY unread DESC, mailbox_url ASC
@@ -1090,6 +1145,29 @@ def query_mailbox_urls() -> list[str]:
 
     def read(conn):
         return [r[0] for r in conn.execute("SELECT url FROM mailboxes")]
+
+    return _read_index(path, read)
+
+
+def is_label_mailbox(url: str) -> bool:
+    """True when ``url`` is a Gmail label mailbox (``mailboxes.source`` set, facts §5f).
+
+    A label mailbox is a view of label membership, not a place a message is stored,
+    so a write that names one as its SOURCE does not do what it reports: device-
+    verified 2026-10-06, a move from a label added the destination label and kept the
+    source label (#287). Exact equality on the raw percent-encoded url, the ``folder``
+    token every read returns; an unknown url is not a label. Raises on a missing
+    store — a write cannot prove its source is no label without it, and the
+    recoverable plane's locate needs the same store a moment later.
+    """
+    path = require_index_path()
+
+    def read(conn):
+        row = conn.execute(
+            "SELECT 1 FROM mailboxes WHERE url = ? AND source IS NOT NULL LIMIT 1",
+            (url.strip(),),
+        ).fetchone()
+        return row is not None
 
     return _read_index(path, read)
 

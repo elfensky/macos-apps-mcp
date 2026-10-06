@@ -11,6 +11,10 @@ mailbox and lies. Verify every Mail write **by running it and inspecting the res
 three reviews and a green suite once passed a forward that delivered empty mail and ate 7
 attachments.
 
+**Our count disagrees with Mail's own counter? Our query is wrong until proven otherwise.**
+Compare against `mailboxes.total_count` / `unread_count` (#251, #287): a Gmail INBOX
+mismatch was once filed as stale counters, and Mail's counter was right.
+
 ## Architecture (don't drift)
 
 - **FastMCP standalone.** Tools in `macos_apps_mcp/server.py` are *thin dispatch* to adapters — no

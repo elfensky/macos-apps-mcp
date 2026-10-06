@@ -1,0 +1,62 @@
+{
+  "tag": "gsd-spike-005 e3f0dddf",
+  "created": {
+    "visible-unowned-biz-domain": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "visible-owned-upper": {
+      "set_error": "",
+      "readback": "account:Business"
+    },
+    "visible-default-content": {
+      "set_error": "",
+      "readback": "account:Personal"
+    },
+    "visible-owned-content": {
+      "set_error": "",
+      "readback": "account:Business"
+    }
+  },
+  "autosaved": {
+    "visible-owned-content": [
+      {
+        "sender": "account:Business",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "visible-owned-upper": [
+      {
+        "sender": "other:A@a.a <A@A.A>",
+        "from_header": "account:Business",
+        "filed_in": "Business",
+        "in_reply_to": false
+      }
+    ],
+    "visible-default-content": [
+      {
+        "sender": "account:Personal",
+        "from_header": "account:Personal",
+        "filed_in": "Personal",
+        "in_reply_to": false
+      }
+    ],
+    "visible-unowned-biz-domain": [
+      {
+        "sender": "account:Personal",
+        "from_header": "account:Personal",
+        "filed_in": "Personal",
+        "in_reply_to": false
+      }
+    ]
+  },
+  "drafts_before": 278,
+  "drafts_after_autosave": 282,
+  "outgoing_gone_kept": "4 0",
+  "tagged_drafts_after_outgoing_delete": 4,
+  "drafts_deleted": 4,
+  "left": 0,
+  "drafts_final": 278
+}

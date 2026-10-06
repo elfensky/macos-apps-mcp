@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from macos_apps_mcp.adapters import mail_addressing
+from macos_apps_mcp.adapters import mail_addressing, mail_index
 from macos_apps_mcp.adapters.mail import MailAdapter
 
 pytestmark = pytest.mark.integration
@@ -128,3 +128,26 @@ def test_a_body_miss_reports_coverage_instead_of_a_bare_empty():
     out = MailAdapter().search(body="macos-apps-mcp-no-such-body-text-zzz")
     assert out["results"] == []
     assert "searchable body" in out["coverage"]
+
+
+def test_overview_count_parity_with_mails_own_counters():
+    """Our overview total may be lower than Mail's ``mailboxes.total_count`` (we dedupe
+    by Message-ID) but never zero where Mail counts messages.
+
+    #251 slipped through because Gmail INBOX read empty while Mail's own counter said
+    otherwise, and the gap was filed as stale counters. When the two disagree, our
+    query is wrong until proven otherwise (#287). Pure sqlite: no Apple Event is sent.
+    """
+
+    def read(conn):
+        return dict(
+            conn.execute("SELECT url, total_count FROM mailboxes WHERE total_count > 0")
+        )
+
+    theirs = mail_index._read_index(mail_index.require_index_path(), read)
+    ours = {r["mailbox_url"]: r["total"] for r in mail_index.query_overview_rows()}
+    offenders = sorted(url for url in theirs if not ours.get(url))
+    assert not offenders, (
+        f"{len(offenders)} of {len(theirs)} mailboxes Mail counts read empty here: "
+        f"{offenders}"
+    )

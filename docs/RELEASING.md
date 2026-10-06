@@ -119,4 +119,5 @@ not close a milestone just because a same-numbered release went out.
       `https://pypi.org/pypi/macos-apps-mcp/X.Y.Z/json` returns 200
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
+- [ ] Build log shows `stream smoke ok` (#286)
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha

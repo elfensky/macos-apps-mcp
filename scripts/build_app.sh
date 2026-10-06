@@ -26,7 +26,14 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
 cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file (codesign)
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
-uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" "$REPO"
+# Install from uv.lock (#286): a bare install resolves the newest versions the open
+# constraints allow, so the bundle shipped mcp 2 while CI tested the lock. Locked
+# deps first (hashes kept), then the project alone.
+REQS="$(mktemp)"
+trap 'rm -f "$REQS"' EXIT
+uv export --project "$REPO" --frozen --no-dev --no-emit-project > "$REQS"
+uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" -r "$REQS"
+uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.
@@ -40,6 +47,15 @@ cp "$REPO/packaging/Info.plist" "$APP/Contents/Info.plist"
 # Smoke: env-free import through the bundled interpreter (getpath layout claim).
 env -i "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
   || { echo "BUNDLE SMOKE FAILED: getpath layout wrong"; exit 1; }
+# Smoke: one streamed tool call through the shim's transport, on the bundled
+# libraries — CI tests uv.lock, this tests what ships (#286).
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P "$REPO/scripts/smoke_stream.py" \
+  || { echo "STREAM SMOKE FAILED: bundled mcp/fastmcp break the shim (#286)"; exit 1; }
+# Precompile every module BEFORE signing: otherwise the daemon writes .pyc into the
+# signed Contents/lib on its first imports and breaks the seal (codesign --strict).
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -m compileall -q -j 0 \
+  "$APP/Contents/lib/python${PYVER}" >/dev/null \
+  || { echo "BYTECODE PRECOMPILE FAILED"; exit 1; }
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"

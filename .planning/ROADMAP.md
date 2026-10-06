@@ -192,12 +192,43 @@ Plans:
   2. A recurring event created with `BYDAY` (including monthly ordinals), `BYMONTHDAY` or `BYMONTH` reads back six months of occurrences matching RFC 5545 expansion; a shape EventKit cannot express is rejected loudly with a typed error naming the shape, never silently saved.
   3. `delete_reminder(id)` defaults `dry_run=True`, logs its own audit verb, and its verify-after-write read confirms the reminder is gone on device — the same contract as `delete_event`.
   4. A reminder list can be created and the new list appears in the adapter's list read.
-  5. Subtasks read and create through the public `parentReminder` route on macOS 14+ and read back under their parent; the tags probe runs as the phase's first task and its answer is the deliverable — tags ship read-only from the Reminders sqlite store with the write gap named in the tool docstring, or the probe's finding is documented and the surface is dropped. No private-API write in either outcome.
+  5. Subtasks and tags ship read-only from the Reminders sqlite store, joined to EventKit by id and schema-fingerprinted: `reminders()` Pointers carry `tags` and `parent` when the store has them, an unreadable store degrades loudly with a `coverage` flag, and the write gap is named in the tool docstrings. Spike 002 (2026-09-28) settled it: `EKReminder.parentReminder` is not public API, so there is no subtask or tag write. No private-API write in any outcome.
   6. `events()` and `reminders()` Pointers carry the owning calendar or list id in `folder` — the same container token `free_busy(calendars=…)` and the write tools already take; a unit test on `_event_pointer` and `_reminder_pointer` with a fake `calendar()` passes, and a caller filters by calendar without the per-calendar `free_busy` workaround (#207).
   7. `rollback()`'s unverified delete of a windowless outgoing message has a decided handling (#229): a device probe settles whether a retry, a different mitigation or a documented caller contract fits; the chosen handling ships, an outbound call that leaves a message behind says so loudly, and the #229 xfail is removed or its reason names the decision. Verified on device with the Mail watchdog running.
   8. The reply quote's read of the original is decided by the five dedicated device runs (#230), with the newest inbox message in an account a probe may target: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation (a longer cap for this one read, or a caller note in the tool docstring) and a `docs/mail-applescript-facts.md` entry that separates a transient event-queue stall from the permanent wedge (§9b).
 
-**Plans**: TBD
+**Plans**: 10/10 plans executed in 10 waves
+
+Plans:
+**Wave 1**
+- [x] 03-01-PLAN.md — Device probes first: list save on the default source, reminder BY* round trip, spike 008 alarm harness on Google (D-23)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 03-02-PLAN.md — Container ids in `Pointer.folder` for events and reminders (#207) and `create_reminder_list` (#92)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 03-03-PLAN.md — BY* recurrence: parse, validate, 9-argument build, part-by-part verify, reminder BY* (#90)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 03-04-PLAN.md — DTSTART membership note and six-month RFC 5545 expansion test; python-dateutil dev-only after owner verify (#90)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 03-05-PLAN.md — Event alarms: minutes before the start, all-day counted from local midnight, at most 5, tri-state on update (#89)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [x] 03-06-PLAN.md — Tags and parent links read-only from the Reminders sqlite store; `coverage` when the store is unreadable (#91)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [x] 03-07-PLAN.md — `delete_reminder` with dry-run default, gone-check and the subtask guard (#92)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [x] 03-08-PLAN.md — Parent-aware `complete_reminder`; gone-check added to `delete_event`
+
+**Wave 9** *(blocked on Wave 8 completion)*
+- [x] 03-09-PLAN.md — Device sweep on iCloud and Google; owner builds the cascade fixture in Reminders.app
+
+**Wave 10** *(blocked on Wave 9 completion)*
+- [x] 03-10-PLAN.md — Cascade proof on the fixture; MAIL-05/06 confirmed from the record; issues #89/#90/#91/#92/#207 closed
 
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
@@ -255,7 +286,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
-| 3. EventKit Depth — Calendar & Reminders | 0/TBD | Not started | - |
+| 3. EventKit Depth — Calendar & Reminders | 10/10 | In Progress | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

@@ -45,7 +45,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
 - [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
-- [ ] Reminders: delete + list management (#92); subtasks via the public `parentReminder` route, tags investigate-first and read-only if no public write exists (#91)
+- [ ] Reminders: delete + list management (#92); subtasks and tags read-only from the Reminders sqlite store — no public write route exists (spike 002, 2026-09-28) (#91)
 - [ ] Notes: semantic search sidecar — decision first, then an optional `[semantic]` extra (#93)
 - [ ] Photos: settle osxphotos vs PhotoKit by running `uv add`; albums, bounded metadata, export to disk (#96)
 

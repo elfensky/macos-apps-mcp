@@ -48,6 +48,10 @@ class _FakeSource:
         self.queries.append(query)
         return [Pointer(id="P-1", summary="s", deeplink="d")]
 
+    def read(self, query: str) -> dict:
+        # reminders(): the EventKit pointers in the {results, coverage?} envelope (#91)
+        return read_result(self.get_pointers(query))
+
     def inbox_search(self, query: str) -> dict:
         # the mail read in its bounded-read envelope (#156), exactly as MailAdapter
         # wraps its own get_pointers
@@ -101,7 +105,7 @@ def test_reminders_tool_dispatches(monkeypatch):
     monkeypatch.setattr(srv, "_reminders", fake)
     out = srv.reminders("overdue")
     assert fake.queries == ["overdue"]
-    assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    assert out == {"results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]}
 
 
 def test_events_tool_dispatches(monkeypatch):
@@ -279,9 +283,9 @@ class _FakeWriter:
         self.calls.append(("update_reminder", ident, data))
         return Pointer(id=ident, summary="s", deeplink="d")
 
-    def complete_reminder(self, ident: str) -> Pointer:
+    def complete_reminder(self, ident: str) -> dict:
         self.calls.append(("complete_reminder", ident))
-        return Pointer(id=ident, summary="done", deeplink="d")
+        return Pointer(id=ident, summary="done", deeplink="d").as_dict()
 
     def create_event(self, data: CalendarEventData) -> Pointer:
         self.calls.append(("create_event", data))
@@ -372,6 +376,35 @@ def test_update_event_builds_typed_payload(monkeypatch):
     assert out == {"id": "E-1", "summary": "s", "deeplink": "d"}
 
 
+def test_create_event_alarms_become_a_tuple(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event(
+        "Standup",
+        start="2026-06-24T09:00:00",
+        end="2026-06-24T09:15:00",
+        alarms=[15, 60],
+    )
+    assert fake.calls[0][1].alarms == (15, 60)
+
+
+def test_create_event_without_alarms_hands_none(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event("Standup", start="2026-06-24T09:00:00", end="2026-06-24T09:15:00")
+    assert fake.calls[0][1].alarms is None
+
+
+def test_update_event_alarms_tri_state(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    when = dict(start="2026-06-24T09:00:00", end="2026-06-24T09:15:00")
+    srv.update_event("E-1", "Standup", **when)  # omitted → leave untouched
+    srv.update_event("E-1", "Standup", alarms=[], **when)  # [] → clear
+    srv.update_event("E-1", "Standup", alarms=[15], **when)
+    assert [c[2].alarms for c in fake.calls] == [None, (), (15,)]
+
+
 def test_delete_event_dispatches(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
@@ -391,6 +424,21 @@ def test_delete_event_bare_call_previews(monkeypatch):
     monkeypatch.setattr(srv, "_calendar", _Cal())
     srv.delete_event("E-1")
     assert calls == [("E-1", None, True)]
+
+
+def test_delete_reminder_dispatches_with_the_dry_run_default(monkeypatch):
+    # REM-01 (#92): a bare call previews; the tool is one line to the adapter
+    calls = []
+
+    class _Rem:
+        def delete_reminder(self, ident, *, dry_run=True, with_subtasks=False):
+            calls.append((ident, dry_run, with_subtasks))
+            return {"dry_run": True, "would_delete": {}}
+
+    monkeypatch.setattr(srv, "_reminders", _Rem())
+    srv.delete_reminder("R-1")
+    srv.delete_reminder("R-1", dry_run=False, with_subtasks=True)
+    assert calls == [("R-1", True, False), ("R-1", False, True)]
 
 
 def test_update_event_passes_span(monkeypatch):
@@ -557,7 +605,7 @@ def test_create_event_rejects_bad_rrule(monkeypatch):
             "x",
             start="2026-06-24T09:00:00",
             end="2026-06-24T09:15:00",
-            recurrence="FREQ=WEEKLY;BYDAY=MO",
+            recurrence="FREQ=YEARLY;BYWEEKNO=20",
         )
 
 
@@ -997,15 +1045,19 @@ def test_untrusted_notice_end_to_end_and_leaves_data_intact(monkeypatch):
 
     reminders_res, now_res = asyncio.run(_run())
     assert reminders_res.content[0].text == notices.UNTRUSTED_NOTICE
-    assert reminders_res.data == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    assert reminders_res.data == {
+        "results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    }
     assert now_res.content[0].text != notices.UNTRUSTED_NOTICE  # meta tool exempt
 
 
 def test_untrusted_notice_is_one_block_not_per_item(monkeypatch):
     # Acceptance: exactly one line, never repeated per item.
     class _Multi:
-        def get_pointers(self, query):
-            return [Pointer(id=str(i), summary=f"s{i}", deeplink="d") for i in range(4)]
+        def read(self, query):
+            return read_result(
+                [Pointer(id=str(i), summary=f"s{i}", deeplink="d") for i in range(4)]
+            )
 
     monkeypatch.setattr(srv, "_reminders", _Multi())
 
@@ -1024,7 +1076,7 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
     # An error carries a remediation directive, not user data — it must not be prefixed
     # with the notice. (_guard raises ToolError → call_next raises → prepend skipped.)
     class _Boom:
-        def get_pointers(self, query):
+        def read(self, query):
             raise AutomationDenied("automation off")
 
     monkeypatch.setattr(srv, "_reminders", _Boom())
@@ -1036,6 +1088,40 @@ def test_untrusted_notice_not_added_to_error_results(monkeypatch):
             return str(exc.value)
 
     assert notices.UNTRUSTED_NOTICE not in asyncio.run(_run())
+
+
+def test_reminders_over_the_client_carries_tags_and_parents(monkeypatch, tmp_path):
+    # Tracer (#91): sqlite store -> reminders_store -> join by EventKit id ->
+    # read_result envelope -> the wire. A tool-level call alone would pass while the
+    # FastMCP output schema rejects the list-valued `tags` (RESEARCH Pitfall 4).
+    from macos_apps_mcp.adapters import reminders as rem
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders import _fake_reminder
+    from tests.test_reminders_store import _make_reminders_store
+
+    path = _make_reminders_store(tmp_path / "Data-live.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    items = [_fake_reminder(t, i) for t, i in (("a", "R1"), ("b", "R2"), ("c", "R3"))]
+    fake_store = SimpleNamespace(
+        calendarsForEntityType_=lambda _t: [],
+        predicateForIncompleteRemindersWithDueDateStarting_ending_calendars_=(
+            lambda *_a: None
+        ),
+    )
+    monkeypatch.setattr(rem, "store", lambda: fake_store)
+    monkeypatch.setattr(rem, "run_native", lambda fn: fn())
+    monkeypatch.setattr(rem, "_fetch_reminders", lambda _s, _p: items)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("reminders", {"due": "today"})
+
+    data = asyncio.run(_run()).data
+    assert set(data) == {"results"}  # no coverage key: the store was readable
+    r1, r2, r3 = data["results"]
+    assert r1["tags"] == ["Work", "home"] and "parent" not in r1
+    assert r2["parent"] == "R1" and "tags" not in r2
+    assert "tags" not in r3 and "parent" not in r3
 
 
 # --- dry_run dispatch (#54) ----------------------------------------------------------
@@ -1123,3 +1209,11 @@ def test_ping_returns_the_server_identity():
     # #110: through the mac-mcp → macos-apps-mcp rename only a grep gate kept this
     # string consistent — pin the identity so a stray edit can't pass CI silently.
     assert srv.ping() == "macos-apps-mcp ok"
+
+
+def test_the_tag_and_subtask_write_gap_is_named_where_the_model_reads_it():
+    # D-16: no public API writes a tag or nests a reminder, so the three reminder
+    # docstrings say so and the model does not try.
+    for fn in (srv.reminders, srv.create_reminder, srv.update_reminder):
+        assert "no public API" in fn.__doc__, fn.__name__
+    assert "Full Disk Access" in srv.reminders.__doc__

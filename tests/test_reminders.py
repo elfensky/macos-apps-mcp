@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from macos_apps_mcp import tiers
 from macos_apps_mcp.adapters.reminders import (
     _due_tuple,
     _expected_due_tuple,
@@ -23,7 +24,7 @@ from macos_apps_mcp.errors import AmbiguousTarget, VerificationFailed
 from tests._fakes import fake_rule
 
 
-def _fake_reminder(title, ident, due=None):
+def _fake_reminder(title, ident, due=None, calendar_id="L-1"):
     due_comps = None
     if due is not None:
         y, m, d = due
@@ -32,6 +33,12 @@ def _fake_reminder(title, ident, due=None):
         title=lambda: title,
         calendarItemIdentifier=lambda: ident,
         dueDateComponents=lambda: due_comps,
+        # None means a reminder with no list
+        calendar=(
+            (lambda: None)
+            if calendar_id is None
+            else (lambda: SimpleNamespace(calendarIdentifier=lambda: calendar_id))
+        ),
     )
 
 
@@ -316,6 +323,77 @@ def test_verify_reminder_matching_recurrence_passes():
     _verify_reminder(fresh, "R-1", data, "L-Home")  # no raise
 
 
+def test_verify_reminder_dropped_bymonthday_raises():
+    data = ReminderData(
+        title="Pay rent",
+        due=datetime(2026, 6, 25, 9, 0),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYMONTHDAY=1,15"),
+    )
+    fresh = _fake_persisted(
+        title="Pay rent", due=_comps(2026, 6, 25, 9, 0), rule=fake_rule(freq=2)
+    )
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_reminder(fresh, "R-1", data, "L-Home")
+
+
+def _until_data():
+    return ReminderData(
+        title="Gym",
+        due=datetime(2026, 6, 25, 9, 0),
+        recurrence=Recurrence.from_rrule("FREQ=WEEKLY;BYDAY=MO;UNTIL=20270115"),
+    )
+
+
+def test_verify_reminder_until_on_another_day_raises():
+    # owner override of A5 (2026-10-06): a reminder's UNTIL is compared by day
+    rule = fake_rule(freq=1, byday=[(0, "MO")], until=datetime(2027, 1, 16, 9, 0))
+    fresh = _fake_persisted(title="Gym", due=_comps(2026, 6, 25, 9, 0), rule=rule)
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_reminder(fresh, "R-1", _until_data(), "L-Home")
+
+
+def test_verify_reminder_until_any_time_that_day_passes():
+    for end in (datetime(2027, 1, 15, 0, 0), datetime(2027, 1, 15, 23, 59, 59)):
+        rule = fake_rule(freq=1, byday=[(0, "MO")], until=end)
+        fresh = _fake_persisted(title="Gym", due=_comps(2026, 6, 25, 9, 0), rule=rule)
+        _verify_reminder(fresh, "R-1", _until_data(), "L-Home")  # no raise
+
+
+def test_update_reminder_resend_text_carries_the_byday_part(monkeypatch):
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.errors import RecurrenceRequired
+
+    target = SimpleNamespace(
+        isCompleted=lambda: False,  # an EKReminder
+        recurrenceRules=lambda: [fake_rule(freq=1, byday=[(0, "MO"), (0, "WE")])],
+    )
+    s = SimpleNamespace(calendarItemWithIdentifier_=lambda _i: target)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    with pytest.raises(RecurrenceRequired, match="BYDAY=MO,WE"):
+        rem.RemindersAdapter().update_reminder("R-1", ReminderData(title="Renamed"))
+
+
+def test_update_reminder_refuses_a_calendar_event_before_any_setter(monkeypatch):
+    # an EKEvent has no isCompleted; the setters must never run on it (WR-01)
+    import macos_apps_mcp.adapters.reminders as rem
+
+    touched = []
+    event = SimpleNamespace(
+        recurrenceRules=lambda: None,
+        setTitle_=lambda v: touched.append(("title", v)),
+        setNotes_=lambda v: touched.append(("notes", v)),
+        setPriority_=lambda v: touched.append(("priority", v)),
+    )
+    s = SimpleNamespace(calendarItemWithIdentifier_=lambda _i: event)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    with pytest.raises(ValueError, match="not a reminder.*update_event") as exc:
+        rem.RemindersAdapter().update_reminder("E-1", ReminderData(title="Renamed"))
+    assert "Nothing was changed" in str(exc.value)
+    assert touched == []
+
+
 def test_verify_reminder_nfd_title_matches_nfc_persisted():
     # Cocoa normalizes to NFC on store — a byte-exact diff would false-fail a
     # correct write (#49).
@@ -366,3 +444,780 @@ def test_reminders_snapshot_missing_returns_none(monkeypatch):
     fake_store = SimpleNamespace(calendarItemWithIdentifier_=lambda i: None)
     monkeypatch.setattr(rem, "store", lambda: fake_store)
     assert rem.RemindersAdapter().snapshot("R-1") is None
+
+
+# --- container id on the pointer (REM-06, D-12, #207) --------------------------------
+
+
+def test_reminder_pointer_folder_is_the_list_identifier():
+    p = _reminder_pointer(_fake_reminder("Buy milk", "R-1", calendar_id="L-9"))
+    assert p.as_dict()["folder"] == "L-9"
+
+
+def test_reminder_pointer_folder_omitted_when_no_list():
+    p = _reminder_pointer(_fake_reminder("Orphan", "R-2", calendar_id=None))
+    assert "folder" not in p.as_dict()
+
+
+def test_reminder_pointer_folder_separates_lists_that_share_a_title():
+    # two lists both titled "Inbox": the folder (identifier) tells their reminders apart
+    a = _reminder_pointer(_fake_reminder("Inbox", "R-1", calendar_id="L-1"))
+    b = _reminder_pointer(_fake_reminder("Inbox", "R-2", calendar_id="L-2"))
+    assert (a.folder, b.folder) == ("L-1", "L-2")
+
+
+def test_reminder_pointer_folder_equals_the_list_pointer_id():
+    cal = SimpleNamespace(calendarIdentifier=lambda: "L:1/x ", title=lambda: "Inbox")
+    r = _fake_reminder("Buy milk", "R-1", calendar_id="L:1/x ")
+    assert _reminder_pointer(r).folder == _list_pointer(cal).id
+
+
+def test_get_pointers_folder_keeps_fetch_order(monkeypatch):
+    # adding folder must not reorder: EventKit's fetch order r3, r1, r2 survives
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+
+    s = _fake_store(["Work"])
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    monkeypatch.setattr(rem, "_incomplete_due_pred", lambda s, end, cals: cals)
+    order = [
+        _fake_reminder("c", "R-3", calendar_id="L-3"),
+        _fake_reminder("a", "R-1", calendar_id="L-1"),
+        _fake_reminder("b", "R-2", calendar_id="L-2"),
+    ]
+    monkeypatch.setattr(rem, "_fetch_reminders", lambda s, cals: order)
+    ptrs = RemindersAdapter().get_pointers("today")
+    assert [(p.id, p.folder) for p in ptrs] == [
+        ("R-3", "L-3"),
+        ("R-1", "L-1"),
+        ("R-2", "L-2"),
+    ]
+
+
+# --- create_reminder_list on the default account (REM-02, D-22, #92) -----------------
+
+
+def _list_env(
+    monkeypatch,
+    existing=(("L-1", "Inbox"),),
+    source="iCloud",
+    save_error=None,
+    persist=True,
+    has_default=True,
+    persisted_title=None,
+):
+    """Wire create_reminder_list to fakes. ``save_error``: an error code (int) the save
+    reports; ``persist=False``: the save says OK but the list never shows up."""
+    import macos_apps_mcp.adapters.reminders as rem
+
+    cals = [
+        SimpleNamespace(calendarIdentifier=lambda i=i: i, title=lambda t=t: t)
+        for i, t in existing
+    ]
+    saves, runs = [], []
+
+    def new_cal(_etype, _store):
+        c = SimpleNamespace(src=None, name=None, ident=f"NEW-{len(saves) + 1}")
+        c.setTitle_ = lambda t: setattr(c, "name", t)
+        c.setSource_ = lambda src: setattr(c, "src", src)
+        c.title = lambda: c.name
+        c.calendarIdentifier = lambda: c.ident
+        return c
+
+    def save(cal, commit, _err):
+        saves.append((cal, commit))
+        if save_error is not None:
+            return (False, SimpleNamespace(code=lambda: save_error))
+        if persisted_title is not None:
+            cal.name = persisted_title  # the store re-wrote the title
+        if persist:
+            cals.append(cal)
+        return (True, None)
+
+    default = SimpleNamespace(source=lambda: SimpleNamespace(title=lambda: source))
+    s = SimpleNamespace(
+        calendarsForEntityType_=lambda _e: list(cals),
+        defaultCalendarForNewReminders=lambda: default if has_default else None,
+        saveCalendar_commit_error_=save,
+    )
+    fake_ek = SimpleNamespace(
+        EKEntityTypeReminder=1,
+        EKErrorSourceDoesNotAllowCalendarAddDelete=17,
+        EKErrorSourceDoesNotAllowReminders=24,
+        EKCalendar=SimpleNamespace(calendarForEntityType_eventStore_=new_cal),
+    )
+    monkeypatch.setattr(rem, "EK", fake_ek)
+    monkeypatch.setattr(rem, "store", lambda: s)
+    monkeypatch.setattr(rem, "run_native", lambda f: (runs.append(1), f())[1])
+    return SimpleNamespace(adapter=rem.RemindersAdapter(), saves=saves, runs=runs)
+
+
+def test_create_reminder_list_saves_once_and_returns_the_list_pointer(monkeypatch):
+    env = _list_env(monkeypatch)
+    p = env.adapter.create_reminder_list("Groceries")
+    assert len(env.saves) == 1 and env.saves[0][1] is True
+    assert (p.id, p.summary, p.deeplink) == ("NEW-1", "Groceries", "")
+    assert env.saves[0][0].src.title() == "iCloud"  # the default list's source
+
+
+def test_create_reminder_list_refuses_an_exact_duplicate_naming_its_id(monkeypatch):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError, match="L-1") as ei:
+        env.adapter.create_reminder_list("Inbox")
+    assert "list_name" in str(ei.value)
+    assert env.saves == []
+
+
+def test_create_reminder_list_accepts_a_name_differing_only_in_case(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("inbox")  # write resolution is exact (#55)
+    assert len(env.saves) == 1
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "   ", "a\x07b", "tab\there", " lead", "trail ", "\u00a0nb"]
+)
+def test_create_reminder_list_bad_name_raises_before_any_native_call(monkeypatch, bad):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError):
+        env.adapter.create_reminder_list(bad)
+    assert env.runs == [] and env.saves == []
+
+
+def test_create_reminder_list_keeps_the_name_raw(monkeypatch):
+    env = _list_env(monkeypatch)
+    assert env.adapter.create_reminder_list("Spaced  Out").summary == "Spaced  Out"
+
+
+@pytest.mark.parametrize("code", [17, 24])
+def test_create_reminder_list_refusing_source_maps_to_write_refused(monkeypatch, code):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, save_error=code)
+    with pytest.raises(WriteRefused, match="iCloud") as ei:
+        env.adapter.create_reminder_list("Groceries")
+    assert "no list was created" in str(ei.value)
+
+
+def test_create_reminder_list_other_save_failure_uses_refused_write(monkeypatch):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, save_error=5)
+    with pytest.raises(WriteRefused, match="refused by the store"):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_without_a_default_list_is_write_refused(monkeypatch):
+    from macos_apps_mcp.errors import WriteRefused
+
+    env = _list_env(monkeypatch, has_default=False)
+    with pytest.raises(WriteRefused, match="default"):
+        env.adapter.create_reminder_list("Groceries")
+    assert env.saves == []
+
+
+def test_create_reminder_list_unverified_save_is_verification_failed(monkeypatch):
+    env = _list_env(monkeypatch, persist=False)
+    with pytest.raises(VerificationFailed):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_whitespace_refusal_names_the_fix(monkeypatch):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError, match="start or end with whitespace") as exc:
+        env.adapter.create_reminder_list("Groceries ")
+    assert "No list was created" in str(exc.value)
+
+
+def test_create_reminder_list_a_rewritten_title_is_verification_failed(monkeypatch):
+    # the store kept the list but changed its title: the id alone is not proof (IN-02)
+    env = _list_env(monkeypatch, persisted_title="Groceries (1)")
+    with pytest.raises(VerificationFailed, match="Groceries"):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_second_identical_create_is_a_duplicate(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("Groceries")
+    with pytest.raises(ValueError, match="NEW-1"):
+        env.adapter.create_reminder_list("Groceries")
+    assert len(env.saves) == 1  # exactly one list exists
+
+
+def test_create_reminder_list_scan_save_and_verify_share_one_run_native(monkeypatch):
+    env = _list_env(monkeypatch)
+    env.adapter.create_reminder_list("Groceries")
+    assert env.runs == [1]
+
+
+# --- RemindersAdapter.read: the store plane degrades loudly (#91, D-15) ---------------
+
+
+def _adapter_with_pointers(monkeypatch):
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+
+    pointers = [
+        Pointer(id="R1", summary="one", deeplink="d1", folder="L-1"),
+        Pointer(id="R2", summary="two", deeplink="d2", folder="L-1"),
+    ]
+    monkeypatch.setattr(RemindersAdapter, "get_pointers", lambda self, q: pointers)
+    return RemindersAdapter(), pointers
+
+
+def _plain(pointers):
+    return [p.as_dict() for p in pointers]
+
+
+def test_read_with_an_ungranted_store_keeps_the_eventkit_pointers(monkeypatch):
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+
+    def denied():
+        raise FullDiskAccessDenied("Grant Full Disk Access in System Settings.")
+
+    monkeypatch.setattr(reminders_store, "store_path", denied)
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)  # no tags, no parent keys
+    assert out["coverage"].startswith("tags and parent links unavailable:")
+    assert "Grant Full Disk Access" in out["coverage"]
+
+
+def test_read_with_a_drifted_store_names_the_drift(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-d.sqlite", drop_parent_column=True)
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)
+    assert out["coverage"].startswith("tags and parent links unavailable:")
+    assert "ZPARENTREMINDER" in out["coverage"]
+
+
+def test_read_with_a_store_that_fails_mid_read_gives_no_partial_tags(
+    monkeypatch, tmp_path
+):
+    # a locked or rewritten store: the sqlite error becomes SchemaDrift inside
+    # read_via_sqlite, so the tags read first are NOT presented as the whole answer
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-m.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "_PARENTS", "SELECT nope FROM nowhere")
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)  # R1 has tags in the store, none shown
+    assert "coverage" in out
+
+
+def test_read_with_a_missing_store_still_returns_the_pointers(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    monkeypatch.setattr(reminders_store, "_STORES", tmp_path / "absent")
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)
+    assert "not found" in out["coverage"]
+
+
+def test_read_names_the_pointers_the_store_does_not_have(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    ghost = Pointer(id="GHOST", summary="three", deeplink="d3", folder="L-1")
+    monkeypatch.setattr(
+        RemindersAdapter, "get_pointers", lambda self, q: [*pointers, ghost]
+    )
+    path = _make_reminders_store(tmp_path / "Data-g.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    out = adapter.read("today")
+    assert [r["id"] for r in out["results"]] == ["R1", "R2", "GHOST"]
+    assert out["results"][0]["tags"] == ["Work", "home"]  # the rest is still enriched
+    assert "1 of 3 reminders are not in the Reminders store" in out["coverage"]
+
+
+def test_read_with_every_pointer_in_the_store_has_no_coverage(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, _pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-ok.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    assert "coverage" not in adapter.read("today")
+
+
+def test_read_never_folds_an_eventkit_failure_into_coverage(monkeypatch):
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.errors import AccessDenied
+
+    def boom(self, query):
+        raise AccessDenied("no Reminders access")
+
+    monkeypatch.setattr(RemindersAdapter, "get_pointers", boom)
+    with pytest.raises(AccessDenied):
+        RemindersAdapter().read("today")
+
+
+# --- delete_reminder (REM-01, #92) ----------------------------------------------------
+
+
+class _EKWorld:
+    """An EKEventStore stand-in for the delete tests: it answers the by-id fetch and the
+    remove, records every remove call, and can make a removal NOT stick.
+
+    ``cascade``   parent id -> ids EventKit removes with it (the subtasks).
+    ``survivors`` ids that stay fetchable after the remove (an iCloud restore)."""
+
+    def __init__(self, *items, cascade=None, survivors=()):
+        self.items = {i.calendarItemIdentifier(): i for i in items}
+        self.cascade = cascade or {}
+        self.survivors = set(survivors)
+        self.removed: list[str] = []
+
+    def calendarItemWithIdentifier_(self, ident):
+        return self.items.get(ident)
+
+    def removeReminder_commit_error_(self, r, commit, err):
+        ident = r.calendarItemIdentifier()
+        self.removed.append(ident)
+        for gone in (ident, *self.cascade.get(ident, ())):
+            if gone not in self.survivors:
+                self.items.pop(gone, None)
+        return True, None
+
+
+def _ek_item(ident, title="Item", *, reminder=True):
+    item = SimpleNamespace(
+        title=lambda: title,
+        calendarItemIdentifier=lambda: ident,
+        dueDateComponents=lambda: None,
+        calendar=lambda: SimpleNamespace(calendarIdentifier=lambda: "L-1"),
+        refresh=lambda: True,
+    )
+    if reminder:
+        item.isCompleted = lambda: False  # only an EKReminder has it
+    return item
+
+
+def _wire_delete(monkeypatch, tmp_path, world, *, rows=()):
+    """Patch the adapter's store and worker, and point the store plane at a fixture
+    Reminders store carrying ``rows`` (pk, ckid, parent pk, tombstone)."""
+    import macos_apps_mcp.adapters.reminders as rem
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _add_reminders, _make_reminders_store
+
+    path = _make_reminders_store(tmp_path / "Data-del.sqlite")
+    _add_reminders(path, list(rows))
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(rem, "store", lambda: world)
+    monkeypatch.setattr(rem, "run_native", lambda f: f())
+    return rem.RemindersAdapter()
+
+
+_P0 = [(30, "P0", None, 0)]  # a reminder with no subtasks
+
+
+def test_delete_reminder_dry_run_previews_and_removes_nothing(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0", "Water plants"))
+    out = _wire_delete(monkeypatch, tmp_path, world, rows=_P0).delete_reminder("P0")
+    assert out["dry_run"] is True
+    assert out["would_delete"]["id"] == "P0" and out["would_delete"]["folder"] == "L-1"
+    assert world.removed == []
+
+
+def test_delete_reminder_removes_once_and_proves_it_gone(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    out = _wire_delete(monkeypatch, tmp_path, world, rows=_P0).delete_reminder(
+        "P0", dry_run=False
+    )
+    assert out == {"deleted": "P0"}
+    assert world.removed == ["P0"]
+
+
+def test_delete_reminder_still_there_after_the_remove_is_not_reported_deleted(
+    monkeypatch, tmp_path
+):
+    world = _EKWorld(_ek_item("P0"), survivors={"P0"})  # iCloud put it back
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    with pytest.raises(VerificationFailed, match="still present"):
+        adapter.delete_reminder("P0", dry_run=False)
+
+
+def test_delete_reminder_unknown_id_is_refused(monkeypatch, tmp_path):
+    world = _EKWorld()
+    adapter = _wire_delete(monkeypatch, tmp_path, world)
+    with pytest.raises(ValueError, match="no reminder with id"):
+        adapter.delete_reminder("nope", dry_run=False)
+    assert world.removed == []
+
+
+def test_delete_reminder_never_removes_a_calendar_event(monkeypatch, tmp_path):
+    # the base id of an event resolves through calendarItemWithIdentifier_ too
+    world = _EKWorld(_ek_item("E-1", reminder=False))
+    adapter = _wire_delete(monkeypatch, tmp_path, world)
+    with pytest.raises(ValueError, match="not a reminder"):
+        adapter.delete_reminder("E-1", dry_run=False)
+    assert world.removed == []
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_delete_reminder_with_an_unreadable_store_refuses_and_changes_nothing(
+    monkeypatch, tmp_path, dry_run
+):
+    # D-18: without the store the cascade is unknowable — a blind delete is refused
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied, WriteRefused
+
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("grant Full Disk Access to the launcher")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    with pytest.raises(WriteRefused) as exc:
+        adapter.delete_reminder("P0", dry_run=dry_run)
+    assert "grant Full Disk Access" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.removed == []
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_delete_reminder_with_no_store_row_refuses_and_changes_nothing(
+    monkeypatch, tmp_path, dry_run
+):
+    # EventKit knows P0, the store does not (wrong file / not synced): the cascade is
+    # unknowable, so the delete is refused — never read as "no subtasks"
+    from macos_apps_mcp.errors import WriteRefused
+
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world)  # no row for P0
+    with pytest.raises(WriteRefused) as exc:
+        adapter.delete_reminder("P0", dry_run=dry_run)
+    assert "not in the Reminders store" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.removed == []
+
+
+def test_second_real_delete_of_the_same_id_is_an_error_not_a_second_success(
+    monkeypatch, tmp_path
+):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    assert adapter.delete_reminder("P0", dry_run=False) == {"deleted": "P0"}
+    with pytest.raises(ValueError, match="no reminder with id"):
+        adapter.delete_reminder("P0", dry_run=False)
+    assert world.removed == ["P0"]
+
+
+def test_two_dry_runs_agree_and_change_nothing(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    assert adapter.delete_reminder("P0") == adapter.delete_reminder("P0")
+    assert world.removed == []
+
+
+def test_delete_snapshotter_returns_the_pointer_or_none(monkeypatch, tmp_path):
+    import macos_apps_mcp.adapters.reminders as rem
+
+    world = _EKWorld(_ek_item("P0", "Water plants"), _ek_item("E-1", reminder=False))
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    snap = rem.ReminderDeleteSnapshotter()
+    assert snap.snapshot("P0").id == "P0"
+    assert snap.snapshot("absent") is None
+    assert snap.snapshot("E-1") is None  # an event is no reminder: no before-state
+
+
+# --- delete_reminder: the subtask guard (D-19, D-20) ---------------------------------
+
+_P1_ROWS = [  # a parent with three live subtasks, in creation order
+    (10, "P1", None, 0),
+    (11, "C1", 10, 0),
+    (12, "C2", 10, 0),
+    (13, "C3", 10, 0),
+]
+
+
+def _parent_world(*, survivors=(), missing=()):
+    """P1 with children C1..C3 in EventKit; ``missing`` children EventKit cannot fetch
+    (the store lists them, EventKit does not — spike 007)."""
+    kids = [_ek_item(c, f"child {c}") for c in ("C1", "C2", "C3") if c not in missing]
+    return _EKWorld(
+        _ek_item("P1", "Parent task"),
+        *kids,
+        cascade={"P1": ["C1", "C2", "C3"]},
+        survivors=survivors,
+    )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_a_parent_with_subtasks_is_refused_unless_confirmed(
+    monkeypatch, tmp_path, dry_run
+):
+    from macos_apps_mcp.errors import SubtasksRequired
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    with pytest.raises(SubtasksRequired) as exc:
+        adapter.delete_reminder("P1", dry_run=dry_run)
+    text = str(exc.value)
+    assert "3 subtasks" in text and "with_subtasks=True" in text
+    assert "No change was made" in text
+    for kid in ("C1", "C2", "C3"):
+        assert f"child {kid} [{kid}]" in text  # each subtask as `summary [id]`
+    assert world.removed == []  # not removed, in the dry run or the real call
+    assert SubtasksRequired.kind == "subtasks_required"
+
+
+def test_confirmed_dry_run_lists_every_subtask_and_removes_nothing(
+    monkeypatch, tmp_path
+):
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    assert out["dry_run"] is True
+    assert [s["id"] for s in out["would_delete"]["subtasks"]] == ["C1", "C2", "C3"]
+    assert out["cascade"].startswith("and 3 subtasks")
+    assert world.removed == []
+
+
+def test_confirmed_delete_names_every_removed_reminder(monkeypatch, tmp_path):
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", dry_run=False, with_subtasks=True)
+    assert out["deleted"] == "P1"
+    assert [s["id"] for s in out["subtasks"]] == ["C1", "C2", "C3"]
+    assert out["cascade"].startswith("and 3 subtasks")
+    assert world.removed == ["P1"]  # one remove call; EventKit takes the children
+
+
+def test_a_subtask_that_is_still_there_after_the_delete_is_named(monkeypatch, tmp_path):
+    world = _parent_world(survivors={"C2"})
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    with pytest.raises(VerificationFailed, match="C2"):
+        adapter.delete_reminder("P1", dry_run=False, with_subtasks=True)
+
+
+def test_a_store_subtask_eventkit_cannot_fetch_is_still_counted(monkeypatch, tmp_path):
+    # RESEARCH Pitfall 7: dropping it would report fewer reminders than were removed
+    world = _parent_world(missing={"C3"})
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    ghost = out["would_delete"]["subtasks"][2]
+    assert ghost["id"] == "C3"
+    assert ghost["summary"] == "(subtask not visible to EventKit)"
+    assert out["cascade"].startswith("and 3 subtasks")
+
+
+def test_a_parent_without_subtasks_needs_no_confirmation(monkeypatch, tmp_path):
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    out = adapter.delete_reminder("P0", dry_run=False)
+    assert out == {"deleted": "P0"}  # no `subtasks`, no `cascade`
+
+
+def test_the_delete_snapshotter_records_the_parent_and_every_subtask(
+    monkeypatch, tmp_path
+):
+    import macos_apps_mcp.adapters.reminders as rem
+
+    world = _parent_world(missing={"C3"})
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    before = rem.ReminderDeleteSnapshotter().snapshot("P1").as_dict()
+    assert [s["id"] for s in before["subtasks"]] == ["C1", "C2", "C3"]
+
+
+def test_the_shared_snapshot_makes_no_store_read(monkeypatch, tmp_path):
+    # D-20: update/complete share this snapshot; a store read there would log
+    # before=None whenever the grant is missing
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("no grant")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    assert adapter.snapshot("P1").id == "P1"
+
+
+@pytest.mark.skipif(
+    tiers.read_only(),
+    reason="delete_reminder is a write tool — absent under MACOS_APPS_READ_ONLY, so "
+    "the live MCP Client cannot call it (its absence is test_registry's concern)",
+)
+def test_the_audit_before_state_records_all_the_reminders_a_delete_removes(
+    monkeypatch, tmp_path
+):
+    import asyncio
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.audit as au
+    import macos_apps_mcp.server as srv
+
+    world = _parent_world()
+    _wire_delete(monkeypatch, tmp_path, world, rows=_P1_ROWS)
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            await c.call_tool(
+                "delete_reminder",
+                {"id": "P1", "dry_run": False, "with_subtasks": True},
+            )
+            return await c.call_tool("audit", {})
+
+    records = asyncio.run(_run()).data
+    newest = next(r for r in records if r["tool"] == "delete_reminder")
+    assert newest["op"] == "delete"
+    assert [s["id"] for s in newest["before"]["subtasks"]] == ["C1", "C2", "C3"]
+    assert world.removed == ["P1"]
+
+
+# --- complete_reminder: the open-subtask report (D-21, #91) --------------------------
+
+
+class _CompleteWorld(_EKWorld):
+    """``_EKWorld`` plus the save ``complete_reminder`` makes; records every save."""
+
+    def __init__(self, *items):
+        super().__init__(*items)
+        self.saved: list[str] = []
+
+    def saveReminder_commit_error_(self, r, commit, err):
+        self.saved.append(r.calendarItemIdentifier())
+        return True, None
+
+
+def _open_item(ident, title="Item", *, done=False):
+    """An EKReminder stand-in whose completed state ``setCompleted_`` flips."""
+    item = _ek_item(ident, title)
+    state = {"done": done}
+    item.isCompleted = lambda: state["done"]
+    item.setCompleted_ = lambda v: state.update(done=bool(v))
+    return item
+
+
+_P2_ROWS = [(20, "P2", None, 0), (21, "D1", 20, 0), (22, "D2", 20, 0)]
+
+
+def _wire_complete(monkeypatch, tmp_path, world, *, rows=_P2_ROWS):
+    return _wire_delete(monkeypatch, tmp_path, world, rows=rows)
+
+
+def _complete_world(*, d1_done=False, d2_done=True):
+    return _CompleteWorld(
+        _open_item("P2", "Parent task"),
+        _open_item("D1", "child one", done=d1_done),
+        _open_item("D2", "child two", done=d2_done),
+    )
+
+
+@pytest.mark.skipif(
+    tiers.read_only(),
+    reason="complete_reminder is a write tool — absent under MACOS_APPS_READ_ONLY",
+)
+def test_complete_reminder_over_the_client_lists_the_open_subtask(
+    monkeypatch, tmp_path
+):
+    # the tracer: the dict with a `subtasks` list must pass FastMCP's output validation
+    import asyncio
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.audit as au
+    import macos_apps_mcp.server as srv
+
+    world = _complete_world()
+    _wire_complete(monkeypatch, tmp_path, world)
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+
+    async def _run():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("complete_reminder", {"id": "P2"})
+
+    data = asyncio.run(_run()).data
+    assert world.saved == ["P2"]
+    assert data["id"] == "P2"
+    assert [s["id"] for s in data["subtasks"]] == ["D1"]  # D2 is completed already
+
+
+def test_complete_reminder_leaves_the_subtasks_open(monkeypatch, tmp_path):
+    world = _complete_world()
+    adapter = _wire_complete(monkeypatch, tmp_path, world)
+    out = adapter.complete_reminder("P2")
+    assert [s["summary"] for s in out["subtasks"]] == ["child one"]
+    assert world.saved == ["P2"]  # the parent only: never a child (D-21)
+    assert world.items["D1"].isCompleted() is False
+
+
+def test_complete_reminder_with_only_completed_subtasks_has_no_subtasks_key(
+    monkeypatch, tmp_path
+):
+    world = _complete_world(d1_done=True)
+    out = _wire_complete(monkeypatch, tmp_path, world).complete_reminder("P2")
+    assert out["id"] == "P2" and "subtasks" not in out and "coverage" not in out
+
+
+def test_complete_reminder_without_subtasks_has_no_subtasks_key(monkeypatch, tmp_path):
+    world = _CompleteWorld(_open_item("P0"))
+    out = _wire_complete(monkeypatch, tmp_path, world, rows=_P0).complete_reminder("P0")
+    assert out["id"] == "P0" and "subtasks" not in out and "coverage" not in out
+
+
+def test_complete_reminder_with_an_unreadable_store_refuses_before_any_save(
+    monkeypatch, tmp_path
+):
+    # owner override of A9, 2026-10-06: a parent cannot be told from a plain reminder
+    # without the store, so the completion is refused and nothing is saved
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied, WriteRefused
+
+    world = _complete_world()
+    adapter = _wire_complete(monkeypatch, tmp_path, world)
+
+    def denied(_ident):
+        raise FullDiskAccessDenied("grant Full Disk Access to the launcher")
+
+    monkeypatch.setattr(reminders_store, "subtasks_of", denied)
+    with pytest.raises(WriteRefused) as exc:
+        adapter.complete_reminder("P2")
+    assert "complete_reminder refused" in str(exc.value)
+    assert "grant Full Disk Access" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.saved == []
+    assert world.items["P2"].isCompleted() is False
+
+
+def test_complete_reminder_never_completes_a_calendar_event(monkeypatch, tmp_path):
+    # the base id of an event resolves through calendarItemWithIdentifier_ too
+    world = _CompleteWorld(_ek_item("E-1", reminder=False))
+    adapter = _wire_complete(monkeypatch, tmp_path, world, rows=())
+    with pytest.raises(ValueError, match="not a reminder"):
+        adapter.complete_reminder("E-1")
+    assert world.saved == []
+
+
+def test_complete_reminder_with_no_store_row_refuses_before_any_save(
+    monkeypatch, tmp_path
+):
+    from macos_apps_mcp.errors import WriteRefused
+
+    world = _CompleteWorld(_open_item("P0"))
+    adapter = _wire_complete(monkeypatch, tmp_path, world, rows=())  # no row for P0
+    with pytest.raises(WriteRefused) as exc:
+        adapter.complete_reminder("P0")
+    assert "not in the Reminders store" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.saved == []
+    assert world.items["P0"].isCompleted() is False

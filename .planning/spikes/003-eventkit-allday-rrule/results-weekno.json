@@ -1,0 +1,174 @@
+[
+ {
+  "name": "weekno-20-mo",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO",
+  "dtstart": "2027-05-17T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2027-05-17T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    20
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [
+   "2028-05-15T10:00:00",
+   "2029-05-14T10:00:00",
+   "2030-05-13T10:00:00"
+  ],
+  "extra": []
+ },
+ {
+  "name": "weekno-20-allweek",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=20",
+  "dtstart": "2027-05-17T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2027-05-17T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    20
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 28,
+  "rule_diff": {},
+  "missing": [
+   "2027-05-18T10:00:00",
+   "2027-05-19T10:00:00",
+   "2027-05-20T10:00:00",
+   "2027-05-21T10:00:00"
+  ],
+  "extra": []
+ },
+ {
+  "name": "weekno-20-21-mo",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=20,21;BYDAY=MO",
+  "dtstart": "2027-05-17T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2027-05-17T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    20,
+    21
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 8,
+  "rule_diff": {},
+  "missing": [
+   "2027-05-24T10:00:00",
+   "2028-05-15T10:00:00",
+   "2028-05-22T10:00:00",
+   "2029-05-14T10:00:00"
+  ],
+  "extra": []
+ },
+ {
+  "name": "weekno-last-mo",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=-1;BYDAY=MO",
+  "dtstart": "2026-12-28T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2026-12-28T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    -1
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 0,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 4,
+  "rule_diff": {},
+  "missing": [
+   "2027-12-27T10:00:00",
+   "2028-12-25T10:00:00",
+   "2029-12-24T10:00:00"
+  ],
+  "extra": []
+ },
+ {
+  "name": "weekno-count3",
+  "rrule": "FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO;COUNT=3",
+  "dtstart": "2027-05-17T10:00",
+  "verdict": "OCCURRENCES DIFFER",
+  "saved_start": "2027-05-17T10:00:00",
+  "saved_rule": {
+   "freq": "YEARLY",
+   "interval": 1,
+   "byday": [
+    [
+     0,
+     "MO"
+    ]
+   ],
+   "bymonthday": [],
+   "bymonth": [],
+   "byweekno": [
+    20
+   ],
+   "byyearday": [],
+   "bysetpos": [],
+   "count": 3,
+   "until": null
+  },
+  "n_ek": 1,
+  "n_ref": 3,
+  "rule_diff": {},
+  "missing": [
+   "2028-05-15T10:00:00",
+   "2029-05-14T10:00:00"
+  ],
+  "extra": []
+ }
+]

@@ -3,7 +3,7 @@ EventKit writes)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import EventKit as EK
@@ -31,13 +31,21 @@ def _ns(dt: datetime):
     return F.NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
 
 
-def _fake_event(title, ident, start, end, all_day=False):
+def _fake_calendar(calendar_id):
+    """``calendar()`` for a fake item: None means an item with no calendar."""
+    if calendar_id is None:
+        return lambda: None
+    return lambda: SimpleNamespace(calendarIdentifier=lambda: calendar_id)
+
+
+def _fake_event(title, ident, start, end, all_day=False, calendar_id="C-1"):
     return SimpleNamespace(
         title=lambda: title,
         calendarItemIdentifier=lambda: ident,
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
         isAllDay=lambda: all_day,
+        calendar=_fake_calendar(calendar_id),
     )
 
 
@@ -207,6 +215,24 @@ def test_resolve_single_calendar_among_many_still_works():
 # --- verify-after-write (#49) --------------------------------------------------------
 
 
+class _FakeEvent(SimpleNamespace):
+    def setAlarms_(self, alarms):
+        self.set_alarms_calls.append(alarms)
+
+    def __getattr__(self, name):  # only reached for a missing attribute
+        if name.startswith("set"):
+            return lambda *a: None
+        raise AttributeError(name)
+
+
+def _alarm(offset_s, absolute=False):
+    """A persisted EKAlarm: ``relativeOffset`` seconds (EventKit's own unit)."""
+    return SimpleNamespace(
+        relativeOffset=lambda: offset_s,
+        absoluteDate=lambda: object() if absolute else None,
+    )
+
+
 def _fake_persisted_event(
     title="Standup",
     start=datetime(2026, 6, 24, 9, 0),
@@ -217,8 +243,13 @@ def _fake_persisted_event(
     cal_title="Work",
     cal_id="C-Work",  # verify keys on the identifier now, not the title (#55 review)
     rule=None,
+    alarms=None,
 ):
-    return SimpleNamespace(
+    """A persisted event. ``alarms`` is a list of ``_alarm`` items (None = no alarms);
+    ``setAlarms_`` calls are recorded on ``set_alarms_calls`` and any other setter is a
+    no-op, so the real ``_apply_event`` can run against it."""
+    return _FakeEvent(
+        set_alarms_calls=[],
         title=lambda: title,
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
@@ -229,6 +260,7 @@ def _fake_persisted_event(
             title=lambda: cal_title, calendarIdentifier=lambda: cal_id
         ),
         recurrenceRules=lambda: [rule] if rule is not None else None,
+        alarms=lambda: alarms,
     )
 
 
@@ -382,6 +414,58 @@ def test_verify_event_matching_recurrence_passes():
     _verify_event(fresh, "E-1|x", data, "C-Work")  # no raise
 
 
+def _monthly_2tu_event(**kw):
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"),
+        **kw,
+    )
+
+
+def test_verify_event_byday_matching_passes():
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2, byday=[(2, "TU")]))
+    _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")  # no raise
+
+
+def test_verify_event_dropped_byday_raises():
+    # the store kept MONTHLY but lost the 2TU — presence+cadence alone would pass it
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")
+
+
+def test_verify_event_changed_byday_ordinal_raises():
+    fresh = _fake_persisted_event(rule=fake_rule(freq=2, byday=[(3, "TU")]))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(fresh, "E-1|x", _monthly_2tu_event(), "C-Work")
+
+
+def _timed_until_event():
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU;UNTIL=20270115"),
+    )
+
+
+def test_verify_event_timed_until_compared_at_day_granularity():
+    ok = fake_rule(freq=2, byday=[(2, "TU")], until=datetime(2027, 1, 15, 9, 0))
+    _verify_event(
+        _fake_persisted_event(rule=ok), "E-1|x", _timed_until_event(), "C-Work"
+    )
+
+
+def test_verify_event_timed_until_on_another_day_raises():
+    bad = fake_rule(freq=2, byday=[(2, "TU")], until=datetime(2027, 1, 16, 9, 0))
+    with pytest.raises(VerificationFailed, match="recurs"):
+        _verify_event(
+            _fake_persisted_event(rule=bad), "E-1|x", _timed_until_event(), "C-Work"
+        )
+
+
 def test_verify_event_nfd_title_matches_nfc_persisted():
     # Cocoa treats NFC/NFD as equal — an NFD input persisted as NFC is the store
     # normalizing, not a dropped field (norm_text, #49 review).
@@ -512,10 +596,49 @@ def test_refetch_event_missing_is_rollback():
         _refetch_event(store, "E-404")
 
 
+def _event_data():
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+    )
+
+
+@pytest.mark.parametrize("tool", ["update_event", "delete_event"])
+def test_event_writes_refuse_a_reminder_id_before_any_mutation(monkeypatch, tool):
+    # one id space: a plain (suffix-less) id can name an EKReminder (WR-01)
+    import macos_apps_mcp.adapters.calendar as cal
+
+    touched = []
+    reminder = SimpleNamespace(
+        isCompleted=lambda: False,
+        setTitle_=lambda v: touched.append(v),
+        recurrenceRules=lambda: None,
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: reminder,
+        saveEvent_span_commit_error_=lambda *a: touched.append(a),
+        removeEvent_span_commit_error_=lambda *a: touched.append(a),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+    adapter = cal.CalendarAdapter()
+    call = (
+        (lambda: adapter.update_event("R-1", _event_data()))
+        if tool == "update_event"
+        else (lambda: adapter.delete_event("R-1", dry_run=True))
+    )
+    with pytest.raises(ValueError, match="reminder, not a calendar event") as exc:
+        call()
+    assert "update_reminder / delete_reminder" in str(exc.value)
+    assert "Nothing was changed" in str(exc.value)
+    assert touched == []
+
+
 # --- dry_run delete (#54) ------------------------------------------------------------
 
 
-def _fake_event_full(title, ident, start, end, *, recurring=False):
+def _fake_event_full(title, ident, start, end, *, recurring=False, calendar_id="C-1"):
     # everything _resolve_span + _event_pointer touch; recurrenceRules drives the span.
     return SimpleNamespace(
         title=lambda: title,
@@ -523,8 +646,12 @@ def _fake_event_full(title, ident, start, end, *, recurring=False):
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
         isAllDay=lambda: False,
+        calendar=_fake_calendar(calendar_id),
         recurrenceRules=lambda: [object()] if recurring else None,
     )
+
+
+_EPOCH = 1782205200  # an arbitrary occurrence start; only equality matters
 
 
 def test_delete_event_dry_run_resolves_but_removes_nothing(monkeypatch):
@@ -556,15 +683,88 @@ def test_delete_event_real_returns_deletion_envelope(monkeypatch):
     event = _fake_event_full(
         "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
     )
+    live = [event]  # the remove takes the event out; the gone-check re-resolves it
     store = SimpleNamespace(
-        calendarItemWithIdentifier_=lambda i: event,
-        removeEvent_span_commit_error_=lambda *a: (removed.append(a), (True, None))[1],
+        calendarItemWithIdentifier_=lambda i: live[0] if live else None,
+        removeEvent_span_commit_error_=lambda *a: (
+            removed.append(a),
+            live.clear(),
+            (True, None),
+        )[2],
     )
     monkeypatch.setattr(cal, "run_native", lambda fn: fn())
     monkeypatch.setattr(cal, "store", lambda: store)
 
     assert cal.CalendarAdapter().delete_event("E-1") == {"deleted": "E-1"}
     assert removed  # the event actually got removed
+
+
+def test_delete_event_that_still_resolves_after_the_remove_is_not_reported_deleted(
+    monkeypatch,
+):
+    # D-17: iCloud / Google may restore the event after the commit
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: event,  # still there after the remove
+        removeEvent_span_commit_error_=lambda *a: (True, None),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    with pytest.raises(VerificationFailed, match="still resolves after the delete"):
+        cal.CalendarAdapter().delete_event("E-1")
+
+
+def test_delete_event_this_event_passes_while_the_series_master_lives_on(monkeypatch):
+    # Pitfall 6: the gone-check is occurrence-aware. After a this-event delete of one
+    # occurrence the base id still fetches the master, but the occurrence is gone.
+    import macos_apps_mcp.adapters.calendar as cal
+
+    start = datetime(2026, 6, 23, 9, 0)
+    occ = _fake_event_full("Weekly", "E-3", start, datetime(2026, 6, 23, 9, 30))
+    occ.recurrenceRules = lambda: [object()]
+    occ.startDate = lambda: SimpleNamespace(timeIntervalSince1970=lambda: float(_EPOCH))
+    live = [occ]
+    removed = []
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: occ,  # the master survives the delete
+        predicateForEventsWithStartDate_endDate_calendars_=lambda *a: None,
+        eventsMatchingPredicate_=lambda pred: list(live),
+        removeEvent_span_commit_error_=lambda *a: (
+            removed.append(a),
+            live.clear(),
+            (True, None),
+        )[2],
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    ident = f"E-3|{_EPOCH}"
+    out = cal.CalendarAdapter().delete_event(ident, span="this-event")
+    assert out == {"deleted": ident}
+    assert len(removed) == 1
+
+
+def test_delete_event_dry_run_makes_no_remove_and_no_gone_check(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup", "E-1", datetime(2026, 6, 23, 9, 0), datetime(2026, 6, 23, 9, 15)
+    )
+    lookups = []
+    store = SimpleNamespace(
+        calendarItemWithIdentifier_=lambda i: (lookups.append(i), event)[1],
+        removeEvent_span_commit_error_=lambda *a: pytest.fail("dry run removed"),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert lookups == ["E-1"]  # the one resolve; no second look after a remove
 
 
 def test_delete_event_dry_run_recurring_without_span_still_raises(monkeypatch):
@@ -614,3 +814,288 @@ def test_calendar_snapshot_found(monkeypatch):
     monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: ev)
     p = cal.CalendarAdapter().snapshot("E-1|123")
     assert p is not None and "Standup" in p.summary
+
+
+# --- container id on the pointer (CAL-04, D-12, #207) --------------------------------
+
+
+def test_event_pointer_folder_is_the_calendar_identifier():
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Standup", "E-1", start, start, calendar_id="C-Work")
+    assert _event_pointer(e).as_dict()["folder"] == "C-Work"
+
+
+def test_event_pointer_folder_omitted_when_no_calendar():
+    # a calendar-less event: the key is absent from the wire dict, never null
+    start = datetime(2026, 6, 23, 9, 0)
+    e = _fake_event("Orphan", "E-9", start, start, calendar_id=None)
+    assert "folder" not in _event_pointer(e).as_dict()
+
+
+def test_event_pointer_folder_is_raw_identifier_never_normalized():
+    # compared by exact equality: no trim, case-fold or NFC pass on the way out
+    start = datetime(2026, 6, 23, 9, 0)
+    raw = " Ab:C\u0301/x "
+    e = _fake_event("Standup", "E-1", start, start, calendar_id=raw)
+    assert _event_pointer(e).folder == raw
+
+
+def test_get_pointers_folder_round_trips_into_free_busy(monkeypatch):
+    # tracer: EventKit item -> Pointer.folder -> wire -> accepted back by free_busy
+    import macos_apps_mcp.adapters.calendar as cal
+
+    start = datetime(2026, 6, 23, 9, 0)
+    event = _fake_event("Standup", "E-1", start, start, calendar_id="C-Work")
+    event.availability = lambda: EK.EKEventAvailabilityBusy
+    seen = {}
+
+    def predicate(_s, _e, cals):
+        seen["cals"] = cals
+        return "pred"
+
+    s = SimpleNamespace(
+        calendarsForEntityType_=lambda _e: [
+            SimpleNamespace(calendarIdentifier=lambda: "C-Work", title=lambda: "T")
+        ],
+        predicateForEventsWithStartDate_endDate_calendars_=predicate,
+        eventsMatchingPredicate_=lambda _p: [event],
+    )
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+
+    ptrs = cal.CalendarAdapter().get_pointers("2026-06-23")
+    folder = ptrs[0].as_dict()["folder"]
+    assert folder == "C-Work"
+    cal.CalendarAdapter().get_free_busy(
+        "2026-06-23T00:00:00", "2026-06-24T00:00:00", calendars=[folder]
+    )  # no ValueError: the folder is a valid calendar id
+    assert [c.calendarIdentifier() for c in seen["cals"]] == ["C-Work"]
+
+
+def test_delete_event_dry_run_preview_carries_folder(monkeypatch):
+    import macos_apps_mcp.adapters.calendar as cal
+
+    event = _fake_event_full(
+        "Standup",
+        "E-1",
+        datetime(2026, 6, 23, 9, 0),
+        datetime(2026, 6, 23, 9, 15),
+        calendar_id="C-Work",
+    )
+    store = SimpleNamespace(calendarItemWithIdentifier_=lambda i: event)
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: store)
+
+    out = cal.CalendarAdapter().delete_event("E-1", dry_run=True)
+    assert out["would_delete"]["folder"] == "C-Work"
+
+
+# --- DTSTART outside its rule is stated on the pointer (D-10, CAL-03, #90) -----------
+
+
+def _write_world(monkeypatch, persisted):
+    """Fake store + EventKit seams so create_event / update_event run end to end on the
+    real pointer and verify code. Returns the adapter."""
+    import macos_apps_mcp.adapters.calendar as cal
+
+    s = SimpleNamespace(saveEvent_span_commit_error_=lambda *a: (True, None))
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(
+        cal.EK,
+        "EKEvent",
+        SimpleNamespace(eventWithEventStore_=lambda _s: persisted),
+    )
+    monkeypatch.setattr(cal, "_resolve_span", lambda *a, **k: "span")
+    monkeypatch.setattr(cal, "_apply_event", lambda *a, **k: None)
+    monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: persisted)
+    monkeypatch.setattr(cal, "_refetch_event", lambda _s, _i: persisted)
+    return cal.CalendarAdapter()
+
+
+def _monthly_2tu_world(monkeypatch, start, title="Standup"):
+    end = start + timedelta(minutes=15)
+    persisted = _fake_persisted_event(
+        title=title, start=start, end=end, rule=fake_rule(freq=2, byday=[(2, "TU")])
+    )
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    data = CalendarEventData(
+        title=title,
+        start=start,
+        end=end,
+        recurrence=Recurrence.from_rrule("FREQ=MONTHLY;BYDAY=2TU"),
+    )
+    return _write_world(monkeypatch, persisted), data
+
+
+def test_dtstart_outside_rule_create_event_states_the_extra_occurrence(monkeypatch):
+    # tracer: 2027-01-04 is a Monday, not the 2nd Tuesday
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 4, 10))
+    p = adapter.create_event(data)
+    assert isinstance(p, Pointer)
+    assert p.summary.startswith("Standup 10:00")
+    assert "one extra first occurrence" in p.summary
+    assert p.summary.endswith("(RFC 5545)")
+
+
+def test_dtstart_inside_rule_create_event_has_no_note(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 12, 10))
+    assert "extra first occurrence" not in adapter.create_event(data).summary
+
+
+def test_dtstart_outside_rule_update_event_states_the_extra_occurrence(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 4, 10))
+    p = adapter.update_event("E-1|1", data, span="future-events")
+    assert p.summary.endswith("(RFC 5545)")
+    assert "one extra first occurrence" in p.summary
+
+
+def test_dtstart_inside_rule_update_event_has_no_note(monkeypatch):
+    adapter, data = _monthly_2tu_world(monkeypatch, datetime(2027, 1, 12, 10))
+    p = adapter.update_event("E-1|1", data, span="future-events")
+    assert "extra first occurrence" not in p.summary
+
+
+def test_dtstart_note_survives_a_title_that_fills_the_summary(monkeypatch):
+    # the summary is bounded: a long title must be cut, never the note
+    adapter, data = _monthly_2tu_world(
+        monkeypatch, datetime(2027, 1, 4, 10), title="T" * 400
+    )
+    assert adapter.create_event(data).summary.endswith("(RFC 5545)")
+
+
+def test_dtstart_no_recurrence_has_no_note(monkeypatch):
+    start = datetime(2027, 1, 4, 10)
+    end = start + timedelta(minutes=15)
+    persisted = _fake_persisted_event(start=start, end=end)
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    adapter = _write_world(monkeypatch, persisted)
+    data = CalendarEventData(title="Standup", start=start, end=end)
+    assert "extra first occurrence" not in adapter.create_event(data).summary
+
+
+# --- alarms: relative EKAlarms, verified as a multiset (CAL-01, CAL-02, #89) ---------
+
+
+def _alarm_world(monkeypatch, persisted):
+    """create_event / update_event with the REAL ``_apply_event``: it writes onto
+    ``persisted``, which is also what the re-fetch returns."""
+    import macos_apps_mcp.adapters.calendar as cal
+
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    s = SimpleNamespace(
+        saveEvent_span_commit_error_=lambda *a: (True, None),
+        defaultCalendarForNewEvents=lambda: persisted.calendar(),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(
+        cal.EK, "EKEvent", SimpleNamespace(eventWithEventStore_=lambda _s: persisted)
+    )
+    monkeypatch.setattr(cal, "_resolve_span", lambda *a, **k: "span")
+    monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: persisted)
+    monkeypatch.setattr(cal, "_refetch_event", lambda _s, _i: persisted)
+    return cal.CalendarAdapter()
+
+
+def _timed(**kw):
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        **kw,
+    )
+
+
+def test_create_event_alarms_builds_one_relative_alarm(monkeypatch):
+    persisted = _fake_persisted_event(alarms=[_alarm(-900.0)])
+    p = _alarm_world(monkeypatch, persisted).create_event(_timed(alarms=(15,)))
+    assert isinstance(p, Pointer)
+    (built,) = persisted.set_alarms_calls
+    assert [a.relativeOffset() for a in built] == [-900.0]
+    assert all(a.absoluteDate() is None for a in built)
+
+
+def test_create_event_alarms_missing_after_save_raises(monkeypatch):
+    persisted = _fake_persisted_event(alarms=None)  # the store dropped them
+    with pytest.raises(VerificationFailed, match="alarms"):
+        _alarm_world(monkeypatch, persisted).create_event(_timed(alarms=(15,)))
+
+
+def test_verify_event_alarms_absolute_alarm_raises():
+    # offset 0 matches the requested (0,), so only the absolute alarm is the mismatch
+    fresh = _fake_persisted_event(alarms=[_alarm(0.0, absolute=True)])
+    with pytest.raises(VerificationFailed, match="absolute_alarms"):
+        _verify_event(fresh, "E-1|x", _timed(alarms=(0,)), "C-Work")
+
+
+def test_verify_event_alarms_compare_is_a_multiset():
+    # EventKit returns alarms in no stable order: either order passes
+    want = _timed(alarms=(60, 15))
+    for got in ([-900.0, -3600.0], [-3600.0, -900.0]):
+        fresh = _fake_persisted_event(alarms=[_alarm(o) for o in got])
+        _verify_event(fresh, "E-1|x", want, "C-Work")  # no raise
+
+
+def test_verify_event_alarms_wrong_offset_raises():
+    fresh = _fake_persisted_event(alarms=[_alarm(-1800.0)])
+    with pytest.raises(VerificationFailed, match="alarms"):
+        _verify_event(fresh, "E-1|x", _timed(alarms=(15,)), "C-Work")
+
+
+@pytest.mark.parametrize(
+    ("minutes", "offset"),
+    [(-540, 32400.0), (900, -54000.0), (0, 0.0), (1440, -86400.0)],
+)
+def test_all_day_alarm_offsets_count_from_local_midnight(minutes, offset):
+    # D-02: -540 is 09:00 on the day, 900 is 09:00 the day before, 1440 is midnight
+    # the day before — real EKAlarm value objects, built through the real _apply_event
+    from macos_apps_mcp.adapters.calendar import _apply_event
+
+    day = datetime(2027, 2, 15)
+    data = CalendarEventData("x", day, day, all_day=True, alarms=(minutes,))
+    event = _fake_persisted_event()
+    store = SimpleNamespace(defaultCalendarForNewEvents=lambda: None)
+    _apply_event(store, event, data)
+    (built,) = event.set_alarms_calls
+    assert [a.relativeOffset() for a in built] == [offset]
+
+
+def test_update_event_alarms_omitted_leaves_them_untouched(monkeypatch):
+    # D-04: None is "not given" — no setAlarms_ call, and verify does not look at them
+    persisted = _fake_persisted_event(alarms=[_alarm(-900.0)])
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(), span="future-events"
+    )
+    assert persisted.set_alarms_calls == []
+
+
+def test_update_event_alarms_empty_clears_them(monkeypatch):
+    persisted = _fake_persisted_event(alarms=None)
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(alarms=()), span="future-events"
+    )
+    assert persisted.set_alarms_calls == [None]  # None, never [], clears
+
+
+def test_update_event_alarms_replace_them(monkeypatch):
+    persisted = _fake_persisted_event(alarms=[_alarm(-3600.0)])
+    _alarm_world(monkeypatch, persisted).update_event(
+        "E-1|1", _timed(alarms=(60,)), span="future-events"
+    )
+    ((built,),) = persisted.set_alarms_calls
+    assert built.relativeOffset() == -3600.0
+
+
+def test_verify_event_all_day_alarms_pass_in_either_order():
+    day = datetime(2027, 2, 15)
+    want = CalendarEventData("Holiday", day, day, all_day=True, alarms=(-540, 900))
+    for got in ([32400.0, -54000.0], [-54000.0, 32400.0]):
+        fresh = _fake_persisted_event(
+            title="Holiday",
+            start=day,
+            end=day + timedelta(days=1),
+            all_day=True,
+            alarms=[_alarm(o) for o in got],
+        )
+        _verify_event(fresh, "E-1|x", want, "C-Work")  # no raise

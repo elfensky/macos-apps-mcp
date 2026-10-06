@@ -19,8 +19,10 @@ never the full body.
 
 from __future__ import annotations
 
+import re
+from calendar import isleap, monthrange
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal, Protocol, get_args, runtime_checkable
 
 
@@ -90,14 +92,32 @@ def parse_all_day(value: str) -> datetime:
     return dt
 
 
-def deletion_result(ident: str, preview: Pointer | None) -> dict:
+def deletion_result(
+    ident: str, preview: Pointer | None, *, subtasks: tuple[Pointer, ...] = ()
+) -> dict:
     """The ONE wire shape for every delete tool (C5d): a dry run answers
     ``{"dry_run": True, "would_delete": <pointer dict>}``; a real delete answers
     ``{"deleted": ident}``. Adapters own ``dry_run`` and build this envelope —
-    tools stay one-line delegations."""
+    tools stay one-line delegations.
+
+    ``subtasks`` (a reminder delete that takes subtasks with it, D-19/D-20): both
+    shapes add ``cascade``, and the confirmation adds ``subtasks``. A preview's own
+    ``would_delete`` already carries them — the caller built it with
+    ``Pointer.subtasks``. Without subtasks neither key appears."""
     if preview is not None:
-        return {"dry_run": True, "would_delete": preview.as_dict()}
-    return {"deleted": ident}
+        out: dict = {"dry_run": True, "would_delete": preview.as_dict()}
+    else:
+        out = {"deleted": ident}
+        if subtasks:
+            out["subtasks"] = [p.as_dict() for p in subtasks]
+    if subtasks:
+        n = len(subtasks)
+        out["cascade"] = (
+            f"and {n} subtask{'' if n == 1 else 's'} — deleting a parent deletes its "
+            f"subtasks; the audit log keeps all {n + 1}, and a re-create brings them "
+            "back as flat reminders (no public API re-nests them)"
+        )
+    return out
 
 
 def read_result(
@@ -219,7 +239,10 @@ class Pointer:
     summary: str
     deeplink: str
     # notes reads (notes_all, search): "Account / Folder"; create_note: the requested
-    # bare folder name; mail reads: the round-trip mailbox token; None elsewhere
+    # bare folder name; mail reads: the round-trip mailbox token; events/reminders
+    # reads: the owning calendar or list identifier — the token free_busy(calendars=…),
+    # create_event(calendar=…) and create_reminder(list_name=…) take (#207); unset for
+    # reads that have no container
     folder: str | None = None
     reason: str | None = None  # triage reads only: a stable machine-readable why-string
     # mail reads: the owning account's id — the uuid segment of ``folder``'s url, so it
@@ -231,11 +254,22 @@ class Pointer:
     # (#158). It stays optional and opt-in because a snippet on every pointer of a
     # 100-message thread is the payload dump "pointers, not payload" exists to prevent.
     snippet: str | None = None
+    # reminders reads only: the reminder's tags (sorted) from the read-only store plane.
+    # Unset when the store has none OR could not be read — the read's ``coverage`` says
+    # which. No public API writes tags (#91, D-16).
+    tags: tuple[str, ...] | None = None
+    # reminders reads only: the parent reminder's EventKit id when this is a subtask
+    # (same store plane and the same read-only rule as ``tags``, #91)
+    parent: str | None = None
+    # delete previews, confirmations and audit before-state for a parent reminder: the
+    # subtasks the delete takes with it (D-20); 03-08's complete report reuses it
+    subtasks: tuple[Pointer, ...] | None = None
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict:
         """The wire shape: required fields always; optional fields only when set.
-        The ONE serialization of a Pointer — tool results and audit records share it."""
-        d = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
+        The ONE serialization of a Pointer — tool results and audit records share it.
+        ``dict``, not ``dict[str, str]``: ``tags`` is a list."""
+        d: dict = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
         if self.folder is not None:
             d["folder"] = self.folder
         if self.reason is not None:
@@ -244,6 +278,12 @@ class Pointer:
             d["account"] = self.account
         if self.snippet is not None:
             d["snippet"] = self.snippet
+        if self.tags is not None:
+            d["tags"] = list(self.tags)
+        if self.parent is not None:
+            d["parent"] = self.parent
+        if self.subtasks is not None:
+            d["subtasks"] = [p.as_dict() for p in self.subtasks]
         return d
 
 
@@ -302,7 +342,28 @@ class Snapshotter(Protocol):
 
 Frequency = Literal["daily", "weekly", "monthly", "yearly"]
 _FREQUENCIES: tuple[str, ...] = get_args(Frequency)
-_RRULE_SUPPORTED = ("FREQ", "INTERVAL", "COUNT", "UNTIL")
+_RRULE_SUPPORTED = (
+    "FREQ",
+    "INTERVAL",
+    "COUNT",
+    "UNTIL",
+    "BYDAY",
+    "BYMONTHDAY",
+    "BYMONTH",
+    "BYYEARDAY",
+    "BYSETPOS",
+)
+# Parts refused by name (D-06). BYWEEKNO is the trap: EventKit saves it without error
+# and then expands only DTSTART, so a "supported" BYWEEKNO would be a silent wrong rule.
+_RRULE_REJECTED = {
+    "BYWEEKNO": "EventKit saves it but expands only the first occurrence (spike 003)",
+    "BYHOUR": "EventKit has no field for it",
+    "BYMINUTE": "EventKit has no field for it",
+    "BYSECOND": "EventKit has no field for it",
+    "WKST": "EventKit has no field for it",
+}
+_WEEKDAY_CODES = ("SU", "MO", "TU", "WE", "TH", "FR", "SA")
+_BYDAY_ITEM = re.compile(r"^([+-]?\d+)?([A-Za-z]{2})$")
 
 
 def _rrule_until(v: str) -> datetime:
@@ -336,32 +397,136 @@ def _rrule_until(v: str) -> datetime:
     return parsed
 
 
+def _parse_byday(value: str) -> tuple[tuple[int, str], ...]:
+    """BYDAY list → ``(ordinal, code)`` pairs; ordinal 0 for a plain weekday."""
+    days = []
+    for item in value.split(","):
+        m = _BYDAY_ITEM.match(item.strip())
+        if m is None or m.group(2).upper() not in _WEEKDAY_CODES:
+            raise ValueError(
+                f"RRULE BYDAY item {item.strip()!r} is not a weekday "
+                f"({', '.join(_WEEKDAY_CODES)}) with an optional ordinal such as 2TU"
+            )
+        ordinal = int(m.group(1) or 0)
+        if m.group(1) and ordinal == 0:  # "0MO" is not "every MO" — say so
+            raise ValueError(
+                f"RRULE BYDAY ordinal 0 in {item.strip()!r} is out of range "
+                "(omit the ordinal for every such weekday)"
+            )
+        days.append((ordinal, m.group(2).upper()))
+    return tuple(days)
+
+
+def _by_ints(fields: dict[str, str], part: str) -> tuple[int, ...]:
+    return _parse_ints(part, fields[part]) if part in fields else ()
+
+
+def _parse_ints(part: str, value: str) -> tuple[int, ...]:
+    """Comma list of signed integers for a BY part; range checks are the dataclass's."""
+    out = []
+    for item in value.split(","):
+        try:
+            out.append(int(item.strip()))
+        except ValueError:
+            raise ValueError(
+                f"RRULE {part} item {item.strip()!r} is not an integer"
+            ) from None
+    return tuple(out)
+
+
 @dataclass(frozen=True, slots=True)
 class Recurrence:
-    """A repeat rule — the FREQ/INTERVAL/COUNT/UNTIL subset of RFC 5545.
+    """A repeat rule — the FREQ/INTERVAL/COUNT/UNTIL/BY* subset of RFC 5545.
 
     Pure data: the EventKit ``EKRecurrenceRule`` mapping lives in
     ``eventkit.to_recurrence_rule``, so this module stays free of native imports.
+    ``byday`` holds sorted unique ``(ordinal, code)`` pairs (ordinal 0 = every such
+    weekday); the other BY parts are sorted unique ints. All default to ``()``.
     """
 
     frequency: Frequency
     interval: int = 1  # every N periods
     count: int | None = None  # end after N occurrences …
     until: datetime | None = None  # … or end on a date (mutually exclusive with count)
+    byday: tuple[tuple[int, str], ...] = ()
+    bymonthday: tuple[int, ...] = ()
+    bymonth: tuple[int, ...] = ()
+    byyearday: tuple[int, ...] = ()
+    bysetpos: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         # Enforce the documented invariant on the contract itself, so it holds however
         # a Recurrence is built (direct construction included), not only via from_rrule.
         if self.count is not None and self.until is not None:
             raise ValueError("recurrence count and until are mutually exclusive")
+        if self.interval < 1:
+            raise ValueError(f"recurrence INTERVAL must be >= 1; got {self.interval}")
+        if self.count is not None and self.count < 1:
+            raise ValueError(f"recurrence COUNT must be >= 1; got {self.count}")
+        # canonical form: sorted unique, so equal rules compare equal however built
+        for name in ("byday", "bymonthday", "bymonth", "byyearday", "bysetpos"):
+            object.__setattr__(self, name, tuple(sorted(set(getattr(self, name)))))
+        self._validate_by_parts()
+
+    def _validate_by_parts(self) -> None:
+        """Ranges and RFC 5545 §3.3.10 combination bans. EventKit validates none of
+        this and saves a nonsense rule without error (RESEARCH Pitfall 3), so the
+        boundary does — on direct construction too."""
+        for name, limit in (("bymonthday", 31), ("byyearday", 366), ("bysetpos", 366)):
+            for v in getattr(self, name):
+                if v == 0 or abs(v) > limit:
+                    raise ValueError(
+                        f"{name.upper()} value {v} is out of range "
+                        f"(±1 to ±{limit}; 0 is not allowed)"
+                    )
+        for v in self.bymonth:
+            if not 1 <= v <= 12:
+                raise ValueError(f"BYMONTH value {v} is out of range (1 to 12)")
+        for ordinal, code in self.byday:
+            if code not in _WEEKDAY_CODES:
+                codes = ", ".join(_WEEKDAY_CODES)
+                raise ValueError(f"BYDAY code {code!r} is not a weekday ({codes})")
+            if abs(ordinal) > 53:
+                raise ValueError(f"BYDAY ordinal {ordinal} is out of range (±1 to ±53)")
+        freq = self.frequency.upper()
+        ordinals = [n for n, _ in self.byday if n]
+        if ordinals and self.frequency not in ("monthly", "yearly"):
+            raise ValueError(
+                "BYDAY with an ordinal such as 2TU is only valid with FREQ=MONTHLY "
+                f"or FREQ=YEARLY, not FREQ={freq} (RFC 5545)"
+            )
+        # a month has at most five of any weekday: a bigger ordinal saves a rule that
+        # never fires (Pitfall 3 warning sign). A YEARLY ordinal is per month only
+        # when BYMONTH narrows it.
+        if self.frequency == "monthly" or (self.frequency == "yearly" and self.bymonth):
+            for n in ordinals:
+                if abs(n) > 5:
+                    raise ValueError(
+                        f"BYDAY ordinal {n} is out of range for a month (±1 to ±5): "
+                        "a month has at most five of any weekday"
+                    )
+        if self.bymonthday and self.frequency == "weekly":
+            raise ValueError("BYMONTHDAY must not be used with FREQ=WEEKLY (RFC 5545)")
+        if self.byyearday and self.frequency in ("daily", "weekly", "monthly"):
+            raise ValueError(f"BYYEARDAY must not be used with FREQ={freq} (RFC 5545)")
+        if self.bysetpos and not (
+            self.byday or self.bymonthday or self.bymonth or self.byyearday
+        ):
+            raise ValueError(
+                "BYSETPOS must be used with another BY part such as BYDAY (RFC 5545)"
+            )
 
     @classmethod
     def from_rrule(cls, rrule: str) -> Recurrence:
         """Parse an RFC 5545 RRULE (the supported subset).
 
-        e.g. ``FREQ=WEEKLY;INTERVAL=2;COUNT=10``. FREQ is required; COUNT and UNTIL are
-        mutually exclusive. Unsupported parts (BYDAY, BYMONTHDAY, …) are rejected so a
-        rule never silently does the wrong thing.
+        e.g. ``FREQ=MONTHLY;INTERVAL=2;BYDAY=2TU;COUNT=10``. FREQ is required; COUNT and
+        UNTIL are mutually exclusive. Supported: FREQ, INTERVAL, COUNT, UNTIL, BYDAY
+        (with ordinals such as 2TU, -1FR), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS.
+        BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused *by name* (BYWEEKNO is
+        the trap: EventKit saves it and expands only DTSTART). EventKit validates no BY
+        value, so ranges and the RFC 5545 combination bans are checked here, before any
+        native call (RESEARCH Pitfall 3), so a rule never silently does the wrong thing.
         """
         body = rrule.strip()
         if body.upper().startswith("RRULE:"):
@@ -376,6 +541,11 @@ class Recurrence:
             key, _, val = token.partition("=")
             fields[key.strip().upper()] = val.strip()
 
+        for part in sorted(set(fields) & set(_RRULE_REJECTED)):
+            raise ValueError(
+                f"unsupported RRULE part {part}: {_RRULE_REJECTED[part]}; "
+                f"supported: {', '.join(_RRULE_SUPPORTED)}"
+            )
         extra = set(fields) - set(_RRULE_SUPPORTED)
         if extra:
             raise ValueError(
@@ -388,15 +558,94 @@ class Recurrence:
                 f"RRULE FREQ must be one of {_FREQUENCIES}; got {fields.get('FREQ')!r}"
             )
         interval = int(fields["INTERVAL"]) if "INTERVAL" in fields else 1
-        if interval < 1:
-            raise ValueError(f"RRULE INTERVAL must be >= 1; got {interval}")
         if "COUNT" in fields and "UNTIL" in fields:
             raise ValueError("RRULE COUNT and UNTIL are mutually exclusive")
         count = int(fields["COUNT"]) if "COUNT" in fields else None
-        if count is not None and count < 1:
-            raise ValueError(f"RRULE COUNT must be >= 1; got {count}")
         until = _rrule_until(fields["UNTIL"]) if "UNTIL" in fields else None
-        return cls(frequency=freq, interval=interval, count=count, until=until)
+        return cls(
+            frequency=freq,
+            interval=interval,
+            count=count,
+            until=until,
+            byday=_parse_byday(fields["BYDAY"]) if "BYDAY" in fields else (),
+            bymonthday=_by_ints(fields, "BYMONTHDAY"),
+            bymonth=_by_ints(fields, "BYMONTH"),
+            byyearday=_by_ints(fields, "BYYEARDAY"),
+            bysetpos=_by_ints(fields, "BYSETPOS"),
+        )
+
+
+def _is_nth(n: int, size: int, wanted: tuple[int, ...]) -> bool:
+    """``n`` (1-based) or its from-the-end form (``n - size - 1``) is in ``wanted``."""
+    return n in wanted or n - size - 1 in wanted
+
+
+def _passes_by_filters(rule: Recurrence, d: date) -> bool:
+    """Whether ``d`` survives every BY filter of ``rule`` (BYSETPOS aside)."""
+    if rule.bymonth and d.month not in rule.bymonth:
+        return False
+    year_size = 366 if isleap(d.year) else 365
+    yday = d.timetuple().tm_yday
+    if rule.byyearday and not _is_nth(yday, year_size, rule.byyearday):
+        return False
+    month_size = monthrange(d.year, d.month)[1]
+    if rule.bymonthday and not _is_nth(d.day, month_size, rule.bymonthday):
+        return False
+    if not rule.byday:
+        return True
+    code = _WEEKDAY_CODES[(d.weekday() + 1) % 7]  # _WEEKDAY_CODES starts on Sunday
+    # an ordinal counts inside the month for MONTHLY and YEARLY+BYMONTH, else the year
+    in_month = rule.frequency == "monthly" or (
+        rule.frequency == "yearly" and bool(rule.bymonth)
+    )
+    pos, size = (d.day, month_size) if in_month else (yday, year_size)
+    nth = (pos - 1) // 7 + 1
+    from_end = -((size - pos) // 7 + 1)
+    return any(
+        wd == code and ordinal in (0, nth, from_end) for ordinal, wd in rule.byday
+    )
+
+
+def _period(frequency: str, d: date) -> tuple[date, date]:
+    """The half-open ``[lo, hi)`` date range BYSETPOS counts inside."""
+    if frequency == "daily":
+        return d, d + timedelta(days=1)
+    if frequency == "weekly":
+        lo = d - timedelta(days=d.weekday())
+        return lo, lo + timedelta(days=7)
+    if frequency == "monthly":
+        lo = d.replace(day=1)
+        return lo, (lo + timedelta(days=32)).replace(day=1)
+    return date(d.year, 1, 1), date(d.year + 1, 1, 1)
+
+
+def dtstart_in_rule(rule: Recurrence, start: date) -> bool:
+    """Whether ``start`` itself is one of the dates ``rule`` describes (D-10).
+
+    RFC 5545 §3.3.10 counts DTSTART as the first instance even when it does not match
+    the rule, and EventKit agrees, so this check only decides whether that first
+    occurrence is *extra*. Pure stdlib over the supported parts: an absent part is
+    implied by DTSTART and never fails; INTERVAL, COUNT and UNTIL do not affect
+    membership. BYSETPOS picks from the candidates of ``start``'s own period — the
+    month, the year, or the Monday-to-Sunday week (RFC default WKST=MO; EventKit reads
+    2 for ``firstDayOfTheWeek``).
+
+    python-dateutil is not used: it drops a non-matching DTSTART and diverges from RFC
+    5545 on mixed plain/ordinal BYDAY and on WEEKLY+BYSETPOS.
+    """
+    d = date(start.year, start.month, start.day)  # a datetime is accepted too
+    if not _passes_by_filters(rule, d):
+        return False
+    if not rule.bysetpos:
+        return True
+    lo, hi = _period(rule.frequency, d)
+    candidates = [
+        x
+        for x in (lo + timedelta(days=i) for i in range((hi - lo).days))
+        if _passes_by_filters(rule, x)
+    ]
+    position = candidates.index(d) + 1
+    return _is_nth(position, len(candidates), rule.bysetpos)
 
 
 class _ClearRecurrence:
@@ -468,6 +717,35 @@ class CalendarEventData:
     # case, an event can't be safely un-recurred through the occurrence-edit path —
     # delete the series instead). See calendar._apply_event.
     recurrence: Recurrence | None = None
+    # alarms, as minutes BEFORE the start (the Google Calendar API convention). None =
+    # leave the event's alarms untouched, () = clear them, (15, 60) = exactly those.
+    alarms: tuple[int, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.alarms is None:
+            return
+        if len(self.alarms) > 5:
+            raise ValueError(
+                "at most 5 alarms: Google keeps 5 and silently drops a different one "
+                "after the save"
+            )
+        for m in self.alarms:
+            if not isinstance(m, int) or isinstance(m, bool):
+                raise ValueError(
+                    "alarms are whole minutes before the start, e.g. [15, 60]; "
+                    f"got {m!r}"
+                )
+            if m < 0 and not self.all_day:
+                raise ValueError(
+                    "a timed event's alarm is minutes BEFORE the start, 0 or more; "
+                    f"got {m}. Negative minutes are for all-day events, counted from "
+                    "local midnight"
+                )
+        if len(set(self.alarms)) != len(self.alarms):
+            raise ValueError(
+                "give each alarm offset once; duplicates are never useful and were "
+                "never probed"
+            )
 
 
 @dataclass(frozen=True, slots=True)

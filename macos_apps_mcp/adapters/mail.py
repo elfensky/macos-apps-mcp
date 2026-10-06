@@ -73,7 +73,7 @@ from functools import partial
 
 from .. import runtime
 from ..contracts import Pointer, read_result
-from ..errors import BatchTooLarge, NativeError, OutputOverflow
+from ..errors import BatchTooLarge, NativeError, OutputOverflow, WriteRefused
 from ..runtime import log
 from ..text import (
     BODY_HARD_MAX,
@@ -876,6 +876,21 @@ end run"""
 )
 
 
+def _refuse_label_source(mailbox: str) -> None:
+    """Refuse a Gmail label folder as the source of a destructive write (#287).
+
+    Raises before any native call, dry runs included.
+    """
+    if mail_index.is_label_mailbox(mailbox):
+        raise WriteRefused(
+            f"{mailbox!r} is a Gmail label folder: a view of label membership, not "
+            "where the message is stored. A move from a label adds the destination "
+            "label and keeps this one (device-verified 2026-10-06), so no write route "
+            "from a label folder is proven yet (#287). Nothing was changed. Do not "
+            "retry from this folder; tell the user."
+        )
+
+
 def _tri(value: bool | None) -> str:
     """A tri-state boolean as the scripts read it off argv: ``""`` leaves the property
     alone, ``"1"``/``"0"`` set it. argv carries only text, so the absent case needs a
@@ -1530,11 +1545,16 @@ class MailAdapter:
           would avoid it ("Sent Messages"/"Deleted Messages"/"[Gmail]/Trash") is
           exactly the per-locale name table #61 deleted. Nothing moves and nothing is
           lost, and the status is loud and factual.
+
+        A Gmail label folder as ``from_mailbox`` is refused (``WriteRefused``) before
+        any native call, dry runs included: on device a move from a label is a copy
+        (#287).
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any
         # native call — that is the whole point of enforcing them in one place.
         mail_recover.check_batch(mids)
+        _refuse_label_source(from_mailbox)
         src = mail_addressing.mailbox_args(from_mailbox)
         dst = mail_addressing.mailbox_args(to_mailbox)
         if src == dst:
@@ -1661,9 +1681,13 @@ class MailAdapter:
         several copies in the source gets EVERY one of them trashed (D-03), same as
         ``move_mail``. The by-ID trash act was never run in the spike that proved
         ``_MOVE``'s shape — its device check (02.1-05) is mandatory, not a formality.
+
+        A Gmail label folder as ``mailbox`` is refused (``WriteRefused``) before any
+        native call, dry runs included (#287).
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
+        _refuse_label_source(mailbox)
         src = mail_addressing.mailbox_args(mailbox)
         account = mail_index.account_of(mailbox)
         if account is None:

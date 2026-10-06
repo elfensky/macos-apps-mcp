@@ -110,6 +110,33 @@ def test_locate_picks_the_row_in_the_targets_own_mailbox(store):
     assert (t.rowid, t.fidelity) == (10, "full")
 
 
+def test_locate_prefers_the_targets_own_account_for_a_gmail_label_folder(
+    store, monkeypatch
+):
+    # A Gmail label folder is never a physical row (#251), so no row matches t.folder
+    # and the old first-row fallback backed up another account's file (live: 272 of
+    # 1,056 label members).
+    other = "imap://BBBBBBBB-1111-2222-3333-444444444444/INBOX"
+    monkeypatch.setattr(
+        mail_index,
+        "query_message_locations",
+        lambda ids: [
+            {"message_id": "<a@x>", "rowid": 99, "mailbox_url": other},
+            {
+                "message_id": "<a@x>",
+                "rowid": 10,
+                "mailbox_url": f"imap://{ACCT}/%5BGmail%5D/All%20Mail",
+            },
+        ],
+    )
+    [t] = mail_recover.locate([_target("a@x", folder=f"imap://{ACCT}/Receipts")])
+    assert (t.rowid, t.fidelity) == (10, "full")
+    assert t.path is not None and t.path.endswith("10.emlx")
+    # an account-less target (unified accessor) still takes the first row
+    [u] = mail_recover.locate([mail_recover.Target(id="a@x", folder="inbox")])
+    assert u.rowid == 99
+
+
 def test_locate_stamps_a_headers_only_message_partial(store):
     # 62.5% of local messages are .partial.emlx on a real Mac — the fidelity stamp is
     # what makes a backup honest rather than merely present.

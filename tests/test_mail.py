@@ -1620,6 +1620,8 @@ def no_backup(monkeypatch):
     """
     monkeypatch.setattr(mail.mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail.mail_index, "query_message_locations", lambda ids: [])
+    # keeps the label-source check (#287) off the real Envelope Index
+    monkeypatch.setattr(mail.mail_index, "is_label_mailbox", lambda url: False)
 
 
 def test_split_ids_dedupes_and_strips_framing_bytes():

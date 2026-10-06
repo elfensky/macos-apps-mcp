@@ -35,6 +35,10 @@ then the main executable, then the bundle — never `codesign --deep`) with
 `--timestamp --options runtime`. Omit `--sign` for an unsigned dev build (no Login Items
 registration will work without a signature, but the bundle still smoke-tests).
 
+The build installs the exact versions in `uv.lock`, then runs `scripts/smoke_stream.py` on
+the bundled interpreter (one streamed tool call through the shim's transport). A failing
+smoke fails the build; a good build log shows `stream smoke ok` (#286).
+
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
 
