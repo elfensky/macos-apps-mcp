@@ -8,6 +8,10 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **Reminder tags and subtasks, read-only** (#91) — `reminders()` results carry `tags`
+  and `parent` from the Reminders store (needs Full Disk Access); there is no public API
+  to write them.
+
 - **Alarms on events** (#89) — `alarms=[15, 60]` (minutes before the start) on
   `create_event` and `update_event`; all-day offsets count from local midnight; at most
   5; verified after the write.
@@ -28,6 +32,11 @@ surface may still shift between minor versions.
   or list id, the same token `free_busy(calendars=…)`, `create_event(calendar=…)` and
   `create_reminder(list_name=…)` take. It is never a title, and it is omitted when the
   item has no container.
+
+### Changed
+
+- **Breaking: `reminders()` returns `{results, coverage?}`** instead of a list. Read
+  `results`; `coverage` appears when the Reminders store cannot be read.
 
 ### Fixed
 

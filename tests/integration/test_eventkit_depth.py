@@ -22,6 +22,7 @@ import EventKit as EK
 import pytest
 from dateutil.rrule import rrulestr
 
+from macos_apps_mcp.adapters import reminders_store
 from macos_apps_mcp.adapters.calendar import CalendarAdapter
 from macos_apps_mcp.adapters.reminders import RemindersAdapter
 from macos_apps_mcp.contracts import (
@@ -131,6 +132,29 @@ def test_create_reminder_list_on_default_source(ek_items):
     found = rem.get_pointers(name)
     assert [p.id for p in found] == [made.id]
     assert found[0].folder == pointer.id
+
+
+def test_reminders_read_carries_the_store_plane(ek_items):
+    # The store plane (#91) on the real Mac. Parent and tag VALUES are proven on the
+    # owner-built fixture (03-10); here the read must work end to end.
+    rem = RemindersAdapter()
+    pointer = rem.create_reminder_list(PREFIX + "store")
+    ek_items.lists.append(pointer.id)
+    made = rem.create_reminder(
+        ReminderData(
+            title=PREFIX + "store r",
+            list_name=pointer.id,
+            due=datetime.now() + timedelta(days=1),
+        )
+    )
+    ek_items.reminders.append(made.id)
+
+    out = rem.read(pointer.summary)
+    assert "coverage" not in out, out.get("coverage")  # a denial = no Full Disk Access
+    assert [(r["id"], r["folder"]) for r in out["results"]] == [(made.id, pointer.id)]
+
+    tags, parents = reminders_store.tags_and_parents()
+    assert isinstance(tags, dict) and isinstance(parents, dict)
 
 
 def test_event_pointer_folder_is_its_calendar_id(icloud_scratch, ek_items):

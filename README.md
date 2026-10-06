@@ -64,7 +64,7 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 |------|------|-------|
 | `events` | `when` = `today` \| `week` \| `YYYY-MM-DD` | list events as pointers |
 | `free_busy` | `start`, `end` (ISO), optional `calendars` ids | merged busy intervals + free gaps in the window; no event details |
-| `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as pointers |
+| `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as `{results, coverage?}`; each result carries `folder`, `tags` and `parent` (read-only; needs EventKit and Full Disk Access) |
 | `calendars` / `reminder_lists` | — | containers (id + name) to target writes |
 | `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence`, `alarms` (minutes before the start, at most 5; all-day: from local midnight, `-540` = 09:00 on the day) | `update` is a full replace by id |
 | `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting |
@@ -74,6 +74,11 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 
 Event and reminder pointers carry `folder` = the calendar or list id, which
 `free_busy(calendars=…)` and the write tools (`calendar=`, `list_name=`) take.
+
+Reminder **tags** and **subtasks** (`tags`, `parent` = the parent's id) are read from the
+Reminders store, read-only, and need Full Disk Access. When that store cannot be read, the
+reminders still come back and `coverage` says why. No public API writes a tag or nests a
+reminder, so no tool here does.
 
 A write targets its container by **name or `Pointer.id`**; an ambiguous name raises rather than
 guessing. **Recurrence** is an RFC 5545 `RRULE`: `FREQ`, `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (with
