@@ -4,9 +4,11 @@ import sqlite3
 
 import pytest
 
-from macos_apps_mcp.adapters import mail_index
+from macos_apps_mcp import runtime
+from macos_apps_mcp.adapters import mail, mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
-from macos_apps_mcp.errors import SchemaDrift
+from macos_apps_mcp.errors import SchemaDrift, WriteRefused
+from macos_apps_mcp.text import RS, US
 from tests.envelope import ACCT_A, ACCT_B
 
 
@@ -199,3 +201,67 @@ def test_missing_membership_schema_fails_loudly(gmail_envelope, change):
         conn.execute(change)
     with pytest.raises(SchemaDrift):
         mail_index.query_overview_rows()
+
+
+# --- a label folder is never a write source (#287) ---------------------------
+
+
+def test_is_label_mailbox_tells_labels_from_physical_and_unknown(gmail_envelope):
+    _, _, urls = gmail_envelope
+    for name in ("inbox", "sent", "label"):
+        assert mail_index.is_label_mailbox(urls[name])
+    for name in ("all", "other"):
+        assert not mail_index.is_label_mailbox(urls[name])
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_A}/NoSuchFolder")
+    assert not mail_index.is_label_mailbox("inbox")
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_label_source(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # The conftest native seam makes runtime.run_osascript raise AssertionError, so a
+    # WriteRefused here proves the refusal came before any osascript call.
+    with pytest.raises(WriteRefused, match=r"label.*#287"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>", urls["inbox"], urls["other"], dry_run=dry_run
+        )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_trash_mail_refuses_a_label_source(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # Same seam argument: no osascript ran, or the conftest guard would have fired.
+    with pytest.raises(WriteRefused, match=r"label.*#287"):
+        MailAdapter().trash_mail(
+            "<gmail-2@example.test>", urls["inbox"], dry_run=dry_run
+        )
+
+
+def _present_recorder(monkeypatch):
+    seen = []
+
+    def fake(script, *args, **kw):
+        seen.append(script)
+        ids = args[-1].split(US) if args else []
+        return "".join(f"{m}{US}present{RS}" for m in ids if m)
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    monkeypatch.setattr(mail_index, "mail_root", lambda: None)
+    return seen
+
+
+def test_move_mail_from_a_physical_source_still_previews(gmail_envelope, monkeypatch):
+    _, _, urls = gmail_envelope
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().move_mail("<gmail-2@example.test>", urls["all"], urls["other"])
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen
+
+
+def test_trash_mail_from_a_physical_source_still_previews(gmail_envelope, monkeypatch):
+    db, _, urls = gmail_envelope
+    db.add_mailbox(f"imap://{ACCT_A}/%5BGmail%5D/Trash")
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().trash_mail("<gmail-2@example.test>", urls["all"])
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen

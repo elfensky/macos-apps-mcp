@@ -336,6 +336,17 @@ not a verification of deduplicated totals or of a patched live server.
   account and only then the first row — 272 of 1,056 label members had a copy in
   another account that the old fallback picked.
 
+**Device-verified 2026-10-06 (#287) — a move from a label folder is a copy.**
+
+- A `move_mail` from a Gmail label mailbox to INBOX, through the real daemon, added the
+  INBOX label and kept the source label. It stayed that way for 5+ minutes.
+- The tool's own post-check reported the message present in BOTH mailboxes and
+  deleted nothing; `mail_undo` answered that it had no messages to restore.
+- Rule: a mailbox with `mailboxes.source` set is refused as the source of `move_mail`
+  and `trash_mail` before any native call, dry runs included.
+- `trash_mail` from a label was not run; it is refused by extension.
+- A route from a label ships only after a device run shows the source label gone.
+
 ## 6. Addressing and iteration
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
