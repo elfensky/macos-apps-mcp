@@ -365,6 +365,13 @@ class RemindersAdapter:
             raise ValueError(
                 f"name must be non-empty text without control characters — got {name!r}"
             )
+        if name != name.strip():
+            # a store may trim the title, and the exact-name duplicate scan would then
+            # disagree with what was saved (IN-02)
+            raise ValueError(
+                "name must not start or end with whitespace — remove it and retry "
+                f"(got {name!r}). No list was created."
+            )
 
         def work():  # scan, save and verify on one worker turn: nothing interleaves
             s = store()
@@ -403,13 +410,20 @@ class RemindersAdapter:
                     )
                 raise refused_write("reminder list create", "account", err)
             ident = cal.calendarIdentifier()
-            if ident not in {
-                c.calendarIdentifier()
+            titles = {
+                c.calendarIdentifier(): c.title()
                 for c in s.calendarsForEntityType_(EK.EKEntityTypeReminder)
-            }:
+            }
+            if ident not in titles:
                 raise VerificationFailed(
                     f"reminder list {name!r} (id {ident!r}) is not in the store after "
                     "the save — the write did not persist. Do not trust the id."
+                )
+            if norm_text(titles[ident]) != norm_text(name):
+                raise VerificationFailed(
+                    f"reminder list {ident!r} was saved but its title persisted as "
+                    f"{titles[ident]!r}, not {name!r}. Do not trust the name; re-read "
+                    "the lists before retrying."
                 )
             return _list_pointer(cal)
 

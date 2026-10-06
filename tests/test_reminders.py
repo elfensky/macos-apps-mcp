@@ -505,6 +505,7 @@ def _list_env(
     save_error=None,
     persist=True,
     has_default=True,
+    persisted_title=None,
 ):
     """Wire create_reminder_list to fakes. ``save_error``: an error code (int) the save
     reports; ``persist=False``: the save says OK but the list never shows up."""
@@ -528,6 +529,8 @@ def _list_env(
         saves.append((cal, commit))
         if save_error is not None:
             return (False, SimpleNamespace(code=lambda: save_error))
+        if persisted_title is not None:
+            cal.name = persisted_title  # the store re-wrote the title
         if persist:
             cals.append(cal)
         return (True, None)
@@ -572,7 +575,9 @@ def test_create_reminder_list_accepts_a_name_differing_only_in_case(monkeypatch)
     assert len(env.saves) == 1
 
 
-@pytest.mark.parametrize("bad", ["", "   ", "a\x07b", "tab\there"])
+@pytest.mark.parametrize(
+    "bad", ["", "   ", "a\x07b", "tab\there", " lead", "trail ", "\u00a0nb"]
+)
 def test_create_reminder_list_bad_name_raises_before_any_native_call(monkeypatch, bad):
     env = _list_env(monkeypatch)
     with pytest.raises(ValueError):
@@ -582,7 +587,7 @@ def test_create_reminder_list_bad_name_raises_before_any_native_call(monkeypatch
 
 def test_create_reminder_list_keeps_the_name_raw(monkeypatch):
     env = _list_env(monkeypatch)
-    assert env.adapter.create_reminder_list(" Spaced  Out ").summary == " Spaced  Out "
+    assert env.adapter.create_reminder_list("Spaced  Out").summary == "Spaced  Out"
 
 
 @pytest.mark.parametrize("code", [17, 24])
@@ -615,6 +620,20 @@ def test_create_reminder_list_without_a_default_list_is_write_refused(monkeypatc
 def test_create_reminder_list_unverified_save_is_verification_failed(monkeypatch):
     env = _list_env(monkeypatch, persist=False)
     with pytest.raises(VerificationFailed):
+        env.adapter.create_reminder_list("Groceries")
+
+
+def test_create_reminder_list_whitespace_refusal_names_the_fix(monkeypatch):
+    env = _list_env(monkeypatch)
+    with pytest.raises(ValueError, match="start or end with whitespace") as exc:
+        env.adapter.create_reminder_list("Groceries ")
+    assert "No list was created" in str(exc.value)
+
+
+def test_create_reminder_list_a_rewritten_title_is_verification_failed(monkeypatch):
+    # the store kept the list but changed its title: the id alone is not proof (IN-02)
+    env = _list_env(monkeypatch, persisted_title="Groceries (1)")
+    with pytest.raises(VerificationFailed, match="Groceries"):
         env.adapter.create_reminder_list("Groceries")
 
 
