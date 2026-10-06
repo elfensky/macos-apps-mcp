@@ -34,18 +34,18 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Calendar
 
-- [ ] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write (#89)
-- [ ] **CAL-02**: Alarms on all-day and recurring all-day events fire on the right day in a non-UTC timezone (device-probed first, not fixed later) (#89)
-- [ ] **CAL-03**: User can create/update recurring events with `BYDAY` (incl. ordinals for monthly), `BYMONTHDAY`, `BYMONTH`; shapes EventKit cannot express are rejected loudly as today; accepted shapes are read back over six months and match RFC 5545 expansion (#90)
-- [ ] **CAL-04**: `events()` Pointers carry the owning calendar's id in `Pointer.folder` — the token `free_busy(calendars=…)`, `create_event` and `update_event` already take; `calendars()` maps ids to names; unit test on `_event_pointer` with a fake `calendar()` (#207)
+- [x] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write (#89)
+- [x] **CAL-02**: Alarms on all-day and recurring all-day events fire on the right day in a non-UTC timezone (device-probed first, not fixed later) (#89)
+- [x] **CAL-03**: User can create/update recurring events with `BYDAY` (incl. ordinals for monthly), `BYMONTHDAY`, `BYMONTH`; shapes EventKit cannot express are rejected loudly as today; accepted shapes are read back over six months and match RFC 5545 expansion (#90)
+- [x] **CAL-04**: `events()` Pointers carry the owning calendar's id in `Pointer.folder` — the token `free_busy(calendars=…)`, `create_event` and `update_event` already take; `calendars()` maps ids to names; unit test on `_event_pointer` with a fake `calendar()` (#207)
 
 ### Reminders
 
-- [ ] **REM-01**: User can delete a reminder by id (`dry_run=True` default, verify-after-write, mirrors `delete_event`) (#92)
-- [ ] **REM-02**: User can create a reminder list (#92)
-- [ ] **REM-03**: User can read subtasks — `reminders()` Pointers carry the parent's id, read from the Reminders sqlite store and joined by id; no public write route exists (spike 002), so the write gap is named in the docstring (#91)
-- [ ] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write (#91)
-- [ ] **REM-06**: `reminders()` Pointers carry the owning list's id in `Pointer.folder` — same rule and test shape as CAL-04; `reminder_lists()` maps ids to names (#207)
+- [x] **REM-01**: User can delete a reminder by id (`dry_run=True` default, verify-after-write, mirrors `delete_event`) (#92)
+- [x] **REM-02**: User can create a reminder list (#92)
+- [x] **REM-03**: User can read subtasks — `reminders()` Pointers carry the parent's id, read from the Reminders sqlite store and joined by id; no public write route exists (spike 002), so the write gap is named in the docstring (#91)
+- [x] **REM-04**: Tags are investigated first; if no public write route exists they ship read-only (Reminders sqlite) with the write gap documented in the tool docstring — never a private-API write (#91)
+- [x] **REM-06**: `reminders()` Pointers carry the owning list's id in `Pointer.folder` — same rule and test shape as CAL-04; `reminder_lists()` maps ids to names (#207)
 
 ### Notes
 
@@ -160,15 +160,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MAIL-04 | Phase 02.1 | Complete |
 | MAIL-05 | Phase 3 | Complete (0.13.1, ahead of the phase) |
 | MAIL-06 | Phase 3 | Complete (0.13.1, ahead of the phase) |
-| CAL-01 | Phase 3 | Pending |
-| CAL-02 | Phase 3 | Pending |
-| CAL-03 | Phase 3 | Pending |
-| CAL-04 | Phase 3 | Pending |
-| REM-01 | Phase 3 | Pending |
-| REM-02 | Phase 3 | Pending |
-| REM-03 | Phase 3 | Pending |
-| REM-04 | Phase 3 | Pending |
-| REM-06 | Phase 3 | Pending |
+| CAL-01 | Phase 3 | Complete |
+| CAL-02 | Phase 3 | Complete |
+| CAL-03 | Phase 3 | Complete |
+| CAL-04 | Phase 3 | Complete |
+| REM-01 | Phase 3 | Complete |
+| REM-02 | Phase 3 | Complete |
+| REM-03 | Phase 3 | Complete |
+| REM-04 | Phase 3 | Complete |
+| REM-06 | Phase 3 | Complete |
 | NOTE-01 | Phase 4 | Pending |
 | NOTE-02 | Phase 4 | Pending |
 | PHO-01 | Phase 4 | Pending |
