@@ -12,7 +12,13 @@ from datetime import datetime, timedelta
 
 import EventKit as EK
 
-from ..contracts import Pointer, Recurrence, ReminderData, read_result
+from ..contracts import (
+    Pointer,
+    Recurrence,
+    ReminderData,
+    deletion_result,
+    read_result,
+)
 from ..errors import (
     NativeError,
     RecurrenceRequired,
@@ -135,6 +141,12 @@ def _fresh_item(s, ident):
     if fresh is not None and not fresh.refresh():
         return None  # gone from the DB between save and verify
     return fresh
+
+
+def _is_reminder(item) -> bool:
+    """An EKReminder answers ``isCompleted``; an EKEvent, which shares the id space of
+    ``calendarItemWithIdentifier_``, does not."""
+    return hasattr(item, "isCompleted")
 
 
 def _apply_reminder(s, r, data: ReminderData) -> None:
@@ -425,5 +437,67 @@ class RemindersAdapter:
             fresh = _fresh_item(s, ident)
             _verify_completed(fresh, ident)
             return _reminder_pointer(fresh)
+
+        return run_native(work)
+
+    def delete_reminder(
+        self, ident: str, *, dry_run: bool = True, with_subtasks: bool = False
+    ) -> dict:
+        """Delete a reminder by id → the ``deletion_result`` envelope (D-17).
+
+        The subtask read, the refusal check, the remove and the gone-check run in ONE
+        ``run_native`` block, so what a confirmation lists is what was present at delete
+        time, not at preview time. A subtask indented in Reminders.app minutes earlier
+        may not be in the store yet (spike 007); the store is the only witness there is.
+        ``dry_run=True`` does everything but the remove — the store is read and the
+        refusals fire exactly as they would for the real call.
+        """
+
+        def work():
+            s = store()
+            r = s.calendarItemWithIdentifier_(ident)
+            if r is None:
+                raise ValueError(f"no reminder with id {ident!r}")
+            if not _is_reminder(r):
+                raise ValueError(
+                    f"{ident!r} is a calendar event, not a reminder — use delete_event "
+                    "for events. Nothing was changed."
+                )
+            # D-18: deleting a parent takes its subtasks and EventKit cannot see them.
+            # Read them first; if the store is unreadable the cascade is unknowable, so
+            # nothing is removed.
+            try:
+                reminders_store.subtasks_of(ident)
+            except NativeError as e:
+                raise WriteRefused(
+                    "delete_reminder refused: the Reminders store could not be read to "
+                    f"find this reminder's subtasks ({e}). No change was made."
+                ) from e
+            if dry_run:
+                return deletion_result(ident, _reminder_pointer(r))
+            ok, err = s.removeReminder_commit_error_(r, True, None)
+            if not ok:
+                raise refused_write("reminder delete", "list", err)
+            if _fresh_item(s, ident) is not None:
+                raise VerificationFailed(
+                    f"reminder {ident!r} is still present after the delete — it may "
+                    "have been restored by iCloud; re-read before retrying."
+                )
+            return deletion_result(ident, None)
+
+        return run_native(work)
+
+
+class ReminderDeleteSnapshotter:
+    """The audit before-state source for ``delete_reminder`` (D-20) — its own class so
+    the shared ``RemindersAdapter.snapshot`` (update, complete) stays EventKit-only: a
+    store read there, with the grant missing, would silently log ``before=None``."""
+
+    def snapshot(self, ident: str) -> Pointer | None:
+        def work():
+            r = store().calendarItemWithIdentifier_(ident)
+            if r is None or not _is_reminder(r):
+                return None
+            return _reminder_pointer(r)
 
         return run_native(work)

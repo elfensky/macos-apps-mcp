@@ -54,6 +54,13 @@ _TAGS = """SELECT r.ZCKIDENTIFIER, h.ZNAME1 FROM ZREMCDOBJECT h
 _PARENTS = """SELECT c.ZCKIDENTIFIER, p.ZCKIDENTIFIER FROM ZREMCDREMINDER c
   JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
   WHERE c.ZMARKEDFORDELETION = 0 AND p.ZMARKEDFORDELETION = 0"""
+# A parent's live children, in creation order. The id is a bound parameter, never
+# formatted in: it is a model-chosen string (D-18).
+_SUBTASKS_OF = """SELECT c.ZCKIDENTIFIER FROM ZREMCDREMINDER c
+  JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
+  WHERE p.ZCKIDENTIFIER = ? AND c.ZMARKEDFORDELETION = 0
+    AND p.ZMARKEDFORDELETION = 0
+  ORDER BY c.Z_PK"""
 
 
 def store_path() -> Path:
@@ -108,5 +115,21 @@ def tags_and_parents() -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
                 tags.setdefault(ident, set()).add(clean)
         parents = dict(conn.execute(_PARENTS))
         return {i: tuple(sorted(t)) for i, t in tags.items()}, parents
+
+    return read_via_sqlite(store_path(), _FINGERPRINT, query)
+
+
+def subtasks_of(parent_id: str) -> list[str]:
+    """The EventKit ids of ``parent_id``'s live subtasks, in creation order.
+
+    The delete's guard (D-18): EventKit cannot see subtasks and removes them with the
+    parent, so the store is the only witness of what a delete takes. A typed store error
+    (``FullDiskAccessDenied`` / ``SchemaDrift``) propagates — the caller refuses rather
+    than delete blind. Runs inline when already on the worker, so one ``run_native``
+    block can read here and then act through EventKit.
+    """
+
+    def query(conn: sqlite3.Connection):
+        return [ident for (ident,) in conn.execute(_SUBTASKS_OF, (parent_id,))]
 
     return read_via_sqlite(store_path(), _FINGERPRINT, query)

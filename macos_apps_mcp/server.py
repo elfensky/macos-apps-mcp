@@ -19,7 +19,7 @@ from .adapters.messages import MessagesAdapter
 from .adapters.music import MusicAdapter
 from .adapters.notes import NotesAdapter
 from .adapters.photos import PhotosAdapter
-from .adapters.reminders import RemindersAdapter
+from .adapters.reminders import ReminderDeleteSnapshotter, RemindersAdapter
 from .adapters.safari import SafariAdapter
 from .adapters.shortcuts import ShortcutsAdapter
 from .audit import AuditMiddleware, audit_read, usage_report
@@ -43,6 +43,7 @@ from .lifecycle import install_lifecycle_guards
 mcp = FastMCP("macos-apps-mcp")
 
 _reminders = RemindersAdapter()
+_reminder_delete_snapshot = ReminderDeleteSnapshotter()
 _calendar = CalendarAdapter()
 _contacts = ContactsAdapter()
 _mail = MailAdapter()
@@ -1176,6 +1177,22 @@ def complete_reminder(id: str) -> dict[str, str]:
     """Mark a reminder complete by id.
     Side effect (completes); needs EventKit (Reminders) access. `id` from reminders."""
     return _reminders.complete_reminder(id).as_dict()
+
+
+@_write_tool(
+    snapshot=_reminder_delete_snapshot,
+    adapter="reminders",
+    permission=("EventKit", "Full Disk Access"),
+)
+def delete_reminder(id: str, dry_run: bool = True, with_subtasks: bool = False) -> dict:
+    """Delete a reminder by id. `dry_run` DEFAULTS TO TRUE — previews the reminder that
+    WOULD be deleted (pointer, no mutation); pass `dry_run=false` to delete. A parent
+    with subtasks is refused unless `with_subtasks=true`, because deleting a parent
+    deletes its subtasks too. A subtask indented in Reminders in the last few minutes
+    may not be visible yet.
+    Destructive; needs EventKit and Full Disk Access (the subtask check reads the
+    Reminders store). `id` from reminders."""
+    return _reminders.delete_reminder(id, dry_run=dry_run, with_subtasks=with_subtasks)
 
 
 @_additive_tool(adapter="calendar", permission="EventKit")

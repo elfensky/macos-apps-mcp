@@ -696,7 +696,7 @@ def test_read_never_folds_an_eventkit_failure_into_coverage(monkeypatch):
         RemindersAdapter().read("today")
 
 
-# --- delete_reminder (REM-01, #92) -----------------------------------------------------
+# --- delete_reminder (REM-01, #92) ----------------------------------------------------
 
 
 class _EKWorld:
