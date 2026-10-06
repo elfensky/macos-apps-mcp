@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-07 — EventKit depth
+
 ### Added
 
 - **`complete_reminder` on a parent lists the subtasks it leaves open** (#91) — under
