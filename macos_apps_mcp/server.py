@@ -274,13 +274,15 @@ async def usage() -> dict:
     return usage_report({t.name for t in await mcp.list_tools()})
 
 
-@_read_tool(adapter="reminders", permission="EventKit")
-def reminders(due: str = "today") -> list[dict[str, str]]:
-    """List reminders as pointers. `due`: today | overdue | this-week | a list name.
-    Each result's `folder` is its list's id (from `reminder_lists`); pass it as
-    `list_name=`. Read-only; needs EventKit (Reminders) access. Hydrate none —
-    pointers only."""
-    return [p.as_dict() for p in _reminders.get_pointers(due)]
+@_read_tool(adapter="reminders", permission=("EventKit", "Full Disk Access"))
+def reminders(due: str = "today") -> dict:
+    """List reminders as pointers in `{results, coverage?}`. `due`: today | overdue |
+    this-week | a list name. Each result may carry `folder` (its list's id, from
+    `reminder_lists`; pass it as `list_name=`), `tags` and `parent` (the parent
+    reminder's id, for a subtask). Requires EventKit and Full Disk Access (tags and
+    parent links come from the Reminders store). Read-only. Hydrate none — pointers
+    only."""
+    return _reminders.read(due)
 
 
 @_read_tool(adapter="calendar", permission="EventKit")

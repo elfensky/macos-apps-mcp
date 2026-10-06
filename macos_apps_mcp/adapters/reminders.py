@@ -6,12 +6,13 @@ Reads return Pointers; writes take ``ReminderData``. All EventKit access goes th
 
 from __future__ import annotations
 
+import dataclasses
 import unicodedata
 from datetime import datetime, timedelta
 
 import EventKit as EK
 
-from ..contracts import Pointer, Recurrence, ReminderData
+from ..contracts import Pointer, Recurrence, ReminderData, read_result
 from ..errors import (
     RecurrenceRequired,
     VerificationFailed,
@@ -33,6 +34,7 @@ from ..eventkit import (
 )
 from ..runtime import run_native
 from ..text import clean_summary, fold_text, norm_text
+from . import reminders_store
 
 # A fetch has no user interaction, so the GCD callback should arrive quickly. Bound the
 # wait so a callback that never fires can't hang the single worker — and every later
@@ -55,13 +57,17 @@ def _reminder_deeplink(ident: str) -> str:
     return f"x-apple-reminderkit://REMCDReminder/{ident}"
 
 
-def _reminder_pointer(item) -> Pointer:
+def _reminder_pointer(
+    item, *, tags: tuple[str, ...] | None = None, parent: str | None = None
+) -> Pointer:
     ident = item.calendarItemIdentifier()
     return Pointer(
         id=ident,
         summary=clean_summary(_reminder_summary(item)),
         deeplink=_reminder_deeplink(ident),
         folder=container_id(item),  # the list identifier, never its title (D-12)
+        tags=tags,
+        parent=parent,
     )
 
 
@@ -252,6 +258,20 @@ class RemindersAdapter:
             return [_reminder_pointer(r) for r in _fetch_reminders(s, pred)]
 
         return run_native(work)
+
+    def read(self, query: str) -> dict:
+        """``get_pointers`` plus the read-only store plane: each Pointer carries its
+        ``tags`` and ``parent`` (joined by EventKit id) when the store has them, in the
+        ``{results, coverage?}`` envelope (D-15, #91)."""
+        # EventKit first and outside any `try`: its errors are the read's own and must
+        # never be folded into `coverage`.
+        pointers = self.get_pointers(query)
+        tags, parents = reminders_store.tags_and_parents()
+        pointers = [
+            dataclasses.replace(p, tags=tags.get(p.id), parent=parents.get(p.id))
+            for p in pointers
+        ]
+        return read_result(pointers)
 
     def get_lists(self) -> list[Pointer]:
         """Reminder lists as Pointers (id + name) for resolving write targets."""

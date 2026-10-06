@@ -236,11 +236,19 @@ class Pointer:
     # (#158). It stays optional and opt-in because a snippet on every pointer of a
     # 100-message thread is the payload dump "pointers, not payload" exists to prevent.
     snippet: str | None = None
+    # reminders reads only: the reminder's tags (sorted) from the read-only store plane.
+    # Unset when the store has none OR could not be read — the read's ``coverage`` says
+    # which. No public API writes tags (#91, D-16).
+    tags: tuple[str, ...] | None = None
+    # reminders reads only: the parent reminder's EventKit id when this is a subtask
+    # (same store plane and the same read-only rule as ``tags``, #91)
+    parent: str | None = None
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict:
         """The wire shape: required fields always; optional fields only when set.
-        The ONE serialization of a Pointer — tool results and audit records share it."""
-        d = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
+        The ONE serialization of a Pointer — tool results and audit records share it.
+        ``dict``, not ``dict[str, str]``: ``tags`` is a list."""
+        d: dict = {"id": self.id, "summary": self.summary, "deeplink": self.deeplink}
         if self.folder is not None:
             d["folder"] = self.folder
         if self.reason is not None:
@@ -249,6 +257,10 @@ class Pointer:
             d["account"] = self.account
         if self.snippet is not None:
             d["snippet"] = self.snippet
+        if self.tags is not None:
+            d["tags"] = list(self.tags)
+        if self.parent is not None:
+            d["parent"] = self.parent
         return d
 
 
