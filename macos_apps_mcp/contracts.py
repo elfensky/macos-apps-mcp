@@ -459,6 +459,10 @@ class Recurrence:
         # a Recurrence is built (direct construction included), not only via from_rrule.
         if self.count is not None and self.until is not None:
             raise ValueError("recurrence count and until are mutually exclusive")
+        if self.interval < 1:
+            raise ValueError(f"recurrence INTERVAL must be >= 1; got {self.interval}")
+        if self.count is not None and self.count < 1:
+            raise ValueError(f"recurrence COUNT must be >= 1; got {self.count}")
         # canonical form: sorted unique, so equal rules compare equal however built
         for name in ("byday", "bymonthday", "bymonth", "byyearday", "bysetpos"):
             object.__setattr__(self, name, tuple(sorted(set(getattr(self, name)))))
@@ -554,13 +558,9 @@ class Recurrence:
                 f"RRULE FREQ must be one of {_FREQUENCIES}; got {fields.get('FREQ')!r}"
             )
         interval = int(fields["INTERVAL"]) if "INTERVAL" in fields else 1
-        if interval < 1:
-            raise ValueError(f"RRULE INTERVAL must be >= 1; got {interval}")
         if "COUNT" in fields and "UNTIL" in fields:
             raise ValueError("RRULE COUNT and UNTIL are mutually exclusive")
         count = int(fields["COUNT"]) if "COUNT" in fields else None
-        if count is not None and count < 1:
-            raise ValueError(f"RRULE COUNT must be >= 1; got {count}")
         until = _rrule_until(fields["UNTIL"]) if "UNTIL" in fields else None
         return cls(
             frequency=freq,

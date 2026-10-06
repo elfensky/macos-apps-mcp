@@ -250,6 +250,27 @@ def test_recurrence_rejects_nonpositive_count():
         Recurrence.from_rrule("FREQ=DAILY;COUNT=0")
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"interval": 0}, "INTERVAL must be >= 1"),
+        ({"interval": -2}, "INTERVAL must be >= 1"),
+        ({"count": 0}, "COUNT must be >= 1"),
+        ({"count": -1}, "COUNT must be >= 1"),
+    ],
+)
+def test_recurrence_direct_construction_rejects_nonpositive_interval_and_count(
+    kwargs, match
+):
+    with pytest.raises(ValueError, match=match):
+        Recurrence(frequency="daily", **kwargs)
+
+
+def test_recurrence_from_rrule_rejects_a_zero_interval():
+    with pytest.raises(ValueError, match="INTERVAL must be >= 1"):
+        Recurrence.from_rrule("FREQ=DAILY;INTERVAL=0")
+
+
 def test_recurrence_rejects_malformed_part():
     with pytest.raises(ValueError, match="expected KEY=VALUE"):
         Recurrence.from_rrule("FREQ=DAILY;GARBAGE")
