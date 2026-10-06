@@ -26,7 +26,14 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
 cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file (codesign)
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
-uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" "$REPO"
+# Install from uv.lock (#286): a bare install resolves the newest versions the open
+# constraints allow, so the bundle shipped mcp 2 while CI tested the lock. Locked
+# deps first (hashes kept), then the project alone.
+REQS="$(mktemp)"
+trap 'rm -f "$REQS"' EXIT
+uv export --project "$REPO" --frozen --no-dev --no-emit-project > "$REQS"
+uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" -r "$REQS"
+uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.

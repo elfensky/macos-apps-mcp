@@ -28,9 +28,9 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "fastmcp>=2.0",
+    "fastmcp>=2.0,<4",                    # <4: tested major (#286)
     "anyio>=4",                           # imported directly (audit.py)
-    "mcp>=1.26",                          # imported directly (server.py: mcp.types)
+    "mcp>=1.26,<2",                       # imported directly (server.py: mcp.types); <2: tested major (#286)
     "pyobjc-framework-EventKit>=10.0",    # Calendar + Reminders (v1)
     "pyobjc-framework-Cocoa>=10.0",       # Foundation, imported directly (runtime.py)
     "pyobjc-framework-ServiceManagement>=10.0",  # SMAppService agent registration (deploy.py)
@@ -47,7 +47,9 @@ dependencies = [
 macos-apps-mcp = "macos_apps_mcp:main"
 
 # Dev deps with >=major,<next pins mirror the sibling repos' uv discipline (lintle, descent-engine).
-# Runtime deps stay unbounded above — capping them downgraded EventKit/fastmcp, so don't.
+# Runtime deps stay unbounded above except mcp/fastmcp, capped at the majors CI tests:
+# the shim's #170 wrapper is mcp-1.x-only (#286). Other caps once downgraded
+# EventKit/fastmcp, so do not add more.
 [dependency-groups]
 dev = [
     "pytest>=8,<10",
