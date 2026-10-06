@@ -1133,6 +1133,29 @@ def query_mailbox_urls() -> list[str]:
     return _read_index(path, read)
 
 
+def is_label_mailbox(url: str) -> bool:
+    """True when ``url`` is a Gmail label mailbox (``mailboxes.source`` set, facts §5f).
+
+    A label mailbox is a view of label membership, not a place a message is stored,
+    so a write that names one as its SOURCE does not do what it reports: device-
+    verified 2026-10-06, a move from a label added the destination label and kept the
+    source label (#287). Exact equality on the raw percent-encoded url, the ``folder``
+    token every read returns; an unknown url is not a label. Raises on a missing
+    store — a write cannot prove its source is no label without it, and the
+    recoverable plane's locate needs the same store a moment later.
+    """
+    path = require_index_path()
+
+    def read(conn):
+        row = conn.execute(
+            "SELECT 1 FROM mailboxes WHERE url = ? AND source IS NOT NULL LIMIT 1",
+            (url.strip(),),
+        ).fetchone()
+        return row is not None
+
+    return _read_index(path, read)
+
+
 def query_thread(message_id: str, limit: int) -> list[Pointer]:
     """One conversation by any member's EXACT-form (bracketed) Message-ID →
     Pointers, oldest-first. Id-form normalization is the adapter's concern."""
