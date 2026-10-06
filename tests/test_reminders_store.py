@@ -8,7 +8,9 @@ point: Reminders keeps deleted tags and reminders in the store with
 
 from __future__ import annotations
 
+import ast
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -204,3 +206,44 @@ def test_store_path_on_something_that_is_not_a_directory_stays_typed(
     monkeypatch.setattr(reminders_store, "_STORES", afile)
     with pytest.raises(NativeError, match="could not be listed"):
         reminders_store.store_path()
+
+
+# REM-04 / D-16: tags and subtasks are read-only; Apple's private selectors that could
+# write them are never referenced (exact names, so a docstring naming them is fine).
+_PRIVATE_SELECTORS = {
+    "parentID",
+    "setParentID_",
+    "setParentID",
+    "setParentID:",
+    "parentReminder",
+    "setParentReminder_",
+}
+
+
+def _private_selectors(source: str) -> list[str]:
+    return [
+        name
+        for node in ast.walk(ast.parse(source))
+        for name in (
+            node.attr if isinstance(node, ast.Attribute) else None,
+            node.value if isinstance(node, ast.Constant) else None,
+        )
+        if isinstance(name, str) and name in _PRIVATE_SELECTORS
+    ]
+
+
+@pytest.mark.parametrize(
+    "source", ["store.setParentID_(child)", 'getattr(r, "parentReminder")']
+)
+def test_the_private_selector_scan_bites(source):
+    assert _private_selectors(source)
+
+
+def test_the_package_never_references_a_private_subtask_selector():
+    root = Path(__file__).resolve().parent.parent
+    offenders = {
+        str(path.relative_to(root)): found
+        for path in (root / "macos_apps_mcp").rglob("*.py")
+        if (found := _private_selectors(path.read_text()))
+    }
+    assert offenders == {}
