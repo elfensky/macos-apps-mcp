@@ -571,6 +571,19 @@ def _passes_by_filters(rule: Recurrence, d: date) -> bool:
     )
 
 
+def _period(frequency: str, d: date) -> tuple[date, date]:
+    """The half-open ``[lo, hi)`` date range BYSETPOS counts inside."""
+    if frequency == "daily":
+        return d, d + timedelta(days=1)
+    if frequency == "weekly":
+        lo = d - timedelta(days=d.weekday())
+        return lo, lo + timedelta(days=7)
+    if frequency == "monthly":
+        lo = d.replace(day=1)
+        return lo, (lo + timedelta(days=32)).replace(day=1)
+    return date(d.year, 1, 1), date(d.year + 1, 1, 1)
+
+
 def dtstart_in_rule(rule: Recurrence, start: date) -> bool:
     """Whether ``start`` itself is one of the dates ``rule`` describes (D-10).
 
@@ -598,19 +611,6 @@ def dtstart_in_rule(rule: Recurrence, start: date) -> bool:
     ]
     position = candidates.index(d) + 1
     return _is_nth(position, len(candidates), rule.bysetpos)
-
-
-def _period(frequency: str, d: date) -> tuple[date, date]:
-    """The half-open ``[lo, hi)`` date range BYSETPOS counts inside."""
-    if frequency == "daily":
-        return d, d + timedelta(days=1)
-    if frequency == "weekly":
-        lo = d - timedelta(days=d.weekday())
-        return lo, lo + timedelta(days=7)
-    if frequency == "monthly":
-        lo = d.replace(day=1)
-        return lo, (lo + timedelta(days=32)).replace(day=1)
-    return date(d.year, 1, 1), date(d.year + 1, 1, 1)
 
 
 class _ClearRecurrence:
