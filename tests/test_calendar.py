@@ -215,6 +215,24 @@ def test_resolve_single_calendar_among_many_still_works():
 # --- verify-after-write (#49) --------------------------------------------------------
 
 
+class _FakeEvent(SimpleNamespace):
+    def setAlarms_(self, alarms):
+        self.set_alarms_calls.append(alarms)
+
+    def __getattr__(self, name):  # only reached for a missing attribute
+        if name.startswith("set"):
+            return lambda *a: None
+        raise AttributeError(name)
+
+
+def _alarm(offset_s, absolute=False):
+    """A persisted EKAlarm: ``relativeOffset`` seconds (EventKit's own unit)."""
+    return SimpleNamespace(
+        relativeOffset=lambda: offset_s,
+        absoluteDate=lambda: object() if absolute else None,
+    )
+
+
 def _fake_persisted_event(
     title="Standup",
     start=datetime(2026, 6, 24, 9, 0),
@@ -225,8 +243,13 @@ def _fake_persisted_event(
     cal_title="Work",
     cal_id="C-Work",  # verify keys on the identifier now, not the title (#55 review)
     rule=None,
+    alarms=None,
 ):
-    return SimpleNamespace(
+    """A persisted event. ``alarms`` is a list of ``_alarm`` items (None = no alarms);
+    ``setAlarms_`` calls are recorded on ``set_alarms_calls`` and any other setter is a
+    no-op, so the real ``_apply_event`` can run against it."""
+    return _FakeEvent(
+        set_alarms_calls=[],
         title=lambda: title,
         startDate=lambda: _ns(start),
         endDate=lambda: _ns(end),
@@ -237,6 +260,7 @@ def _fake_persisted_event(
             title=lambda: cal_title, calendarIdentifier=lambda: cal_id
         ),
         recurrenceRules=lambda: [rule] if rule is not None else None,
+        alarms=lambda: alarms,
     )
 
 
@@ -833,3 +857,72 @@ def test_dtstart_no_recurrence_has_no_note(monkeypatch):
     adapter = _write_world(monkeypatch, persisted)
     data = CalendarEventData(title="Standup", start=start, end=end)
     assert "extra first occurrence" not in adapter.create_event(data).summary
+
+
+# --- alarms: relative EKAlarms, verified as a multiset (CAL-01, CAL-02, #89) ---------
+
+
+def _alarm_world(monkeypatch, persisted):
+    """create_event / update_event with the REAL ``_apply_event``: it writes onto
+    ``persisted``, which is also what the re-fetch returns."""
+    import macos_apps_mcp.adapters.calendar as cal
+
+    persisted.calendarItemIdentifier = lambda: "E-1"
+    s = SimpleNamespace(
+        saveEvent_span_commit_error_=lambda *a: (True, None),
+        defaultCalendarForNewEvents=lambda: persisted.calendar(),
+    )
+    monkeypatch.setattr(cal, "run_native", lambda fn: fn())
+    monkeypatch.setattr(cal, "store", lambda: s)
+    monkeypatch.setattr(
+        cal.EK, "EKEvent", SimpleNamespace(eventWithEventStore_=lambda _s: persisted)
+    )
+    monkeypatch.setattr(cal, "_resolve_span", lambda *a, **k: "span")
+    monkeypatch.setattr(cal, "_resolve_event", lambda _s, _i: persisted)
+    monkeypatch.setattr(cal, "_refetch_event", lambda _s, _i: persisted)
+    return cal.CalendarAdapter()
+
+
+def _timed(**kw):
+    return CalendarEventData(
+        title="Standup",
+        start=datetime(2026, 6, 24, 9, 0),
+        end=datetime(2026, 6, 24, 9, 15),
+        **kw,
+    )
+
+
+def test_create_event_alarms_builds_one_relative_alarm(monkeypatch):
+    persisted = _fake_persisted_event(alarms=[_alarm(-900.0)])
+    p = _alarm_world(monkeypatch, persisted).create_event(_timed(alarms=(15,)))
+    assert isinstance(p, Pointer)
+    (built,) = persisted.set_alarms_calls
+    assert [a.relativeOffset() for a in built] == [-900.0]
+    assert all(a.absoluteDate() is None for a in built)
+
+
+def test_create_event_alarms_missing_after_save_raises(monkeypatch):
+    persisted = _fake_persisted_event(alarms=None)  # the store dropped them
+    with pytest.raises(VerificationFailed, match="alarms"):
+        _alarm_world(monkeypatch, persisted).create_event(_timed(alarms=(15,)))
+
+
+def test_verify_event_alarms_absolute_alarm_raises():
+    # offset 0 matches the requested (0,), so only the absolute alarm is the mismatch
+    fresh = _fake_persisted_event(alarms=[_alarm(0.0, absolute=True)])
+    with pytest.raises(VerificationFailed, match="absolute_alarms"):
+        _verify_event(fresh, "E-1|x", _timed(alarms=(0,)), "C-Work")
+
+
+def test_verify_event_alarms_compare_is_a_multiset():
+    # EventKit returns alarms in no stable order: either order passes
+    want = _timed(alarms=(60, 15))
+    for got in ([-900.0, -3600.0], [-3600.0, -900.0]):
+        fresh = _fake_persisted_event(alarms=[_alarm(o) for o in got])
+        _verify_event(fresh, "E-1|x", want, "C-Work")  # no raise
+
+
+def test_verify_event_alarms_wrong_offset_raises():
+    fresh = _fake_persisted_event(alarms=[_alarm(-1800.0)])
+    with pytest.raises(VerificationFailed, match="alarms"):
+        _verify_event(fresh, "E-1|x", _timed(alarms=(15,)), "C-Work")

@@ -372,6 +372,35 @@ def test_update_event_builds_typed_payload(monkeypatch):
     assert out == {"id": "E-1", "summary": "s", "deeplink": "d"}
 
 
+def test_create_event_alarms_become_a_tuple(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event(
+        "Standup",
+        start="2026-06-24T09:00:00",
+        end="2026-06-24T09:15:00",
+        alarms=[15, 60],
+    )
+    assert fake.calls[0][1].alarms == (15, 60)
+
+
+def test_create_event_without_alarms_hands_none(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    srv.create_event("Standup", start="2026-06-24T09:00:00", end="2026-06-24T09:15:00")
+    assert fake.calls[0][1].alarms is None
+
+
+def test_update_event_alarms_tri_state(monkeypatch):
+    fake = _FakeWriter()
+    monkeypatch.setattr(srv, "_calendar", fake)
+    when = dict(start="2026-06-24T09:00:00", end="2026-06-24T09:15:00")
+    srv.update_event("E-1", "Standup", **when)  # omitted → leave untouched
+    srv.update_event("E-1", "Standup", alarms=[], **when)  # [] → clear
+    srv.update_event("E-1", "Standup", alarms=[15], **when)
+    assert [c[2].alarms for c in fake.calls] == [None, (), (15,)]
+
+
 def test_delete_event_dispatches(monkeypatch):
     fake = _FakeWriter()
     monkeypatch.setattr(srv, "_calendar", fake)
