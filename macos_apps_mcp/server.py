@@ -287,8 +287,9 @@ def reminders(due: str = "today") -> list[dict[str, str]]:
 def events(when: str = "today") -> list[dict[str, str]]:
     """List calendar events as pointers. `when`: today | week | YYYY-MM-DD.
     Each result's `folder` is its calendar's id (from `calendars`); pass it to
-    `free_busy(calendars=…)` or as `calendar=`. Read-only; needs EventKit (Calendar)
-    access."""
+    `free_busy(calendars=…)` or as `calendar=`. A read cannot tell that a series'
+    first occurrence is extra (each result holds its own occurrence start); the
+    create/update result says so. Read-only; needs EventKit (Calendar) access."""
     return [p.as_dict() for p in _calendar.get_pointers(when)]
 
 
@@ -1184,7 +1185,9 @@ def create_event(
     such as 2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY,
     BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day`
     takes a DATE
-    (2026-07-01); a timestamp with a UTC offset is rejected.
+    (2026-07-01); a timestamp with a UTC offset is rejected. A `start` that does not
+    match its `recurrence` is accepted (RFC 5545 counts it as the first occurrence) and
+    the result's summary says so.
     Side effect (creates); needs EventKit (Calendar) access. Target a calendar via
     `calendar` — a calendar name OR a calendar Pointer id (from calendars). An ambiguous
     name is refused (with the candidate ids listed), never guessed."""
@@ -1219,7 +1222,8 @@ def update_event(
     2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS;
     BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day` takes a
     DATE (2026-07-01); a timestamp with a UTC offset
-    is rejected.
+    is rejected. A `start` that does not match its `recurrence` is accepted (RFC 5545
+    counts it as the first occurrence) and the result's summary says so.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from

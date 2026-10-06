@@ -8,6 +8,9 @@ surface may still shift between minor versions.
 
 ### Added
 
+- A recurring event whose start does not match its rule is accepted (RFC 5545 counts
+  the start as the first occurrence) and the result says so (#90).
+
 - **Real recurrence on events and reminders** (#90) — BYDAY (with ordinals), BYMONTHDAY,
   BYMONTH, BYYEARDAY, BYSETPOS; verified part by part after the write, a reminder's UNTIL
   included (day precision); BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused by

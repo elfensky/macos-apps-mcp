@@ -81,7 +81,9 @@ ordinals such as `2TU` or `-1FR` for monthly and yearly rules), `BYMONTHDAY`, `B
 `BYYEARDAY` and `BYSETPOS`, e.g. `FREQ=MONTHLY;BYDAY=2TU;COUNT=6`. A recurring reminder needs a
 due date. `BYWEEKNO`, `BYHOUR`, `BYMINUTE`, `BYSECOND` and `WKST` are refused by name (EventKit
 saves `BYWEEKNO` but expands only the first date), and so is any value out of range or any
-combination RFC 5545 forbids; each part is checked again after the write.
+combination RFC 5545 forbids; each part is checked again after the write. A start date that
+does not match its rule is accepted — RFC 5545 counts it as the first occurrence — and the
+event result says that the first occurrence is an extra one.
 
 ### Mail — id-first read + draft-and-open (Automation)
 
