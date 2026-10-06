@@ -1194,3 +1194,11 @@ def test_ping_returns_the_server_identity():
     # #110: through the mac-mcp → macos-apps-mcp rename only a grep gate kept this
     # string consistent — pin the identity so a stray edit can't pass CI silently.
     assert srv.ping() == "macos-apps-mcp ok"
+
+
+def test_the_tag_and_subtask_write_gap_is_named_where_the_model_reads_it():
+    # D-16: no public API writes a tag or nests a reminder, so the three reminder
+    # docstrings say so and the model does not try.
+    for fn in (srv.reminders, srv.create_reminder, srv.update_reminder):
+        assert "no public API" in fn.__doc__, fn.__name__
+    assert "Full Disk Access" in srv.reminders.__doc__

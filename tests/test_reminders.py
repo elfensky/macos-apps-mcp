@@ -608,3 +608,89 @@ def test_create_reminder_list_scan_save_and_verify_share_one_run_native(monkeypa
     env = _list_env(monkeypatch)
     env.adapter.create_reminder_list("Groceries")
     assert env.runs == [1]
+
+
+# --- RemindersAdapter.read: the store plane degrades loudly (#91, D-15) ---------------
+
+
+def _adapter_with_pointers(monkeypatch):
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+
+    pointers = [
+        Pointer(id="R1", summary="one", deeplink="d1", folder="L-1"),
+        Pointer(id="R2", summary="two", deeplink="d2", folder="L-1"),
+    ]
+    monkeypatch.setattr(RemindersAdapter, "get_pointers", lambda self, q: pointers)
+    return RemindersAdapter(), pointers
+
+
+def _plain(pointers):
+    return [p.as_dict() for p in pointers]
+
+
+def test_read_with_an_ungranted_store_keeps_the_eventkit_pointers(monkeypatch):
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import FullDiskAccessDenied
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+
+    def denied():
+        raise FullDiskAccessDenied("Grant Full Disk Access in System Settings.")
+
+    monkeypatch.setattr(reminders_store, "store_path", denied)
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)  # no tags, no parent keys
+    assert out["coverage"].startswith("tags and parent links unavailable:")
+    assert "Grant Full Disk Access" in out["coverage"]
+
+
+def test_read_with_a_drifted_store_names_the_drift(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-d.sqlite", drop_parent_column=True)
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)
+    assert out["coverage"].startswith("tags and parent links unavailable:")
+    assert "ZPARENTREMINDER" in out["coverage"]
+
+
+def test_read_with_a_store_that_fails_mid_read_gives_no_partial_tags(
+    monkeypatch, tmp_path
+):
+    # a locked or rewritten store: the sqlite error becomes SchemaDrift inside
+    # read_via_sqlite, so the tags read first are NOT presented as the whole answer
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-m.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "_PARENTS", "SELECT nope FROM nowhere")
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)  # R1 has tags in the store, none shown
+    assert "coverage" in out
+
+
+def test_read_with_a_missing_store_still_returns_the_pointers(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    monkeypatch.setattr(reminders_store, "_STORES", tmp_path / "absent")
+    out = adapter.read("today")
+    assert out["results"] == _plain(pointers)
+    assert "not found" in out["coverage"]
+
+
+def test_read_never_folds_an_eventkit_failure_into_coverage(monkeypatch):
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from macos_apps_mcp.errors import AccessDenied
+
+    def boom(self, query):
+        raise AccessDenied("no Reminders access")
+
+    monkeypatch.setattr(RemindersAdapter, "get_pointers", boom)
+    with pytest.raises(AccessDenied):
+        RemindersAdapter().read("today")

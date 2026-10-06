@@ -13,7 +13,7 @@ import sqlite3
 import pytest
 
 from macos_apps_mcp.adapters import reminders_store
-from macos_apps_mcp.errors import SchemaDrift
+from macos_apps_mcp.errors import FullDiskAccessDenied, NativeError, SchemaDrift
 
 _OBJECT_COLS = (
     "Z_ENT INTEGER, ZNAME1 TEXT, ZREMINDER3 INTEGER, ZMARKEDFORDELETION INTEGER"
@@ -117,3 +117,44 @@ def test_a_tag_reaches_the_caller_as_one_clean_line(tmp_path, monkeypatch):
     monkeypatch.setattr(reminders_store, "store_path", lambda: path)
     tags, _ = reminders_store.tags_and_parents()
     assert tags == {"R1": ("dup", "line one line two")}
+
+
+# --- store_path: the directory listing (RESEARCH Pitfall 5) ---------------------------
+
+
+def test_store_path_picks_the_largest_data_file(tmp_path, monkeypatch):
+    (tmp_path / "Data-a.sqlite").write_bytes(b"x" * 10)
+    (tmp_path / "Data-b.sqlite").write_bytes(b"x" * 20)
+    (tmp_path / "Data-c.sqlite-wal").write_bytes(b"x" * 99)  # not a store file
+    monkeypatch.setattr(reminders_store, "_STORES", tmp_path)
+    assert reminders_store.store_path() == tmp_path / "Data-b.sqlite"
+
+
+def test_store_path_on_a_missing_directory_says_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(reminders_store, "_STORES", tmp_path / "absent")
+    with pytest.raises(NativeError, match="not found") as exc:
+        reminders_store.store_path()
+    assert not isinstance(exc.value, FullDiskAccessDenied)
+
+
+def test_store_path_on_an_empty_directory_says_not_found(tmp_path, monkeypatch):
+    monkeypatch.setattr(reminders_store, "_STORES", tmp_path)
+    with pytest.raises(NativeError, match="not found"):
+        reminders_store.store_path()
+
+
+def test_an_unreadable_directory_is_a_full_disk_access_denial_not_not_found(
+    tmp_path, monkeypatch
+):
+    # Path.glob would return [] here and read as "store not found": a denied grant
+    # must stay a denied grant.
+    locked = tmp_path / "Stores"
+    locked.mkdir()
+    (locked / "Data-a.sqlite").write_bytes(b"x")
+    locked.chmod(0o000)
+    try:
+        monkeypatch.setattr(reminders_store, "_STORES", locked)
+        with pytest.raises(FullDiskAccessDenied, match="Full Disk Access"):
+            reminders_store.store_path()
+    finally:
+        locked.chmod(0o700)
