@@ -685,6 +685,34 @@ def test_read_with_a_missing_store_still_returns_the_pointers(monkeypatch, tmp_p
     assert "not found" in out["coverage"]
 
 
+def test_read_names_the_pointers_the_store_does_not_have(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.adapters.reminders import RemindersAdapter
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, pointers = _adapter_with_pointers(monkeypatch)
+    ghost = Pointer(id="GHOST", summary="three", deeplink="d3", folder="L-1")
+    monkeypatch.setattr(
+        RemindersAdapter, "get_pointers", lambda self, q: [*pointers, ghost]
+    )
+    path = _make_reminders_store(tmp_path / "Data-g.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    out = adapter.read("today")
+    assert [r["id"] for r in out["results"]] == ["R1", "R2", "GHOST"]
+    assert out["results"][0]["tags"] == ["Work", "home"]  # the rest is still enriched
+    assert "1 of 3 reminders are not in the Reminders store" in out["coverage"]
+
+
+def test_read_with_every_pointer_in_the_store_has_no_coverage(monkeypatch, tmp_path):
+    from macos_apps_mcp.adapters import reminders_store
+    from tests.test_reminders_store import _make_reminders_store
+
+    adapter, _pointers = _adapter_with_pointers(monkeypatch)
+    path = _make_reminders_store(tmp_path / "Data-ok.sqlite")
+    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    assert "coverage" not in adapter.read("today")
+
+
 def test_read_never_folds_an_eventkit_failure_into_coverage(monkeypatch):
     from macos_apps_mcp.adapters.reminders import RemindersAdapter
     from macos_apps_mcp.errors import AccessDenied
@@ -817,6 +845,23 @@ def test_delete_reminder_with_an_unreadable_store_refuses_and_changes_nothing(
     with pytest.raises(WriteRefused) as exc:
         adapter.delete_reminder("P0", dry_run=dry_run)
     assert "grant Full Disk Access" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.removed == []
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_delete_reminder_with_no_store_row_refuses_and_changes_nothing(
+    monkeypatch, tmp_path, dry_run
+):
+    # EventKit knows P0, the store does not (wrong file / not synced): the cascade is
+    # unknowable, so the delete is refused — never read as "no subtasks"
+    from macos_apps_mcp.errors import WriteRefused
+
+    world = _EKWorld(_ek_item("P0"))
+    adapter = _wire_delete(monkeypatch, tmp_path, world)  # no row for P0
+    with pytest.raises(WriteRefused) as exc:
+        adapter.delete_reminder("P0", dry_run=dry_run)
+    assert "not in the Reminders store" in str(exc.value)
     assert "No change was made" in str(exc.value)
     assert world.removed == []
 
@@ -1121,3 +1166,18 @@ def test_complete_reminder_never_completes_a_calendar_event(monkeypatch, tmp_pat
     with pytest.raises(ValueError, match="not a reminder"):
         adapter.complete_reminder("E-1")
     assert world.saved == []
+
+
+def test_complete_reminder_with_no_store_row_refuses_before_any_save(
+    monkeypatch, tmp_path
+):
+    from macos_apps_mcp.errors import WriteRefused
+
+    world = _CompleteWorld(_open_item("P0"))
+    adapter = _wire_complete(monkeypatch, tmp_path, world, rows=())  # no row for P0
+    with pytest.raises(WriteRefused) as exc:
+        adapter.complete_reminder("P0")
+    assert "not in the Reminders store" in str(exc.value)
+    assert "No change was made" in str(exc.value)
+    assert world.saved == []
+    assert world.items["P0"].isCompleted() is False

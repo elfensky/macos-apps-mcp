@@ -142,16 +142,40 @@ def test_subtasks_of_lists_live_children_of_a_live_parent(store_file):
     )
     assert reminders_store.subtasks_of("P1") == ["C1", "C2"]
     assert reminders_store.subtasks_of("R2") == []  # a leaf
-    assert reminders_store.subtasks_of("absent") == []
 
 
-def test_subtasks_of_a_tombstoned_parent_is_empty(store_file):
-    # R3 is a child of the tombstoned RP: no live parent, so no link to report
-    assert reminders_store.subtasks_of("RP") == []
+def test_subtasks_of_a_parent_the_store_has_no_row_for_raises(store_file):
+    # "[]" must mean "no subtasks", never "the store cannot see this reminder"
+    with pytest.raises(NativeError, match="not in the Reminders store"):
+        reminders_store.subtasks_of("absent")
+    with pytest.raises(NativeError, match="not in the Reminders store"):
+        reminders_store.subtasks_of("RP")  # tombstoned: no live row either
+
+
+def test_a_null_id_row_is_never_a_subtask_parent_or_tag_owner(store_file):
+    _add_reminders(
+        store_file,
+        [(10, "P1", None, 0), (11, None, 10, 0), (12, "C2", 10, 0)],
+    )
+    conn = sqlite3.connect(store_file)
+    conn.execute("INSERT INTO ZREMCDOBJECT VALUES (30, 'ghost', 11, 0)")
+    conn.commit()
+    conn.close()
+    assert reminders_store.subtasks_of("P1") == ["C2"]
+    tags, parents = reminders_store.tags_and_parents()
+    assert parents == {"R2": "R1", "C2": "P1"}  # no None key
+    assert None not in tags
+
+
+def test_live_ids_are_the_live_non_null_rows(store_file):
+    _add_reminders(store_file, [(10, None, None, 0)])
+    assert reminders_store.live_ids() == {"R1", "R2", "R3"}
 
 
 def test_subtasks_of_binds_the_id_never_formats_it_into_the_sql(store_file):
-    assert reminders_store.subtasks_of("R1' OR '1'='1") == []
+    # bound, so the quote is part of an id that matches no row (never an OR-true)
+    with pytest.raises(NativeError, match="not in the Reminders store"):
+        reminders_store.subtasks_of("R1' OR '1'='1")
     assert reminders_store.subtasks_of("R1") == ["R2"]
 
 

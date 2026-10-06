@@ -304,15 +304,26 @@ class RemindersAdapter:
         # `coverage` — loud, never an empty list or a swallowed error (D-15, Pitfall 5).
         try:
             tags, parents = reminders_store.tags_and_parents()
+            live = reminders_store.live_ids()
         except NativeError as e:
             return read_result(
                 pointers, coverage=f"tags and parent links unavailable: {e}"
             )
+        unseen = sum(p.id not in live for p in pointers)
         pointers = [
             dataclasses.replace(p, tags=tags.get(p.id), parent=parents.get(p.id))
             for p in pointers
         ]
-        return read_result(pointers)
+        # A readable store that lacks a pointer's id is a wrong store file or a lag:
+        # its tags and parent are unknown, not absent — say so (never silent).
+        note = (
+            f"{unseen} of {len(pointers)} reminders are not in the Reminders store "
+            "(a different store file, or not synced yet) — their tags and parent "
+            "links are unknown"
+            if unseen
+            else None
+        )
+        return read_result(pointers, coverage=note)
 
     def get_lists(self) -> list[Pointer]:
         """Reminder lists as Pointers (id + name) for resolving write targets."""

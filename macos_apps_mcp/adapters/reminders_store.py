@@ -50,17 +50,27 @@ _FINGERPRINT = {
 _TAGS = """SELECT r.ZCKIDENTIFIER, h.ZNAME1 FROM ZREMCDOBJECT h
   JOIN ZREMCDREMINDER r ON r.Z_PK = h.ZREMINDER3
   WHERE h.Z_ENT = (SELECT Z_ENT FROM Z_PRIMARYKEY WHERE Z_NAME = 'REMCDHashtag')
-    AND h.ZMARKEDFORDELETION = 0 AND r.ZMARKEDFORDELETION = 0"""
+    AND h.ZMARKEDFORDELETION = 0 AND r.ZMARKEDFORDELETION = 0
+    AND r.ZCKIDENTIFIER IS NOT NULL"""
 _PARENTS = """SELECT c.ZCKIDENTIFIER, p.ZCKIDENTIFIER FROM ZREMCDREMINDER c
   JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
-  WHERE c.ZMARKEDFORDELETION = 0 AND p.ZMARKEDFORDELETION = 0"""
+  WHERE c.ZMARKEDFORDELETION = 0 AND p.ZMARKEDFORDELETION = 0
+    AND c.ZCKIDENTIFIER IS NOT NULL AND p.ZCKIDENTIFIER IS NOT NULL"""
 # A parent's live children, in creation order. The id is a bound parameter, never
 # formatted in: it is a model-chosen string (D-18).
 _SUBTASKS_OF = """SELECT c.ZCKIDENTIFIER FROM ZREMCDREMINDER c
   JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
   WHERE p.ZCKIDENTIFIER = ? AND c.ZMARKEDFORDELETION = 0
-    AND p.ZMARKEDFORDELETION = 0
+    AND p.ZMARKEDFORDELETION = 0 AND c.ZCKIDENTIFIER IS NOT NULL
   ORDER BY c.Z_PK"""
+# Is the reminder in the store at all? (a bound parameter, like _SUBTASKS_OF)
+_LIVE_ROW = (
+    "SELECT 1 FROM ZREMCDREMINDER WHERE ZCKIDENTIFIER = ? AND ZMARKEDFORDELETION = 0"
+)
+_LIVE_IDS = (
+    "SELECT ZCKIDENTIFIER FROM ZREMCDREMINDER "
+    "WHERE ZMARKEDFORDELETION = 0 AND ZCKIDENTIFIER IS NOT NULL"
+)
 
 
 def store_path() -> Path:
@@ -119,17 +129,38 @@ def tags_and_parents() -> tuple[dict[str, tuple[str, ...]], dict[str, str]]:
     return read_via_sqlite(store_path(), _FINGERPRINT, query)
 
 
+def live_ids() -> set[str]:
+    """The ids of every live reminder row — what ``read`` checks its EventKit pointers
+    against, so a store that does not know them (a wrong file, not synced) is named."""
+
+    def query(conn: sqlite3.Connection):
+        return {ident for (ident,) in conn.execute(_LIVE_IDS)}
+
+    return read_via_sqlite(store_path(), _FINGERPRINT, query)
+
+
 def subtasks_of(parent_id: str) -> list[str]:
     """The EventKit ids of ``parent_id``'s live subtasks, in creation order.
 
     The delete's guard (D-18): EventKit cannot see subtasks and removes them with the
     parent, so the store is the only witness of what a delete takes. A typed store error
     (``FullDiskAccessDenied`` / ``SchemaDrift``) propagates — the caller refuses rather
-    than delete blind. Runs inline when already on the worker, so one ``run_native``
-    block can read here and then act through EventKit.
+    than delete blind. So does a parent the store has no live row for: ``[]`` must mean
+    "no subtasks", never "the store cannot see this reminder" (a wrong store file, a
+    NULL join key, a reminder not synced yet). Runs inline when already on the worker,
+    so one ``run_native`` block can read here and then act through EventKit.
     """
 
     def query(conn: sqlite3.Connection):
+        # Device, 2026-10-06 (3 of 3): a reminder created through EventKit is in the
+        # store within 0.00-0.05 s and gone from it within 0.01 s of a delete — so a
+        # missing row is refused at once, with no wait loop.
+        if conn.execute(_LIVE_ROW, (parent_id,)).fetchone() is None:
+            raise NativeError(
+                f"reminder {parent_id!r} is not in the Reminders store (not synced "
+                "yet, or a different store file), so its subtasks cannot be seen. "
+                "Re-read with `reminders`, then retry."
+            )
         return [ident for (ident,) in conn.execute(_SUBTASKS_OF, (parent_id,))]
 
     return read_via_sqlite(store_path(), _FINGERPRINT, query)
