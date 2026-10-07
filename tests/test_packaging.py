@@ -82,3 +82,5 @@ def test_build_script_gates_universal2():
     ):
         assert needle in src, needle
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
+    # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
+    assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")

@@ -131,6 +131,16 @@ if [[ -n "$SIGN" ]]; then
     -s "$SIGN" "$APP/Contents/MacOS/macos-apps-mcp"
   codesign --force --timestamp --options runtime --entitlements "$ENTS" \
     -s "$SIGN" "$APP"
+  # The smokes above ran unsigned; the hardened runtime can still break a slice (#205:
+  # x86_64 ctypes init needs writable+executable memory, which it refuses). That
+  # failure is a hang with TMPDIR set (as under launchd), so keep the env, cap the time.
+  # -B: no .pyc into the sealed bundle; --verify below proves the seal held.
+  for a in arm64 x86_64; do
+    /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 /usr/bin/arch "-$a" \
+      "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -B -c "import macos_apps_mcp" \
+      || { echo "SIGNED SMOKE FAILED ($a): the hardened runtime breaks it"; exit 1; }
+    echo "signed smoke ok: $a"
+  done
   codesign --verify --strict --verbose=2 "$APP"
 fi
 
