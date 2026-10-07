@@ -160,10 +160,17 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
 # source = messages.mailbox for label mailboxes (device-verified 2026-10-06, facts
 # §5f). Keep this read projection separate from build_message_location_query: backup
 # and body-file lookup still need the physical messages.mailbox, not a label.
+# Arm 3 (#299) is the write guard's rule (is_label_mailbox) for a label without
+# source: a source-less mailbox that stores no messages row. Its labels rows count
+# only when the labelled message's own mailbox is in the same account; a row into
+# another account's mailbox stays out. Mail's own counter skips these (total_count
+# stays 0, facts §5f).
 # UNION ALL is safe: arm 1 requires mb.source IS NULL, arm 2 requires
-# mb.source = m.mailbox (non-NULL), so the arms are disjoint, and the labels primary
-# key (message_id, mailbox_id) rules out repeats inside arm 2. It skips the dedup sort
-# (measured: identical counts, about half the added search latency recovered).
+# mb.source = m.mailbox (non-NULL), so the arms are disjoint. Arm 3 requires
+# source IS NULL (disjoint from arm 2) and a mailbox with no messages row, which
+# therefore never equals m.mailbox (disjoint from arm 1). The labels primary key
+# (message_id, mailbox_id) rules out repeats inside arms 2 and 3. It skips the dedup
+# sort (measured: identical counts, about half the added search latency recovered).
 _MAILBOX_MEMBERSHIP_CTE = """
 WITH mailbox_membership(message_rowid, mailbox_id) AS (
     SELECT m.ROWID, mb.ROWID
@@ -176,6 +183,18 @@ WITH mailbox_membership(message_rowid, mailbox_id) AS (
     JOIN messages m ON m.ROWID = l.message_id
     JOIN mailboxes mb ON mb.ROWID = l.mailbox_id AND mb.source = m.mailbox
     WHERE m.deleted = 0
+    UNION ALL
+    SELECT m.ROWID, l.mailbox_id
+    FROM labels l
+    JOIN messages m ON m.ROWID = l.message_id
+    JOIN mailboxes mb ON mb.ROWID = l.mailbox_id AND mb.source IS NULL
+    JOIN mailboxes hb ON hb.ROWID = m.mailbox
+    WHERE m.deleted = 0
+      AND NOT EXISTS (SELECT 1 FROM messages dm WHERE dm.mailbox = mb.ROWID)
+      AND substr(mb.url, 1, instr(mb.url, '://') + 2 +
+                 instr(substr(mb.url, instr(mb.url, '://') + 3), '/'))
+        = substr(hb.url, 1, instr(hb.url, '://') + 2 +
+                 instr(substr(hb.url, instr(hb.url, '://') + 3), '/'))
 )
 """
 
