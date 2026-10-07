@@ -209,7 +209,7 @@ def test_attachments_by_id_addresses_one_message_and_makes_no_cap_claim(
     _seed_one_message(blank_envelope, _SPAM_URL)
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **kw):
         seen["argv"] = argv
         return "<a@b>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1e"
 

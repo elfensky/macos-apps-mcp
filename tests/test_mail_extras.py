@@ -21,7 +21,7 @@ from macos_apps_mcp.adapters import (
     mail_index,
     mail_recover,
 )
-from macos_apps_mcp.errors import BatchTooLarge
+from macos_apps_mcp.errors import BatchTooLarge, NativeError
 from macos_apps_mcp.text import RS, US
 
 _ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
@@ -186,9 +186,38 @@ def test_save_by_an_unknown_attachment_id_lists_the_real_ids(
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, _TWO))
     with pytest.raises(ValueError) as e:
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="9")
-    assert "2" in str(e.value) and "1.3" in str(e.value)
+    assert "its attachment ids are: 2, 1.3." in str(e.value)
     assert [c[0] for c in calls] == [mail_attachments._ATTACHMENTS]
     assert not (root / "in").exists()
+
+
+def test_save_by_attachment_id_when_the_folder_holds_no_such_message(
+    root, resolved, monkeypatch
+):
+    """#296 review: an empty listing means the message is not in that folder (a stale
+    token) — say so, not "it has no attachments", and save nothing."""
+    calls = []
+    monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, _TWO))
+    monkeypatch.setattr(mail_attachments, "records", lambda *a, **k: [])
+    with pytest.raises(NativeError, match=r"no message with id 'a@x'.*stale"):
+        mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
+    assert calls == []
+    assert not (root / "in").exists()
+
+
+def test_the_listing_waits_as_long_as_its_script(root, resolved, monkeypatch):
+    """#296 review: the id-only listing scans the mailbox; its host cap matches the
+    script's own 120 s, not the 30 s default (#230)."""
+    calls = []
+
+    def fake(script, *argv, **kw):
+        calls.append(kw.get("timeout"))
+        return ""
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    with pytest.raises(NativeError):
+        mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
+    assert calls == [mail_attachments._LIST_TIMEOUT] == [120.0]
 
 
 def test_save_by_attachment_id_refuses_an_existing_file(root, resolved, monkeypatch):
@@ -246,6 +275,7 @@ def test_save_by_name_makes_one_apple_event(root, resolved, monkeypatch, attachm
 def test_save_script_enforces_the_cap_and_the_ambiguous_name():
     # the cap is checked in-script because `file size` is only knowable from Mail, and
     # the fetch above means "look, then save" costs a second Apple Event every time.
+    # (An id-only save lists first anyway, #296, and checks the listed size too.)
     assert "over the cap" in mail_attachments._SAVE_ATTACHMENT
     assert "pass attachment_id instead" in mail_attachments._SAVE_ATTACHMENT
     # ...and the save is the LAST thing the script does, after both refusals
