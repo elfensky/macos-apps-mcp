@@ -6,6 +6,14 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`save_mail_attachment` names a save by `attachment_id` after the attachment** (#296)
+  — with only an id, the file was named after the id (no extension), and
+  `original_name` reported the id. The name now comes from the message's attachment
+  list, read before the path is chosen, so the never-overwrite and size checks still
+  run before the save. An unknown id is refused with the ids the message has.
+
 ## [0.14.1] - 2026-10-07 — Gmail label fixes
 
 ### Fixed
