@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-08 — Universal app
+
 ### Changed
 
 - **The daemon `.app` is universal2 (Apple silicon and Intel) and needs macOS 15** (#205)
