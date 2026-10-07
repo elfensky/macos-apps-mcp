@@ -82,5 +82,27 @@ def test_build_script_gates_universal2():
     ):
         assert needle in src, needle
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
+    # the gate names a bad binary before a smoke can trip over it
+    assert src.index("universal2 gate ok") < src.index("# Smokes on BOTH slices")
+    # kept safety properties of the build: pinned interpreter, identical per-arch
+    # trees, no unexplained arch-specific file, bytecode sealed in before signing
+    for needle in ("shasum -a 256 -c", "ARCH TREES DIFFER", "ARCH-SPECIFIC NON-BINARY"):
+        assert needle in src, needle
+    assert src.index("-m compileall") < src.index('if [[ -n "$SIGN" ]]')
     # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
     assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
+
+
+def test_only_the_intel_slice_carries_the_memory_exception():
+    """#205: libffi has no x86_64 trampoline pages, so the Intel slice needs
+    allow-unsigned-executable-memory; arm64 keeps the strict set
+    (test_entitlements_minimal). The build derives the x86_64 set from the strict
+    file by adding exactly that one key, joins the per-set slices, and gates on both."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    key = "com.apple.security.cs.allow-unsigned-executable-memory"
+    assert src.count("PlistBuddy -c") == 1
+    assert f'"Add :{key} bool true"' in src
+    assert 'lipo -create "$WORK/exe-x86_64" "$WORK/exe-arm64"' in src
+    assert "entitlements ok: x86_64 has the exception, arm64 is strict" in src
+    sign = src.index('if [[ -n "$SIGN" ]]')
+    assert sign < src.index("entitlements ok") < src.index("signed smoke ok")
