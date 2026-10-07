@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-07T16:07:03.690Z"
+last_updated: "2026-10-07T22:24:40.734Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 03 execution started
-state_head: b25235360df55ed740e2bdf5c5253f0e792f4f61
+state_head: e0a22643503844a42cedfc8890847e7cdc3ac169
 progress:
   total_phases: 7
   completed_phases: 3
@@ -132,6 +132,7 @@ Recent decisions affecting current work:
 | 261007-1bq | Gmail write gaps: canonical source refused, label match in any spelling, label destination refused after a device run, undo explains, new labels without source detected (#291, PR #295); doctor reports bundled mcp/fastmcp (#285) | 2026-10-07 | f7967f4 | [261007-1bq-gmail-write-gaps-291-and-doctor-mcp-vers](./quick/261007-1bq-gmail-write-gaps-291-and-doctor-mcp-vers/) |
 | 261007-o5a | Reads count a Gmail label without mailboxes.source: bare_label arm by the write guard's rule; deleted rows ignored; ~+20 ms per id lookup (#299, PR #305) | 2026-10-07 | b252353 | [261007-o5a-reads-count-a-gmail-label-without-mailbo](./quick/261007-o5a-reads-count-a-gmail-label-without-mailbo/) |
 | 261007-o5d | save_mail_attachment names an id-only save after the attachment; stale-folder error; 120 s listing cap (#296, PR #304) | 2026-10-07 | b252353 | [261007-o5d-save-mail-attachment-names-an-id-only-sa](./quick/261007-o5d-save-mail-attachment-names-an-id-only-sa/) |
+| 261007-tu3 | Universal2 .app (Apple silicon + Intel), macOS 15 floor, no cryptography; Intel-only allow-unsigned-executable-memory, notarization Accepted (#205, PR #308) | 2026-10-08 | e0a2264 | [261007-tu3-universal2-app-build-intel-apple-silicon](./quick/261007-tu3-universal2-app-build-intel-apple-silicon/) |
 
 ### Roadmap Evolution
 
