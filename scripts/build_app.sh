@@ -17,6 +17,13 @@ while [[ $# -gt 0 ]]; do case "$1" in
 esac; done
 
 [[ -n "$NOTARIZE" && -z "$SIGN" ]] && { echo "--notarize requires --sign" >&2; exit 2; }
+# Preflight: both slices are smoke-run here (x86_64 under Rosetta), and lipo/vtool
+# come from the Xcode Command Line Tools — fail now, not after the installs.
+{ /usr/bin/arch -arm64 /usr/bin/true && /usr/bin/arch -x86_64 /usr/bin/true \
+    && xcrun -f vtool >/dev/null; } 2>/dev/null \
+  || { echo "build needs an Apple-silicon Mac with Rosetta 2 (softwareupdate" \
+       "--install-rosetta --agree-to-license) and the Xcode Command Line Tools" >&2
+       exit 2; }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
@@ -39,14 +46,19 @@ lipo2() { lipo -create "$1" "$2" -output "$WORK/fat" && mv "$WORK/fat" "$1"; }
 mkdir -p "$CACHE"
 for a in aarch64 x86_64; do
   t="cpython-$PBS_PY+$PBS_TAG-$a-apple-darwin-install_only_stripped.tar.gz"
-  [[ -f "$CACHE/$t" ]] || curl -fsSL -o "$CACHE/$t" \
-    "https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/${t//+/%2B}"
+  if [[ ! -f "$CACHE/$t" ]]; then   # .part, then mv: a cut download never sits in the cache
+    curl -fsSL -o "$CACHE/$t.part" \
+      "https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/${t//+/%2B}"
+    mv "$CACHE/$t.part" "$CACHE/$t"
+  fi
   sha="PBS_SHA_$a"
-  echo "${!sha}  $CACHE/$t" | shasum -a 256 -c - >/dev/null
+  echo "${!sha}  $CACHE/$t" | shasum -a 256 -c - >/dev/null 2>&1 \
+    || { echo "PBS SHA256 MISMATCH ($a): $CACHE/$t — delete it and rebuild" >&2; exit 1; }
   mkdir -p "$WORK/$a" && tar -xzf "$CACHE/$t" -C "$WORK/$a"
 done
 STD="$WORK/aarch64/python" X="$WORK/x86_64/python"
-(cd "$STD" && find "bin/python$PYVER" "lib/python$PYVER" -type f) | while read -r f; do
+(cd "$STD" && find "bin/python$PYVER" "lib/python$PYVER" -type f -print0) |
+  while IFS= read -r -d '' f; do
   if is_macho "$STD/$f"; then lipo2 "$STD/$f" "$X/$f"; fi
 done
 
@@ -75,7 +87,7 @@ diff <(cd "$WORK/site-aarch64" && find . | sort) \
   <(cd "$WORK/site-x86_64" && find . | sort) >&2 \
   || { echo "ARCH TREES DIFFER: per-arch wheels ship different files"; exit 1; }
 ditto "$WORK/site-aarch64" "$SITE"
-(cd "$WORK/site-aarch64" && find . -type f) | while read -r f; do
+(cd "$WORK/site-aarch64" && find . -type f -print0) | while IFS= read -r -d '' f; do
   cmp -s "$SITE/$f" "$WORK/site-x86_64/$f" && continue   # pure, or already universal2
   if is_macho "$SITE/$f"; then lipo2 "$SITE/$f" "$WORK/site-x86_64/$f"
   elif [[ "$f" != *.dist-info/* ]]; then echo "ARCH-SPECIFIC NON-BINARY: $f"; exit 1; fi
@@ -90,6 +102,20 @@ sed "s|__APP__|/Applications/macos-apps-mcp.app|" \
   "$REPO/packaging/ren.lav.macos-apps-mcp.plist" \
   > "$APP/Contents/Library/LaunchAgents/ren.lav.macos-apps-mcp.plist"
 cp "$REPO/packaging/Info.plist" "$APP/Contents/Info.plist"
+
+# Gate: every Mach-O is universal2 and no slice needs a newer macOS than MACOS_MIN.
+# Before the smokes, so a thin or too-new extension is named here, not as a smoke
+# failure. compileall adds no Mach-O.
+find "$APP" -type f -print0 | while IFS= read -r -d '' f; do
+  is_macho "$f" || continue
+  [[ "$(lipo -archs "$f")" == "x86_64 arm64" ]] || { echo "NOT UNIVERSAL2: $f"; exit 1; }
+  for a in arm64 x86_64; do
+    m="$(vtool -arch "$a" -show-build "$f" | awk '$1=="minos"||$1=="version"{print $2; exit}')"
+    [[ -n "$m" && "$(printf '%s\n' "$m" "$MACOS_MIN" | sort -V | tail -1)" == "$MACOS_MIN" ]] \
+      || { echo "MINOS ${m:-?} > $MACOS_MIN ($a): $f"; exit 1; }
+  done
+done
+echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 # Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
 for a in arm64 x86_64; do
@@ -108,17 +134,6 @@ done
   "$APP/Contents/lib/python${PYVER}" >/dev/null \
   || { echo "BYTECODE PRECOMPILE FAILED"; exit 1; }
 
-# Gate: every Mach-O is universal2 and no slice needs a newer macOS than MACOS_MIN.
-find "$APP" -type f | while read -r f; do
-  is_macho "$f" || continue
-  [[ "$(lipo -archs "$f")" == "x86_64 arm64" ]] || { echo "NOT UNIVERSAL2: $f"; exit 1; }
-  for a in arm64 x86_64; do
-    m="$(vtool -arch "$a" -show-build "$f" | awk '$1=="minos"||$1=="version"{print $2; exit}')"
-    [[ -n "$m" && "$(printf '%s\n' "$m" "$MACOS_MIN" | sort -V | tail -1)" == "$MACOS_MIN" ]] \
-      || { echo "MINOS ${m:-?} > $MACOS_MIN ($a): $f"; exit 1; }
-  done
-done
-echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"
@@ -131,8 +146,9 @@ if [[ -n "$SIGN" ]]; then
   # two sets cannot drift apart.
   ENTS_X86="$WORK/entitlements-x86_64.plist"
   cp "$ENTS" "$ENTS_X86"
-  plutil -insert com.apple.security.cs.allow-unsigned-executable-memory -bool YES \
-    "$ENTS_X86"
+  # PlistBuddy, not plutil: plutil reads the dots in the key as a key path.
+  /usr/libexec/PlistBuddy -c \
+    "Add :com.apple.security.cs.allow-unsigned-executable-memory bool true" "$ENTS_X86"
   # inside-out: every nested Mach-O first (libraries carry no entitlements)...
   find "$APP/Contents/lib" \( -name '*.so' -o -name '*.dylib' \) -print0 |
     while IFS= read -r -d '' f; do
