@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-06T23:23:54.550Z"
+last_updated: "2026-10-07T15:02:28.885Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 03 execution started
-state_head: 01972d9fb3206b7532d1cc3b5a418bad948f0fed
+state_head: c6ef3fa50a0350326d67fdf80cd07b2bf9fed831
 progress:
   total_phases: 7
   completed_phases: 3
@@ -128,6 +128,7 @@ Recent decisions affecting current work:
 | 4 | Precompile the daemon bundle's bytecode before signing so its code seal survives first launch | 2026-10-07 | 26baa9a | — |
 | 261007-11j | Release bump 0.14.0 (EventKit depth): changelog corrections, version sites, Phase 3 device re-run record | 2026-10-07 | e672a4b | [261007-11j-release-bump-0-14-0-with-changelog-corre](./quick/261007-11j-release-bump-0-14-0-with-changelog-corre/) |
 | 6 | Record v0.14.0 as the installed daemon (build a5766c9, ditto install, probe-proven 2026-10-07) | 2026-10-07 | 01972d9 | — |
+| 7 | Release bump 0.14.1 — Gmail label fixes (#291, #285) | 2026-10-07 | c6ef3fa | — |
 
 ### Roadmap Evolution
 
