@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-07T15:02:28.885Z"
+last_updated: "2026-10-07T15:11:36.949Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 03 execution started
-state_head: c6ef3fa50a0350326d67fdf80cd07b2bf9fed831
+state_head: f7967f479c76e42703f600a8aaf6832667e9ebe8
 progress:
   total_phases: 7
   completed_phases: 3
@@ -111,7 +111,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.0 (build `a5766c9`, installed with `ditto` and probe-proven 2026-10-07, code seal intact after the first run; on PyPI too). It carries Phase 3, #251, #286, #287 and #292. Install with `ditto`, not `cp -R` (#297).
+- The installed daemon is release v0.14.1 (build `5f0ec19`, notarized, installed with `ditto`, `doctor()` proven over the socket 2026-10-07: version 0.14.1, libs mcp 1.29.0 / fastmcp 3.4.7; code seal intact after the first run; TestPyPI only so far). It adds #295 (#291 Gmail label refusals, #285 `doctor().libs`) to v0.14.0. Install with `ditto`, not `cp -R` (#297).
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -129,6 +129,7 @@ Recent decisions affecting current work:
 | 261007-11j | Release bump 0.14.0 (EventKit depth): changelog corrections, version sites, Phase 3 device re-run record | 2026-10-07 | e672a4b | [261007-11j-release-bump-0-14-0-with-changelog-corre](./quick/261007-11j-release-bump-0-14-0-with-changelog-corre/) |
 | 6 | Record v0.14.0 as the installed daemon (build a5766c9, ditto install, probe-proven 2026-10-07) | 2026-10-07 | 01972d9 | — |
 | 7 | Release bump 0.14.1 — Gmail label fixes (#291, #285) | 2026-10-07 | c6ef3fa | — |
+| 261007-1bq | Gmail write gaps: canonical source refused, label match in any spelling, label destination refused after a device run, undo explains, new labels without source detected (#291, PR #295); doctor reports bundled mcp/fastmcp (#285) | 2026-10-07 | f7967f4 | [261007-1bq-gmail-write-gaps-291-and-doctor-mcp-vers](./quick/261007-1bq-gmail-write-gaps-291-and-doctor-mcp-vers/) |
 
 ### Roadmap Evolution
 
