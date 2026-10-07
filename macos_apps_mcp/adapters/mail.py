@@ -876,28 +876,38 @@ end run"""
 )
 
 
+# Said of a folder the label guard refuses. "Or ..." because the guard also refuses a
+# Gmail-account folder that stores no message, which it cannot tell from a label.
+_LABEL_FOLDER = (
+    "is a Gmail label folder (or a Gmail-account folder that stores no message in "
+    "Mail's index, which reads the same)"
+)
+
+
 def _refuse_label_route(source: str, destination: str | None = None) -> None:
     """Refuse a write that routes through a Gmail label folder, before any native call
     (dry runs included).
 
-    SOURCE a label folder (#287): device-verified 2026-10-06, a move from a label adds
-    the destination label and keeps the source one. DESTINATION a label folder, or a
-    canonical name while the source account has label folders (#291): a unified name
-    files into the source account's own mailbox of that role (facts §5e), which in
-    Gmail can be a label. A move into a label is not device-verified.
+    SOURCE a label folder: in both device runs a move out of a label left the
+    message in that label — within Gmail 2026-10-06 (#287), and to another account
+    2026-10-07 (#291), where the post-check read ``ok`` and the copy was back by
+    +2 min. DESTINATION a label folder, or a canonical name while the source account
+    has label folders (a unified name files into the source account's own mailbox of
+    that role, facts §5e): ``mail_undo`` of such a move is a move out of the label,
+    so it cannot reverse it (#291).
     """
     if mail_index.is_label_mailbox(source):
         raise WriteRefused(
-            f"{source!r} is a Gmail label folder: a view of label membership, not "
-            "where the message is stored. A move from a label adds the destination "
-            "label and keeps this one (device-verified 2026-10-06), so no write route "
-            "from a label folder is proven yet (#287). Nothing was changed. Do not "
+            f"{source!r} {_LABEL_FOLDER}: a view of label membership, not where the "
+            "message is stored. In both device runs a move out of a label left the "
+            "message in that label, also when the move went to another account and "
+            "the tool's own check read ok (#287, #291). Nothing was changed. Do not "
             "retry from this folder; tell the user."
         )
     if destination is None:
         return
     if mail_index.is_label_mailbox(destination):
-        why = f"{destination!r} is a Gmail label folder"
+        why = f"{destination!r} {_LABEL_FOLDER}"
     elif mail_index.account_of(destination) is None and mail_index.account_has_labels(
         mail_index.account_of(source)
     ):
@@ -909,11 +919,9 @@ def _refuse_label_route(source: str, destination: str | None = None) -> None:
     else:
         return
     raise WriteRefused(
-        f"{why}. A move into a Gmail label is not device-verified: within Gmail it "
-        "may add a label (a copy) or, out of All Mail, may trash the message, "
-        "depending on the account's Gmail IMAP settings (#291). Nothing was changed. "
-        "Pass a physical folder url as to_mailbox, or do this move in Mail by hand; "
-        "a route ships only after a device run."
+        f"{why}. mail_undo cannot reverse a move into a Gmail label: the move back "
+        "out of a label left a copy on device (#291). Nothing was changed. Pass a "
+        "physical folder url as to_mailbox, or do this move in Mail by hand."
     )
 
 
@@ -1574,9 +1582,10 @@ class MailAdapter:
           lost, and the status is loud and factual.
 
         A Gmail label folder is refused (``WriteRefused``) as either end, before any
-        native call, dry runs included: on device a move from a label is a copy (#287),
-        and a move into one is not device-verified (#291). A canonical ``to_mailbox``
-        is refused for the same reason when the source account has label folders.
+        native call, dry runs included: on device a move out of a label left a copy,
+        so ``mail_undo`` cannot reverse a move into one (#287, #291). A canonical
+        ``to_mailbox`` is refused for the same reason when the source account has
+        label folders.
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any
@@ -1994,10 +2003,10 @@ class MailAdapter:
             backup = rec.get("backup_dir") or "(no backup was taken)"
             raise WriteRefused(
                 f"receipt {receipt_id!r} moved these messages into the Gmail label "
-                f"folder {dest!r}, and no proven route moves a message out of a Gmail "
-                "label (#287, #291). Nothing was changed. The messages came from "
-                f"{source!r}, and their backed-up bytes are in {backup}. Remove the "
-                "label, or move them back, in Mail by hand. Do not retry."
+                f"folder {dest!r}, and a move out of a Gmail label is a copy "
+                "(device-verified, #287, #291). Nothing was changed. The messages "
+                f"came from {source!r}, and their backed-up bytes are in {backup}. "
+                "Remove the label, or move them back, in Mail by hand. Do not retry."
             )
         return self.move_mail(
             [t.id for t in targets],

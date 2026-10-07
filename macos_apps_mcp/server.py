@@ -745,8 +745,10 @@ def create_mailbox(name: str, account: str) -> dict:
     `mail_overview` will report Mail's own equivalent spelling of it once the account
     syncs — both address the same mailbox. A "%" in the name is rejected (it cannot be
     addressed unambiguously). There is no delete counterpart: removing a mailbox is not
-    scriptable, so do it in Mail. Additive (creates a folder; touches no message); needs
-    Automation access for Mail, plus Full Disk Access to resolve "On My Mac"."""
+    scriptable, so do it in Mail. In a Gmail account the new mailbox is a label:
+    `move_mail` refuses it at either end (#291), and reads show it empty while Mail's
+    index does not mark it as a label. Additive (creates a folder; touches no message);
+    needs Automation access for Mail, plus Full Disk Access to resolve "On My Mac"."""
     return _mail.create_mailbox(name, account)
 
 
@@ -774,12 +776,13 @@ def move_mail(
     canonical "inbox"/"sent"/"drafts"/"trash"/"junk", which files into the SOURCE
     message's own account (it names Mail's cross-account accessor, not one mailbox),
     so it is refused for an On My Mac source — that store has none of the five. A
-    Gmail label folder is refused as either end (a move from a label is a copy, a
-    move into one is not verified), and a canonical `to_mailbox` is refused when the
-    source account has Gmail label folders. Pass a `folder` url from mail_overview
-    when in doubt. To archive, move into a mailbox named Archive — there is no
-    separate archive tool.
-    Cross-account moves are supported and leave exactly ONE copy. Verification is
+    Gmail label folder is refused as either end (a move out of a label left a copy
+    on device, so mail_undo cannot reverse a move into one), and a canonical
+    `to_mailbox` is refused when the source account has Gmail label folders. Pass a
+    `folder` url from mail_overview when in doubt. To archive, move into a mailbox
+    named Archive — there is no separate archive tool.
+    Cross-account moves are supported and leave exactly ONE copy (out of a Gmail label
+    they do not, which is why a label is refused). Verification is
     by-ID (#206): each copy's internal reference must go dead after the move, and the
     destination's count of that Message-ID must rise — presence alone can't tell a
     landed copy from a pre-existing one. A Message-ID with several copies in the
@@ -816,7 +819,9 @@ def trash_mail(ids: str, mailbox: str, dry_run: bool = True) -> dict:
     the cap is not overridable. `mailbox` is REQUIRED and must be the `folder` url from
     the read that produced the ids, passed back VERBATIM — not one of the canonical
     names: Mail files a deleted message in its OWNING account's Trash, and a unified
-    name ("inbox") cannot say which account that is.
+    name ("inbox") cannot say which account that is. A Gmail label folder is refused
+    (a delete there is not a delete of the message, #287); use the message's
+    `[Gmail]/All Mail` folder.
     Returns {op, receipt, count, succeeded, targets, destination, backup_dir, undo} —
     keep `receipt` to undo the batch. Each copy is deleted by Mail's internal id and
     verified by the account Trash's count rising, or every one of its copies' source

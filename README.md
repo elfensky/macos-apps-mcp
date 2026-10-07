@@ -113,10 +113,10 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
-| `create_mailbox` | name (`/` nests), account | creates the folder; missing parents auto-created. **No delete counterpart** — `delete <mailbox>` is not scriptable, so removing one is a Mail.app action |
-| `move_mail` | ids (≤25), from_mailbox, to_mailbox, `dry_run` | file/archive/refile; every message backed up + logged **before** anything moves, so `mail_undo` puts it back. `dry_run` defaults to `True`. Cross-account moves leave exactly one copy |
+| `create_mailbox` | name (`/` nests), account | creates the folder; missing parents auto-created. **No delete counterpart** — `delete <mailbox>` is not scriptable, so removing one is a Mail.app action. In a Gmail account the new folder is a label, which `move_mail` refuses |
+| `move_mail` | ids (≤25), from_mailbox, to_mailbox, `dry_run` | file/archive/refile; every message backed up + logged **before** anything moves, so `mail_undo` puts it back. `dry_run` defaults to `True`. Cross-account moves leave exactly one copy. A Gmail label folder is refused at either end (a move out of a label leaves a copy), and so is a unified name as the source |
 | `trash_mail` | ids (≤25), mailbox, `dry_run` | **soft delete, and the only delete there is** — Mail's `delete` moves to the account's Trash and nothing in its scripting dictionary erases from there. Undoable via `mail_undo`; emptying Trash is yours to do in Mail.app. `dry_run` defaults to `True` |
-| `mail_undo` | receipt, `dry_run` | replay a `move_mail`/`trash_mail` receipt in reverse; the undo is itself backed up and undoable |
+| `mail_undo` | receipt, `dry_run` | replay a `move_mail`/`trash_mail` receipt in reverse; the undo is itself backed up and undoable. A receipt into a Gmail label or a unified name is refused, with how to restore by hand |
 | `update_mail_status` | ids (≤25), mailbox, `read`, `flagged`, `flag_color` | mark read/unread, flag (+colour). Re-issuing with the opposite value **is** the undo, so `dry_run` defaults to `False` |
 | `mail_duplicates` | `limit` | **report only** — per-mailbox redundant-copy counts + worst offenders. Cleanup is the `dedupe-mail` CLI below; this tool cannot delete |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
