@@ -120,5 +120,6 @@ not close a milestone just because a same-numbered release went out.
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
 - [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed the import and stream smokes (#205, #286)
+- [ ] Build log shows `signed smoke ok: arm64` and `signed smoke ok: x86_64` — each slice imports under the hardened runtime (#205)
 - [ ] Build log shows `universal2 gate ok` — every binary is arm64 + x86_64 and needs no newer macOS than `LSMinimumSystemVersion` (#205)
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha

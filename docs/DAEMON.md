@@ -223,7 +223,12 @@ build:
    Look for `flags=0x10000(runtime)` in the output — confirms hardened runtime is actually on,
    not just requested.
 
-2. **PyObjC imports and callbacks still work under it.** If every tool call that touches
+2. **PyObjC imports and callbacks still work under it.** A signed build imports the package on
+   both slices after signing, with a 120-second cap. It fails unless the log shows
+   `signed smoke ok: arm64` and `signed smoke ok: x86_64` (#205). Without the escape-hatch
+   entitlement below, the x86_64 slice fails there: its libffi has no trampoline table, so
+   ctypes init needs writable+executable memory, which the hardened runtime refuses. The
+   process hangs (with `env -i`, it raises `MemoryError`). If every tool call that touches
    EventKit/Contacts/ServiceManagement works (i.e. the acceptance checklist above passes), this
    is implicitly verified — PyObjC's libffi closure trampolines are exercised by every native
    call `run_native()` makes. If instead you see crashes or `EXC_BAD_ACCESS` specifically inside
