@@ -122,22 +122,51 @@ echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"
-  # inside-out: every nested Mach-O first, then the main binary, then the bundle
+  EXE="$APP/Contents/MacOS/macos-apps-mcp"
+  # Intel needs ONE exception, and only Intel gets it (#205, operator decision
+  # 2026-10-07). libffi has no pre-built trampoline pages on x86_64 — neither PBS's
+  # copy nor Apple's /usr/lib/libffi.dylib — so ctypes and PyObjC write closure code
+  # at startup, which the hardened runtime refuses (hang / MemoryError). arm64 has
+  # the trampoline pages and keeps the strict set. Derived, not a second file, so the
+  # two sets cannot drift apart.
+  ENTS_X86="$WORK/entitlements-x86_64.plist"
+  cp "$ENTS" "$ENTS_X86"
+  plutil -insert com.apple.security.cs.allow-unsigned-executable-memory -bool YES \
+    "$ENTS_X86"
+  # inside-out: every nested Mach-O first (libraries carry no entitlements)...
   find "$APP/Contents/lib" \( -name '*.so' -o -name '*.dylib' \) -print0 |
     while IFS= read -r -d '' f; do
       codesign --force --timestamp --options runtime -s "$SIGN" "$f"
     done
-  codesign --force --timestamp --options runtime --entitlements "$ENTS" \
-    -s "$SIGN" "$APP/Contents/MacOS/macos-apps-mcp"
+  # ...then the bundle, whose signature lives in the main executable. codesign takes
+  # one entitlement set per run, so sign once per set, keep the matching slice of
+  # each, and join them. Both runs seal the same resources, so both slices point at
+  # the same CodeResources.
+  codesign --force --timestamp --options runtime --entitlements "$ENTS_X86" \
+    -s "$SIGN" "$APP"
+  lipo "$EXE" -thin x86_64 -output "$WORK/exe-x86_64"
   codesign --force --timestamp --options runtime --entitlements "$ENTS" \
     -s "$SIGN" "$APP"
-  # The smokes above ran unsigned; the hardened runtime can still break a slice (#205:
-  # x86_64 ctypes init needs writable+executable memory, which it refuses). That
-  # failure is a hang with TMPDIR set (as under launchd), so keep the env, cap the time.
+  lipo "$EXE" -thin arm64 -output "$WORK/exe-arm64"
+  lipo -create "$WORK/exe-x86_64" "$WORK/exe-arm64" -output "$EXE"
+  codesign --verify --strict --verbose=2 "$APP"
+  # Gate: the exception is on the x86_64 slice and NOT on arm64.
+  # (captured first: under pipefail, `codesign | grep -q` can fail on SIGPIPE)
+  ex="com.apple.security.cs.allow-unsigned-executable-memory"
+  e_x86="$(codesign -d --entitlements - --arch x86_64 "$EXE" 2>/dev/null)"
+  e_arm="$(codesign -d --entitlements - --arch arm64 "$EXE" 2>/dev/null)"
+  [[ "$e_x86" == *"$ex"* ]] || { echo "ENTITLEMENTS: x86_64 slice lacks $ex"; exit 1; }
+  [[ "$e_arm" != *"$ex"* && "$e_arm" == *apple-events* ]] \
+    || { echo "ENTITLEMENTS: arm64 slice is not the strict set"; exit 1; }
+  echo "entitlements ok: x86_64 has the exception, arm64 is strict"
+  # The smokes above ran unsigned; the hardened runtime can still break a slice. The
+  # failure is a hang with TMPDIR set (as under launchd), so keep the env, cap the
+  # time. The server import pulls PyObjC; the CFUNCTYPE is a real closure allocation.
   # -B: no .pyc into the sealed bundle; --verify below proves the seal held.
   for a in arm64 x86_64; do
-    /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 /usr/bin/arch "-$a" \
-      "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -B -c "import macos_apps_mcp" \
+    /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 /usr/bin/arch "-$a" "$EXE" \
+      -E -s -P -B -c "import ctypes, macos_apps_mcp.server
+ctypes.CFUNCTYPE(None)(lambda: None)" \
       || { echo "SIGNED SMOKE FAILED ($a): the hardened runtime breaks it"; exit 1; }
     echo "signed smoke ok: $a"
   done
