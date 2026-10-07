@@ -146,6 +146,11 @@ def test_overview_count_parity_with_mails_own_counters():
 
     theirs = mail_index._read_index(mail_index.require_index_path(), read)
     ours = {r["mailbox_url"]: r["total"] for r in mail_index.query_overview_rows()}
+    # A Gmail label made by create_mailbox has source IS NULL and stores no row.
+    # Mail's own counter stays 0 for it while our read counts its labels rows
+    # (#299, facts §5f). This one-way check cannot fire for such a label, so it
+    # needs no exemption; compare such a label against an AppleScript count
+    # (AGENTS.md).
     offenders = sorted(url for url in theirs if not ours.get(url))
     assert not offenders, (
         f"{len(offenders)} of {len(theirs)} mailboxes Mail counts read empty here: "
