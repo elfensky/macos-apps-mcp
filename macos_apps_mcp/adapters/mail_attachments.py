@@ -264,6 +264,23 @@ def records(mailbox: str, query: str, message_id: str, limit: int) -> list[dict]
     return recs
 
 
+def _listed_attachment(target: mail_addressing.ResolvedMessage, wanted_id: str) -> dict:
+    """The listed row of attachment ``wanted_id`` on ``target`` (#296). Lists the SAME
+    folder and message the save reads: ``target.folder`` is trusted verbatim by
+    ``resolve``, and both scripts take the first ``whose message id is`` match."""
+    recs = records(target.folder, "", target.id, 1)
+    rows = recs[0]["attachments"] if recs else []
+    for row in rows:
+        if row["id"] == wanted_id:
+            return row
+    ids = ", ".join(r["id"] for r in rows if r["id"]) or "none"
+    raise ValueError(
+        f"no attachment with id {wanted_id!r} on message {target.id!r} in "
+        f"{target.folder}; its attachment ids are: {ids}. List them with "
+        "mail_attachments. Nothing was saved."
+    )
+
+
 def save_attachment(
     message_id: str,
     dest_dir: str,
@@ -272,7 +289,11 @@ def save_attachment(
     mailbox: str = "",
 ) -> dict:
     """The body of ``MailAdapter.save_attachment`` — see that docstring for the
-    caller-facing contract."""
+    caller-facing contract.
+
+    An id-only call first reads the message's attachment list (one more Apple Event,
+    a read that fetches nothing), so the file is named after the attachment, not its
+    id; the listed size lets the cap refuse before the save Apple Event (#296)."""
     target = mail_addressing.resolve(message_id, folder=mailbox or None)
     wanted_name, wanted_id = name.strip(), attachment_id.strip()
     if not wanted_name and not wanted_id:
@@ -280,7 +301,12 @@ def save_attachment(
             "save_mail_attachment needs the attachment's name or its id — list "
             "them with mail_attachments first"
         )
-    path = mail_files.target_path(dest_dir, wanted_name or wanted_id)
+    file_name = wanted_name
+    if not file_name:
+        row = _listed_attachment(target, wanted_id)
+        mail_files.check_size(row["size"], row["name"])
+        file_name = row["name"]
+    path = mail_files.target_path(dest_dir, file_name)
     raw = runtime.run_osascript(
         _SAVE_ATTACHMENT,
         target.id,
@@ -295,7 +321,7 @@ def save_attachment(
     return {
         "saved": str(path),
         "name": path.name,
-        "original_name": wanted_name or wanted_id,
+        "original_name": file_name,
         "bytes": mail_files.confirm_written(path),
         "reported_size": int_or_none(size),
         "was_downloaded": bool_or_none(downloaded),
