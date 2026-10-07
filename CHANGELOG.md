@@ -6,7 +6,28 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **The daemon `.app` is universal2 (Apple silicon and Intel) and needs macOS 15** (#205)
+  — one bundle carries arm64 and x86_64 slices. `LSMinimumSystemVersion` is 15.0, the
+  oldest macOS tested on a device; the code itself needs macOS 14. The build pins its
+  Python (3.14.5, python-build-standalone 20260510) by sha256, needs Rosetta 2,
+  smoke-tests both slices, and fails when a binary lacks a slice or needs a newer macOS.
+  The Intel slice has run only under Rosetta so far.
+
+### Removed
+
+- **cryptography, cffi and pycparser are no longer in the `.app`** (closes #205) — only
+  mcp's `pyjwt[crypto]` and fastmcp's auth modules use them, and the daemon configures
+  no auth. cryptography 49+ has no Intel macOS wheel, so the bundle could not be built
+  for Intel. `uv.lock` is unchanged; the dev venv keeps them.
+
 ### Fixed
+
+- **The `.app` no longer carries extensions built for a newer macOS** (#205) — uv picked
+  wheels for the build host's macOS, so 0.14.1's bundle carried a `caio` extension that
+  needs macOS 26. Wheels are now picked for the floor, and the build gate checks every
+  binary.
 
 - **`save_mail_attachment` names a save by `attachment_id` after the attachment** (#296)
   — with only an id, the file was named after the id (no extension), and
