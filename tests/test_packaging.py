@@ -20,6 +20,9 @@ def test_info_plist_contract():
     assert info["CFBundleIdentifier"] == "ren.lav.macos-apps-mcp"
     assert info["CFBundleExecutable"] == "macos-apps-mcp"
     assert info["LSUIElement"] is True
+    # 15.0 = oldest macOS device-verified (15.6.1, 15.7.9); the code needs 14 (EventKit
+    # requestFullAccessTo*). build_app.sh reads it for wheel tags + minos gate (#205).
+    assert info["LSMinimumSystemVersion"] == "15.0"
     for key in (
         "NSCalendarsFullAccessUsageDescription",
         "NSRemindersFullAccessUsageDescription",
@@ -59,3 +62,23 @@ def test_build_script_never_deep_signs():
     assert "--timestamp" in src and "runtime" in src
     assert "sort -V" in src
     assert "--notarize requires --sign" in src
+
+
+def test_build_script_gates_universal2():
+    """A missing slice or a too-new binary installs fine and fails only on the user's
+    Mac; only the build gate sees it (#205)."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    for needle in (
+        "plutil -extract LSMinimumSystemVersion raw",
+        'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
+        "--prune cryptography",
+        "lipo -archs",
+        '"x86_64 arm64"',
+        "vtool -arch",
+        "for a in arm64 x86_64",
+        '/usr/bin/arch "-$a"',
+        "smoke_stream.py",
+        "universal2 gate ok",
+    ):
+        assert needle in src, needle
+    assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
