@@ -14,6 +14,12 @@ surface may still shift between minor versions.
   list, read before the path is chosen, so the never-overwrite and size checks still
   run before the save. An unknown id is refused with the ids the message has.
 
+- **Reads count a Gmail label that has no `source`** (#299) — a label made by
+  `create_mailbox` has no `source` in Mail's index, so `mail_overview` showed it at 0
+  and a `mail_search` scoped to it found nothing while Mail listed its messages. Reads
+  now count it by the rule the move guard uses; `mail_thread`, `mail_awaiting_reply`
+  and `mail_stats` follow.
+
 ## [0.14.1] - 2026-10-07 — Gmail label fixes
 
 ### Fixed
