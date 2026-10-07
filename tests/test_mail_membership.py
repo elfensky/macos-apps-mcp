@@ -611,3 +611,36 @@ def test_a_sourceless_mailbox_with_stored_rows_counts_only_its_rows(gmail_envelo
     assert {p.id for p in mail_index.query_search(mailbox_urls=[trash])} == {
         "<trash@example.test>"
     }
+
+
+def test_a_deleted_row_does_not_make_a_label_physical(gmail_envelope):
+    """A tombstoned direct row is no stored message: the label still counts in reads,
+    and the write guard still refuses it (#299 review)."""
+    db, _, _ = gmail_envelope
+    fresh = _sourceless_label(db, "Fresh", 101)
+    box = mail_index._read_index(
+        mail_index.require_index_path(),
+        lambda c: c.execute(
+            "SELECT ROWID FROM mailboxes WHERE url = ?", (fresh,)
+        ).fetchone()[0],
+    )
+    db.add_message(ROWID=121, subject=1, mailbox=box, deleted=1)
+    assert _overview()[fresh] == (1, 1)
+    assert mail_index.is_label_mailbox(fresh)
+
+
+def test_a_pathless_url_is_not_the_same_account(blank_envelope):
+    """Two pathless urls (``imap://A``, ``imap://B``) must not compare as one account:
+    the account is compared on ``url || '/'`` (#299 review)."""
+    db = blank_envelope
+    home = db.add_mailbox(f"imap://{ACCT_B}")
+    db.execute(
+        "INSERT INTO message_global_data(ROWID, message_id_header)"
+        " VALUES (530, '<pathless@example.test>')"
+    )
+    db.add_message(ROWID=130, subject=None, global_message_id=530, mailbox=home)
+    # Both urls pathless: without the '/' the two prefixes collapse to 'imap://'.
+    label = db.add_mailbox(f"imap://{ACCT_A}")
+    db.execute("INSERT INTO labels VALUES (130, ?)", (label,))
+    counts = {r["mailbox_url"]: r["total"] for r in mail_index.query_overview_rows()}
+    assert counts.get(f"imap://{ACCT_A}", 0) == 0

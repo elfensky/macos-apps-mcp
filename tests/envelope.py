@@ -71,7 +71,7 @@ CREATE TABLE attachments(ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
 CREATE TABLE messages(
     ROWID INTEGER PRIMARY KEY, subject INT, sender INT, global_message_id INT,
     mailbox INT, date_received INT, date_sent INT, read INT, flagged INT,
-    deleted INT, conversation_id INT,
+    deleted INT NOT NULL DEFAULT 0, conversation_id INT,
     size INT NOT NULL DEFAULT 0,
     message_id INT NOT NULL DEFAULT 0,
     subject_prefix TEXT);
