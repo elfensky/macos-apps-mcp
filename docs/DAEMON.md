@@ -31,7 +31,8 @@ scripts/build_app.sh \
 ```
 
 This produces `dist/macos-apps-mcp.app`, signed **inside-out** (every vendored `.so`/`.dylib`,
-then the main executable, then the bundle — never `codesign --deep`) with
+then the bundle once per entitlement set, joining the main executable's slices with `lipo` —
+see "Hardened-runtime check"; never `codesign --deep`) with
 `--timestamp --options runtime`. Omit `--sign` for an unsigned dev build (no Login Items
 registration will work without a signature, but the bundle still smoke-tests).
 
@@ -220,9 +221,10 @@ build:
 
 1. **The signature carries the runtime flag:**
    ```sh
-   codesign -dvv /Applications/macos-apps-mcp.app
+   codesign -dvv --arch arm64 /Applications/macos-apps-mcp.app
+   codesign -dvv --arch x86_64 /Applications/macos-apps-mcp.app
    ```
-   Look for `flags=0x10000(runtime)` in the output — confirms hardened runtime is actually on,
+   Each slice has its own signature. Look for `flags=0x10000(runtime)` in both outputs — confirms hardened runtime is actually on,
    not just requested.
 
 2. **Each slice carries its own entitlements, and both start under the runtime** (#205).
