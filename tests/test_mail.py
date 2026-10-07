@@ -1621,7 +1621,11 @@ def no_backup(monkeypatch):
     monkeypatch.setattr(mail.mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail.mail_index, "query_message_locations", lambda ids: [])
     # keeps the label checks (#287, #291) off the real Envelope Index
-    monkeypatch.setattr(mail.mail_index, "_label_keys", lambda: frozenset())
+    monkeypatch.setattr(
+        mail.mail_index,
+        "_label_state",
+        lambda: mail.mail_index._LabelState(*[frozenset()] * 3),
+    )
 
 
 def test_split_ids_dedupes_and_strips_framing_bytes():

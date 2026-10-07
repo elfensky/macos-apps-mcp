@@ -95,7 +95,11 @@ def capture() -> dict:
         mp.setattr(mail_index, "mail_root", lambda: None)
         mp.setattr(mail_index, "query_message_locations", lambda ids: [])
         # keeps the label checks (#287, #291) off the real Envelope Index
-        mp.setattr(mail_index, "_label_keys", lambda: frozenset())
+        mp.setattr(
+            mail_index,
+            "_label_state",
+            lambda: mail_index._LabelState(*[frozenset()] * 3),
+        )
 
         ad = mail.MailAdapter()
         out: dict = {}
@@ -198,7 +202,9 @@ def wired(monkeypatch):
     monkeypatch.setattr(mail_index, "mail_root", lambda: None)
     monkeypatch.setattr(mail_index, "query_message_locations", lambda ids: [])
     # keeps the label checks (#287, #291) off the real Envelope Index
-    monkeypatch.setattr(mail_index, "_label_keys", lambda: frozenset())
+    monkeypatch.setattr(
+        mail_index, "_label_state", lambda: mail_index._LabelState(*[frozenset()] * 3)
+    )
     return mail.MailAdapter(), calls
 
 
