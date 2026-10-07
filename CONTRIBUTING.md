@@ -55,4 +55,4 @@ Commits follow conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, 
 - One adapter module per app under `macos_apps_mcp/adapters/`. Adding an app = add a module + mount its tools in `server.py`.
 
 ## Compatibility
-Latest stable macOS only (rolling). We use the macOS 14+ full-access APIs; we do not carry back-compat shims.
+Latest stable macOS only (rolling). We use the macOS 14+ full-access APIs; we do not carry back-compat shims. The daemon `.app` declares macOS 15 (`LSMinimumSystemVersion`, the oldest macOS tested on a device).
