@@ -18,7 +18,10 @@ surface may still shift between minor versions.
   `create_mailbox` has no `source` in Mail's index, so `mail_overview` showed it at 0
   and a `mail_search` scoped to it found nothing while Mail listed its messages. Reads
   now count it by the rule the move guard uses; `mail_thread`, `mail_awaiting_reply`
-  and `mail_stats` follow.
+  and `mail_stats` follow. A message that carries such a label now cites it as its
+  `folder`, as for any Gmail label, so a move or trash from that folder is refused;
+  pass the account's `[Gmail]/All Mail` url instead. An id lookup costs about 20 ms
+  more.
 
 ## [0.14.1] - 2026-10-07 — Gmail label fixes
 
