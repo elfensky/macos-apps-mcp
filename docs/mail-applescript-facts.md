@@ -372,6 +372,13 @@ not change across their observations; T3 changed between +20 s and +2 min, then 
   in T3 the tool's own check read `ok`. Not known: whether Mail never sent the delete for a
   label folder, or a slow Mail dropped it (§5c, #164). A rerun on a healthy Mail (health
   read at or under 2.0 s) decides it. The refusal holds either way.
+- Gmail's side: this account has Auto-Expunge on ("Immediately update the server", the
+  default; read from Gmail web by the operator, 2026-10-07), and Google documents that
+  "You can find messages you delete from an IMAP folder in your 'All Mail' label in
+  Gmail" (https://support.google.com/mail/answer/78892, read 2026-10-07). So a delete
+  that reached Gmail would have removed the label at once; in T3 the label stayed, so
+  the delete did not reach Gmail. And even when it does, the message stays in All Mail:
+  a move out of a label to another account cannot leave one copy.
 - So `mail_undo` cannot reverse a move into a label: its route is a move out of the label.
   No other undo route was run (for example a cross-account move from the All Mail row).
 - T2 matches a label add, and also a dropped source-side delete on a slow Mail. A healthy
@@ -386,11 +393,12 @@ not change across their observations; T3 changed between +20 s and +2 min, then 
 - Cleanup: `trash_mail` from Personal INBOX, Personal Sent and Gmail All Mail (each a
   physical folder), all `ok`. Gmail Trash gained the message, its INBOX and label
   memberships were gone, and Gmail INBOX was back to 13 messages (held to +15 min). Mail's
-  pid did not change during the run. The empty label stays;
-  a mailbox cannot be deleted by script (§5b).
+  pid did not change during the run. The operator removed the empty label by hand (a
+  mailbox cannot be deleted by script, §5b), and its index row went with it.
 - Not run: a move into or out of an established (sourced) label across accounts, and a
-  cross-account move into or out of All Mail. Not recorded: the Gmail IMAP delete
-  settings, which only Gmail web shows.
+  cross-account move into or out of All Mail. Not recorded: Gmail's "expunged from the
+  last visible IMAP folder" action; the message stays visible in All Mail here, so it
+  does not apply.
 
 **Rules (#291).**
 
