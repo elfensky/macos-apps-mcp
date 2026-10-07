@@ -533,3 +533,114 @@ def test_stats_attribute_gmail_messages_to_inbox_and_sent(gmail_envelope):
     assert sorted(r["mailbox_url"] for r in rows) == sorted(
         [urls["inbox"], urls["inbox"], urls["sent"]]
     )
+
+
+# --- #299: a Gmail label without source counts in every read ------------------------
+
+
+def _sourceless_label(db, leaf, *rowids):
+    """A label made by create_mailbox: ``source IS NULL``, members only in
+    ``labels`` (facts §5f)."""
+    url = f"imap://{ACCT_A}/{leaf}"
+    box = db.add_mailbox(url)
+    for rowid in rowids:
+        db.execute("INSERT INTO labels VALUES (?, ?)", (rowid, box))
+    return url
+
+
+def test_overview_and_search_count_a_label_without_source(gmail_envelope):
+    db, _, urls = gmail_envelope
+    before = _overview()
+    fresh = _sourceless_label(db, "Fresh", 101, 105)  # 105 is deleted
+    fresh_empty = _sourceless_label(db, "Fresh-Empty")
+    counts = _overview()
+    assert counts[fresh] == (1, 1)
+    assert counts[fresh_empty] == (0, 0)
+    assert {k: v for k, v in counts.items() if k in before} == before
+    [p] = mail_index.query_search(mailbox_urls=[fresh])
+    assert (p.id, p.folder) == ("<gmail-1@example.test>", fresh)
+    assert mail_index.query_search(mailbox_urls=[fresh_empty]) == []
+    # The new membership does not outrank INBOX for the unscoped citation.
+    [p] = mail_index.query_search(message_ids=["<gmail-1@example.test>"])
+    assert p.folder == urls["inbox"]
+
+
+def test_thread_triage_and_stats_follow_a_label_without_source(gmail_envelope):
+    db, boxes, _ = gmail_envelope
+    mid = "<gmail-7@example.test>"
+    db.add_message(
+        ROWID=107,
+        subject=1,
+        global_message_id=507,
+        message_id=907,
+        mailbox=boxes["all"],
+        date_received=1007,
+        deleted=0,
+        read=0,
+        conversation_id=7,
+    )
+    db.execute(
+        "INSERT INTO message_global_data(ROWID, message_id_header, message_id)"
+        " VALUES (507, ?, 907)",
+        (mid,),
+    )
+    # The Sent leaf only makes the sent-triage scan see this label.
+    sent = _sourceless_label(db, "Sent", 107)
+    [p] = mail_index.query_thread(mid, 10)
+    assert p.folder == sent
+    assert p.folder == mail_index.query_search(message_ids=[mid])[0].folder
+    assert [r["mailbox_url"] for r in mail_index.query_stats_rows(0)].count(sent) == 1
+    assert any(
+        (r["rowid"], r["mid"]) == (107, mid) for r in mail_index.query_sent_triage(10)
+    )
+
+
+def test_a_sourceless_mailbox_with_stored_rows_counts_only_its_rows(gmail_envelope):
+    """Guard (passes before and after #299): a physical source-less folder keeps
+    arm 1 — its stored rows count, a ``labels`` row into it does not."""
+    db, _, _ = gmail_envelope
+    trash = f"imap://{ACCT_A}/%5BGmail%5D/Trash"
+    db.execute(
+        "INSERT INTO message_global_data(ROWID, message_id_header)"
+        " VALUES (520, '<trash@example.test>')"
+    )
+    box = db.add_mailbox(trash)
+    db.add_message(ROWID=120, subject=1, global_message_id=520, mailbox=box, deleted=0)
+    db.execute("INSERT INTO labels VALUES (101, ?)", (box,))
+    assert _overview()[trash][0] == 1
+    assert {p.id for p in mail_index.query_search(mailbox_urls=[trash])} == {
+        "<trash@example.test>"
+    }
+
+
+def test_a_deleted_row_does_not_make_a_label_physical(gmail_envelope):
+    """A tombstoned direct row is no stored message: the label still counts in reads,
+    and the write guard still refuses it (#299 review)."""
+    db, _, _ = gmail_envelope
+    fresh = _sourceless_label(db, "Fresh", 101)
+    box = mail_index._read_index(
+        mail_index.require_index_path(),
+        lambda c: c.execute(
+            "SELECT ROWID FROM mailboxes WHERE url = ?", (fresh,)
+        ).fetchone()[0],
+    )
+    db.add_message(ROWID=121, subject=1, mailbox=box, deleted=1)
+    assert _overview()[fresh] == (1, 1)
+    assert mail_index.is_label_mailbox(fresh)
+
+
+def test_a_pathless_url_is_not_the_same_account(blank_envelope):
+    """Two pathless urls (``imap://A``, ``imap://B``) must not compare as one account:
+    the account is compared on ``url || '/'`` (#299 review)."""
+    db = blank_envelope
+    home = db.add_mailbox(f"imap://{ACCT_B}")
+    db.execute(
+        "INSERT INTO message_global_data(ROWID, message_id_header)"
+        " VALUES (530, '<pathless@example.test>')"
+    )
+    db.add_message(ROWID=130, subject=None, global_message_id=530, mailbox=home)
+    # Both urls pathless: without the '/' the two prefixes collapse to 'imap://'.
+    label = db.add_mailbox(f"imap://{ACCT_A}")
+    db.execute("INSERT INTO labels VALUES (130, ?)", (label,))
+    counts = {r["mailbox_url"]: r["total"] for r in mail_index.query_overview_rows()}
+    assert counts.get(f"imap://{ACCT_A}", 0) == 0

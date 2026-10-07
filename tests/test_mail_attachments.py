@@ -50,7 +50,7 @@ def test_parse_attachments_groups_by_message():
 def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
     captured = {}
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         captured["script"] = script
         captured["args"] = args
         # more records than MAX_MAILS — the cap must actually bite
@@ -73,7 +73,7 @@ def test_list_attachments_resolves_mailbox_and_caps(monkeypatch):
 
 
 def test_list_attachments_empty_query_lists_all(monkeypatch):
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         return (
             "<1@x>\x1fFirst\x1fa.pdf\x1f10\x1ftrue\x1e"
             "<2@x>\x1fSecond\x1fb.pdf\x1f20\x1ffalse\x1e"
@@ -100,7 +100,7 @@ def test_list_attachments_reaches_a_user_folder(monkeypatch):
     # folder was unreachable there too.
     seen = {}
 
-    def fake(script, *args):
+    def fake(script, *args, **kw):
         seen["args"] = args
         return "<c@x>\x1fContract\x1fdeal.pdf\x1f100\x1ftrue\x1f1.2\x1e"
 

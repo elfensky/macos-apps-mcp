@@ -3,7 +3,8 @@
 Reads address any mailbox through ``mail_addressing`` (the shared ``MAILBOX_REF``
 resolver / ``resolve`` for a bare id); the filesystem boundary — allowlisted root,
 derived filenames, never-overwrite, size cap — is ``mail_files``', enforced in Python
-BEFORE any Apple Event. Nothing here mutates a message: ``save`` writes a file out,
+BEFORE the save Apple Event (an id-only save first lists the message to learn the
+attachment's name, #296). Nothing here mutates a message: ``save`` writes a file out,
 and the one side effect it can have (Mail fetching a not-yet-downloaded message) is
 documented on the script below.
 
@@ -16,6 +17,7 @@ the reverse).
 from __future__ import annotations
 
 from .. import runtime
+from ..errors import NativeError
 from ..text import (
     STRIP_FRAMING,
     US,
@@ -133,7 +135,9 @@ end run"""
 #   creates it first, inside the allowlisted root).
 # * The size cap is enforced HERE, before `save`, because `file size` is only knowable
 #   from Mail — checking it in Python would cost a second Apple Event on every call,
-#   and the fetch above means "look, then save" is not free.
+#   and the fetch above means "look, then save" is not free. An id-only save (#296)
+#   already lists the message to learn the name, so it checks the listed size in
+#   Python too; this in-script cap stays the backstop for every path.
 #
 # Addressing: `attachment id` (a MIME part path like "1.12") when given, else the name.
 # The name is NOT unique — four `image00N.jpg` on one real message — so an ambiguous
@@ -239,6 +243,12 @@ def _parse_attachments(raw: str) -> list[dict]:
     return recs
 
 
+# The listing's `whose message id` scan reads the whole mailbox; on device such scans
+# have run past the 30 s default (#230), so the host waits as long as the script's own
+# `with timeout of 120 seconds` backstop (GATE-10 allows equal).
+_LIST_TIMEOUT = 120.0
+
+
 def records(mailbox: str, query: str, message_id: str, limit: int) -> list[dict]:
     """The body of ``MailAdapter.list_attachments`` — see that docstring for the
     caller-facing contract. Returns the records; the adapter wraps them in the
@@ -253,7 +263,9 @@ def records(mailbox: str, query: str, message_id: str, limit: int) -> list[dict]
         folder, mb, mid = target.folder, target.mailbox_args, target.id
     else:
         folder, mb, mid = mailbox, mail_addressing.mailbox_args(mailbox), ""
-    raw = runtime.run_osascript(_ATTACHMENTS, query.strip(), str(limit), *mb, mid)
+    raw = runtime.run_osascript(
+        _ATTACHMENTS, query.strip(), str(limit), *mb, mid, timeout=_LIST_TIMEOUT
+    )
     recs = _parse_attachments(raw)[:limit]
     # #155: hand back the mailbox this actually read, VERBATIM. It is already the
     # round-trip token every id-taking tool wants, and echoing it means a row from
@@ -264,6 +276,30 @@ def records(mailbox: str, query: str, message_id: str, limit: int) -> list[dict]
     return recs
 
 
+def _listed_attachment(target: mail_addressing.ResolvedMessage, wanted_id: str) -> dict:
+    """The listed row of attachment ``wanted_id`` on ``target`` (#296). Lists the SAME
+    folder and message the save reads: ``target.folder`` is trusted verbatim by
+    ``resolve``, and both scripts take the first ``whose message id is`` match."""
+    recs = records(target.folder, "", target.id, 1)
+    if not recs:
+        raise NativeError(
+            f"no message with id {target.id!r} in {target.folder} — the folder may be "
+            "stale (a move changes it). Re-read the message's `folder` with "
+            "mail_search, or omit mailbox so the id resolves through Mail's index. "
+            "Nothing was saved."
+        )
+    rows = recs[0]["attachments"]
+    for row in rows:
+        if row["id"] == wanted_id:
+            return row
+    ids = ", ".join(r["id"] for r in rows if r["id"]) or "none"
+    raise ValueError(
+        f"no attachment with id {wanted_id!r} on message {target.id!r} in "
+        f"{target.folder}; its attachment ids are: {ids}. List them with "
+        "mail_attachments. Nothing was saved."
+    )
+
+
 def save_attachment(
     message_id: str,
     dest_dir: str,
@@ -272,7 +308,11 @@ def save_attachment(
     mailbox: str = "",
 ) -> dict:
     """The body of ``MailAdapter.save_attachment`` — see that docstring for the
-    caller-facing contract."""
+    caller-facing contract.
+
+    An id-only call first reads the message's attachment list (one more Apple Event,
+    a read that fetches nothing), so the file is named after the attachment, not its
+    id; the listed size lets the cap refuse before the save Apple Event (#296)."""
     target = mail_addressing.resolve(message_id, folder=mailbox or None)
     wanted_name, wanted_id = name.strip(), attachment_id.strip()
     if not wanted_name and not wanted_id:
@@ -280,7 +320,12 @@ def save_attachment(
             "save_mail_attachment needs the attachment's name or its id — list "
             "them with mail_attachments first"
         )
-    path = mail_files.target_path(dest_dir, wanted_name or wanted_id)
+    file_name = wanted_name
+    if not file_name:
+        row = _listed_attachment(target, wanted_id)
+        mail_files.check_size(row["size"], row["name"])
+        file_name = row["name"]
+    path = mail_files.target_path(dest_dir, file_name)
     raw = runtime.run_osascript(
         _SAVE_ATTACHMENT,
         target.id,
@@ -295,7 +340,7 @@ def save_attachment(
     return {
         "saved": str(path),
         "name": path.name,
-        "original_name": wanted_name or wanted_id,
+        "original_name": file_name,
         "bytes": mail_files.confirm_written(path),
         "reported_size": int_or_none(size),
         "was_downloaded": bool_or_none(downloaded),

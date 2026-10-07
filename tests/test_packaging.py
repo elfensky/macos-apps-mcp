@@ -20,6 +20,9 @@ def test_info_plist_contract():
     assert info["CFBundleIdentifier"] == "ren.lav.macos-apps-mcp"
     assert info["CFBundleExecutable"] == "macos-apps-mcp"
     assert info["LSUIElement"] is True
+    # 15.0 = oldest macOS device-verified (15.6.1, 15.7.9); the code needs 14 (EventKit
+    # requestFullAccessTo*). build_app.sh reads it for wheel tags + minos gate (#205).
+    assert info["LSMinimumSystemVersion"] == "15.0"
     for key in (
         "NSCalendarsFullAccessUsageDescription",
         "NSRemindersFullAccessUsageDescription",
@@ -59,3 +62,56 @@ def test_build_script_never_deep_signs():
     assert "--timestamp" in src and "runtime" in src
     assert "sort -V" in src
     assert "--notarize requires --sign" in src
+
+
+def test_build_script_gates_universal2():
+    """A missing slice or a too-new binary installs fine and fails only on the user's
+    Mac; only the build gate sees it (#205)."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    for needle in (
+        "plutil -extract LSMinimumSystemVersion raw",
+        'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
+        "--prune cryptography",
+        "lipo -archs",
+        '"x86_64 arm64"',
+        "vtool -arch",
+        "for a in arm64 x86_64",
+        '/usr/bin/arch "-$a"',
+        "smoke_stream.py",
+        "universal2 gate ok",
+    ):
+        assert needle in src, needle
+    assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
+    # the gate names a bad binary before a smoke can trip over it
+    assert src.index("universal2 gate ok") < src.index("BUNDLE SMOKE FAILED")
+    # three per-slice loops: the minos gate, the unsigned smokes, the signed smokes
+    assert src.count("for a in arm64 x86_64; do") == 3
+    # kept safety properties of the build: pinned interpreter, identical per-arch
+    # trees, no unexplained arch-specific file, bytecode sealed in before signing
+    for needle in ("shasum -a 256 -c", "ARCH TREES DIFFER", "ARCH-SPECIFIC NON-BINARY"):
+        assert needle in src, needle
+    assert src.index("-m compileall") < src.index('if [[ -n "$SIGN" ]]')
+    # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
+    assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
+
+
+def test_only_the_intel_slice_carries_the_memory_exception():
+    """#205: libffi has no x86_64 trampoline pages, so the Intel slice needs
+    allow-unsigned-executable-memory; arm64 keeps the strict set
+    (test_entitlements_minimal). The build derives the x86_64 set from the strict
+    file by adding exactly that one key, joins the per-set slices, and gates on both."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    key = "com.apple.security.cs.allow-unsigned-executable-memory"
+    assert 'cp "$ENTS" "$ENTS_X86"' in src  # derived from the strict file
+    assert src.count("PlistBuddy -c") == 1
+    assert f'"Add :{key} bool true"' in src
+    # ...and the gate proves strict-plus-ONE-key, then exact sets and the runtime flag
+    assert "$((n_strict + 1))" in src
+    assert 'want="$ENTS"; [[ "$a" == x86_64 ]] && want="$ENTS_X86"' in src
+    assert '"flags=0x10000(runtime)"' in src
+    assert 'lipo -create "$WORK/exe-x86_64" "$WORK/exe-arm64"' in src
+    # the signed smoke loads PyObjC and allocates a real closure, time-capped
+    assert "ctypes.CFUNCTYPE(None)(lambda: None)" in src
+    assert "alarm shift; exec @ARGV' 120" in src
+    sign = src.index('if [[ -n "$SIGN" ]]')
+    assert sign < src.index("entitlements ok") < src.index("signed smoke ok")

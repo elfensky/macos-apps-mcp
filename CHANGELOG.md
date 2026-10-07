@@ -6,6 +6,49 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-08 — Universal app
+
+### Changed
+
+- **The daemon `.app` is universal2 (Apple silicon and Intel) and needs macOS 15** (#205)
+  — one bundle carries arm64 and x86_64 slices. `LSMinimumSystemVersion` is 15.0, the
+  oldest macOS tested on a device; the code itself needs macOS 14. The build pins its
+  Python (3.14.5, python-build-standalone 20260510) by sha256, needs Rosetta 2,
+  smoke-tests both slices, and fails when a binary lacks a slice or needs a newer macOS.
+  The Intel slice carries one signing exception, `allow-unsigned-executable-memory`:
+  libffi has no pre-built trampoline pages on x86_64, so ctypes and PyObjC must write
+  code at startup. The Apple-silicon slice keeps the strict signature. The Intel slice
+  has run only under Rosetta so far, not on an Intel CPU.
+
+### Removed
+
+- **cryptography, cffi and pycparser are no longer in the `.app`** (closes #205) — only
+  auth code uses them (mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib, joserfc),
+  and the daemon configures no auth. cryptography 49+ has no Intel macOS wheel, so the bundle could not be built
+  for Intel. `uv.lock` is unchanged; the dev venv keeps them.
+
+### Fixed
+
+- **The `.app` no longer carries extensions built for a newer macOS** (#205) — uv picked
+  wheels for the build host's macOS, so 0.14.1's bundle carried a `caio` extension that
+  needs macOS 26. Wheels are now picked for the floor, and the build gate checks every
+  binary.
+
+- **`save_mail_attachment` names a save by `attachment_id` after the attachment** (#296)
+  — with only an id, the file was named after the id (no extension), and
+  `original_name` reported the id. The name now comes from the message's attachment
+  list, read before the path is chosen, so the never-overwrite and size checks still
+  run before the save. An unknown id is refused with the ids the message has.
+
+- **Reads count a Gmail label that has no `source`** (#299) — a label made by
+  `create_mailbox` has no `source` in Mail's index, so `mail_overview` showed it at 0
+  and a `mail_search` scoped to it found nothing while Mail listed its messages. Reads
+  now count it by the rule the move guard uses; `mail_thread`, `mail_awaiting_reply`
+  and `mail_stats` follow. A message that carries such a label now cites it as its
+  `folder`, as for any Gmail label, so a move or trash from that folder is refused;
+  pass the account's `[Gmail]/All Mail` url instead. An id lookup costs about 20 ms
+  more.
+
 ## [0.14.1] - 2026-10-07 — Gmail label fixes
 
 ### Fixed

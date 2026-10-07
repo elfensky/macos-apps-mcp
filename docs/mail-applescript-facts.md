@@ -386,10 +386,15 @@ not change across their observations; T3 changed between +20 s and +2 min, then 
 - A label made by `create_mailbox` had `source IS NULL` and `total_count = 0` for the whole
   run (38 min, one label). The index had no row for it before its first message (O0) and
   had one 45 s after T1. So the label check does not rely on `source` alone (Rules below).
-- Reads share the blind spot, run on the real index at T2+15m: `mail_overview` showed the
-  new label at 0, and a `mail_search` scoped to it found nothing, while Mail listed the
-  message there. Mail's own counter also said 0, so a parity check against it cannot see
-  this.
+- Reads share the blind spot, run on the real index at T2+15m: `mail_overview` showed
+  the new label at 0, and a `mail_search` scoped to it found nothing, while Mail listed
+  the message there. Mail's own counter also said 0, so a parity check against it cannot
+  see this. Since #299 the reads count such a label by the label guard's rule (Rules
+  below): a mailbox with no `source` that stores no message row counts a `labels` row
+  whose message lives in the same account. Mail's own counter still says 0 for it. A
+  parity check against `total_count` therefore cannot see it (Mail's counter is 0);
+  compare it against an AppleScript count instead (AGENTS.md). The new read is
+  unit-tested and has not run on device yet.
 - Cleanup: `trash_mail` from Personal INBOX, Personal Sent and Gmail All Mail (each a
   physical folder), all `ok`. Gmail Trash gained the message, its INBOX and label
   memberships were gone, and Gmail INBOX was back to 13 messages (held to +15 min). Mail's

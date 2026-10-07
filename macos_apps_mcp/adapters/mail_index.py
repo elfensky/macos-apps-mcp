@@ -160,12 +160,36 @@ _DEDUP_SELECT_COLS = """gd.message_id_header AS message_id_header,
 # source = messages.mailbox for label mailboxes (device-verified 2026-10-06, facts
 # §5f). Keep this read projection separate from build_message_location_query: backup
 # and body-file lookup still need the physical messages.mailbox, not a label.
+# Arm 3 (#299) is the write guard's rule (is_label_mailbox) for a label without
+# source: `bare_label` is every source-less mailbox that has labels rows and no LIVE
+# stored row. Its labels rows count only when the labelled message's own mailbox is
+# in the same account (compared on `url || '/'`, so pathless urls cannot collapse to
+# 'imap://'); a row into another account's mailbox stays out. Unlike arm 2 it does
+# not require the backing store, which a source-less label does not name; Gmail
+# drops every label when it trashes a message, so a Trash or Spam home is moot in
+# practice. Mail's own counter skips these (total_count stays 0, facts §5f).
+# Driving arm 3 from the small `bare_label` set keeps the cost low: measured on a
+# real index (132k memberships, 2026-10-07), +5 to +45 ms per read — id lookup
+# ~100 -> ~125 ms, search 400 -> 445 ms, overview/thread/sent triage +5 to +15 ms.
+# A MATERIALIZED hint made sent triage take 58 s, and a CROSS JOIN order made search
+# take 5 s — measure any rewrite on all five reads.
 # UNION ALL is safe: arm 1 requires mb.source IS NULL, arm 2 requires
-# mb.source = m.mailbox (non-NULL), so the arms are disjoint, and the labels primary
-# key (message_id, mailbox_id) rules out repeats inside arm 2. It skips the dedup sort
-# (measured: identical counts, about half the added search latency recovered).
+# mb.source = m.mailbox (non-NULL), so the arms are disjoint. Arm 3 requires
+# source IS NULL (disjoint from arm 2) and a mailbox with no live row, which
+# therefore never equals a live m.mailbox (disjoint from arm 1). The labels primary
+# key (message_id, mailbox_id) rules out repeats inside arms 2 and 3. It skips the
+# dedup sort (measured: identical counts).
 _MAILBOX_MEMBERSHIP_CTE = """
-WITH mailbox_membership(message_rowid, mailbox_id) AS (
+WITH bare_label(id, account) AS (
+    SELECT mb.ROWID, substr((mb.url || '/'), 1, instr((mb.url || '/'), '://') + 2 +
+                 instr(substr((mb.url || '/'), instr((mb.url || '/'), '://') + 3), '/'))
+    FROM mailboxes mb
+    WHERE mb.source IS NULL
+      AND EXISTS (SELECT 1 FROM labels bl WHERE bl.mailbox_id = mb.ROWID)
+      AND NOT EXISTS (SELECT 1 FROM messages dm
+                      WHERE dm.deleted = 0 AND dm.mailbox = mb.ROWID)
+),
+mailbox_membership(message_rowid, mailbox_id) AS (
     SELECT m.ROWID, mb.ROWID
     FROM messages m
     JOIN mailboxes mb ON mb.ROWID = m.mailbox AND mb.source IS NULL
@@ -176,6 +200,15 @@ WITH mailbox_membership(message_rowid, mailbox_id) AS (
     JOIN messages m ON m.ROWID = l.message_id
     JOIN mailboxes mb ON mb.ROWID = l.mailbox_id AND mb.source = m.mailbox
     WHERE m.deleted = 0
+    UNION ALL
+    SELECT m.ROWID, b.id
+    FROM bare_label b
+    JOIN labels l ON l.mailbox_id = b.id
+    JOIN messages m ON m.ROWID = l.message_id
+    JOIN mailboxes hb ON hb.ROWID = m.mailbox
+    WHERE m.deleted = 0
+      AND b.account = substr((hb.url || '/'), 1, instr((hb.url || '/'), '://') + 2 +
+                 instr(substr((hb.url || '/'), instr((hb.url || '/'), '://') + 3), '/'))
 )
 """
 
@@ -1185,7 +1218,14 @@ def _label_state() -> _LabelState:
             "SELECT DISTINCT l.mailbox_id, m.mailbox FROM labels l"
             " JOIN messages m ON m.ROWID = l.message_id"
         ).fetchall()
-        stored = {r for (r,) in conn.execute("SELECT DISTINCT mailbox FROM messages")}
+        # A tombstoned row is no stored message: it must not make a label look
+        # physical (#299 review) — the same rule the reads' bare_label uses.
+        stored = {
+            r
+            for (r,) in conn.execute(
+                "SELECT DISTINCT mailbox FROM messages WHERE deleted = 0"
+            )
+        }
         sourced = {k for k, source in keys.values() if source is not None}
         accounts = {k[0] for k in sourced}
         for label, home in pairs:

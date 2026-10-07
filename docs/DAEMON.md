@@ -31,14 +31,37 @@ scripts/build_app.sh \
 ```
 
 This produces `dist/macos-apps-mcp.app`, signed **inside-out** (every vendored `.so`/`.dylib`,
-then the main executable, then the bundle — never `codesign --deep`) with
+then the bundle once per entitlement set, joining the main executable's slices with `lipo` —
+see "Hardened-runtime check"; never `codesign --deep`) with
 `--timestamp --options runtime`. Omit `--sign` for an unsigned dev build (no Login Items
 registration will work without a signature, but the bundle still smoke-tests).
 
-The build installs the exact versions in `uv.lock`, then runs `scripts/smoke_stream.py` on
-the bundled interpreter (one streamed tool call through the shim's transport). A failing
-smoke fails the build; a good build log shows `stream smoke ok` (#286). `doctor().libs` reports the `mcp`
-and `fastmcp` versions the bundle carries (#285).
+The build installs the exact versions in `uv.lock`, except cryptography, cffi and
+pycparser (see below), then runs `scripts/smoke_stream.py` on
+each slice of the bundled interpreter (one streamed tool call through the shim's transport).
+A failing smoke fails the build; a good build log shows `stream smoke ok` (#286).
+`doctor().libs` reports the `mcp` and `fastmcp` versions the bundle carries (#285).
+
+**Universal2, macOS 15 floor.** The `.app` carries arm64 and x86_64 slices of the
+interpreter and of every extension (#205). The build runs on an Apple-silicon Mac and needs
+Rosetta 2 (`softwareupdate --install-rosetta --agree-to-license`), because the import and
+stream smokes run on both slices. An Intel Mac cannot run the arm64 smoke, so it installs a
+release build instead of building one. The build downloads a pinned python-build-standalone
+CPython (3.14.5, release 20260510) for each arch and checks its sha256. It caches the
+tarballs in `~/Library/Caches/macos-apps-mcp-build`; `PBS_CACHE` overrides the path.
+`LSMinimumSystemVersion` in `packaging/Info.plist` is 15.0, the oldest macOS tested on a
+device (15.6.1 and 15.7.9). The code itself needs macOS 14 (the EventKit full-access APIs).
+The build reads that key and picks wheels for it. Before signing, it fails unless every
+Mach-O is `x86_64 arm64` and no slice needs a newer macOS. A good build log shows
+`smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. Both slices, unsigned and
+signed, have run only on an Apple-silicon Mac (x86_64 under Rosetta), not on an Intel CPU.
+
+**No cryptography in the `.app`** (#205). The build leaves out cryptography, cffi and
+pycparser. Only auth code uses them: mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib
+and joserfc. The daemon configures no auth, so no daemon, shim or tool path imports them.
+cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
+the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the
+dev venv keeps them.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
@@ -198,22 +221,31 @@ build:
 
 1. **The signature carries the runtime flag:**
    ```sh
-   codesign -dvv /Applications/macos-apps-mcp.app
+   codesign -dvv --arch arm64 /Applications/macos-apps-mcp.app
+   codesign -dvv --arch x86_64 /Applications/macos-apps-mcp.app
    ```
-   Look for `flags=0x10000(runtime)` in the output — confirms hardened runtime is actually on,
+   Each slice has its own signature. Look for `flags=0x10000(runtime)` in both outputs — confirms hardened runtime is actually on,
    not just requested.
 
-2. **PyObjC imports and callbacks still work under it.** If every tool call that touches
-   EventKit/Contacts/ServiceManagement works (i.e. the acceptance checklist above passes), this
-   is implicitly verified — PyObjC's libffi closure trampolines are exercised by every native
-   call `run_native()` makes. If instead you see crashes or `EXC_BAD_ACCESS` specifically inside
-   a PyObjC callback (not a normal TCC denial), add the escape-hatch entitlement from spec §A and
-   re-sign:
-   ```xml
-   <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+2. **Each slice carries its own entitlements, and both start under the runtime** (#205).
+   The x86_64 slice carries one exception, `com.apple.security.cs.allow-unsigned-executable-memory`;
+   the arm64 slice carries only `packaging/entitlements.plist`. Why: libffi has no pre-built
+   trampoline pages on x86_64, neither the PBS copy nor Apple's `/usr/lib/libffi.dylib`, so
+   ctypes and PyObjC write closure code at startup, which the hardened runtime refuses (the
+   process hangs; with `env -i` it raises `MemoryError`). arm64 has the pages and needs no
+   exception. Verified 2026-10-07: the python.org and BeeWare Pythons, which use Apple's libffi,
+   fail the same way on x86_64, so a different interpreter does not avoid it.
+   `codesign` takes one entitlement set per run, so the build signs the bundle once per set and
+   joins the matching slices of the main executable with `lipo`. It then fails unless the log
+   shows `entitlements ok: x86_64 has the exception, arm64 is strict`, `signed smoke ok: arm64`
+   and `signed smoke ok: x86_64` (each signed slice loads the server and allocates a ctypes
+   closure, with a 120-second cap). To check an installed app:
+   ```sh
+   codesign -d --entitlements - --arch x86_64 /Applications/macos-apps-mcp.app
+   codesign -d --entitlements - --arch arm64 /Applications/macos-apps-mcp.app
    ```
-   in `packaging/entitlements.plist`, then rebuild. Modern arm64 static trampolines usually don't
-   need this — treat it as a documented fallback, not a default.
+   Never add the exception to `packaging/entitlements.plist`: that file is the arm64 set, and
+   the build derives the x86_64 set from it.
 
 ## Troubleshooting
 
