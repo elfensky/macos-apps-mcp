@@ -13,13 +13,16 @@ surface may still shift between minor versions.
   oldest macOS tested on a device; the code itself needs macOS 14. The build pins its
   Python (3.14.5, python-build-standalone 20260510) by sha256, needs Rosetta 2,
   smoke-tests both slices, and fails when a binary lacks a slice or needs a newer macOS.
-  The Intel slice has run only under Rosetta so far.
+  The Intel slice carries one signing exception, `allow-unsigned-executable-memory`:
+  libffi has no pre-built trampoline pages on x86_64, so ctypes and PyObjC must write
+  code at startup. The Apple-silicon slice keeps the strict signature. The Intel slice
+  has run only under Rosetta so far, not on an Intel CPU.
 
 ### Removed
 
 - **cryptography, cffi and pycparser are no longer in the `.app`** (closes #205) — only
-  mcp's `pyjwt[crypto]` and fastmcp's auth modules use them, and the daemon configures
-  no auth. cryptography 49+ has no Intel macOS wheel, so the bundle could not be built
+  auth code uses them (mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib, joserfc),
+  and the daemon configures no auth. cryptography 49+ has no Intel macOS wheel, so the bundle could not be built
   for Intel. `uv.lock` is unchanged; the dev venv keeps them.
 
 ### Fixed
