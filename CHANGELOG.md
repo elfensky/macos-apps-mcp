@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-07 — Gmail label fixes
+
 ### Fixed
 
 - **`move_mail` refuses a unified name (`inbox`, `trash`, ...) as the source** (#291) —
