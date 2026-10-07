@@ -83,7 +83,9 @@ def test_build_script_gates_universal2():
         assert needle in src, needle
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
     # the gate names a bad binary before a smoke can trip over it
-    assert src.index("universal2 gate ok") < src.index("# Smokes on BOTH slices")
+    assert src.index("universal2 gate ok") < src.index("BUNDLE SMOKE FAILED")
+    # three per-slice loops: the minos gate, the unsigned smokes, the signed smokes
+    assert src.count("for a in arm64 x86_64; do") == 3
     # kept safety properties of the build: pinned interpreter, identical per-arch
     # trees, no unexplained arch-specific file, bytecode sealed in before signing
     for needle in ("shasum -a 256 -c", "ARCH TREES DIFFER", "ARCH-SPECIFIC NON-BINARY"):
@@ -100,9 +102,16 @@ def test_only_the_intel_slice_carries_the_memory_exception():
     file by adding exactly that one key, joins the per-set slices, and gates on both."""
     src = (ROOT / "scripts" / "build_app.sh").read_text()
     key = "com.apple.security.cs.allow-unsigned-executable-memory"
+    assert 'cp "$ENTS" "$ENTS_X86"' in src  # derived from the strict file
     assert src.count("PlistBuddy -c") == 1
     assert f'"Add :{key} bool true"' in src
+    # ...and the gate proves strict-plus-ONE-key, then exact sets and the runtime flag
+    assert "$((n_strict + 1))" in src
+    assert 'want="$ENTS"; [[ "$a" == x86_64 ]] && want="$ENTS_X86"' in src
+    assert '"flags=0x10000(runtime)"' in src
     assert 'lipo -create "$WORK/exe-x86_64" "$WORK/exe-arm64"' in src
-    assert "entitlements ok: x86_64 has the exception, arm64 is strict" in src
+    # the signed smoke loads PyObjC and allocates a real closure, time-capped
+    assert "ctypes.CFUNCTYPE(None)(lambda: None)" in src
+    assert "alarm shift; exec @ARGV' 120" in src
     sign = src.index('if [[ -n "$SIGN" ]]')
     assert sign < src.index("entitlements ok") < src.index("signed smoke ok")

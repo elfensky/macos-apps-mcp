@@ -19,11 +19,13 @@ esac; done
 [[ -n "$NOTARIZE" && -z "$SIGN" ]] && { echo "--notarize requires --sign" >&2; exit 2; }
 # Preflight: both slices are smoke-run here (x86_64 under Rosetta), and lipo/vtool
 # come from the Xcode Command Line Tools — fail now, not after the installs.
-{ /usr/bin/arch -arm64 /usr/bin/true && /usr/bin/arch -x86_64 /usr/bin/true \
-    && xcrun -f vtool >/dev/null; } 2>/dev/null \
-  || { echo "build needs an Apple-silicon Mac with Rosetta 2 (softwareupdate" \
-       "--install-rosetta --agree-to-license) and the Xcode Command Line Tools" >&2
-       exit 2; }
+/usr/bin/arch -arm64 /usr/bin/true 2>/dev/null \
+  || { echo "build needs an Apple-silicon Mac (it runs the arm64 slice)" >&2; exit 2; }
+/usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null \
+  || { echo "build needs Rosetta 2: softwareupdate --install-rosetta" \
+       "--agree-to-license" >&2; exit 2; }
+xcrun -f vtool >/dev/null 2>&1 \
+  || { echo "build needs the Xcode Command Line Tools (lipo, vtool)" >&2; exit 2; }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
@@ -39,21 +41,27 @@ CACHE="${PBS_CACHE:-$HOME/Library/Caches/macos-apps-mcp-build}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 APP="$OUT/macos-apps-mcp.app"
-is_macho() { file -b "$1" | grep -q '^Mach-O'; }
+is_macho() { [[ "$(file -b "$1")" == Mach-O* ]]; }   # no pipe: SIGPIPE-safe
 lipo2() { lipo -create "$1" "$2" -output "$WORK/fat" && mv "$WORK/fat" "$1"; }
 
 # 1. universal2 interpreter: lipo the two thin PBS builds over the arm64 tree.
 mkdir -p "$CACHE"
 for a in aarch64 x86_64; do
   t="cpython-$PBS_PY+$PBS_TAG-$a-apple-darwin-install_only_stripped.tar.gz"
-  if [[ ! -f "$CACHE/$t" ]]; then   # .part, then mv: a cut download never sits in the cache
+  sha="PBS_SHA_$a"
+  # Only a download that matches the pin enters the cache (.part, check, then mv).
+  if [[ ! -f "$CACHE/$t" ]]; then
     curl -fsSL -o "$CACHE/$t.part" \
       "https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/${t//+/%2B}"
+    echo "${!sha}  $CACHE/$t.part" | shasum -a 256 -c - >/dev/null 2>&1 \
+      || { rm -f "$CACHE/$t.part"; echo "PBS SHA256 MISMATCH ($a): the download does" \
+           "not match PBS_SHA_$a — upstream changed or it was tampered with; check" \
+           "before you change the pin" >&2; exit 1; }
     mv "$CACHE/$t.part" "$CACHE/$t"
   fi
-  sha="PBS_SHA_$a"
   echo "${!sha}  $CACHE/$t" | shasum -a 256 -c - >/dev/null 2>&1 \
-    || { echo "PBS SHA256 MISMATCH ($a): $CACHE/$t — delete it and rebuild" >&2; exit 1; }
+    || { echo "PBS SHA256 MISMATCH ($a): cached $CACHE/$t is corrupt — delete it" \
+         "and rebuild" >&2; exit 1; }
   mkdir -p "$WORK/$a" && tar -xzf "$CACHE/$t" -C "$WORK/$a"
 done
 STD="$WORK/aarch64/python" X="$WORK/x86_64/python"
@@ -120,7 +128,8 @@ echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 # Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
 for a in arm64 x86_64; do
   env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
-    || { echo "BUNDLE SMOKE FAILED ($a): getpath layout wrong"; exit 1; }
+    || { echo "BUNDLE SMOKE FAILED ($a): import failed (getpath layout, or a" \
+         "slice-specific extension)"; exit 1; }
   # one streamed tool call through the shim's transport, on the bundled libraries (#286)
   /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P \
     "$REPO/scripts/smoke_stream.py" \
@@ -166,14 +175,23 @@ if [[ -n "$SIGN" ]]; then
   lipo "$EXE" -thin arm64 -output "$WORK/exe-arm64"
   lipo -create "$WORK/exe-x86_64" "$WORK/exe-arm64" -output "$EXE"
   codesign --verify --strict --verbose=2 "$APP"
-  # Gate: the exception is on the x86_64 slice and NOT on arm64.
-  # (captured first: under pipefail, `codesign | grep -q` can fail on SIGPIPE)
-  ex="com.apple.security.cs.allow-unsigned-executable-memory"
-  e_x86="$(codesign -d --entitlements - --arch x86_64 "$EXE" 2>/dev/null)"
-  e_arm="$(codesign -d --entitlements - --arch arm64 "$EXE" 2>/dev/null)"
-  [[ "$e_x86" == *"$ex"* ]] || { echo "ENTITLEMENTS: x86_64 slice lacks $ex"; exit 1; }
-  [[ "$e_arm" != *"$ex"* && "$e_arm" == *apple-events* ]] \
-    || { echo "ENTITLEMENTS: arm64 slice is not the strict set"; exit 1; }
+  # Gate: each slice carries EXACTLY the set it was signed with, under the hardened
+  # runtime — the x86_64 set is the strict file plus one key, arm64 is the strict
+  # file. Exact compares, so an extra key on either slice fails the build.
+  n_strict="$(plutil -p "$ENTS" | grep -c '=>')"
+  [[ "$(plutil -p "$ENTS_X86" | grep -c '=>')" -eq $((n_strict + 1)) ]] \
+    || { echo "ENTITLEMENTS: the x86_64 set is not the strict set plus one key"; exit 1; }
+  for a in x86_64 arm64; do
+    want="$ENTS"; [[ "$a" == x86_64 ]] && want="$ENTS_X86"
+    got="$(codesign -d --entitlements - --xml --arch "$a" "$EXE" 2>/dev/null \
+      | plutil -p -)"
+    [[ "$got" == "$(plutil -p "$want")" ]] \
+      || { echo "ENTITLEMENTS: the $a slice does not carry exactly $(basename "$want")"
+           exit 1; }
+    info="$(codesign -dv --arch "$a" "$EXE" 2>&1)"
+    [[ "$info" == *"flags=0x10000(runtime)"* ]] \
+      || { echo "ENTITLEMENTS: the $a slice lacks the hardened runtime"; exit 1; }
+  done
   echo "entitlements ok: x86_64 has the exception, arm64 is strict"
   # The smokes above ran unsigned; the hardened runtime can still break a slice. The
   # failure is a hang with TMPDIR set (as under launchd), so keep the env, cap the
