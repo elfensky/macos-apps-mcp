@@ -294,6 +294,7 @@ def test_diagnose_shape(monkeypatch, tmp_path):
     assert set(report) == {
         "version",
         "build",
+        "libs",
         "responsible_process",
         "note",
         "probed_automation",
@@ -301,11 +302,19 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "surfaces",
         "deployment",
     }
+    assert set(report["libs"]) == {"mcp", "fastmcp"}
     # 2 EventKit + 7 Automation + shortcuts + FDA + mail_index
     assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
     assert report["summary"] == "all 12 surfaces OK"
+
+
+def test_version_reads_any_distribution():
+    from importlib.metadata import version
+
+    assert doc._version("mcp") == version("mcp")
+    assert doc._version("no-such-dist-291") == "unknown"
 
 
 def test_summary_names_denied_surfaces(monkeypatch, tmp_path):

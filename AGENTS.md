@@ -7,13 +7,16 @@ Full design and rationale: [DESIGN.md](DESIGN.md).
 Device-verified traps that code review cannot catch — `delete` after `send` is a silent no-op, a
 compose window is a recipient-less `outgoing message`, writing `content` on a forward destroys the
 attachments, and Mail's Drafts autosave lands ~15s late so a 3-second check reports a clean
-mailbox and lies. Verify every Mail write **by running it and inspecting the resulting message**;
-three reviews and a green suite once passed a forward that delivered empty mail and ate 7
-attachments.
+mailbox and lies — and a move out of a Gmail label reads `ok`, then the copy is back ~2 min later
+(observe Gmail writes at +2 and +15 min). Verify every Mail write **by running it and inspecting
+the resulting message**; three reviews and a green suite once passed a forward that delivered
+empty mail and ate 7 attachments.
 
 **Our count disagrees with Mail's own counter? Our query is wrong until proven otherwise.**
 Compare against `mailboxes.total_count` / `unread_count` (#251, #287): a Gmail INBOX
-mismatch was once filed as stale counters, and Mail's counter was right.
+mismatch was once filed as stale counters, and Mail's counter was right. Exception: a Gmail
+label made by `create_mailbox` has no `source`, and its counter stays 0 — compare against an
+AppleScript count there (#291).
 
 ## Architecture (don't drift)
 

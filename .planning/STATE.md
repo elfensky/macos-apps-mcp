@@ -5,10 +5,10 @@ current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
 stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-06T22:57:08.339Z"
-last_activity: 2026-10-06
+last_updated: "2026-10-07T15:02:28.885Z"
+last_activity: 2026-10-07
 last_activity_desc: Phase 03 execution started
-state_head: e672a4b35baf05bb1b3747b58fe9ec61e159c695
+state_head: c6ef3fa50a0350326d67fdf80cd07b2bf9fed831
 progress:
   total_phases: 7
   completed_phases: 3
@@ -111,7 +111,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.13.1 (build `4b13dba`, installed and probe-proven 2026-10-05; on PyPI too). It carries #229, #230 and #261.
+- The installed daemon is release v0.14.0 (build `a5766c9`, installed with `ditto` and probe-proven 2026-10-07, code seal intact after the first run; on PyPI too). It carries Phase 3, #251, #286, #287 and #292. Install with `ditto`, not `cp -R` (#297).
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -127,6 +127,8 @@ Recent decisions affecting current work:
 | 261006-wa0 | Gmail follow-ups: refuse label-folder write sources; labels in thread, sent triage, stats; parity guard (#287, PR #289) | 2026-10-06 | 328ccec | [261006-wa0-gmail-follow-ups-to-251-label-source-gua](./quick/261006-wa0-gmail-follow-ups-to-251-label-source-gua/) |
 | 4 | Precompile the daemon bundle's bytecode before signing so its code seal survives first launch | 2026-10-07 | 26baa9a | — |
 | 261007-11j | Release bump 0.14.0 (EventKit depth): changelog corrections, version sites, Phase 3 device re-run record | 2026-10-07 | e672a4b | [261007-11j-release-bump-0-14-0-with-changelog-corre](./quick/261007-11j-release-bump-0-14-0-with-changelog-corre/) |
+| 6 | Record v0.14.0 as the installed daemon (build a5766c9, ditto install, probe-proven 2026-10-07) | 2026-10-07 | 01972d9 | — |
+| 7 | Release bump 0.14.1 — Gmail label fixes (#291, #285) | 2026-10-07 | c6ef3fa | — |
 
 ### Roadmap Evolution
 

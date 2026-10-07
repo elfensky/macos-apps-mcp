@@ -6,6 +6,38 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-07 — Gmail label fixes
+
+### Fixed
+
+- **`move_mail` refuses a unified name (`inbox`, `trash`, ...) as the source** (#291) —
+  for a Gmail message it resolves to a label folder, where a move is a copy, and a move
+  out of the unified Trash crashes Mail; pass the `folder` url from the read.
+
+- **A Gmail label folder is recognised in any spelling** (#291) — a decoded
+  (`[Gmail]/Sent Mail`) or re-cased url reached a move or trash unguarded; label folders
+  now match on account and decoded path, ignoring case.
+
+- **`move_mail` refuses a Gmail label folder as the destination** (#291) — and a unified
+  destination when the source account has Gmail labels. On device a move into a label
+  landed, but `mail_undo` of it left a copy that the tool's check reported as `ok`.
+  Refused before any change, dry runs included.
+
+- **A new Gmail label is recognised as a label** (#291) — a label made by
+  `create_mailbox` had no `source` in Mail's index, so a move out of it passed the
+  guard and left a copy that read `ok`. In an account with labels, a folder that
+  stores no message, or a url the index does not know yet, is now refused as a label.
+  An empty physical folder (Drafts, an emptied Trash or Spam) is refused with it — the
+  safe side.
+
+- **`mail_undo` explains a move it cannot replay** (#291) — a receipt whose destination
+  is a Gmail label or a unified name now names the source folder and how to restore by
+  hand.
+
+- **`doctor()` reports the bundled `mcp` and `fastmcp` versions** (#285) — under `libs`,
+  so a bundle built with other library versions than the tests is visible without
+  opening it.
+
 ## [0.14.0] - 2026-10-07 — EventKit depth
 
 ### Added

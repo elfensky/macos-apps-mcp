@@ -34,6 +34,10 @@ by the tool's return value.
 This single mis-timing produced repeated "cannot reproduce" verdicts on a bug that reproduces 100%
 of the time when you wait long enough.
 
+The same trap, slower, on Gmail (#291, 2026-10-07): a move out of a label read clean at +20 s,
+and the copy was back by +2 min. Observe a Gmail write at +2 min and +15 min, never only at
++20 s (§5f).
+
 Corollary: `run_osascript` caps a script at **30 seconds**, so a probe that needs a long `delay`
 must be run as raw `osascript` from a shell, not through the runtime.
 
@@ -46,7 +50,7 @@ must be run as raw `osascript` from a shell, not through the runtime.
 | **A compose window IS an `outgoing message` with 0 recipients.** So "delete every recipient-less outgoing message" would destroy a human's half-written email. Never sweep on that predicate. | #135, 2026-07-26 |
 | `delete` **before** `send` works reliably — fresh messages and `forward`-derived alike, leaving no immediate residue. | #135, 2026-07-26 |
 | `delete` **after** `send` is a **silent no-op**. Both `delete <ref>` and `delete outgoing message i` return cleanly, remove nothing, and the message delivers anyway. **Never roll back past the `send` verb** — report the leftover instead. | #135, 2026-07-26 |
-| A successfully deleted message's reference goes **dead with -1728**. This is the only reliable way to *prove* a delete took; treat any other error as "unknown", never as success. | #135, 2026-07-26 |
+| A successfully deleted message's reference goes **dead with -1728**. This is the only reliable way to *prove* a delete took; treat any other error as "unknown", never as success. It proves that Mail dropped its LOCAL copy, not that the server deleted it: in #291 T3 (out of a Gmail label, slow Mail) the reference died and the message was back by +2 min (§5f). | #135, 2026-07-26 |
 | `count of outgoing messages` counts script-session message **objects**, including already-delivered ones — it does not fall back to 0 and is **not** the outbox. Use `count of (messages of outbox)` for the real queue. | #135, 2026-07-26 |
 | `send` returning means Mail **ACCEPTED** the message, not that it was delivered. An accepted send can sit in the Outbox for minutes. | 2026-07-25 |
 | A message stuck in the Outbox clears when Mail is **quit and reopened** — the stranded entry is in-memory, not on disk. | #135, 2026-07-26 |
@@ -219,7 +223,7 @@ these contradict what `Mail.sdef` reads like** — the dictionary is not the dev
 |---|---|
 | **`move {a, b, c} to mb` — an AppleScript LIST — raises -1700 and moves NOTHING.** | `Can't make {…} into type specifier`. The `list="yes"` direct parameter that makes a batch look like one Apple Event is inside a **commented-out block** of `Mail.sdef`; the live definition is a singular `type="specifier"`. `whose message id is in {…}` fails identically. So a batch is **N events in one script**, never one event — which is what the 25 cap and the raised host-side timeout exist for. The failure was atomic: 0 of 3 moved. |
 | `move <one ref> to dst` and `move (messages of src whose message id is "…") to dst` both work. | The `whose` form re-evaluates per iteration, so it is immune to the moved-out-of-the-collection reference rot in §6. |
-| **A cross-account `move` is a TRUE move: source 0, destination 1, stable after 45s and in the Envelope Index.** | Mail.app's own UI **drag** copies — that is where #140/#153's ~3.9k duplicates came from — but the `move` verb does not. So there is no copy → verify → delete-source dance to build. Verify anyway: `move` on a 0-match `whose` is a silent no-op. |
+| **A cross-account `move` is a TRUE move: source 0, destination 1, stable after 45s and in the Envelope Index.** | Mail.app's own UI **drag** copies — that is where #140/#153's ~3.9k duplicates came from — but the `move` verb does not. So there is no copy → verify → delete-source dance to build. Verify anyway: `move` on a 0-match `whose` is a silent no-op. Exception: OUT of a Gmail label folder it left a copy (§5f, #291). |
 | `make new mailbox with properties {name:"a/b"}` **auto-creates the missing parent**, at application level and via `at end of mailboxes of <account>`. | So nesting needs no per-level loop. |
 | It returns **`missing value`** — there is nothing to read the new mailbox's address back from. | Combined with "the `mailbox` class has no url property" and "the Envelope Index does not know it exists until Mail syncs", all three possible sources are blind. The address must be **synthesised** (`<scheme>://<uuid>/<name>`), which works because the path is percent-DECODED before use. |
 | **`make new mailbox at <account> …` (the bare `at acct` form) raises a coercion error AND CREATES THE MAILBOX ANYWAY.** | Reports failure, leaves a folder behind. Only the `at end of mailboxes of <account>` form is safe. |
@@ -343,9 +347,101 @@ not a verification of deduplicated totals or of a patched live server.
 - The tool's own post-check reported the message present in BOTH mailboxes and
   deleted nothing; `mail_undo` answered that it had no messages to restore.
 - Rule: a mailbox with `mailboxes.source` set is refused as the source of `move_mail`
-  and `trash_mail` before any native call, dry runs included.
+  and `trash_mail` before any native call, dry runs included. Widened by #291 (below):
+  in an account that holds labels, a folder with no stored row, or a url the index does
+  not know, is refused too.
 - `trash_mail` from a label was not run; it is refused by extension.
-- A route from a label ships only after a device run shows the source label gone.
+- A route from a label ships only after a device run shows the source label gone. The
+  #291 run (below) did not: the label came back.
+
+**Device-verified 2026-10-07 (#291) — moves into and out of a label.** One throwaway
+message, sent from andrei@lav.ren to itself. Accounts: Personal (plain IMAP) and Google.
+Code: develop 70186a1, before the #291 refusals. Mail watchdog running. Mail was slow
+(health read 5.9–10.8 s against the 2.0 s cap, from memory paging), so the run is labelled
+slow. N = 1 per test. Each test was observed at +20 s, +2, +5 and +15 min. T1 and T2 did
+not change across their observations; T3 changed between +20 s and +2 min, then held.
+
+| Test | Tool status | What Mail and the index showed |
+|---|---|---|
+| T1: Personal INBOX → a new Gmail label (no `source`, not indexed before the move) | `ok` | A move. The Personal INBOX row was gone (the Sent copy from the send stays); Gmail had one All Mail row with the label. |
+| T3: `mail_undo` of T1 (the label → Personal INBOX) | `ok` | A copy. At +20 s the message was gone from Gmail. At +2 min it was back: a new All Mail row with the label kept; Gmail Trash unchanged. |
+| T2: Gmail All Mail → Gmail INBOX | present in BOTH | INBOX gained the message; All Mail and the other label kept it; Gmail Trash unchanged. |
+
+- Outcome: in both runs so far (#287 within Gmail, health not recorded; #291 T3 to
+  another account, slow Mail), a move out of a label left the message in that label, and
+  in T3 the tool's own check read `ok`. Not known: whether Mail never sent the delete for a
+  label folder, or a slow Mail dropped it (§5c, #164). A rerun on a healthy Mail (health
+  read at or under 2.0 s) decides it. The refusal holds either way.
+- Gmail's side: this account has Auto-Expunge on ("Immediately update the server", the
+  default; read from Gmail web by the operator, 2026-10-07), and Google documents that
+  "You can find messages you delete from an IMAP folder in your 'All Mail' label in
+  Gmail" (https://support.google.com/mail/answer/78892, read 2026-10-07). So a delete
+  that reached Gmail would have removed the label at once; in T3 the label stayed, so
+  the delete did not reach Gmail. And even when it does, the message stays in All Mail:
+  a move out of a label to another account cannot leave one copy.
+- So `mail_undo` cannot reverse a move into a label: its route is a move out of the label.
+  No other undo route was run (for example a cross-account move from the All Mail row).
+- T2 matches a label add, and also a dropped source-side delete on a slow Mail. A healthy
+  run may trash the message instead (a delete from All Mail lands in Trash, §5d).
+- A label made by `create_mailbox` had `source IS NULL` and `total_count = 0` for the whole
+  run (38 min, one label). The index had no row for it before its first message (O0) and
+  had one 45 s after T1. So the label check does not rely on `source` alone (Rules below).
+- Reads share the blind spot, run on the real index at T2+15m: `mail_overview` showed the
+  new label at 0, and a `mail_search` scoped to it found nothing, while Mail listed the
+  message there. Mail's own counter also said 0, so a parity check against it cannot see
+  this.
+- Cleanup: `trash_mail` from Personal INBOX, Personal Sent and Gmail All Mail (each a
+  physical folder), all `ok`. Gmail Trash gained the message, its INBOX and label
+  memberships were gone, and Gmail INBOX was back to 13 messages (held to +15 min). Mail's
+  pid did not change during the run. The operator removed the empty label by hand (a
+  mailbox cannot be deleted by script, §5b), and its index row went with it.
+- Not run: a move into or out of an established (sourced) label across accounts, and a
+  cross-account move into or out of All Mail. Not recorded: Gmail's "expunged from the
+  last visible IMAP folder" action; the message stays visible in All Mail here, so it
+  does not apply.
+
+**Rules (#291).**
+
+- A label folder is matched on account uuid + decoded path, case-insensitively — the key
+  `mailbox_args` addresses — so `%5BGmail%5D/Sent%20Mail`, `[Gmail]/Sent Mail` and a
+  re-cased url are one folder.
+- A canonical name is refused as the `move_mail` source: a unified name spans accounts,
+  resolves to a label folder for a Gmail message, and a move out of the unified Trash
+  crashes Mail (§5c).
+- A label folder is refused as the `move_mail` destination, and so is a canonical
+  destination when the source account has label folders (§5e: a unified name files into
+  the source account's mailbox of that role).
+- `mail_undo` of a receipt whose destination is a label folder or a canonical name is
+  refused, with how to restore by hand.
+- A label is: a mailbox with `mailboxes.source` set; or, in an account that holds labels
+  (a sourced mailbox, or a `labels` row whose message lives in the same account), a
+  mailbox with no stored message row, or a url the index does not know. Accepted false
+  positives, refused on the safe side: an empty physical folder (Drafts, an emptied Trash
+  or Spam) and a mistyped url.
+- A route into or out of a label ships only after a device run shows a working undo on a
+  healthy Mail.
+
+**Device-verified 2026-10-07 (#291) — the other Mail tools on a label folder.** Code at
+develop 70186a1, one Gmail account, macOS 27.0.1, Mail watchdog running.
+
+- `mail_body` reads a message from the INBOX label, the `[Gmail]/Sent Mail` label and a
+  custom label: `whose message id` inside the label mailbox finds it.
+- `mail_attachments` with `message_id` lists the attachments from the INBOX and Sent
+  Mail labels.
+- `update_mail_status` sets and clears `flagged` on a message in a custom label; a fresh
+  read confirms each state. The message was restored.
+- `save_mail_attachment` from the INBOX label writes the whole file (79,229 bytes, equal
+  to the reported size).
+- Not run: `mail_reply` and `reply_all` (each opens a compose window and leaves a draft,
+  §3c) and `forward_mail` (outbound). They find the message with the same `whose
+  message id` lookup as `mail_body`; the compose half does not depend on the folder.
+- Seen once: Mail can disagree with itself about a message that earlier label moves
+  touched. In the test label, the index gave row 77215 the subject and Message-ID of one
+  message, and its `.emlx` held another. The first `mail_body` for the index's id
+  returned the other message's body; one minute later the same call answered "no
+  message with that message id". This tool never writes into `~/Library/Mail`, so the
+  wrong body came from Mail. A check of Mail's own `message id` cannot catch it: the
+  `whose` filter matched, so Mail reported the stale id at that moment.
 
 ## 6. Addressing and iteration
 

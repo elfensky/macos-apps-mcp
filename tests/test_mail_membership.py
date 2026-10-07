@@ -177,6 +177,12 @@ def test_membership_obeys_the_mailbox_source(gmail_envelope):
         assert counts[urls[name]] == (0, 0)
         assert mail_index.query_search(mailbox_urls=[urls[name]]) == []
     assert counts[urls["inbox"]] == (2, 1)
+    # The label guard (#291): a labels row into ANOTHER account's mailbox does not
+    # make that account a label account, and a sourced mailbox stays a label even
+    # when it holds a direct row.
+    assert not mail_index.account_has_labels(ACCT_B)
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_B}/NoSuchFolder")
+    assert mail_index.is_label_mailbox(urls["empty"])
 
 
 def test_label_expansion_does_not_change_physical_file_locations(gmail_envelope):
@@ -212,7 +218,10 @@ def test_is_label_mailbox_tells_labels_from_physical_and_unknown(gmail_envelope)
         assert mail_index.is_label_mailbox(urls[name])
     for name in ("all", "other"):
         assert not mail_index.is_label_mailbox(urls[name])
-    assert not mail_index.is_label_mailbox(f"imap://{ACCT_A}/NoSuchFolder")
+    # Unknown in a label account reads as a label (#291 device run): a label just
+    # made by create_mailbox is not indexed yet. Unknown elsewhere is not.
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/NoSuchFolder")
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_B}/NoSuchFolder")
     assert not mail_index.is_label_mailbox("inbox")
 
 
@@ -263,6 +272,194 @@ def test_trash_mail_from_a_physical_source_still_previews(gmail_envelope, monkey
     db.add_mailbox(f"imap://{ACCT_A}/%5BGmail%5D/Trash")
     seen = _present_recorder(monkeypatch)
     out = MailAdapter().trash_mail("<gmail-2@example.test>", urls["all"])
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen
+
+
+# --- #291: label spelling, canonical source, move into a label ---------------------
+
+
+def test_is_label_mailbox_matches_any_spelling(gmail_envelope):
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/Sent Mail")
+    assert mail_index.is_label_mailbox(
+        f"imap://{ACCT_A.lower()}/%5bgmail%5d/sent%20mail"
+    )
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/inbox")
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/All Mail")
+    assert not mail_index.is_label_mailbox("inbox")
+
+
+def test_account_has_labels(gmail_envelope):
+    assert mail_index.account_has_labels(ACCT_A)
+    assert mail_index.account_has_labels(ACCT_A.lower())
+    assert not mail_index.account_has_labels(ACCT_B)
+    assert not mail_index.account_has_labels(None)
+
+
+# --- #291 device run 2026-10-07: a NEW Gmail label has no `source` ----------------
+
+
+def test_a_new_label_without_source_is_still_a_label(gmail_envelope):
+    """Device-verified 2026-10-07: a label made by create_mailbox stays at
+    ``source IS NULL`` (15+ min), with its members only in ``labels``."""
+    db, boxes, _ = gmail_envelope
+    member = db.add_mailbox(f"imap://{ACCT_A}/Fresh")
+    db.execute("INSERT INTO labels VALUES (101, ?)", (member,))
+    db.add_mailbox(f"imap://{ACCT_A}/Fresh-Empty")
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/Fresh")
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/fresh-empty")
+
+
+def test_a_folder_the_index_has_not_seen_is_a_label_only_in_a_label_account(
+    gmail_envelope,
+):
+    # create_mailbox's folder exists in Mail before the index learns it.
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/NotIndexedYet")
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_B}/NotIndexedYet")
+
+
+def test_a_physical_gmail_folder_is_not_a_label(gmail_envelope):
+    db, boxes, urls = gmail_envelope
+    trash = f"imap://{ACCT_A}/%5BGmail%5D/Trash"
+    db.add_message(ROWID=120, subject=1, mailbox=db.add_mailbox(trash))
+    assert not mail_index.is_label_mailbox(urls["all"])
+    assert not mail_index.is_label_mailbox(trash)
+    # The accepted false positive: an EMPTY physical folder (Gmail Drafts) has
+    # nothing that tells it from a label, so it is refused — the safe side.
+    db.add_mailbox(f"imap://{ACCT_A}/%5BGmail%5D/Drafts")
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/Drafts")
+
+
+def test_an_account_whose_only_label_lacks_source_has_labels(blank_envelope):
+    db = blank_envelope
+    all_mail = db.add_mailbox(f"imap://{ACCT_A}/%5BGmail%5D/All%20Mail")
+    db.add_message(ROWID=130, subject=None, mailbox=all_mail)
+    db.execute(
+        "INSERT INTO labels VALUES (130, ?)",
+        (db.add_mailbox(f"imap://{ACCT_A}/Fresh"),),
+    )
+    assert mail_index.account_has_labels(ACCT_A)
+    assert mail_index.is_label_mailbox(f"imap://{ACCT_A}/Fresh")
+    assert not mail_index.is_label_mailbox(f"imap://{ACCT_A}/[Gmail]/All Mail")
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_and_trash_refuse_a_label_source_in_any_spelling(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # No osascript ran, or the conftest native seam would have raised AssertionError.
+    with pytest.raises(WriteRefused, match=r"#287"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>",
+            f"imap://{ACCT_A}/[Gmail]/Sent Mail",
+            urls["other"],
+            dry_run=dry_run,
+        )
+    with pytest.raises(WriteRefused, match=r"#287"):
+        MailAdapter().trash_mail(
+            "<gmail-2@example.test>", f"imap://{ACCT_A.lower()}/inbox", dry_run=dry_run
+        )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_label_destination(gmail_envelope, dry_run):
+    _, _, urls = gmail_envelope
+    # Same seam argument: a WriteRefused proves the refusal came before any osascript.
+    for source, dest in (
+        (urls["all"], urls["label"]),
+        (urls["all"], f"imap://{ACCT_A}/[Gmail]/Sent Mail"),
+        (urls["other"], urls["inbox"]),
+    ):
+        with pytest.raises(WriteRefused, match=r"label.*#291"):
+            MailAdapter().move_mail(
+                "<gmail-2@example.test>", source, dest, dry_run=dry_run
+            )
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_move_mail_refuses_a_canonical_destination_into_a_labelled_account(
+    gmail_envelope, dry_run
+):
+    _, _, urls = gmail_envelope
+    with pytest.raises(WriteRefused, match=r"unified.*#291"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>", urls["all"], "inbox", dry_run=dry_run
+        )
+
+
+def test_move_mail_allows_a_canonical_destination_from_an_unlabelled_account(
+    gmail_envelope, monkeypatch
+):
+    _, _, urls = gmail_envelope
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().move_mail("<gmail-2@example.test>", urls["other"], "drafts")
+    assert mail_recover.is_preview(out)
+    assert mail._PRESENT in seen
+
+
+def _receipt(monkeypatch, dest, source):
+    rec = {"destination": dest, "backup_dir": "/tmp/backup-291"}
+    target = mail_recover.Target(
+        id="gmail-2@example.test", folder=source, account=ACCT_A
+    )
+    monkeypatch.setattr(mail_recover, "undo_plan", lambda rid: (rec, [target]))
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_undo_refuses_a_receipt_into_a_label_folder(
+    gmail_envelope, monkeypatch, dry_run
+):
+    _, _, urls = gmail_envelope
+    # No osascript ran, or the conftest native seam would have raised AssertionError.
+    for dest in (urls["label"], f"imap://{ACCT_A}/[Gmail]/Sent Mail"):
+        _receipt(monkeypatch, dest, urls["all"])
+        with pytest.raises(WriteRefused) as err:
+            MailAdapter().undo("r", dry_run=dry_run)
+        for part in (urls["all"], "/tmp/backup-291", "by hand"):
+            assert part in str(err.value)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_undo_refuses_a_receipt_into_a_canonical_name(
+    gmail_envelope, monkeypatch, dry_run
+):
+    _, _, urls = gmail_envelope
+    _receipt(monkeypatch, "inbox", urls["all"])
+    with pytest.raises(WriteRefused) as err:
+        MailAdapter().undo("r", dry_run=dry_run)
+    assert "mail_search" in str(err.value)
+    assert urls["all"] in str(err.value)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_the_device_shapes_around_a_new_label_are_refused(
+    gmail_envelope, monkeypatch, dry_run
+):
+    """#291 device run 2026-10-07: T1 moved a message from another account into a
+    NEW label (source NULL; not indexed at first). T3, mail_undo of T1, read `ok`
+    and left the Gmail copy. Every leg must refuse before any osascript."""
+    db, _, urls = gmail_envelope
+    fresh = f"imap://{ACCT_A}/Fresh"
+    db.execute("INSERT INTO labels VALUES (101, ?)", (db.add_mailbox(fresh),))
+    for dest in (fresh, f"imap://{ACCT_A}/NotIndexedYet"):
+        with pytest.raises(WriteRefused, match=r"label.*#291"):
+            MailAdapter().move_mail(
+                "<gmail-2@example.test>", urls["other"], dest, dry_run=dry_run
+            )
+    with pytest.raises(WriteRefused, match=r"label.*#287"):
+        MailAdapter().move_mail(
+            "<gmail-2@example.test>", fresh, urls["other"], dry_run=dry_run
+        )
+    _receipt(monkeypatch, fresh, urls["other"])
+    with pytest.raises(WriteRefused) as err:
+        MailAdapter().undo("r", dry_run=dry_run)
+    assert "by hand" in str(err.value)
+
+
+def test_undo_replays_a_receipt_into_a_physical_folder(gmail_envelope, monkeypatch):
+    _, _, urls = gmail_envelope
+    _receipt(monkeypatch, urls["other"], urls["all"])
+    seen = _present_recorder(monkeypatch)
+    out = MailAdapter().undo("r")
     assert mail_recover.is_preview(out)
     assert mail._PRESENT in seen
 

@@ -12,6 +12,7 @@ import sqlite3
 from email import message_from_bytes
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 from ..audit import state_dir
@@ -1149,27 +1150,93 @@ def query_mailbox_urls() -> list[str]:
     return _read_index(path, read)
 
 
-def is_label_mailbox(url: str) -> bool:
-    """True when ``url`` is a Gmail label mailbox (``mailboxes.source`` set, facts §5f).
+def _label_key(url: str) -> tuple[str, str] | None:
+    """``(account uuid, decoded path)``, case-folded — the key ``mailbox_args``
+    addresses. None for a non-url (a canonical name). A physical folder whose key
+    case-folds to a label's reads as a label: the safe direction (refused, nothing
+    changed)."""
+    parsed = mailbox_url.parse(url)
+    return (parsed[1].casefold(), parsed[2].casefold()) if parsed else None
 
-    A label mailbox is a view of label membership, not a place a message is stored,
-    so a write that names one as its SOURCE does not do what it reports: device-
-    verified 2026-10-06, a move from a label added the destination label and kept the
-    source label (#287). Exact equality on the raw percent-encoded url, the ``folder``
-    token every read returns; an unknown url is not a label. Raises on a missing
-    store — a write cannot prove its source is no label without it, and the
-    recoverable plane's locate needs the same store a moment later.
-    """
+
+class _LabelState(NamedTuple):
+    sourced: frozenset[tuple[str, str]]  # keys with mailboxes.source set
+    accounts: frozenset[str]  # account uuids that hold any label mailbox
+    physical: frozenset[tuple[str, str]]  # keys with at least one stored message row
+
+
+def _label_state() -> _LabelState:
+    """What the label guard needs, from three plain reads of the index. Raises on a
+    missing store, like the other raising reads."""
     path = require_index_path()
 
     def read(conn):
-        row = conn.execute(
-            "SELECT 1 FROM mailboxes WHERE url = ? AND source IS NOT NULL LIMIT 1",
-            (url.strip(),),
-        ).fetchone()
-        return row is not None
+        keys = {
+            rowid: (key, source)
+            for rowid, url, source in conn.execute(
+                "SELECT ROWID, url, source FROM mailboxes"
+            )
+            if (key := _label_key(url)) is not None
+        }
+        # (label mailbox, the labelled message's own mailbox): a label row counts
+        # only inside its message's account — a row into another account's ordinary
+        # mailbox must not turn that account into a label account.
+        pairs = conn.execute(
+            "SELECT DISTINCT l.mailbox_id, m.mailbox FROM labels l"
+            " JOIN messages m ON m.ROWID = l.message_id"
+        ).fetchall()
+        stored = {r for (r,) in conn.execute("SELECT DISTINCT mailbox FROM messages")}
+        sourced = {k for k, source in keys.values() if source is not None}
+        accounts = {k[0] for k in sourced}
+        for label, home in pairs:
+            if label in keys and home in keys and keys[label][0][0] == keys[home][0][0]:
+                accounts.add(keys[label][0][0])
+        physical = {keys[r][0] for r in stored if r in keys}
+        return _LabelState(frozenset(sourced), frozenset(accounts), frozenset(physical))
 
     return _read_index(path, read)
+
+
+def is_label_mailbox(url: str) -> bool:
+    """True when ``url`` is a Gmail label mailbox (facts §5f).
+
+    A label mailbox is a view of label membership, not a place a message is stored,
+    so a move from one or into one does not do what it reports (#287, #291 —
+    on device 2026-10-06/07 a move out of a label left a copy, so ``mail_undo``
+    cannot reverse a move into one).
+
+    A label is a mailbox with ``mailboxes.source`` set, OR any mailbox without one
+    stored message row in an account that holds labels (a sourced mailbox, or a
+    ``labels`` row whose message lives in the same account). The second rule exists
+    because a label made by ``create_mailbox`` had ``source IS NULL`` for a whole
+    38-minute device run (2026-10-07) and no index row before its first message; in
+    that Gmail account only All Mail, Trash and Spam stored rows. Accepted false
+    positives, refused on the safe side: an EMPTY physical folder (Drafts, an emptied
+    Trash or Spam) and a url the index does not know. Matches on the key
+    ``mailbox_args`` addresses (account uuid + decoded path), case-insensitively, so
+    a decoded or re-cased url cannot skip the guard; a canonical name is not a
+    label. Raises on a missing store — a write cannot prove its source is no label
+    without it, and the recoverable plane's locate needs the same store a moment
+    later.
+    """
+    key = _label_key(url)
+    if key is None:
+        return False
+    state = _label_state()
+    return key in state.sourced or (
+        key[0] in state.accounts and key not in state.physical
+    )
+
+
+def account_has_labels(account: str | None) -> bool:
+    """True when ``account`` (a uuid) owns at least one Gmail label mailbox.
+
+    A unified destination files into the source account's mailbox of that role
+    (facts §5e), which in a Gmail account can be a label (#291). No account, no read.
+    """
+    if not account:
+        return False
+    return account.casefold() in _label_state().accounts
 
 
 def query_thread(message_id: str, limit: int) -> list[Pointer]:

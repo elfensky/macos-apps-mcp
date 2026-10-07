@@ -876,19 +876,53 @@ end run"""
 )
 
 
-def _refuse_label_source(mailbox: str) -> None:
-    """Refuse a Gmail label folder as the source of a destructive write (#287).
+# Said of a folder the label guard refuses. "Or ..." because the guard also refuses a
+# Gmail-account folder that stores no message, which it cannot tell from a label.
+_LABEL_FOLDER = (
+    "is a Gmail label folder (or a Gmail-account folder that stores no message in "
+    "Mail's index, which reads the same)"
+)
 
-    Raises before any native call, dry runs included.
+
+def _refuse_label_route(source: str, destination: str | None = None) -> None:
+    """Refuse a write that routes through a Gmail label folder, before any native call
+    (dry runs included).
+
+    SOURCE a label folder: in both device runs a move out of a label left the
+    message in that label — within Gmail 2026-10-06 (#287), and to another account
+    2026-10-07 (#291), where the post-check read ``ok`` and the copy was back by
+    +2 min. DESTINATION a label folder, or a canonical name while the source account
+    has label folders (a unified name files into the source account's own mailbox of
+    that role, facts §5e): ``mail_undo`` of such a move is a move out of the label,
+    so it cannot reverse it (#291).
     """
-    if mail_index.is_label_mailbox(mailbox):
+    if mail_index.is_label_mailbox(source):
         raise WriteRefused(
-            f"{mailbox!r} is a Gmail label folder: a view of label membership, not "
-            "where the message is stored. A move from a label adds the destination "
-            "label and keeps this one (device-verified 2026-10-06), so no write route "
-            "from a label folder is proven yet (#287). Nothing was changed. Do not "
+            f"{source!r} {_LABEL_FOLDER}: a view of label membership, not where the "
+            "message is stored. In both device runs a move out of a label left the "
+            "message in that label, also when the move went to another account and "
+            "the tool's own check read ok (#287, #291). Nothing was changed. Do not "
             "retry from this folder; tell the user."
         )
+    if destination is None:
+        return
+    if mail_index.is_label_mailbox(destination):
+        why = f"{destination!r} {_LABEL_FOLDER}"
+    elif mail_index.account_of(destination) is None and mail_index.account_has_labels(
+        mail_index.account_of(source)
+    ):
+        why = (
+            f"{destination!r} is a unified name, which files into the source "
+            "account's own mailbox of that role (facts §5e), and that account has "
+            "Gmail label folders"
+        )
+    else:
+        return
+    raise WriteRefused(
+        f"{why}. mail_undo cannot reverse a move into a Gmail label: the move back "
+        "out of a label left a copy on device (#291). Nothing was changed. Pass a "
+        "physical folder url as to_mailbox, or do this move in Mail by hand."
+    )
 
 
 def _tri(value: bool | None) -> str:
@@ -1500,8 +1534,9 @@ class MailAdapter:
 
         TWO mailboxes are required, not one: #146 established that a message id alone
         does not locate a message, so the source is part of the address. Both are
-        address tokens — a ``folder`` value from a read passed back VERBATIM, or one of
-        the five canonical names.
+        address tokens — a ``folder`` value from a read passed back VERBATIM. The
+        SOURCE must be such a url (a canonical name is refused, #291); the DESTINATION
+        may also be one of the five canonical names.
 
         Batch-capped at 25 and ``dry_run=True`` by DEFAULT (unlike ``delete_draft``): a
         move is reversible in principle, but reversing 200 misfiled messages by hand is
@@ -1546,16 +1581,26 @@ class MailAdapter:
           exactly the per-locale name table #61 deleted. Nothing moves and nothing is
           lost, and the status is loud and factual.
 
-        A Gmail label folder as ``from_mailbox`` is refused (``WriteRefused``) before
-        any native call, dry runs included: on device a move from a label is a copy
-        (#287).
+        A Gmail label folder is refused (``WriteRefused``) as either end, before any
+        native call, dry runs included: on device a move out of a label left a copy,
+        so ``mail_undo`` cannot reverse a move into one (#287, #291). A canonical
+        ``to_mailbox`` is refused for the same reason when the source account has
+        label folders.
         """
         mids = _split_ids(ids)
         # The cap and the empty-batch refusal come from the plane, and BEFORE any
         # native call — that is the whole point of enforcing them in one place.
         mail_recover.check_batch(mids)
-        _refuse_label_source(from_mailbox)
         src = mail_addressing.mailbox_args(from_mailbox)
+        if not src[0]:
+            raise ValueError(
+                f"from_mailbox {from_mailbox!r} is a unified mailbox name and cannot "
+                "be a move source: a unified name spans every account, for a Gmail "
+                "message it resolves to a label folder (a move from a label is a "
+                "copy, #287), and a move out of the unified Trash crashes Mail "
+                "(facts §5c). Nothing was changed. Pass the `folder` url from the "
+                "read that produced these ids (#291)."
+            )
         dst = mail_addressing.mailbox_args(to_mailbox)
         if src == dst:
             raise ValueError(
@@ -1574,6 +1619,7 @@ class MailAdapter:
                 "the destination's `folder` url instead (mail_overview lists them). Do "
                 "not retry with a canonical name."
             )
+        _refuse_label_route(from_mailbox, to_mailbox)
         targets = [
             mail_recover.Target(
                 id=mid,
@@ -1687,7 +1733,7 @@ class MailAdapter:
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
-        _refuse_label_source(mailbox)
+        _refuse_label_route(mailbox)
         src = mail_addressing.mailbox_args(mailbox)
         account = mail_index.account_of(mailbox)
         if account is None:
@@ -1925,6 +1971,11 @@ class MailAdapter:
         behavior, now stated. A receipt whose targets recorded ``unknown`` (a timeout
         mid-act, #206/D-06) is replayed the same as ``ok``.
 
+        A receipt whose destination is a Gmail label folder, or a canonical name, is
+        refused (``WriteRefused``) before the replay, dry runs included: no route out of
+        a label is proven (#287), and a unified name cannot be a move source (#291). The
+        error names the source folder and how to restore by hand.
+
         ponytail: every receipt today comes from ``move_mail``, which takes ONE source
         mailbox, so a receipt has exactly one source and the undo is one move. Group by
         ``Target.folder`` here if an op ever gathers targets from several mailboxes.
@@ -1937,10 +1988,30 @@ class MailAdapter:
                 "this undo cannot replay as one move. Restore them by hand from "
                 f"{rec.get('backup_dir')}. Do not retry."
             )
+        source = folders.pop()
+        dest = rec["destination"]
+        # #291: the replay is a move FROM the destination, and the caller never named a
+        # source, so move_mail's own refusals would mislead. Canonical first (pure).
+        if mail_index.account_of(dest) is None:
+            raise WriteRefused(
+                f"receipt {receipt_id!r} names the unified mailbox {dest!r} as its "
+                "destination, and a unified name cannot be a move source (#291). "
+                "Nothing was changed. Find each message's current `folder` with "
+                f"mail_search, then move_mail it back to {source!r}."
+            )
+        if mail_index.is_label_mailbox(dest):
+            backup = rec.get("backup_dir") or "(no backup was taken)"
+            raise WriteRefused(
+                f"receipt {receipt_id!r} moved these messages into the Gmail label "
+                f"folder {dest!r}, and a move out of a Gmail label is a copy "
+                "(device-verified, #287, #291). Nothing was changed. The messages "
+                f"came from {source!r}, and their backed-up bytes are in {backup}. "
+                "Remove the label, or move them back, in Mail by hand. Do not retry."
+            )
         return self.move_mail(
             [t.id for t in targets],
-            rec["destination"],
-            folders.pop(),
+            dest,
+            source,
             dry_run=dry_run,
         )
 
