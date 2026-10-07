@@ -36,9 +36,29 @@ then the main executable, then the bundle — never `codesign --deep`) with
 registration will work without a signature, but the bundle still smoke-tests).
 
 The build installs the exact versions in `uv.lock`, then runs `scripts/smoke_stream.py` on
-the bundled interpreter (one streamed tool call through the shim's transport). A failing
-smoke fails the build; a good build log shows `stream smoke ok` (#286). `doctor().libs` reports the `mcp`
-and `fastmcp` versions the bundle carries (#285).
+each slice of the bundled interpreter (one streamed tool call through the shim's transport).
+A failing smoke fails the build; a good build log shows `stream smoke ok` (#286).
+`doctor().libs` reports the `mcp` and `fastmcp` versions the bundle carries (#285).
+
+**Universal2, macOS 15 floor.** The `.app` carries arm64 and x86_64 slices of the
+interpreter and of every extension (#205). The build runs on an Apple-silicon Mac and needs
+Rosetta 2 (`softwareupdate --install-rosetta --agree-to-license`), because the import and
+stream smokes run on both slices. An Intel Mac cannot run the arm64 smoke, so it installs a
+release build instead of building one. The build downloads a pinned python-build-standalone
+CPython (3.14.5, release 20260510) for each arch and checks its sha256. It caches the
+tarballs in `~/Library/Caches/macos-apps-mcp-build`; `PBS_CACHE` overrides the path.
+`LSMinimumSystemVersion` in `packaging/Info.plist` is 15.0, the oldest macOS tested on a
+device (15.6.1 and 15.7.9). The code itself needs macOS 14 (the EventKit full-access APIs).
+The build reads that key and picks wheels for it. Before signing, it fails unless every
+Mach-O is `x86_64 arm64` and no slice needs a newer macOS. A good build log shows
+`smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. The x86_64 slice has run
+only under Rosetta so far, not on an Intel CPU.
+
+**No cryptography in the `.app`** (#205). The build leaves out cryptography, cffi and
+pycparser. Only mcp's `pyjwt[crypto]` and fastmcp's auth modules use them. The daemon
+configures no auth, so no daemon, shim or tool path imports them. cryptography 49 and later
+ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in the daemon, the bundle
+fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the dev venv keeps them.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):

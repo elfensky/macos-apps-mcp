@@ -119,5 +119,6 @@ not close a milestone just because a same-numbered release went out.
       `https://pypi.org/pypi/macos-apps-mcp/X.Y.Z/json` returns 200
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
-- [ ] Build log shows `stream smoke ok` (#286)
+- [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed the import and stream smokes (#205, #286)
+- [ ] Build log shows `universal2 gate ok` — every binary is arm64 + x86_64 and needs no newer macOS than `LSMinimumSystemVersion` (#205)
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha
