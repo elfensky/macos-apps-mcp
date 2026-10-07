@@ -1,9 +1,11 @@
 #!/bin/bash
-# Build macos-apps-mcp.app — hand-rolled (spec fork resolution). Layout puts the
-# python-build-standalone interpreter at Contents/MacOS/<exe> and the stdlib at
-# Contents/lib/python3.14 so CPython's getpath finds prefix relative to the
-# executable — NO PYTHONHOME/PYTHONPATH env needed by launchd or client configs.
-# Signing is INSIDE-OUT per Mach-O with --timestamp --options runtime; no recursive signing.
+# Build macos-apps-mcp.app — hand-rolled (spec fork resolution), universal2
+# (arm64 + x86_64). Layout puts the python-build-standalone interpreter at
+# Contents/MacOS/<exe> and the stdlib at Contents/lib/python3.14 so CPython's
+# getpath finds prefix relative to the executable — NO PYTHONHOME/PYTHONPATH env
+# needed by launchd or client configs.
+# Signing is INSIDE-OUT per Mach-O with --timestamp --options runtime; no recursive
+# signing. codesign signs (and --verify checks) every slice of a fat file.
 set -euo pipefail
 
 SIGN="" NOTARIZE="" OUT="dist"
@@ -18,22 +20,67 @@ esac; done
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
-STD="$(ls -d "$HOME"/.local/share/uv/python/cpython-${PYVER}*-macos-*/ | sort -V | tail -1)"
+# The floor's single source is packaging/Info.plist; it sets the wheel tags uv
+# may pick and the minos gate below.
+MACOS_MIN="$(plutil -extract LSMinimumSystemVersion raw "$REPO/packaging/Info.plist")"
+# Pinned interpreter: the SAME python-build-standalone release for both arches
+# (0.14.1 shipped 20260510). A uv-managed glob can pick x86_64 or a newer sqlite.
+PBS_TAG=20260510 PBS_PY=3.14.5
+PBS_SHA_aarch64=1bb0b3d45448dfe7e916dc62144cfd7d7a611dc6ccf05b8bb71662cc5c2a1ad2
+PBS_SHA_x86_64=38662e526797db4e90b3381706b96821979fece0b536ac14b5c4e1a97e0590d5
+CACHE="${PBS_CACHE:-$HOME/Library/Caches/macos-apps-mcp-build}"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 APP="$OUT/macos-apps-mcp.app"
+is_macho() { file -b "$1" | grep -q '^Mach-O'; }
+lipo2() { lipo -create "$1" "$2" -output "$WORK/fat" && mv "$WORK/fat" "$1"; }
+
+# 1. universal2 interpreter: lipo the two thin PBS builds over the arm64 tree.
+mkdir -p "$CACHE"
+for a in aarch64 x86_64; do
+  t="cpython-$PBS_PY+$PBS_TAG-$a-apple-darwin-install_only_stripped.tar.gz"
+  [[ -f "$CACHE/$t" ]] || curl -fsSL -o "$CACHE/$t" \
+    "https://github.com/astral-sh/python-build-standalone/releases/download/$PBS_TAG/${t//+/%2B}"
+  sha="PBS_SHA_$a"
+  echo "${!sha}  $CACHE/$t" | shasum -a 256 -c - >/dev/null
+  mkdir -p "$WORK/$a" && tar -xzf "$CACHE/$t" -C "$WORK/$a"
+done
+STD="$WORK/aarch64/python" X="$WORK/x86_64/python"
+(cd "$STD" && find "bin/python$PYVER" "lib/python$PYVER" -type f) | while read -r f; do
+  if is_macho "$STD/$f"; then lipo2 "$STD/$f" "$X/$f"; fi
+done
+
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
   "$APP/Contents/Library/LaunchAgents" "$APP/Contents/Resources"
-
 cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file (codesign)
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
-# Install from uv.lock (#286): a bare install resolves the newest versions the open
-# constraints allow, so the bundle shipped mcp 2 while CI tested the lock. Locked
-# deps first (hashes kept), then the project alone.
-REQS="$(mktemp)"
-trap 'rm -f "$REQS"' EXIT
-uv export --project "$REPO" --frozen --no-dev --no-emit-project > "$REQS"
-uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" -r "$REQS"
-uv pip install --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
+
+# 2. Locked deps (#286), one tree per arch, then lipo the thin .so files.
+# cryptography (+cffi, pycparser) is reached only via mcp's pyjwt[crypto] and
+# fastmcp's auth modules; no auth is configured, so the bundle never imports it,
+# and 49+ has no x86_64 wheel (#205). --prune drops it from the export; --no-deps
+# stops uv re-resolving it unpinned from PyPI. --no-build: a cross-arch sdist
+# build would compile for the HOST arch. MACOSX_DEPLOYMENT_TARGET applies only
+# with --python-platform (else uv takes the build host's macOS tags).
+uv export --project "$REPO" --frozen --no-dev --no-emit-project \
+  --prune cryptography > "$WORK/reqs"
+for a in aarch64 x86_64; do
+  MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" uv pip install -q \
+    --python "$STD/bin/python${PYVER}" --python-platform "$a-apple-darwin" \
+    --python-version "$PYVER" --no-build --no-deps --require-hashes \
+    --target "$WORK/site-$a" -r "$WORK/reqs"
+done
+diff <(cd "$WORK/site-aarch64" && find . | sort) \
+  <(cd "$WORK/site-x86_64" && find . | sort) >&2 \
+  || { echo "ARCH TREES DIFFER: per-arch wheels ship different files"; exit 1; }
+ditto "$WORK/site-aarch64" "$SITE"
+(cd "$WORK/site-aarch64" && find . -type f) | while read -r f; do
+  cmp -s "$SITE/$f" "$WORK/site-x86_64/$f" && continue   # pure, or already universal2
+  if is_macho "$SITE/$f"; then lipo2 "$SITE/$f" "$WORK/site-x86_64/$f"
+  elif [[ "$f" != *.dist-info/* ]]; then echo "ARCH-SPECIFIC NON-BINARY: $f"; exit 1; fi
+done
+uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.
@@ -44,18 +91,34 @@ sed "s|__APP__|/Applications/macos-apps-mcp.app|" \
   > "$APP/Contents/Library/LaunchAgents/ren.lav.macos-apps-mcp.plist"
 cp "$REPO/packaging/Info.plist" "$APP/Contents/Info.plist"
 
-# Smoke: env-free import through the bundled interpreter (getpath layout claim).
-env -i "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
-  || { echo "BUNDLE SMOKE FAILED: getpath layout wrong"; exit 1; }
-# Smoke: one streamed tool call through the shim's transport, on the bundled
-# libraries — CI tests uv.lock, this tests what ships (#286).
-"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P "$REPO/scripts/smoke_stream.py" \
-  || { echo "STREAM SMOKE FAILED: bundled mcp/fastmcp break the shim (#286)"; exit 1; }
+# Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
+for a in arm64 x86_64; do
+  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
+    || { echo "BUNDLE SMOKE FAILED ($a): getpath layout wrong"; exit 1; }
+  # one streamed tool call through the shim's transport, on the bundled libraries (#286)
+  /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P \
+    "$REPO/scripts/smoke_stream.py" \
+    || { echo "STREAM SMOKE FAILED ($a): bundled mcp/fastmcp break the shim (#286)"; exit 1; }
+  echo "smokes ok: $a"
+done
 # Precompile every module BEFORE signing: otherwise the daemon writes .pyc into the
 # signed Contents/lib on its first imports and breaks the seal (codesign --strict).
+# .pyc is arch-neutral; one slice compiles for both.
 "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -m compileall -q -j 0 \
   "$APP/Contents/lib/python${PYVER}" >/dev/null \
   || { echo "BYTECODE PRECOMPILE FAILED"; exit 1; }
+
+# Gate: every Mach-O is universal2 and no slice needs a newer macOS than MACOS_MIN.
+find "$APP" -type f | while read -r f; do
+  is_macho "$f" || continue
+  [[ "$(lipo -archs "$f")" == "x86_64 arm64" ]] || { echo "NOT UNIVERSAL2: $f"; exit 1; }
+  for a in arm64 x86_64; do
+    m="$(vtool -arch "$a" -show-build "$f" | awk '$1=="minos"||$1=="version"{print $2; exit}')"
+    [[ -n "$m" && "$(printf '%s\n' "$m" "$MACOS_MIN" | sort -V | tail -1)" == "$MACOS_MIN" ]] \
+      || { echo "MINOS ${m:-?} > $MACOS_MIN ($a): $f"; exit 1; }
+  done
+done
+echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 if [[ -n "$SIGN" ]]; then
   ENTS="$REPO/packaging/entitlements.plist"
