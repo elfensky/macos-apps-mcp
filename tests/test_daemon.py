@@ -221,3 +221,126 @@ def test_shim_check_live_socket_passes(sockdir):
         daemon.shim_check(p)  # no raise
     finally:
         s.close()
+
+
+# --- #302: anyio's cancelled-wait InvalidStateError on UDS client loops -----------
+
+
+@pytest.fixture
+def rec_loop():
+    """A fresh loop whose default exception handler records instead of logging; a
+    custom handler is NOT set, so the factory still sees `get_exception_handler()`
+    as None (#302)."""
+    loop = asyncio.new_event_loop()
+    seen: list[dict] = []
+    loop.default_exception_handler = seen.append
+    try:
+        yield loop, seen
+    finally:
+        loop.close()
+
+
+def _turn(loop, *calls):
+    """Queue each (fn, *args) with call_soon, then run the loop for one turn."""
+    for fn, *args in calls:
+        loop.call_soon(fn, *args)
+    loop.call_soon(loop.stop)
+    loop.run_forever()
+
+
+def test_cancelled_wait_race_is_dropped(rec_loop):
+    """#302: set_result queued on a future cancelled in the same turn is logged by
+    asyncio (the reproduction is real) and dropped by the handler."""
+    loop, seen = rec_loop
+    f = loop.create_future()
+    f.cancel()
+    _turn(loop, (f.set_result, None))
+    assert len(seen) == 1
+    assert isinstance(seen[0]["exception"], asyncio.InvalidStateError)
+
+    seen.clear()
+    loop.set_exception_handler(daemon._drop_cancelled_wait)
+    g = loop.create_future()
+    g.cancel()
+    _turn(loop, (g.set_result, None))
+    assert seen == []
+
+
+@pytest.mark.parametrize("case", ["set_result_on_done", "set_exception_on_cancelled"])
+def test_other_invalid_state_errors_still_log(rec_loop, case):
+    """#302: only set_result on a CANCELLED future is dropped; the same
+    InvalidStateError from any other handle reaches the default handler."""
+    loop, seen = rec_loop
+    loop.set_exception_handler(daemon._drop_cancelled_wait)
+    f = loop.create_future()
+    if case == "set_result_on_done":
+        f.set_result(1)
+        _turn(loop, (f.set_result, None))
+    else:
+        f.cancel()
+        _turn(loop, (f.set_exception, ValueError()))
+    assert len(seen) == 1
+    assert isinstance(seen[0]["exception"], asyncio.InvalidStateError)
+
+
+@pytest.mark.parametrize("case", ["other_exception_type", "no_handle"])
+def test_crafted_contexts_pass_through(rec_loop, case):
+    """#302: a non-InvalidStateError, or a context without a handle, is passed on as
+    the identical dict."""
+    loop, seen = rec_loop
+    f = loop.create_future()
+    f.cancel()
+    if case == "other_exception_type":
+        ctx = {
+            "message": "boom",
+            "exception": ValueError(),
+            "handle": loop.call_soon(f.set_result, None),
+        }
+    else:
+        ctx = {"message": "boom", "exception": asyncio.InvalidStateError()}
+    daemon._drop_cancelled_wait(loop, ctx)
+    assert len(seen) == 1
+    assert seen[0] is ctx
+
+
+def test_factory_installs_the_handler_once_per_loop(sockdir):
+    """#302: the factory installs `_drop_cancelled_wait` on the running loop, and
+    repeated calls leave it in place."""
+
+    async def go():
+        loop = asyncio.get_running_loop()
+        assert loop.get_exception_handler() is None
+        factory = daemon._uds_client_factory(sockdir / "s.sock")
+        first = factory()
+        second = factory()
+        got = loop.get_exception_handler()
+        await first.aclose()
+        await second.aclose()
+        return got
+
+    assert asyncio.run(go()) is daemon._drop_cancelled_wait
+
+
+def test_factory_keeps_an_existing_handler(sockdir):
+    """#302: a handler the host already set on the loop is never replaced."""
+
+    def mine(loop, context):  # pragma: no cover - never invoked
+        pass
+
+    assert mine is not daemon._drop_cancelled_wait
+
+    async def go():
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(mine)
+        client = daemon._uds_client_factory(sockdir / "s.sock")()
+        got = loop.get_exception_handler()
+        await client.aclose()
+        return got
+
+    assert asyncio.run(go()) is mine
+
+
+def test_factory_without_a_running_loop_still_builds_the_client(sockdir):
+    """#302: no running loop means nothing to install on; the client is returned."""
+    client = daemon._uds_client_factory(sockdir / "s.sock")()
+    assert isinstance(client, httpx.AsyncClient)
