@@ -3,7 +3,8 @@
 A synthetic Core Data store built in ``tmp_path`` with only the fingerprint columns —
 the real store is never opened (public repo, owner data). The tombstone rows are the
 point: Reminders keeps deleted tags and reminders in the store with
-``ZMARKEDFORDELETION = 1``, and a read that forgets the filter reports ghosts.
+``ZMARKEDFORDELETION = 1``, and a read that forgets the filter reports ghosts. A row on
+a Local (not iCloud) list has a NULL ``ZCKIDENTIFIER`` (#307).
 """
 
 from __future__ import annotations
@@ -21,9 +22,30 @@ _OBJECT_COLS = (
     "Z_ENT INTEGER, ZNAME1 TEXT, ZREMINDER3 INTEGER, ZMARKEDFORDELETION INTEGER"
 )
 _REMINDER_COLS = (
-    "Z_PK INTEGER PRIMARY KEY, ZCKIDENTIFIER TEXT, ZPARENTREMINDER INTEGER, "
+    "Z_PK INTEGER PRIMARY KEY, ZCKIDENTIFIER TEXT, "
+    "ZDACALENDARITEMUNIQUEIDENTIFIER TEXT, ZPARENTREMINDER INTEGER, "
     "ZMARKEDFORDELETION INTEGER"
 )
+
+
+def _add_reminders(path, rows, *, local=False):
+    """Append rows ``(pk, EventKit id, parent pk, tombstone)`` to a built store.
+
+    An iCloud row carries the id in both key columns; a Local row (``local=True``) has a
+    NULL CloudKit id (#307). A ``None`` id is NULL in both."""
+    conn = sqlite3.connect(path)
+    conn.executemany(
+        "INSERT INTO ZREMCDREMINDER (Z_PK, ZCKIDENTIFIER, "
+        "ZDACALENDARITEMUNIQUEIDENTIFIER, ZPARENTREMINDER, ZMARKEDFORDELETION) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            (pk, None if local else ek, ek, parent, dead)
+            for pk, ek, parent, dead in rows
+        ],
+    )
+    conn.commit()
+    conn.close()
+    return path
 
 
 def _make_reminders_store(
@@ -42,28 +64,24 @@ def _make_reminders_store(
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE Z_PRIMARYKEY (Z_ENT INTEGER, Z_NAME TEXT)")
     conn.execute(f"CREATE TABLE ZREMCDOBJECT ({_OBJECT_COLS})")
-    reminder_cols = _REMINDER_COLS
-    if drop_parent_column:
-        reminder_cols = reminder_cols.replace("ZPARENTREMINDER INTEGER, ", "")
-    conn.execute(f"CREATE TABLE ZREMCDREMINDER ({reminder_cols})")
+    conn.execute(f"CREATE TABLE ZREMCDREMINDER ({_REMINDER_COLS})")
     conn.executemany(
         "INSERT INTO Z_PRIMARYKEY VALUES (?, ?)",
         [(hashtag_ent, "REMCDHashtag"), (reminder_ent, "REMCDReminder")],
     )
-    reminders = [  # pk, ckid, parent pk, tombstone
-        (1, "R1", None, 0),
-        (2, "R2", 1, 0),
-        (3, "R3", 4, 0),  # child of a tombstoned parent
-        (4, "RP", None, 1),
-        (5, "R4", None, 1),
-    ]
-    if drop_parent_column:
-        conn.executemany(
-            "INSERT INTO ZREMCDREMINDER VALUES (?, ?, ?)",
-            [(pk, ck, dead) for pk, ck, _parent, dead in reminders],
-        )
-    else:
-        conn.executemany("INSERT INTO ZREMCDREMINDER VALUES (?, ?, ?, ?)", reminders)
+    conn.commit()
+    conn.close()
+    _add_reminders(
+        path,
+        [  # pk, EventKit id, parent pk, tombstone
+            (1, "R1", None, 0),
+            (2, "R2", 1, 0),
+            (3, "R3", 4, 0),  # child of a tombstoned parent
+            (4, "RP", None, 1),
+            (5, "R4", None, 1),
+        ],
+    )
+    conn = sqlite3.connect(path)
     live = tags if tags is not None else ["home", "Work"]
     objects = [(hashtag_ent, name, 1, 0) for name in live]
     objects += [
@@ -72,6 +90,8 @@ def _make_reminders_store(
         (reminder_ent, "notatag", 1, 0),  # another entity that points at R1
     ]
     conn.executemany("INSERT INTO ZREMCDOBJECT VALUES (?, ?, ?, ?)", objects)
+    if drop_parent_column:
+        conn.execute("ALTER TABLE ZREMCDREMINDER DROP COLUMN ZPARENTREMINDER")
     conn.commit()
     conn.close()
     return path
@@ -121,15 +141,6 @@ def test_a_tag_reaches_the_caller_as_one_clean_line(tmp_path, monkeypatch):
     assert tags == {"R1": ("dup", "line one line two")}
 
 
-def _add_reminders(path, rows):
-    """Append reminder rows ``(pk, ckid, parent pk, tombstone)`` to a built store."""
-    conn = sqlite3.connect(path)
-    conn.executemany("INSERT INTO ZREMCDREMINDER VALUES (?, ?, ?, ?)", rows)
-    conn.commit()
-    conn.close()
-    return path
-
-
 def test_subtasks_of_lists_live_children_of_a_live_parent(store_file):
     _add_reminders(
         store_file,
@@ -170,6 +181,70 @@ def test_a_null_id_row_is_never_a_subtask_parent_or_tag_owner(store_file):
 def test_live_ids_are_the_live_non_null_rows(store_file):
     _add_reminders(store_file, [(10, None, None, 0)])
     assert reminders_store.live_ids() == {"R1", "R2", "R3"}
+
+
+# --- Local-list rows: ZCKIDENTIFIER is NULL, the EventKit id is in the other column ---
+
+
+def test_a_local_list_row_is_live(store_file):
+    # #307: a Local row has a NULL CloudKit id; it was invisible to live_ids()
+    _add_reminders(store_file, [(10, "L1", None, 0), (11, "L2", None, 1)], local=True)
+    assert reminders_store.live_ids() == {"R1", "R2", "R3", "L1"}
+
+
+def test_subtasks_of_a_local_list_parent(store_file):
+    # #307
+    _add_reminders(
+        store_file,
+        [
+            (10, "LP", None, 0),
+            (11, "LC1", 10, 0),
+            (12, "LC2", 10, 0),
+            (13, "LC3", 10, 1),
+        ],
+        local=True,
+    )
+    assert reminders_store.subtasks_of("LP") == ["LC1", "LC2"]
+
+
+def test_a_local_list_reminder_has_its_tag_and_parent(store_file):
+    # #307
+    _add_reminders(store_file, [(10, "LP", None, 0), (11, "LC", 10, 0)], local=True)
+    conn = sqlite3.connect(store_file)
+    conn.execute("INSERT INTO ZREMCDOBJECT VALUES (30, 'errand', 11, 0)")
+    conn.commit()
+    conn.close()
+    tags, parents = reminders_store.tags_and_parents()
+    assert tags["LC"] == ("errand",)
+    assert parents["LC"] == "LP"
+    assert tags["R1"] == ("Work", "home")
+    assert parents["R2"] == "R1"
+
+
+def test_a_store_missing_the_eventkit_id_column_is_schema_drift(store_file):
+    conn = sqlite3.connect(store_file)
+    conn.execute(
+        "ALTER TABLE ZREMCDREMINDER DROP COLUMN ZDACALENDARITEMUNIQUEIDENTIFIER"
+    )
+    conn.commit()
+    conn.close()
+    with pytest.raises(SchemaDrift, match="ZDACALENDARITEMUNIQUEIDENTIFIER"):
+        reminders_store.tags_and_parents()
+
+
+def test_a_cloudkit_only_row_fails_closed(store_file):
+    # #307: a NULL EventKit-id column is never live; subtasks_of refuses, not "[]"
+    conn = sqlite3.connect(store_file)
+    conn.execute(
+        "INSERT INTO ZREMCDREMINDER (Z_PK, ZCKIDENTIFIER, "
+        "ZDACALENDARITEMUNIQUEIDENTIFIER, ZPARENTREMINDER, ZMARKEDFORDELETION) "
+        "VALUES (10, 'CK-ONLY', NULL, NULL, 0)"
+    )
+    conn.commit()
+    conn.close()
+    assert "CK-ONLY" not in reminders_store.live_ids()
+    with pytest.raises(NativeError, match="not in the Reminders store"):
+        reminders_store.subtasks_of("CK-ONLY")
 
 
 def test_subtasks_of_binds_the_id_never_formats_it_into_the_sql(store_file):

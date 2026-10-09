@@ -808,7 +808,7 @@ def _ek_item(ident, title="Item", *, reminder=True):
 
 def _wire_delete(monkeypatch, tmp_path, world, *, rows=()):
     """Patch the adapter's store and worker, and point the store plane at a fixture
-    Reminders store carrying ``rows`` (pk, ckid, parent pk, tombstone)."""
+    Reminders store carrying ``rows`` (pk, EventKit id, parent pk, tombstone)."""
     import macos_apps_mcp.adapters.reminders as rem
     from macos_apps_mcp.adapters import reminders_store
     from tests.test_reminders_store import _add_reminders, _make_reminders_store
@@ -985,6 +985,28 @@ def test_confirmed_dry_run_lists_every_subtask_and_removes_nothing(
     assert out["dry_run"] is True
     assert [s["id"] for s in out["would_delete"]["subtasks"]] == ["C1", "C2", "C3"]
     assert out["cascade"].startswith("and 3 subtasks")
+    assert world.removed == []
+
+
+def test_a_local_list_parent_with_subtasks_is_refused_unless_confirmed(
+    monkeypatch, tmp_path
+):
+    # #307: a Local-list row has a NULL ZCKIDENTIFIER, so the guard once saw no row
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import SubtasksRequired
+    from tests.test_reminders_store import _add_reminders
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=())
+    _add_reminders(reminders_store.store_path(), _P1_ROWS, local=True)
+    with pytest.raises(SubtasksRequired) as exc:
+        adapter.delete_reminder("P1")
+    text = str(exc.value)
+    assert "3 subtasks" in text
+    for kid in ("C1", "C2", "C3"):
+        assert f"child {kid} [{kid}]" in text
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    assert [s["id"] for s in out["would_delete"]["subtasks"]] == ["C1", "C2", "C3"]
     assert world.removed == []
 
 
