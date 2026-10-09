@@ -34,9 +34,9 @@ by the tool's return value.
 This single mis-timing produced repeated "cannot reproduce" verdicts on a bug that reproduces 100%
 of the time when you wait long enough.
 
-The same trap, slower, on Gmail (#291, 2026-10-07): a move out of a label read clean at +20 s,
-and the copy was back by +2 min. Observe a Gmail write at +2 min and +15 min, never only at
-+20 s (§5f).
+The same trap, slower, on Gmail (#291): a move out of a label read clean at +20 s, and the
+copy was back by +2 min — on a slow Mail (2026-10-07) and again on a healthy one (2026-10-09).
+Observe a Gmail write at +2 min and +15 min, never only at +20 s (§5f).
 
 Corollary: `run_osascript` caps a script at **30 seconds**, so a probe that needs a long `delay`
 must be run as raw `osascript` from a shell, not through the runtime.
@@ -50,7 +50,7 @@ must be run as raw `osascript` from a shell, not through the runtime.
 | **A compose window IS an `outgoing message` with 0 recipients.** So "delete every recipient-less outgoing message" would destroy a human's half-written email. Never sweep on that predicate. | #135, 2026-07-26 |
 | `delete` **before** `send` works reliably — fresh messages and `forward`-derived alike, leaving no immediate residue. | #135, 2026-07-26 |
 | `delete` **after** `send` is a **silent no-op**. Both `delete <ref>` and `delete outgoing message i` return cleanly, remove nothing, and the message delivers anyway. **Never roll back past the `send` verb** — report the leftover instead. | #135, 2026-07-26 |
-| A successfully deleted message's reference goes **dead with -1728**. This is the only reliable way to *prove* a delete took; treat any other error as "unknown", never as success. It proves that Mail dropped its LOCAL copy, not that the server deleted it: in #291 T3 (out of a Gmail label, slow Mail) the reference died and the message was back by +2 min (§5f). | #135, 2026-07-26 |
+| A successfully deleted message's reference goes **dead with -1728**. This is the only reliable way to *prove* a delete took; treat any other error as "unknown", never as success. It proves that Mail dropped its LOCAL copy, not that the server deleted it: in #291 T3 (out of a Gmail label; a slow Mail on 2026-10-07, a healthy Mail on 2026-10-09) the reference died and the message was back by +2 min (§5f). | #135, 2026-07-26 |
 | `count of outgoing messages` counts script-session message **objects**, including already-delivered ones — it does not fall back to 0 and is **not** the outbox. Use `count of (messages of outbox)` for the real queue. | #135, 2026-07-26 |
 | `send` returning means Mail **ACCEPTED** the message, not that it was delivered. An accepted send can sit in the Outbox for minutes. | 2026-07-25 |
 | A message stuck in the Outbox clears when Mail is **quit and reopened** — the stranded entry is in-memory, not on disk. | #135, 2026-07-26 |
@@ -367,11 +367,10 @@ not change across their observations; T3 changed between +20 s and +2 min, then 
 | T3: `mail_undo` of T1 (the label → Personal INBOX) | `ok` | A copy. At +20 s the message was gone from Gmail. At +2 min it was back: a new All Mail row with the label kept; Gmail Trash unchanged. |
 | T2: Gmail All Mail → Gmail INBOX | present in BOTH | INBOX gained the message; All Mail and the other label kept it; Gmail Trash unchanged. |
 
-- Outcome: in both runs so far (#287 within Gmail, health not recorded; #291 T3 to
-  another account, slow Mail), a move out of a label left the message in that label, and
-  in T3 the tool's own check read `ok`. Not known: whether Mail never sent the delete for a
-  label folder, or a slow Mail dropped it (§5c, #164). A rerun on a healthy Mail (health
-  read at or under 2.0 s) decides it. The refusal holds either way.
+- Outcome: in every run (#287 within Gmail, health not recorded; #291 T3 to another
+  account on a slow Mail; the 2026-10-09 rerun on a healthy Mail, below), a move out of a
+  label left the message in that label, and in T3 the tool's own check read `ok`. So it is
+  not a slow Mail dropping the delete (§5c, #164). The refusal holds.
 - Gmail's side: this account has Auto-Expunge on ("Immediately update the server", the
   default; read from Gmail web by the operator, 2026-10-07), and Google documents that
   "You can find messages you delete from an IMAP folder in your 'All Mail' label in
@@ -405,6 +404,27 @@ not change across their observations; T3 changed between +20 s and +2 min, then 
   last visible IMAP folder" action; the message stays visible in All Mail here, so it
   does not apply.
 
+**Device-verified 2026-10-09 (#291 T3 rerun) — the same undo on a healthy Mail.** One
+throwaway message, sent from andrei@lav.ren to itself. Accounts: Personal (plain IMAP) and
+Google. A new label `mcp-291-rerun`, made by `create_mailbox`. Code: develop 70186a1 (the
+move and the undo before the #291 refusals), run in-process with a scratch state dir. Mail
+watchdog running. Health read (one bulk read of the Fiction INBOX ids, cap 2.0 s): 1.35,
+0.65, 1.62 and 1.56 s across the run, so the run is labelled healthy. N = 1.
+
+| Step | Tool status | What the index and Mail showed |
+|---|---|---|
+| T1: Personal INBOX → the new label | `ok` | A move, at +20 s and +2 min: the Personal INBOX row was gone; Gmail had one All Mail row with the label; Mail counted 1 in the label. |
+| T3: the undo of T1 (the label → Personal INBOX) | `ok` | At +20 s: the Gmail row was gone, Personal INBOX had a new row, Mail counted 0 in the label. At +2 min: a **new** Gmail All Mail row (a new ROWID) with the label; Mail counted 1 in the label. Held at +5 and +15 min. |
+
+- Decided: on a healthy Mail too, a move out of a label leaves the message in Gmail with
+  its label, and Mail's next sync brings it back as a new row. With Auto-Expunge on (above),
+  the delete does not take effect on Gmail. Not measured: Mail's IMAP commands (whether it
+  sends no delete, or one that Gmail ignores).
+- Cleanup: `trash_mail` from Personal INBOX, Personal Sent and Gmail All Mail (the reply
+  and the forward below included), all `ok`; at +2 and +15 min every copy was in a Trash
+  and the label had 0 memberships. The empty label is left for the operator to remove by
+  hand (§5b).
+
 **Rules (#291).**
 
 - A label folder is matched on account uuid + decoded path, case-insensitively — the key
@@ -437,9 +457,18 @@ develop 70186a1, one Gmail account, macOS 27.0.1, Mail watchdog running.
   read confirms each state. The message was restored.
 - `save_mail_attachment` from the INBOX label writes the whole file (79,229 bytes, equal
   to the reported size).
-- Not run: `mail_reply` and `reply_all` (each opens a compose window and leaves a draft,
-  §3c) and `forward_mail` (outbound). They find the message with the same `whose
-  message id` lookup as `mail_body`; the compose half does not depend on the folder.
+- 2026-10-09, daemon 0.14.2, one throwaway message in a custom label, Mail healthy (the
+  rerun above). Judged on the delivered messages, sent to andrei@lav.ren only:
+  - `mail_reply` opens a threaded draft in the Personal account's Drafts: From and To
+    andrei@lav.ren, `In-Reply-To` and `References` = the original. After `delete_draft`
+    its compose window stays open; closing it is a ⌘W for the human (§5e).
+  - `reply_all`: the dry run named only andrei@lav.ren; sent; the outbox drained in about
+    15 s. Delivered `Re: …`, From andrei@lav.ren, To andrei@lav.ren only, `In-Reply-To` =
+    the original; the body is the reply text plus the quoted original.
+  - `forward_mail` to andrei@lav.ren: sent from Mail's default account (andrei@lav.ren).
+    Delivered `Fwd: …` with the full original body. The message had no attachment, so
+    attachment fidelity (§4) was not re-tested here.
+  - Neither send left a draft (0 rows; compare §3c).
 - Seen once: Mail can disagree with itself about a message that earlier label moves
   touched. In the test label, the index gave row 77215 the subject and Message-ID of one
   message, and its `.emlx` held another. The first `mail_body` for the index's id
