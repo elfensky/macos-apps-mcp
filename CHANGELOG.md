@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **The PyPI page links back to the repo** (#111) — `pyproject.toml` has a
+  `[project.urls]` table (Homepage, Repository, Issues, Changelog), so PyPI shows those
+  links from the next upload.
+
 ## [0.14.2] - 2026-10-08 — Universal app
 
 ### Changed
