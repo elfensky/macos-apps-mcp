@@ -139,9 +139,49 @@ done
 # Precompile every module BEFORE signing: otherwise the daemon writes .pyc into the
 # signed Contents/lib on its first imports and breaks the seal (codesign --strict).
 # .pyc is arch-neutral; one slice compiles for both.
-"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -m compileall -q -j 0 \
+# #297: hash .pyc survive a copy that resets file times (cp -R); -f redoes the timestamp .pyc the smokes wrote.
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P -m compileall -q -f -j 0 \
+  --invalidation-mode checked-hash \
   "$APP/Contents/lib/python${PYVER}" >/dev/null \
   || { echo "BYTECODE PRECOMPILE FAILED"; exit 1; }
+# #297: import hooks (beartype's claw, under fastmcp's key_value) write their own opt-*
+# .pyc during the smokes and compileall never touches them; make every timestamp .pyc
+# hash-based (the layout of importlib's _code_to_hash_pyc) so no copy can make it stale.
+"$APP/Contents/MacOS/macos-apps-mcp" -E -s -P - "$APP/Contents/lib/python${PYVER}" <<'PY' \
+  || { echo "HASH PYC CONVERSION FAILED"; exit 1; }
+import sys
+from importlib.util import source_from_cache, source_hash
+from pathlib import Path
+
+conv = sourceless = 0
+bad = []
+for p in sorted(Path(sys.argv[1]).rglob("*.pyc")):
+    b = p.read_bytes()
+    if int.from_bytes(b[4:8], "little") != 0:
+        continue
+    try:
+        src = Path(source_from_cache(str(p)))
+    except ValueError:
+        src = None
+    if src is None or not src.exists():
+        sourceless += 1
+        continue
+    try:
+        data, st = src.read_bytes(), src.stat()
+    except OSError as e:
+        bad.append(f"{p}: {e}")
+        continue
+    # a stale timestamp .pyc must not be blessed as current
+    mt, sz = int(st.st_mtime) & 0xFFFFFFFF, st.st_size & 0xFFFFFFFF
+    if b[8:16] != mt.to_bytes(4, "little") + sz.to_bytes(4, "little"):
+        bad.append(f"{p}: stale against {src}")
+        continue
+    p.write_bytes(b[:4] + (3).to_bytes(4, "little") + source_hash(data) + b[16:])
+    conv += 1
+if bad:
+    sys.exit("timestamp .pyc left:\n" + "\n".join(bad))
+print(f"hash pyc ok: {conv} converted, 0 timestamp left ({sourceless} sourceless kept)")
+PY
 
 
 if [[ -n "$SIGN" ]]; then
