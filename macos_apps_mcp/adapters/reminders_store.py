@@ -79,7 +79,8 @@ _SUBTASKS_OF = f"""SELECT c.{_EK_ID} FROM ZREMCDREMINDER c
 _LIVE_ROW = (
     f"SELECT 1 FROM ZREMCDREMINDER WHERE {_EK_ID} = ? AND ZMARKEDFORDELETION = 0"
 )
-# An account with no reminders has a store file without this table (a shell).
+# A store file can lack the Reminders tables (the #307 rig's Data-local.sqlite had no
+# ZREMCDBASELIST); _read_all skips a file without ZREMCDREMINDER.
 _HAS_TABLE = (
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ZREMCDREMINDER'"
 )
@@ -93,8 +94,8 @@ def store_paths() -> list[Path]:
     """Every ``Data-*.sqlite``, largest first, ties by name (deterministic).
 
     Reminders keeps one store file per account, so a Mac with an iCloud and a Local
-    account holds its Local reminders in a smaller file (#307). An account with no
-    reminders is an empty shell; ``_read_all`` skips it.
+    account holds its Local reminders in a smaller file (#307). A file without the
+    Reminders table is skipped by ``_read_all``.
 
     Lists the directory with ``os.scandir``, NOT ``Path.glob``: glob swallows a
     ``PermissionError`` into an empty result, which would report a missing Full Disk
