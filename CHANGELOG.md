@@ -28,6 +28,13 @@ surface may still shift between minor versions.
   smokes, so no copy method can make them stale. The 0.14.0 note "keeps its code seal
   after the first launch" held only for a `ditto`, Finder-drag or release-zip install.
   DAEMON.md now installs with `ditto`.
+- **UDS clients no longer print an `InvalidStateError` traceback at teardown** (#302) —
+  anyio's unix-socket stream can set a result on a read it already cancelled. asyncio then
+  logged `Exception in callback Future.set_result()`, though the call result was never
+  affected. The shim, the install-agent prompt pass and the stream smoke now drop exactly
+  that case; every other loop exception still logs. The stream smoke now fails on any
+  loop exception, so a traceback can no longer sit above `stream smoke ok` in a passing
+  build.
 
 ## [0.14.2] - 2026-10-08 — Universal app
 
