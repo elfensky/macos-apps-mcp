@@ -41,7 +41,9 @@ surface may still shift between minor versions.
   reported it as not in the Reminders store, without tags or parent links. The store was
   searched by the CloudKit record id, which is empty for a reminder that does not sync
   to iCloud. It is now searched by the column that holds the EventKit id on iCloud and
-  Local lists alike.
+  Local lists alike. Every per-account store file is read, so a Mac with both an iCloud
+  and a Local account finds both, and two store files of equal size no longer decide by
+  directory order.
 
 ## [0.14.2] - 2026-10-08 — Universal app
 
