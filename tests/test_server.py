@@ -1100,7 +1100,7 @@ def test_reminders_over_the_client_carries_tags_and_parents(monkeypatch, tmp_pat
     from tests.test_reminders_store import _make_reminders_store
 
     path = _make_reminders_store(tmp_path / "Data-live.sqlite")
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     items = [_fake_reminder(t, i) for t, i in (("a", "R1"), ("b", "R2"), ("c", "R3"))]
     fake_store = SimpleNamespace(
         calendarsForEntityType_=lambda _t: [],

@@ -678,7 +678,7 @@ def test_read_with_an_ungranted_store_keeps_the_eventkit_pointers(monkeypatch):
     def denied():
         raise FullDiskAccessDenied("Grant Full Disk Access in System Settings.")
 
-    monkeypatch.setattr(reminders_store, "store_path", denied)
+    monkeypatch.setattr(reminders_store, "store_paths", denied)
     out = adapter.read("today")
     assert out["results"] == _plain(pointers)  # no tags, no parent keys
     assert out["coverage"].startswith("tags and parent links unavailable:")
@@ -691,7 +691,7 @@ def test_read_with_a_drifted_store_names_the_drift(monkeypatch, tmp_path):
 
     adapter, pointers = _adapter_with_pointers(monkeypatch)
     path = _make_reminders_store(tmp_path / "Data-d.sqlite", drop_parent_column=True)
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     out = adapter.read("today")
     assert out["results"] == _plain(pointers)
     assert out["coverage"].startswith("tags and parent links unavailable:")
@@ -708,7 +708,7 @@ def test_read_with_a_store_that_fails_mid_read_gives_no_partial_tags(
 
     adapter, pointers = _adapter_with_pointers(monkeypatch)
     path = _make_reminders_store(tmp_path / "Data-m.sqlite")
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     monkeypatch.setattr(reminders_store, "_PARENTS", "SELECT nope FROM nowhere")
     out = adapter.read("today")
     assert out["results"] == _plain(pointers)  # R1 has tags in the store, none shown
@@ -736,7 +736,7 @@ def test_read_names_the_pointers_the_store_does_not_have(monkeypatch, tmp_path):
         RemindersAdapter, "get_pointers", lambda self, q: [*pointers, ghost]
     )
     path = _make_reminders_store(tmp_path / "Data-g.sqlite")
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     out = adapter.read("today")
     assert [r["id"] for r in out["results"]] == ["R1", "R2", "GHOST"]
     assert out["results"][0]["tags"] == ["Work", "home"]  # the rest is still enriched
@@ -749,7 +749,7 @@ def test_read_with_every_pointer_in_the_store_has_no_coverage(monkeypatch, tmp_p
 
     adapter, _pointers = _adapter_with_pointers(monkeypatch)
     path = _make_reminders_store(tmp_path / "Data-ok.sqlite")
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     assert "coverage" not in adapter.read("today")
 
 
@@ -815,7 +815,7 @@ def _wire_delete(monkeypatch, tmp_path, world, *, rows=()):
 
     path = _make_reminders_store(tmp_path / "Data-del.sqlite")
     _add_reminders(path, list(rows))
-    monkeypatch.setattr(reminders_store, "store_path", lambda: path)
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [path])
     monkeypatch.setattr(rem, "store", lambda: world)
     monkeypatch.setattr(rem, "run_native", lambda f: f())
     return rem.RemindersAdapter()
@@ -998,7 +998,33 @@ def test_a_local_list_parent_with_subtasks_is_refused_unless_confirmed(
 
     world = _parent_world()
     adapter = _wire_delete(monkeypatch, tmp_path, world, rows=())
-    _add_reminders(reminders_store.store_path(), _P1_ROWS, local=True)
+    _add_reminders(reminders_store.store_paths()[0], _P1_ROWS, local=True)
+    with pytest.raises(SubtasksRequired) as exc:
+        adapter.delete_reminder("P1")
+    text = str(exc.value)
+    assert "3 subtasks" in text
+    for kid in ("C1", "C2", "C3"):
+        assert f"child {kid} [{kid}]" in text
+    out = adapter.delete_reminder("P1", with_subtasks=True)
+    assert [s["id"] for s in out["would_delete"]["subtasks"]] == ["C1", "C2", "C3"]
+    assert world.removed == []
+
+
+def test_a_local_parent_in_the_smaller_store_file_is_refused_unless_confirmed(
+    monkeypatch, tmp_path
+):
+    # #307: one store file per account; a Local account's rows are not in the largest
+    from macos_apps_mcp.adapters import reminders_store
+    from macos_apps_mcp.errors import SubtasksRequired
+    from tests.test_reminders_store import _add_reminders, _create_store
+
+    world = _parent_world()
+    adapter = _wire_delete(monkeypatch, tmp_path, world, rows=_P0)
+    big = reminders_store.store_paths()[0]
+    small = _add_reminders(
+        _create_store(tmp_path / "Data-local.sqlite"), _P1_ROWS, local=True
+    )
+    monkeypatch.setattr(reminders_store, "store_paths", lambda: [big, small])
     with pytest.raises(SubtasksRequired) as exc:
         adapter.delete_reminder("P1")
     text = str(exc.value)
