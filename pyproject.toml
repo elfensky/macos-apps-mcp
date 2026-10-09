@@ -46,6 +46,12 @@ dependencies = [
 [project.scripts]
 macos-apps-mcp = "macos_apps_mcp:main"
 
+[project.urls]
+Homepage = "https://github.com/elfensky/macos-apps-mcp"
+Repository = "https://github.com/elfensky/macos-apps-mcp"
+Issues = "https://github.com/elfensky/macos-apps-mcp/issues"
+Changelog = "https://github.com/elfensky/macos-apps-mcp/blob/main/CHANGELOG.md"
+
 # Dev deps with >=major,<next pins mirror the sibling repos' uv discipline (lintle, descent-engine).
 # Runtime deps stay unbounded above except mcp/fastmcp, capped at the majors CI tests:
 # the shim's #170 wrapper is mcp-1.x-only (#286). Other caps once downgraded
