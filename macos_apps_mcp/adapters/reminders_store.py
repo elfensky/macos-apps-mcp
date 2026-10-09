@@ -79,8 +79,10 @@ _SUBTASKS_OF = f"""SELECT c.{_EK_ID} FROM ZREMCDREMINDER c
 _LIVE_ROW = (
     f"SELECT 1 FROM ZREMCDREMINDER WHERE {_EK_ID} = ? AND ZMARKEDFORDELETION = 0"
 )
-# A store file can lack the Reminders tables (the #307 rig's Data-local.sqlite had no
-# ZREMCDBASELIST); _read_all skips a file without ZREMCDREMINDER.
+# A store file of an old Reminders model (ReminderData v1-v5) keeps reminders in
+# ZREMCDOBJECT and has no ZREMCDREMINDER table; _read_all skips such a file. Every model
+# from v6 to v2026_A has the table and every _FINGERPRINT column (an empty store built
+# from each of the 20 versions in ReminderKit's ReminderData.momd, 2026-10-09).
 _HAS_TABLE = (
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ZREMCDREMINDER'"
 )
