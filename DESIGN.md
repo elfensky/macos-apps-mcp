@@ -25,6 +25,10 @@ native data-plane adapter, so clean module boundaries are load-bearing.
   venv python**: `command: <repo>/.venv/bin/python`, `args: ["-m","macos_apps_mcp"]` (or `uv run --frozen
   --project <repo> macos-apps-mcp`). Not `uvx` (ephemeral), not a system console_script (no lockfile / may
   lack PyObjC wheels). The same invocation becomes a launchd daemon later.
+  **Amended 2026-10-09 (#113):** the package is on PyPI, so the README recommends
+  `uvx macos-apps-mcp` to users. `uvx` does not read `uv.lock`: it resolves the newest dependency
+  versions that `pyproject.toml` allows (`mcp` and `fastmcp` are capped at the tested majors,
+  #286). The venv launch above stays the development path.
 - **Adapter contract = typed `Protocol`; reads uniform, writes per-adapter typed.** A shared
   `PointerSource` Protocol (`get_pointers(query) -> list[Pointer]`); writes are typed methods
   (`create_event(CalendarEventData)`, `create_reminder(ReminderData)`), never a stringly-typed
