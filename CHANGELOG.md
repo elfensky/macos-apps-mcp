@@ -12,6 +12,13 @@ surface may still shift between minor versions.
   `[project.urls]` table (Homepage, Repository, Issues, Changelog), so PyPI shows those
   links from the next upload.
 
+### Changed
+
+- **The README recommends `uvx macos-apps-mcp` as the install** (#113) — the package is on
+  PyPI, so an MCP client runs it with no clone and no venv path. The README also gives the
+  Claude Code `claude mcp add` line. The `git clone` + `uv sync` setup stays as the
+  development path.
+
 ## [0.14.2] - 2026-10-08 — Universal app
 
 ### Changed
