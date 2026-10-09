@@ -84,8 +84,13 @@ notarization only matters once Gatekeeper sees a quarantine xattr.
 ### 2. Move it to `/Applications`
 
 ```sh
-cp -R dist/macos-apps-mcp.app /Applications/
+ditto dist/macos-apps-mcp.app /Applications/macos-apps-mcp.app
 ```
+
+Use `ditto` (it keeps file times; a Finder drag is also fine), not `cp -R`. `cp -R` resets every
+file's modification time, so a build made before #297 rewrites its `.pyc` inside the signed bundle
+on the first run and breaks the code seal. If an older `/Applications/macos-apps-mcp.app` is
+there, move it away first: `ditto` merges into an existing bundle, and a stale file breaks the seal.
 
 The bundle **must** live in `/Applications` (or `~/Applications`) before registering — a
 quarantined app run from `~/Downloads` executes under App Translocation (a randomized read-only

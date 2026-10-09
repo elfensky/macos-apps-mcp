@@ -19,6 +19,16 @@ surface may still shift between minor versions.
   Claude Code `claude mcp add` line. The `git clone` + `uv sync` setup stays as the
   development path.
 
+### Fixed
+
+- **The signed `.app` keeps its code seal after a `cp -R` install** (#297) — `cp -R`
+  resets file times, so the timestamp `.pyc` read as stale and the daemon rewrote them
+  inside the signed bundle on its first run. The build now compiles hash-based `.pyc`
+  (`checked-hash`), and converts the `opt-*` caches that import hooks write during the
+  smokes, so no copy method can make them stale. The 0.14.0 note "keeps its code seal
+  after the first launch" held only for a `ditto`, Finder-drag or release-zip install.
+  DAEMON.md now installs with `ditto`.
+
 ## [0.14.2] - 2026-10-08 — Universal app
 
 ### Changed
