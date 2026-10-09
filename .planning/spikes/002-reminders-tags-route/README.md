@@ -80,6 +80,7 @@ rows: 0`, then `scratch list removed: True`.
    (`ZMARKEDFORDELETION = 1`). Live tags must filter deletion on both the tag and the reminder.
 8. **Id match.** `ZCKIDENTIFIER`, `ZDACALENDARITEMUNIQUEIDENTIFIER` and `ZIDENTIFIER` (16-byte
    blob → UUID) each equal EK `calendarItemIdentifier` for 1372/1372 live reminders.
+   **Correction (2026-10-09, #307):** `ZCKIDENTIFIER` is the CloudKit id and is NULL on a Local (not iCloud) list. Join on `ZDACALENDARITEMUNIQUEIDENTIFIER` (= EK id on iCloud 1371/1371 and on Local), and read every per-account `Data-*.sqlite`, not only the largest.
 9. **Implicit tags.** Wrote `#gsdspike002` into an EK title and note. The reminder row reached
    the store; no hashtag row appeared in 30 s. Scratch list removed and confirmed gone.
 10. **Subtask read.** 316 live subtasks; child → `ZPARENTREMINDER` → parent: 316/316 have both

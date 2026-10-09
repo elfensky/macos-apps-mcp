@@ -27,6 +27,7 @@ is git-ignored, so the skill is local to this machine and is rebuilt from this d
   read cleanly from the Reminders sqlite store: `ZCKIDENTIFIER` equals the EventKit id for
   1372 of 1372 reminders. The reader needs a schema fingerprint, because the Core Data column
   suffixes (`ZNAME1`, `ZREMINDER3`) can shift between OS releases.
+  **Correction (2026-10-09, #307):** `ZCKIDENTIFIER` is the CloudKit id and is NULL on a Local (not iCloud) list. Join on `ZDACALENDARITEMUNIQUEIDENTIFIER` (= EK id on iCloud 1371/1371 and on Local), and read every per-account `Data-*.sqlite`, not only the largest.
 - **A parent delete takes its subtasks with it.** When EventKit removes a parent, the store
   deletes its subtasks at once, and EventKit cannot see them. `delete_reminder` must read
   the subtasks from the store first and name them in the dry run, the confirmation and the
