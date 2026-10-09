@@ -36,6 +36,13 @@ surface may still shift between minor versions.
   loop exception, so a traceback can no longer sit above `stream smoke ok` in a passing
   build.
 
+- **Reminders on a Local (not iCloud) list are found in the Reminders store** (#307) —
+  `complete_reminder` and `delete_reminder` refused every such reminder, and `reminders`
+  reported it as not in the Reminders store, without tags or parent links. The store was
+  searched by the CloudKit record id, which is empty for a reminder that does not sync
+  to iCloud. It is now searched by the column that holds the EventKit id on iCloud and
+  Local lists alike.
+
 ## [0.14.2] - 2026-10-08 — Universal app
 
 ### Changed
