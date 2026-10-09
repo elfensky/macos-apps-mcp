@@ -4,9 +4,12 @@ REM-03, REM-04, #91.
 
 EventKit has no public tag or parent property (spike 002), so the only read route for
 either is the Reminders sqlite store: a fingerprinted, read-only plane BESIDE the
-EventKit plane. The two join on ``ZCKIDENTIFIER`` = EventKit ``calendarItemIdentifier``
-(1372 of 1372 live reminders on the spike Mac, spike 007), so a Pointer id stays the
-EventKit id. Needs **Full Disk Access**.
+EventKit plane. The two join on ``ZDACALENDARITEMUNIQUEIDENTIFIER`` = EventKit
+``calendarItemIdentifier`` (1371 of 1371 live reminders on an iCloud store, 2026-10-09,
+with no NULL and no duplicate), so a Pointer id stays the EventKit id.
+``ZCKIDENTIFIER`` is the CloudKit record id and is NULL on a Local list (#307). Parent
+links use the Core Data key ``ZPARENTREMINDER`` -> ``Z_PK``, so they need no CloudKit
+id. Needs **Full Disk Access**.
 
 Imported only by ``reminders.py`` (the ``mail_index.py``-beside-``mail.py`` precedent).
 Nothing here writes: the store is opened ``mode=ro`` by ``runtime.read_via_sqlite``,
@@ -29,6 +32,10 @@ _STORES = (
     / "Library/Group Containers/group.com.apple.reminders/Container_v1/Stores"
 )
 
+# The EventKit id on every row, iCloud and Local alike; the CloudKit id is NULL on a
+# Local list (#307). The one key column of every query below.
+_EK_ID = "ZDACALENDARITEMUNIQUEIDENTIFIER"
+
 # Core Data table.column names move with macOS releases; a mismatch trips SchemaDrift,
 # which `reminders()` reports in `coverage` (D-13) rather than mis-reading the store.
 _FINGERPRINT = {
@@ -39,7 +46,7 @@ _FINGERPRINT = {
     # reminder rows: the EventKit id, and the parent link
     "ZREMCDREMINDER": {
         "Z_PK",
-        "ZCKIDENTIFIER",
+        _EK_ID,
         "ZPARENTREMINDER",
         "ZMARKEDFORDELETION",
     },
@@ -47,29 +54,29 @@ _FINGERPRINT = {
 
 # Both rows of a tag, and both ends of a parent link, must be live: Reminders keeps
 # deleted rows with ZMARKEDFORDELETION = 1 (3 of 14 hashtag rows on the spike Mac).
-_TAGS = """SELECT r.ZCKIDENTIFIER, h.ZNAME1 FROM ZREMCDOBJECT h
+_TAGS = f"""SELECT r.{_EK_ID}, h.ZNAME1 FROM ZREMCDOBJECT h
   JOIN ZREMCDREMINDER r ON r.Z_PK = h.ZREMINDER3
   WHERE h.Z_ENT = (SELECT Z_ENT FROM Z_PRIMARYKEY WHERE Z_NAME = 'REMCDHashtag')
     AND h.ZMARKEDFORDELETION = 0 AND r.ZMARKEDFORDELETION = 0
-    AND r.ZCKIDENTIFIER IS NOT NULL"""
-_PARENTS = """SELECT c.ZCKIDENTIFIER, p.ZCKIDENTIFIER FROM ZREMCDREMINDER c
+    AND r.{_EK_ID} IS NOT NULL"""
+_PARENTS = f"""SELECT c.{_EK_ID}, p.{_EK_ID} FROM ZREMCDREMINDER c
   JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
   WHERE c.ZMARKEDFORDELETION = 0 AND p.ZMARKEDFORDELETION = 0
-    AND c.ZCKIDENTIFIER IS NOT NULL AND p.ZCKIDENTIFIER IS NOT NULL"""
+    AND c.{_EK_ID} IS NOT NULL AND p.{_EK_ID} IS NOT NULL"""
 # A parent's live children, in creation order. The id is a bound parameter, never
 # formatted in: it is a model-chosen string (D-18).
-_SUBTASKS_OF = """SELECT c.ZCKIDENTIFIER FROM ZREMCDREMINDER c
+_SUBTASKS_OF = f"""SELECT c.{_EK_ID} FROM ZREMCDREMINDER c
   JOIN ZREMCDREMINDER p ON p.Z_PK = c.ZPARENTREMINDER
-  WHERE p.ZCKIDENTIFIER = ? AND c.ZMARKEDFORDELETION = 0
-    AND p.ZMARKEDFORDELETION = 0 AND c.ZCKIDENTIFIER IS NOT NULL
+  WHERE p.{_EK_ID} = ? AND c.ZMARKEDFORDELETION = 0
+    AND p.ZMARKEDFORDELETION = 0 AND c.{_EK_ID} IS NOT NULL
   ORDER BY c.Z_PK"""
 # Is the reminder in the store at all? (a bound parameter, like _SUBTASKS_OF)
 _LIVE_ROW = (
-    "SELECT 1 FROM ZREMCDREMINDER WHERE ZCKIDENTIFIER = ? AND ZMARKEDFORDELETION = 0"
+    f"SELECT 1 FROM ZREMCDREMINDER WHERE {_EK_ID} = ? AND ZMARKEDFORDELETION = 0"
 )
 _LIVE_IDS = (
-    "SELECT ZCKIDENTIFIER FROM ZREMCDREMINDER "
-    "WHERE ZMARKEDFORDELETION = 0 AND ZCKIDENTIFIER IS NOT NULL"
+    f"SELECT {_EK_ID} FROM ZREMCDREMINDER "
+    f"WHERE ZMARKEDFORDELETION = 0 AND {_EK_ID} IS NOT NULL"
 )
 
 
