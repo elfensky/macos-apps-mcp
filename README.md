@@ -17,9 +17,32 @@ what's landed.
 
 ## Install
 
-Requires macOS and Python ≥ 3.11.
+Requires macOS, Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
 
-**From source (works today):**
+The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so
+there is no clone and no venv path:
+
+```json
+{
+  "mcpServers": {
+    "macos-apps": {
+      "command": "uvx",
+      "args": ["macos-apps-mcp"]
+    }
+  }
+}
+```
+
+For Claude Code:
+
+```sh
+claude mcp add macos-apps --scope user -- uvx macos-apps-mcp
+```
+
+The CLI commands further down (`allow-send`, `dedupe-mail`) run through the same package, for
+example `uvx macos-apps-mcp allow-send`.
+
+**From source (development):** use this path to work on the server itself.
 
 ```sh
 git clone https://github.com/elfensky/macos-apps-mcp && cd macos-apps-mcp
@@ -40,10 +63,11 @@ locked PyObjC wheels:
 }
 ```
 
-**From PyPI** (once published — see the CHANGELOG): `uvx macos-apps-mcp` runs the server with no clone,
-and the MCP config becomes `"command": "uvx", "args": ["macos-apps-mcp"]` (same `"macos-apps"` key).
-
 ### Permissions (macOS TCC)
+
+The server runs over stdio, so macOS gives each grant to the app that launches it (Claude Desktop,
+Terminal, VS Code). Each client needs its own grants. For one set of grants that every client
+shares, run the signed `.app` daemon: see [docs/DAEMON.md](docs/DAEMON.md).
 
 Grant access when macOS prompts — the first call to each app triggers its dialog:
 
