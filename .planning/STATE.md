@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: 03
 current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
 status: verifying
-stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-07T22:33:20.385Z"
+stopped_at: Phase 4 context gathered (assumptions mode)
+last_updated: "2026-10-09T17:56:33.807Z"
 last_activity: 2026-10-07
 last_activity_desc: Phase 03 execution started
-state_head: 36827fe46030778b4f8d551b0f61e5ffd095615b
+state_head: acd3d816feecfa18ddd659710875ea99a068bd3e
 progress:
   total_phases: 7
   completed_phases: 3
@@ -154,6 +154,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T18:44:26.378Z
-Stopped at: Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)
-Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-UAT.md
+Last session: 2026-10-09T17:56:33.702Z
+Stopped at: Phase 4 context gathered (assumptions mode)
+Resume file: .planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-CONTEXT.md
