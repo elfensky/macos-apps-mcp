@@ -2,6 +2,8 @@ import plistlib
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "packaging"
 
@@ -13,6 +15,21 @@ def test_bundle_version_tracks_pyproject():
     info = plistlib.loads((PKG / "Info.plist").read_bytes())
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert info["CFBundleShortVersionString"] == project["project"]["version"]
+
+
+def test_only_intel_macs_cap_cryptography():
+    """cryptography 49+ ships no Intel macOS wheel, so a plain uvx on an Intel Mac built
+    it from source and needed Rust (#322). The cap must stay Intel-only: Apple silicon
+    keeps the current release."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    reqs = [Requirement(d) for d in project["project"]["dependencies"]]
+    (crypto,) = [r for r in reqs if r.name == "cryptography"]
+    assert str(crypto.specifier) == "<49"
+    assert not crypto.extras
+    intel = {"sys_platform": "darwin", "platform_machine": "x86_64"}
+    assert crypto.marker.evaluate(intel)
+    assert not crypto.marker.evaluate({**intel, "platform_machine": "arm64"})
+    assert not crypto.marker.evaluate({**intel, "sys_platform": "linux"})
 
 
 def test_info_plist_contract():
