@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 03
-current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
-status: verifying
-stopped_at: Phase 4 context gathered (assumptions mode)
-last_updated: "2026-10-09T17:56:33.807Z"
-last_activity: 2026-10-07
-last_activity_desc: Phase 03 execution started
-state_head: acd3d816feecfa18ddd659710875ea99a068bd3e
+current_phase: 04
+current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+status: planning
+stopped_at: Phase 03 complete, ready to plan Phase 04
+last_updated: "2026-10-11T01:23:05.573Z"
+last_activity: 2026-10-11
+last_activity_desc: Phase 03 complete, transitioned to Phase 04
+state_head: 4b404ebdd179e48eb7d28a6be33ef452d695f391
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 38
   completed_plans: 38
+  percent: 57
 ---
 
 # Project State
@@ -27,18 +28,18 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 
 ## Current Position
 
-Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
-Plan: 10 of 10
-Status: Phase complete — ready for verification
-Last activity: 2026-10-07 - Completed quick task 261007-11j: release bump 0.14.0 (EventKit depth)
+Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-11 — Phase 03 complete, transitioned to Phase 04
 
-Progress: [████░░░░░░] 43%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 28
+- Total plans completed: 38
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -49,6 +50,7 @@ Progress: [████░░░░░░] 43%
 | 01 | 14 | - | - |
 | 02 | 6 | - | - |
 | 02.1 | 8 | - | - |
+| 03 | 10 | - | - |
 
 **Recent Trend:**
 
@@ -138,6 +140,8 @@ Recent decisions affecting current work:
 | 261009-l2j | Hash-based .pyc (checked-hash, +7% import) plus conversion of import-hook opt-* caches: a cp -R install keeps the code seal, proven on device; DAEMON.md installs with ditto (#297, PR #316) | 2026-10-09 | 1feab0c | [261009-l2j-297-keep-the-app-code-seal-after-a-cp-r-](./quick/261009-l2j-297-keep-the-app-code-seal-after-a-cp-r-/) |
 | 261009-t11 | UDS clients drop anyio's cancelled-wait InvalidStateError (root cause in anyio's selector callback); the stream smoke fails on any other loop exception (#302, PR #319) | 2026-10-09 | c2d66e6 | [261009-t11-302-drop-anyio-s-cancelled-wait-invalids](./quick/261009-t11-302-drop-anyio-s-cancelled-wait-invalids/) |
 | 261009-tqc | facts 5f: the Gmail-label undo on a healthy Mail still returns the copy; reply, reply_all and forward verified from a label (#291, PR #320) | 2026-10-09 | 5a456f1 | [261009-tqc-291-facts-5f-label-undo-on-a-healthy-mai](./quick/261009-tqc-291-facts-5f-label-undo-on-a-healthy-mai/) |
+| 261009-ha3 | Local-list reminders are found: the Reminders store is keyed on ZDACALENDARITEMUNIQUEIDENTIFIER and every per-account store file is read; device-verified on iCloud and on a Local account (Intel iMac) (#307, PR #313) | 2026-10-11 | 39e2a33 | [261009-ha3-fix-307-key-reminders-store-reads-on-zda](./quick/261009-ha3-fix-307-key-reminders-store-reads-on-zda/) |
+| 261011-4iv | The 0.14.2 universal .app verified on an Intel CPU (iMac, macOS 15): daemon, doctor, reads, seal; found #317, #318, #322 (#205, PR #323) | 2026-10-11 | 4b404eb | [261011-4iv-205-item-3-the-0-14-2-universal-app-veri](./quick/261011-4iv-205-item-3-the-0-14-2-universal-app-veri/) |
 | 12 | Release bump 0.14.2 — Universal app (#205, #296, #299) | 2026-10-08 | 36827fe | — |
 
 ### Roadmap Evolution
@@ -160,5 +164,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-09T17:56:33.702Z
-Stopped at: Phase 4 context gathered (assumptions mode)
+Stopped at: Phase 03 complete, ready to plan Phase 04
 Resume file: .planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-CONTEXT.md

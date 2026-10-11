@@ -77,7 +77,7 @@ created: "2026-10-05"
 
 ## Wave 0 Requirements
 
-- [x] `tests/test_reminders_store.py` — `_make_reminders_store` (`Z_PRIMARYKEY` rows `REMCDHashtag`/`REMCDReminder`, `ZREMCDOBJECT`, `ZREMCDREMINDER`, tombstones) plus the `store_file` fixture that patches `reminders_store.store_path`; reused by test_reminders.py and test_server.py
+- [x] `tests/test_reminders_store.py` — `_make_reminders_store` (`Z_PRIMARYKEY` rows `REMCDHashtag`/`REMCDReminder`, `ZREMCDOBJECT`, `ZREMCDREMINDER`, tombstones) plus the `store_file` fixture that patches `reminders_store.store_paths` (renamed from `store_path` by #307, which reads every per-account store file); reused by test_reminders.py and test_server.py
 - [x] `tests/_fakes.py` — `fake_rule` BY* keywords (byday, bymonthday, bymonth, byyearday, bysetpos, until); the fake `calendar()` lives per module (`test_calendar._fake_calendar`, `_fake_reminder(calendar_id=)`), not in `_fakes.py`
 - [x] Device tests — a new module `tests/integration/test_eventkit_depth.py` (16 tests; `ek_items`, `icloud_scratch`, `google_calendar` sweep to `left=0`, module-scoped `cascade_fixture`) instead of `tests/test_integration.py`
 - [x] `uv add --dev python-dateutil` — dev group only after the owner's "approved"; guarded by `test_dtstart_reference_library_is_never_imported_by_the_package` / `…_is_a_dev_dependency_only`
@@ -117,4 +117,12 @@ created: "2026-10-05"
 |---|---|
 | Gaps found | 1 |
 | Resolved | 1 |
+| Escalated | 0 |
+
+## Validation Audit 2026-10-11
+
+| Metric | Count |
+|---|---|
+| Gaps found | 0 |
+| Resolved | 0 |
 | Escalated | 0 |
