@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-10-11 — Local reminders
+
 ### Added
 
 - **The PyPI page links back to the repo** (#111) — `pyproject.toml` has a
