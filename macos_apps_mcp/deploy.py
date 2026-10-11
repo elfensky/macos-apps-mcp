@@ -168,14 +168,9 @@ def grant_report(services: list[str] | None = None) -> dict:
                     entry["status"] = _TCC_AUTH.get(auth, f"unknown({auth})")
                 if auth == 0:
                     entry["reason"] = _TCC_REASON.get(reason, f"unknown({reason})")
-                    if reason == 9:
-                        entry["remediation"] = (
-                            "The consent prompt timed out with nobody at the screen; "
-                            "macOS keeps that as a denial and does not ask again. Run "
-                            f"`tccutil reset {service.removeprefix('kTCCService')} "
-                            f"{client}`, then doctor(request=True) with someone at "
-                            "the screen."
-                        )
+                    if reason == 9:  # the why is said once, in doctor's grant note
+                        svc = service.removeprefix("kTCCService")
+                        entry["remediation"] = f"tccutil reset {svc} {client}"
                 identities.setdefault(service, []).append(entry)
     return {"identities": identities, "reasons": {"user": u_reason, "system": s_reason}}
 

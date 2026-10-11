@@ -335,8 +335,7 @@ def test_timed_out_prompt_is_prompt_timeout_with_remediation(tmp_path, monkeypat
     )
     assert entry["client"] == _ME and entry["target"] == "com.apple.mail"
     assert entry["granted"] is False and entry["reason"] == "prompt-timeout"
-    assert f"tccutil reset AppleEvents {_ME}" in entry["remediation"]
-    assert "doctor(request=True)" in entry["remediation"]
+    assert entry["remediation"] == f"tccutil reset AppleEvents {_ME}"
 
 
 def test_remediation_names_the_rows_own_service(tmp_path, monkeypatch):
