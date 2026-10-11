@@ -54,10 +54,21 @@ _AUTOMATION_APPS = (
 # the Python side died first — this probe launches each quit app in turn, making it
 # the template most likely to strand an orphan. test_applescript_timeout.py sweeps
 # only the adapters package, so this one is pinned by test_doctor.py instead.
+# #317: an app the probe itself launched can come up with no window (Photos) and answer
+# `count windows` with -1728. The event was delivered and answered, which is all the
+# probe proves, so -1728 counts as ok; every other error, the -1743 denial included,
+# re-raises with its original message and number, so runtime._classify_osascript_failure
+# still types it.
 _PROBE = (
     "on run argv\n"
     "  with timeout of 120 seconds\n"
-    "  tell application (item 1 of argv) to count windows\n"
+    "    tell application (item 1 of argv)\n"
+    "      try\n"
+    "        count windows\n"
+    "      on error errMsg number errNum\n"
+    "        if errNum is not -1728 then error errMsg number errNum\n"
+    "      end try\n"
+    "    end tell\n"
     "  end timeout\n"
     "end run"
 )
