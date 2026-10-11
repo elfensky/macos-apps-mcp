@@ -6,6 +6,19 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **doctor reports an answered -1728 probe as `ok`** (#317) — Photos, launched by the
+  probe, had no window yet and answered `count windows` with "Can't get every window"
+  (-1728), so doctor reported a granted, working surface as `native_error`. The probe now
+  counts that answer for every app. A denial (-1743) and every other error report as before.
+- **doctor's grant map says why a TCC row is denied and which app it targets** (#318) — a
+  consent prompt that nobody answers is stored by macOS as a denial (`auth_reason` 9), and
+  doctor showed it as a plain `granted: false`. A denied entry now carries `reason`
+  (`prompt-timeout`, `user-consent`, …), and a `prompt-timeout` entry also carries the
+  `tccutil reset` command that clears it. AppleEvents entries carry `target`, the controlled
+  app's bundle id.
+
 ## [0.14.3] - 2026-10-11 — Local reminders
 
 ### Added
