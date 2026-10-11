@@ -5,6 +5,7 @@ EventKit, osascript, or TCC is touched. One @integration test exercises the real
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -159,6 +160,71 @@ def test_probe_is_a_real_apple_event_with_consent_budget():
     # for the one-time Automation consent dialog (a human answer).
     assert "count windows" in doc._PROBE
     assert doc._PROBE_TIMEOUT == 120.0
+
+
+def test_probe_template_swallows_only_1728():
+    """#317: the probe wraps `count windows` and re-raises every error but -1728."""
+    lines = [ln.strip() for ln in doc._PROBE.splitlines() if ln.strip()]
+    assert lines == [
+        "on run argv",
+        "with timeout of 120 seconds",
+        "tell application (item 1 of argv)",
+        "try",
+        "count windows",
+        "on error errMsg number errNum",
+        "if errNum is not -1728 then error errMsg number errNum",
+        "end try",
+        "end tell",
+        "end timeout",
+        "end run",
+    ]
+
+
+def test_probe_compiles():
+    """#317: the rewritten probe is valid AppleScript."""
+    if not shutil.which("osacompile"):
+        pytest.skip("osacompile not available")
+    proc = subprocess.run(
+        ["osacompile", "-o", "/dev/null", "-"],
+        input=doc._PROBE,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("number", "message", "expected"),
+    [
+        (-1728, "Photos got an error: Can't get every window.", None),
+        (-1743, "Not authorized to send Apple events to Photos.", AutomationDenied),
+        (-609, "Connection is invalid.", AppNotRunning),
+    ],
+)
+def test_probe_error_filter_under_real_osascript(number, message, expected):
+    """#317: -1728 exits 0; -1743 and -609 keep their number and classify."""
+    if not shutil.which("osascript"):
+        pytest.skip("osascript not available")
+    tell, count = "tell application (item 1 of argv)", "count windows"
+    assert doc._PROBE.count(tell) == 1 and doc._PROBE.count(count) == 1
+    # `tell current application` plus `error` sends no Apple event, so no app
+    # launches and no consent prompt can appear.
+    script = doc._PROBE.replace(tell, "tell current application").replace(
+        count, f'error "{message}" number {number}'
+    )
+    proc = subprocess.run(
+        ["osascript", "-", "Photos"],
+        input=script,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if expected is None:
+        assert proc.returncode == 0, proc.stderr
+        return
+    assert proc.returncode != 0
+    assert f"({number})" in proc.stderr
+    assert isinstance(runtime._classify_osascript_failure(proc.stderr), expected)
 
 
 # --- Shortcuts CLI + Full Disk Access ------------------------------------------------
