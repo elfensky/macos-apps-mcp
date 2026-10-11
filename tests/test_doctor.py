@@ -451,7 +451,25 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
         "app_process_info",
         lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
     )
+    # deterministic grant map too: the machine's real TCC.db made this length depend
+    # on the runner (#318). The daemon's own rows, every AppleEvents target denied by a
+    # timed-out prompt — the longest entry the map can carry.
+    from tests.test_deploy import _tcc_db
+
+    me = "ren.lav.macos-apps-mcp"
+    targets = ("mail", "Notes", "AddressBook", "Photos", "Safari", "MobileSMS", "Music")
+    db = tmp_path / "TCC.db"
+    _tcc_db(
+        db,
+        [(s, me, 2, 3, "UNUSED") for s in doc.deploy._SERVICES[:3]]
+        + [("kTCCServiceAppleEvents", me, 0, 9, f"com.apple.{t}") for t in targets]
+        + [("kTCCServiceSystemPolicyAllFiles", me, 2, 3, "UNUSED")],
+    )
+    monkeypatch.setattr(doc.deploy, "_TCC_DB", db)
+    monkeypatch.setattr(doc.deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
     report = doc.diagnose(request=True)
+    assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
+    assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once
     assert len(json.dumps(report, ensure_ascii=False)) < 7000
 
 

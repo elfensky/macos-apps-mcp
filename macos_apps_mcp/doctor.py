@@ -387,7 +387,10 @@ def diagnose(request: bool = False) -> dict:
             if ids is None
             else "grants listed per identity; the daemon identity is "
             "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
-            'granted=False plus status="limited" — not a plain denial.'
+            'granted=False plus status="limited" — not a plain denial. A '
+            'reason="prompt-timeout" entry is a consent prompt nobody answered, which '
+            "macOS keeps as a denial (#318): run its `remediation` command, then "
+            "doctor(request=True) with someone at the screen."
         ),
     }
     # A PARTIAL read (one db answered, the other did not) still has to say so. FDA rows
