@@ -5,10 +5,10 @@ current_phase: 04
 current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 status: planning
 stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-10-11T01:23:05.573Z"
+last_updated: "2026-10-11T01:37:27.219Z"
 last_activity: 2026-10-11
 last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: 4b404ebdd179e48eb7d28a6be33ef452d695f391
+state_head: c38a32b02d67e6ff5371198bcba5641b0ea71c9c
 progress:
   total_phases: 7
   completed_phases: 4
@@ -113,7 +113,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.2 (universal2, build `aa27d32`, notarized, installed with `ditto`; `doctor()` proven over the socket 2026-10-08: version 0.14.2, libs mcp 1.29.0 / fastmcp 3.4.7; code seal intact after the first run; TestPyPI only so far — the PyPI dispatch for 0.14.1/0.14.2 is the operator's). It adds #304 (#296), #305 (#299) and #308 (#205: universal2, macOS 15 floor, no cryptography, Intel-only allow-unsigned-executable-memory) to v0.14.1. Install with `ditto`, not `cp -R` (#297).
+- The installed daemon is release v0.14.3 (universal2, build `85a3baf`, notarized and stapled, installed with `ditto` after moving 0.14.2 to `~/.local/state/macos-apps-mcp/app-backup/`; `doctor()` proven 2026-10-11: version 0.14.3, build `85a3baf 2026-10-11T01:32:20Z`, libs mcp 1.29.0 / fastmcp 3.4.7, daemon mode; code seal intact after the first run, 0 files written in the bundle; TestPyPI from the main merge — the production PyPI dispatch is the operator's). It adds #313 (#307 Local reminders), #316 (#297 hash .pyc), #319 (#302 UDS teardown), #314 (#111), #315 (#113) and the Intel note (#323) to v0.14.2. Release zip sha256 `42c8b46c…f8d8408e`. Open from this cycle: #317, #318, #322.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -143,6 +143,7 @@ Recent decisions affecting current work:
 | 261009-ha3 | Local-list reminders are found: the Reminders store is keyed on ZDACALENDARITEMUNIQUEIDENTIFIER and every per-account store file is read; device-verified on iCloud and on a Local account (Intel iMac) (#307, PR #313) | 2026-10-11 | 39e2a33 | [261009-ha3-fix-307-key-reminders-store-reads-on-zda](./quick/261009-ha3-fix-307-key-reminders-store-reads-on-zda/) |
 | 261011-4iv | The 0.14.2 universal .app verified on an Intel CPU (iMac, macOS 15): daemon, doctor, reads, seal; found #317, #318, #322 (#205, PR #323) | 2026-10-11 | 4b404eb | [261011-4iv-205-item-3-the-0-14-2-universal-app-veri](./quick/261011-4iv-205-item-3-the-0-14-2-universal-app-veri/) |
 | 12 | Release bump 0.14.2 — Universal app (#205, #296, #299) | 2026-10-08 | 36827fe | — |
+| 20 | Release bump 0.14.3 — Local reminders: pyproject, Info.plist, uv.lock root line, CHANGELOG header (PR #325; release PR #326, tag v0.14.3) | 2026-10-11 | c38a32b | — |
 
 ### Roadmap Evolution
 
