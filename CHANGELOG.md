@@ -6,6 +6,55 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-10-11 — Local reminders
+
+### Added
+
+- **The PyPI page links back to the repo** (#111) — `pyproject.toml` has a
+  `[project.urls]` table (Homepage, Repository, Issues, Changelog), so PyPI shows those
+  links from the next upload.
+
+### Changed
+
+- **The README recommends `uvx macos-apps-mcp` as the install** (#113) — the package is on
+  PyPI, so an MCP client runs it with no clone and no venv path. The README also gives the
+  Claude Code `claude mcp add` line. The `git clone` + `uv sync` setup stays as the
+  development path.
+
+### Fixed
+
+- **The signed `.app` keeps its code seal after a `cp -R` install** (#297) — `cp -R`
+  resets file times, so the timestamp `.pyc` read as stale and the daemon rewrote them
+  inside the signed bundle on its first run. The build now compiles hash-based `.pyc`
+  (`checked-hash`), and converts the `opt-*` caches that import hooks write during the
+  smokes, so no copy method can make them stale. The 0.14.0 note "keeps its code seal
+  after the first launch" held only for a `ditto`, Finder-drag or release-zip install.
+  DAEMON.md now installs with `ditto`.
+- **UDS clients no longer print an `InvalidStateError` traceback at teardown** (#302) —
+  anyio's unix-socket stream can set a result on a read it already cancelled. asyncio then
+  logged `Exception in callback Future.set_result()`, though the call result was never
+  affected. The shim, the install-agent prompt pass and the stream smoke now drop exactly
+  that case; every other loop exception still logs. The stream smoke now fails on any
+  loop exception, so a traceback can no longer sit above `stream smoke ok` in a passing
+  build.
+
+- **Reminders on a Local (not iCloud) list are found in the Reminders store** (#307) —
+  `complete_reminder` and `delete_reminder` refused every such reminder, and `reminders`
+  reported it as not in the Reminders store, without tags or parent links. The store was
+  searched by the CloudKit record id, which is empty for a reminder that does not sync
+  to iCloud. It is now searched by the column that holds the EventKit id on iCloud and
+  Local lists alike. Every per-account store file is read, so a Mac with both an iCloud
+  and a Local account finds both, and two store files of equal size no longer decide by
+  directory order.
+
+### Notes
+
+- **The universal `.app` runs on an Intel CPU** (#205) — the 0.14.2 release, on an iMac
+  (2012, OpenCore Legacy Patcher) with macOS 15: the daemon registered and runs, `doctor()`
+  reports 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to the
+  bundle, Mail, Calendar and Reminders reads work through the shim, and the code seal holds
+  after the first run. The run found #317, #318 and #322.
+
 ## [0.14.2] - 2026-10-08 — Universal app
 
 ### Changed

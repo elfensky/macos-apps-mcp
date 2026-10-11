@@ -9,6 +9,10 @@ Run it on the BUNDLE's interpreter: CI tests the `uv.lock` versions, this tests
 the libraries that ship (#286 - an uncapped build shipped mcp 2, which the
 wrapper does not support). Exits non-zero on any failure;
 `scripts/build_app.sh` runs it and fails the build on a non-zero exit.
+
+It also fails when any exception reaches asyncio's default handler on its client
+loop; the benign anyio teardown race is dropped before that by
+`daemon._drop_cancelled_wait` (#302).
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ daemon.fail_loud_on_dead_stream()
 app = FastMCP("smoke")
 
 
+leaked: list[dict] = []
+
+
 @app.tool
 async def slow(ctx: Context) -> dict:
     await ctx.info("working")
@@ -44,6 +51,16 @@ with tempfile.TemporaryDirectory(dir="/tmp") as d:
     threading.Thread(target=uvicorn.Server(cfg).run, daemon=True).start()
 
     async def go():
+        # An instance attribute, NOT set_exception_handler: the factory must still
+        # install the #302 handler, which passes everything else on to this.
+        loop = asyncio.get_running_loop()
+        original = loop.default_exception_handler
+
+        def record(context):
+            leaked.append(context)
+            original(context)
+
+        loop.default_exception_handler = record
         t = StreamableHttpTransport(
             "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
         )
@@ -51,6 +68,11 @@ with tempfile.TemporaryDirectory(dir="/tmp") as d:
             return await asyncio.wait_for(c.call_tool("slow"), 60)
 
     r = asyncio.run(go())
+    if leaked:
+        sys.exit(
+            f"stream smoke FAILED: {len(leaked)} loop exception(s) reached asyncio's "
+            "default handler (logged above) (#302)"
+        )
     if "ok" not in r.content[0].text:
         sys.exit(f"stream smoke FAILED: unexpected result {r!r}")
 print("stream smoke ok")

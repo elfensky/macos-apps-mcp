@@ -53,15 +53,22 @@ tarballs in `~/Library/Caches/macos-apps-mcp-build`; `PBS_CACHE` overrides the p
 device (15.6.1 and 15.7.9). The code itself needs macOS 14 (the EventKit full-access APIs).
 The build reads that key and picks wheels for it. Before signing, it fails unless every
 Mach-O is `x86_64 arm64` and no slice needs a newer macOS. A good build log shows
-`smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. Both slices, unsigned and
-signed, have run only on an Apple-silicon Mac (x86_64 under Rosetta), not on an Intel CPU.
+`smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. The build smokes both
+slices on an Apple-silicon Mac (x86_64 under Rosetta). The signed 0.14.2 release also runs on
+an Intel CPU: an iMac (2012, OpenCore Legacy Patcher, SIP off) on macOS 15, 2026-10-09..11.
+There, the release zip installed and `install-agent` registered the daemon; `doctor()`
+reported 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to
+`ren.lav.macos-apps-mcp`; Mail, Calendar and Reminders reads worked through the shim; and
+`codesign --verify --strict` was valid after the daemon ran.
 
 **No cryptography in the `.app`** (#205). The build leaves out cryptography, cffi and
 pycparser. Only auth code uses them: mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib
 and joserfc. The daemon configures no auth, so no daemon, shim or tool path imports them.
 cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
 the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the
-dev venv keeps them.
+dev venv keeps them. On an Intel Mac, the dev venv and a PyPI install (`uvx`) still resolve
+cryptography; `uv sync --no-install-package cryptography` works for the dev venv, and the
+PyPI install is tracked in #322.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
@@ -84,8 +91,13 @@ notarization only matters once Gatekeeper sees a quarantine xattr.
 ### 2. Move it to `/Applications`
 
 ```sh
-cp -R dist/macos-apps-mcp.app /Applications/
+ditto dist/macos-apps-mcp.app /Applications/macos-apps-mcp.app
 ```
+
+Use `ditto` (it keeps file times; a Finder drag is also fine), not `cp -R`. `cp -R` resets every
+file's modification time, so a build made before #297 rewrites its `.pyc` inside the signed bundle
+on the first run and breaks the code seal. If an older `/Applications/macos-apps-mcp.app` is
+there, move it away first: `ditto` merges into an existing bundle, and a stale file breaks the seal.
 
 The bundle **must** live in `/Applications` (or `~/Applications`) before registering — a
 quarantined app run from `~/Downloads` executes under App Translocation (a randomized read-only

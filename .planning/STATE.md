@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 03
-current_phase_name: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
-status: verifying
-stopped_at: "Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)"
-last_updated: "2026-10-07T22:33:20.385Z"
-last_activity: 2026-10-07
-last_activity_desc: Phase 03 execution started
-state_head: 36827fe46030778b4f8d551b0f61e5ffd095615b
+current_phase: 04
+current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+status: planning
+stopped_at: Phase 03 complete, ready to plan Phase 04
+last_updated: "2026-10-11T01:23:05.573Z"
+last_activity: 2026-10-11
+last_activity_desc: Phase 03 complete, transitioned to Phase 04
+state_head: 4b404ebdd179e48eb7d28a6be33ef452d695f391
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 38
   completed_plans: 38
+  percent: 57
 ---
 
 # Project State
@@ -27,18 +28,18 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 
 ## Current Position
 
-Phase: 03 (EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks) — EXECUTING
-Plan: 10 of 10
-Status: Phase complete — ready for verification
-Last activity: 2026-10-07 - Completed quick task 261007-11j: release bump 0.14.0 (EventKit depth)
+Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-11 — Phase 03 complete, transitioned to Phase 04
 
-Progress: [████░░░░░░] 43%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 28
+- Total plans completed: 38
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -49,6 +50,7 @@ Progress: [████░░░░░░] 43%
 | 01 | 14 | - | - |
 | 02 | 6 | - | - |
 | 02.1 | 8 | - | - |
+| 03 | 10 | - | - |
 
 **Recent Trend:**
 
@@ -111,7 +113,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.1 (build `5f0ec19`, notarized, installed with `ditto`, `doctor()` proven over the socket 2026-10-07: version 0.14.1, libs mcp 1.29.0 / fastmcp 3.4.7; code seal intact after the first run; TestPyPI only so far). It adds #295 (#291 Gmail label refusals, #285 `doctor().libs`) to v0.14.0. Install with `ditto`, not `cp -R` (#297).
+- The installed daemon is release v0.14.2 (universal2, build `aa27d32`, notarized, installed with `ditto`; `doctor()` proven over the socket 2026-10-08: version 0.14.2, libs mcp 1.29.0 / fastmcp 3.4.7; code seal intact after the first run; TestPyPI only so far — the PyPI dispatch for 0.14.1/0.14.2 is the operator's). It adds #304 (#296), #305 (#299) and #308 (#205: universal2, macOS 15 floor, no cryptography, Intel-only allow-unsigned-executable-memory) to v0.14.1. Install with `ditto`, not `cp -R` (#297).
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -133,6 +135,13 @@ Recent decisions affecting current work:
 | 261007-o5a | Reads count a Gmail label without mailboxes.source: bare_label arm by the write guard's rule; deleted rows ignored; ~+20 ms per id lookup (#299, PR #305) | 2026-10-07 | b252353 | [261007-o5a-reads-count-a-gmail-label-without-mailbo](./quick/261007-o5a-reads-count-a-gmail-label-without-mailbo/) |
 | 261007-o5d | save_mail_attachment names an id-only save after the attachment; stale-folder error; 120 s listing cap (#296, PR #304) | 2026-10-07 | b252353 | [261007-o5d-save-mail-attachment-names-an-id-only-sa](./quick/261007-o5d-save-mail-attachment-names-an-id-only-sa/) |
 | 261007-tu3 | Universal2 .app (Apple silicon + Intel), macOS 15 floor, no cryptography; Intel-only allow-unsigned-executable-memory, notarization Accepted (#205, PR #308) | 2026-10-08 | e0a2264 | [261007-tu3-universal2-app-build-intel-apple-silicon](./quick/261007-tu3-universal2-app-build-intel-apple-silicon/) |
+| 261009-l1b | pyproject [project.urls] (Homepage, Repository, Issues, Changelog) so the PyPI page links back from the next upload (#111, PR #314) | 2026-10-09 | cf23238 | [261009-l1b-111-add-project-urls-to-pyproject-toml-s](./quick/261009-l1b-111-add-project-urls-to-pyproject-toml-s/) |
+| 261009-l1d | README recommends uvx macos-apps-mcp; from source becomes the development path; dated DESIGN.md amendment (#113, PR #315) | 2026-10-09 | 0203e2e | [261009-l1d-113-readme-recommends-uvx-macos-apps-mcp](./quick/261009-l1d-113-readme-recommends-uvx-macos-apps-mcp/) |
+| 261009-l2j | Hash-based .pyc (checked-hash, +7% import) plus conversion of import-hook opt-* caches: a cp -R install keeps the code seal, proven on device; DAEMON.md installs with ditto (#297, PR #316) | 2026-10-09 | 1feab0c | [261009-l2j-297-keep-the-app-code-seal-after-a-cp-r-](./quick/261009-l2j-297-keep-the-app-code-seal-after-a-cp-r-/) |
+| 261009-t11 | UDS clients drop anyio's cancelled-wait InvalidStateError (root cause in anyio's selector callback); the stream smoke fails on any other loop exception (#302, PR #319) | 2026-10-09 | c2d66e6 | [261009-t11-302-drop-anyio-s-cancelled-wait-invalids](./quick/261009-t11-302-drop-anyio-s-cancelled-wait-invalids/) |
+| 261009-tqc | facts 5f: the Gmail-label undo on a healthy Mail still returns the copy; reply, reply_all and forward verified from a label (#291, PR #320) | 2026-10-09 | 5a456f1 | [261009-tqc-291-facts-5f-label-undo-on-a-healthy-mai](./quick/261009-tqc-291-facts-5f-label-undo-on-a-healthy-mai/) |
+| 261009-ha3 | Local-list reminders are found: the Reminders store is keyed on ZDACALENDARITEMUNIQUEIDENTIFIER and every per-account store file is read; device-verified on iCloud and on a Local account (Intel iMac) (#307, PR #313) | 2026-10-11 | 39e2a33 | [261009-ha3-fix-307-key-reminders-store-reads-on-zda](./quick/261009-ha3-fix-307-key-reminders-store-reads-on-zda/) |
+| 261011-4iv | The 0.14.2 universal .app verified on an Intel CPU (iMac, macOS 15): daemon, doctor, reads, seal; found #317, #318, #322 (#205, PR #323) | 2026-10-11 | 4b404eb | [261011-4iv-205-item-3-the-0-14-2-universal-app-veri](./quick/261011-4iv-205-item-3-the-0-14-2-universal-app-veri/) |
 | 12 | Release bump 0.14.2 — Universal app (#205, #296, #299) | 2026-10-08 | 36827fe | — |
 
 ### Roadmap Evolution
@@ -154,6 +163,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T18:44:26.378Z
-Stopped at: Phase 3 verified human_needed — 03-UAT.md (device re-run of PR #281 paths)
-Resume file: .planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-UAT.md
+Last session: 2026-10-09T17:56:33.702Z
+Stopped at: Phase 03 complete, ready to plan Phase 04
+Resume file: .planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-CONTEXT.md

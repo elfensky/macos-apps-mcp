@@ -95,6 +95,26 @@ def test_build_script_gates_universal2():
     assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
 
 
+def test_build_script_compiles_hash_pyc():
+    """`cp -R` resets file times, so timestamp .pyc read as stale and the daemon
+    rewrites them inside the signed bundle, breaking the seal (#297). `-f` is needed
+    because the smokes already wrote timestamp .pyc, which compileall would keep."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    cmd = src[src.index("-m compileall") : src.index("BYTECODE PRECOMPILE FAILED")]
+    assert "--invalidation-mode checked-hash" in cmd
+    assert " -f " in cmd
+    # import hooks (beartype claw) write opt-* timestamp .pyc that compileall skips: a
+    # generic conversion step must run after compileall and before signing
+    for needle in ("source_from_cache", "source_hash", "HASH PYC CONVERSION FAILED"):
+        assert needle in src, needle
+    assert (
+        src.index("-m compileall")
+        < src.index("HASH PYC CONVERSION FAILED")
+        < src.index('if [[ -n "$SIGN" ]]')
+    )
+    assert "beartype" not in src[src.index("source_from_cache") :].split("PY\n")[0]
+
+
 def test_only_the_intel_slice_carries_the_memory_exception():
     """#205: libffi has no x86_64 trampoline pages, so the Intel slice needs
     allow-unsigned-executable-memory; arm64 keeps the strict set

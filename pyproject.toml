@@ -1,6 +1,6 @@
 [project]
 name = "macos-apps-mcp"
-version = "0.14.2"
+version = "0.14.3"
 description = "One consolidated MCP server for native macOS apps (Calendar, Reminders, Mail, ...)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,6 +45,12 @@ dependencies = [
 
 [project.scripts]
 macos-apps-mcp = "macos_apps_mcp:main"
+
+[project.urls]
+Homepage = "https://github.com/elfensky/macos-apps-mcp"
+Repository = "https://github.com/elfensky/macos-apps-mcp"
+Issues = "https://github.com/elfensky/macos-apps-mcp/issues"
+Changelog = "https://github.com/elfensky/macos-apps-mcp/blob/main/CHANGELOG.md"
 
 # Dev deps with >=major,<next pins mirror the sibling repos' uv discipline (lintle, descent-engine).
 # Runtime deps stay unbounded above except mcp/fastmcp, capped at the majors CI tests:

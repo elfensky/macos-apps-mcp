@@ -28,6 +28,7 @@ subtasks:** they stay open under a completed parent.
 - Spike 002: `EKReminder` has no public parent API; subtasks are read from the store
   (`ZREMCDREMINDER.ZPARENTREMINDER`), joined to EventKit by `ZCKIDENTIFIER`. No public write
   exists, so EventKit cannot build this fixture.
+  **Correction (2026-10-09, #307):** `ZCKIDENTIFIER` is the CloudKit id and is NULL on a Local (not iCloud) list. Join on `ZDACALENDARITEMUNIQUEIDENTIFIER` (= EK id on iCloud 1371/1371 and on Local), and read every per-account `Data-*.sqlite`, not only the largest.
 - REM-04 excludes a private-API write, so the private `setParentID:` was not used to build
   the fixture either. The owner indented the subtasks in Reminders.app by hand.
 - No external dependency: the probe is EventKit (PyObjC) plus a read-only sqlite read.

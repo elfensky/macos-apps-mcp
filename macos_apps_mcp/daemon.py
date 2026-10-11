@@ -5,6 +5,7 @@ handed the fd, never the path (uvicorn's own bind would create the socket 0666).
 
 from __future__ import annotations
 
+import asyncio
 import errno
 import os
 import socket
@@ -80,11 +81,46 @@ def bind_socket(path: Path) -> socket.socket:
 _UDS_TIMEOUT = httpx.Timeout(None, connect=10.0)
 
 
+def _drop_cancelled_wait(loop, context):
+    """asyncio exception handler that drops ONE benign teardown race (#302) and hands
+    every other context to `loop.default_exception_handler`.
+
+    anyio's UNIX socket stream registers the bare `Future.set_result` as the selector
+    callback and removes it one loop turn later. A wait cancelled in the same turn in
+    which the socket becomes ready makes asyncio log `InvalidStateError` for a future
+    nothing awaits, so no result changes; upstream anyio fixed only the `aclose()`
+    variant.
+
+    A handler, not a patch of anyio's private I/O methods: anyio is uncapped, so an
+    override could silently diverge from a future anyio. This changes logging only,
+    and goes inert once anyio guards the callback. It drops only when the exception is
+    an `InvalidStateError` raised by the bound `set_result` of a CANCELLED
+    `asyncio.Future`."""
+    callback = getattr(context.get("handle"), "_callback", None)
+    future = getattr(callback, "__self__", None)
+    if (
+        isinstance(context.get("exception"), asyncio.InvalidStateError)
+        and getattr(callback, "__name__", None) == "set_result"
+        and isinstance(future, asyncio.Future)
+        and future.cancelled()
+    ):
+        return
+    loop.default_exception_handler(context)
+
+
 def _uds_client_factory(path: Path):
     """httpx AsyncClient factory routing all requests over the unix socket. The URL
-    host is a dummy — never resolved."""
+    host is a dummy — never resolved. It also installs `_drop_cancelled_wait` on the
+    client's running loop, unless the loop already has a handler (#302)."""
 
     def factory(**kwargs):
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # no running loop: nothing to install on
+            pass
+        else:
+            if loop.get_exception_handler() is None:
+                loop.set_exception_handler(_drop_cancelled_wait)
         kwargs.pop("transport", None)
         kwargs["timeout"] = _UDS_TIMEOUT
         return httpx.AsyncClient(
