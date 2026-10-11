@@ -121,7 +121,9 @@ This will:
 2. Register the LaunchAgent via `SMAppService` and start the daemon.
 3. **Trigger every consent prompt proactively** (Calendar, Reminders, Contacts, per-app
    Automation) — approve each one as it appears. Approving in this context (rather than mid
-   tool-call later) keeps a stray timeout from recording as a denial.
+   tool-call later) keeps a stray timeout from recording as a denial. If a prompt times out anyway, doctor shows
+   that row with `reason: "prompt-timeout"` and the reset command to run before
+   `doctor(request=True)` with someone at the screen.
 4. Print the FDA deep-link and the shim `command:`/`args:` snippet to paste into your MCP
    clients.
 
@@ -282,7 +284,11 @@ build:
     `requires-approval` / `not-found`).
   - `deployment.grant_identities`: per-service, per-client-identity grant map read straight from
     `TCC.db` — `None`/unreadable until Full Disk Access is granted to whichever process is
-    asking (chicken-and-egg: reading `TCC.db` itself needs FDA for the reader).
+    asking (chicken-and-egg: reading `TCC.db` itself needs FDA for the reader). Each entry has
+    `client` and `granted`. An AppleEvents entry also has `target`, the bundle id of the
+    controlled app. A denied entry has `reason` (TCC's `auth_reason`, for example
+    `user-consent` or `prompt-timeout`). A `prompt-timeout` entry also has a `remediation` with
+    the `tccutil reset <Service> ren.lav.macos-apps-mcp` command.
   - `deployment.outbound`: adapters with outbound send currently enabled (derived straight from
     the running process's `MACOS_APPS_ALLOW_SEND` state, `[]` if none) + `deployment.outbound_note`
     with the human-readable explanation — see "Outbound (send) mode under the daemon" above if
