@@ -10,7 +10,8 @@ and one registration record — because those cuts reshape the exact files (`ser
 app cannot verify anything that follows. With the gate closed and the read-only suite green, Mail
 fixes come next (Phase 02.1): on 2026-09-24 the owner put email work ahead of every new or
 additional feature. Then the work becomes adapter depth, one native plane at a time: EventKit (Calendar alarms and real
-recurrence, Reminders deletion, lists and subtasks), then the two adapters whose mechanism is still
+recurrence, Reminders deletion, lists and subtasks). On 2026-10-11 the owner put bugs and errors ahead of every
+feature: an open bug goes into an inserted phase before the next feature phase (Phase 03.1). Then the two adapters whose mechanism is still
 open (Notes semantic search, Photos). Those last two open with a probe, and the probe's answer —
 including "the premise was wrong, here is the documented gap" — is the deliverable. Contacts and
 Messages depth were moved to v2 at the 2026-08-28 review (owner's call); their requirements stay
@@ -34,6 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes (completed 2026-10-01)
 - [x] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names (completed 2026-10-05)
 - [x] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness (completed 2026-10-11)
+- [ ] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4
 - [ ] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
@@ -230,10 +232,26 @@ Plans:
 **Wave 10** *(blocked on Wave 9 completion)*
 - [x] 03-10-PLAN.md — Cascade proof on the fixture; MAIL-05/06 confirmed from the record; issues #89/#90/#91/#92/#207 closed
 
+### Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature (INSERTED)
+
+**Goal**: Every open bug is fixed or settled on device before the next feature phase: the findings of the Intel iMac device report (PR #332), the #317 fix that is not yet proven through the daemon, and the audit record that cannot tell a preview from a write (#222). Bugs and errors come before any feature (owner, 2026-10-11).
+**Depends on**: Phase 3
+**Requirements**: FIX-01, FIX-02, FIX-03, FIX-04, FIX-05, FIX-06
+**Success Criteria** (what must be TRUE):
+
+  1. Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field. A test calls a write tool without `dry_run` and its record states `dry_run: true` (#222).
+  2. On the Intel iMac, `contacts("an")` answers, or fails with an error that names the real cause. The cause is found first: narrow-query timing, the same `whose` scan in Script Editor, and the state of Contacts. The fix is the SQLite plane of #95 or a contacts-specific host timeout whose script backstop stays at or above the host cap (#334).
+  3. On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted. A count with the tool's own SQLite filter settles it; if the filter drops a live note, the filter is fixed (#335).
+  4. On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none. The cause of the raw UUID is recorded (#336).
+  5. A `.app` built from `develop` at the end of the phase runs as the daemon on the Intel iMac (`doctor().build` names that commit). Through it, `doctor(request=True)` with Photos quit reports the photos surface ok (#317, #337), and criteria 2–4 hold.
+  6. The Intel iMac device report carries its three corrections, landed by a records PR (#333).
+
+**Plans**: TBD
+
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
 **Goal**: The two adapters whose mechanism is still open are settled on device before any feature code; what survives the probe ships as a bounded read plane, what does not ships as a documented gap.
-**Depends on**: Phase 3
+**Depends on**: Phase 03.1
 **Requirements**: NOTE-01, NOTE-02, PHO-01, PHO-02, PHO-03, PHO-04
 **Success Criteria** (what must be TRUE):
 
@@ -279,7 +297,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -287,6 +305,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
+| 03.1. Bug Fixes (INSERTED) | 0/TBD | Not started | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

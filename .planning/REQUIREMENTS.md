@@ -32,6 +32,15 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **MAIL-05**: `rollback()`'s unverified delete of a windowless outgoing message has a decided, device-probed handling (retry, another mitigation, or a documented caller contract); an outbound call that leaves a message behind says so loudly; the #229 xfail is removed or its reason names the decision (#229)
 - [x] **MAIL-06**: Five dedicated device runs, on a message in an account a probe may target, decide the reply quote's read of the original: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation and a facts entry that separates a transient event-queue stall from the permanent wedge (#230)
 
+### Bugs — bugs and errors come before any feature (owner, 2026-10-11)
+
+- [ ] **FIX-01**: Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field; a test covers a write tool called without `dry_run` and its record states `dry_run: true` (#222)
+- [ ] **FIX-02**: The cause of the `contacts("an")` 30 s timeout on the Intel iMac is found (narrow-query timing, Script Editor timing, Contacts state) and fixed — through the SQLite plane of #95 or a contacts-specific host timeout with the script backstop at or above the host cap; on the Intel iMac the broad query answers, or fails with an error that names the real cause (#334)
+- [ ] **FIX-03**: On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted; if the tool's SQLite filter drops a live note, the filter is fixed (#335)
+- [ ] **FIX-04**: On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none; the cause of the raw UUID (removed account, stale name cache, or an account kind `every account` omits) is recorded (#336)
+- [ ] **FIX-05**: Through the daemon, `doctor(request=True)` with Photos quit reports the photos surface ok — or Phase 4 removes the Photos Automation probe and the issue closes as moot (#317, #337)
+- [ ] **FIX-06**: The Intel iMac device report carries the three corrections: the pass count, the Local-list subtask conclusion, and the machine line without firmware and security details (#333)
+
 ### Calendar
 
 - [x] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write (#89)
@@ -169,6 +178,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REM-03 | Phase 3 | Complete |
 | REM-04 | Phase 3 | Complete |
 | REM-06 | Phase 3 | Complete |
+| FIX-01 | Phase 03.1 | Pending |
+| FIX-02 | Phase 03.1 | Pending |
+| FIX-03 | Phase 03.1 | Pending |
+| FIX-04 | Phase 03.1 | Pending |
+| FIX-05 | Phase 03.1 | Pending |
+| FIX-06 | Phase 03.1 | Pending |
 | NOTE-01 | Phase 4 | Pending |
 | NOTE-02 | Phase 4 | Pending |
 | PHO-01 | Phase 4 | Pending |
@@ -186,11 +201,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 42 total
-- Mapped to phases: 42
+- v1 requirements: 48 total
+- Mapped to phases: 48
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 

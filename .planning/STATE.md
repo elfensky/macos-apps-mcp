@@ -1,20 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 04
-current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+current_phase: "03.1"
+current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
 status: planning
-stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-10-11T16:22:02.646Z"
+stopped_at: Phase 03.1 inserted, ready to plan Phase 03.1
+last_updated: "2026-10-11T21:16:18.404Z"
 last_activity: 2026-10-11
-last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: 2fa3524102b09479899fddb4c9d5886b504fd2e8
+last_activity_desc: Phase 03.1 inserted before Phase 04 (bugs before features)
+state_head: a9c4f2c3d3638a04b638037f0de1d5f8c7a9f547
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 4
   total_plans: 38
   completed_plans: 38
-  percent: 57
 ---
 
 # Project State
@@ -24,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 03 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+**Current focus:** Phase 03.1 — Bug Fixes — Device-Report Findings Before Any Feature
 
 ## Current Position
 
-Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+Phase: 03.1 — Bug Fixes — Device-Report Findings Before Any Feature
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-11 — Phase 03 complete, transitioned to Phase 04
+Last activity: 2026-10-11 — Phase 03.1 inserted before Phase 04 (bugs before features)
 
-Progress: [██████░░░░] 57%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -155,6 +154,7 @@ Recent decisions affecting current work:
 - Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
 - Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
 - Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
+- Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
 
 ## Deferred Items
 
@@ -167,5 +167,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-09T17:56:33.702Z
-Stopped at: Phase 03 complete, ready to plan Phase 04
-Resume file: .planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-CONTEXT.md
+Stopped at: Phase 03.1 inserted, ready to plan Phase 03.1
+Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/
