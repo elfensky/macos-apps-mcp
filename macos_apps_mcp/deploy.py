@@ -77,12 +77,36 @@ def agent_status() -> str:
 # unquoted connect (a `#` in the path truncated at the fragment → "no such table") and
 # `except sqlite3.Error: return None`, which swallowed missing-file and chmod-000 alike
 # (their OperationalErrors are byte-identical — measured). Only the columns the query
-# reads are fingerprinted, same rule as the adapters' stores.
-_TCC_FINGERPRINT = {"access": {"service", "client", "auth_value"}}
+# reads are fingerprinted, same rule as the adapters' stores. auth_reason and
+# indirect_object_identifier exist in `access` since macOS 11 / 10.14; the floor is 14.
+_TCC_FINGERPRINT = {
+    "access": {
+        "service",
+        "client",
+        "auth_value",
+        "auth_reason",
+        "indirect_object_identifier",
+    }
+}
 # TCC auth_value meanings. `granted` stays the auth==2 bool (wire-stable for existing
 # consumers); a non-binary state (limited/prompt/unknown) additionally carries
 # `status`, so limited(3) — partial access — stops masquerading as a plain denial.
 _TCC_AUTH = {0: "denied", 1: "unknown", 2: "granted", 3: "limited"}
+# #318: a consent prompt that nobody answers is stored as a denial with reason 9.
+_TCC_REASON = {
+    1: "error",
+    2: "user-consent",
+    3: "user-set",
+    4: "system-set",
+    5: "service-policy",
+    6: "mdm",
+    7: "override",
+    8: "missing-usage-string",
+    9: "prompt-timeout",
+    10: "preflight-unknown",
+    11: "entitled",
+    12: "app-type-policy",
+}
 
 
 def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
@@ -107,7 +131,8 @@ def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
         marks = ",".join("?" for _ in wanted)
         return (
             conn.execute(
-                f"SELECT service, client, auth_value FROM access "  # noqa: S608
+                "SELECT service, client, auth_value, auth_reason, "  # noqa: S608
+                "indirect_object_identifier FROM access "
                 f"WHERE service IN ({marks})",
                 wanted,
             ).fetchall(),
@@ -123,7 +148,10 @@ def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
 
 def grant_report(services: list[str] | None = None) -> dict:
     """``grant_identities``' mapping PLUS the classified per-db read reason (C7) —
-    doctor prints the reason instead of unconditionally blaming FDA. Never raises."""
+    doctor prints the reason instead of unconditionally blaming FDA. Never raises.
+    #318: an entry also carries ``target`` (AppleEvents' controlled app, when real),
+    ``reason`` (TCC's auth_reason, denied rows only) and, for a prompt that timed out,
+    the ``remediation`` that clears it."""
     wanted = services or _SERVICES
     u_rows, u_reason = _tcc_rows(_TCC_DB, wanted)
     s_rows, s_reason = _tcc_rows(_TCC_SYSTEM_DB, wanted)
@@ -131,10 +159,23 @@ def grant_report(services: list[str] | None = None) -> dict:
     if not (u_rows is None and s_rows is None):
         identities = {}
         for rows in (u_rows, s_rows):
-            for service, client, auth in rows or []:
-                entry = {"client": client, "granted": auth == 2}
+            for service, client, auth, reason, target in rows or []:
+                entry = {"client": client}
+                if target not in (None, "", "UNUSED"):
+                    entry["target"] = target
+                entry["granted"] = auth == 2
                 if auth not in (0, 2):  # limited/prompt/future values: say which
                     entry["status"] = _TCC_AUTH.get(auth, f"unknown({auth})")
+                if auth == 0:
+                    entry["reason"] = _TCC_REASON.get(reason, f"unknown({reason})")
+                    if reason == 9:
+                        entry["remediation"] = (
+                            "The consent prompt timed out with nobody at the screen; "
+                            "macOS keeps that as a denial and does not ask again. Run "
+                            f"`tccutil reset {service.removeprefix('kTCCService')} "
+                            f"{client}`, then doctor(request=True) with someone at "
+                            "the screen."
+                        )
                 identities.setdefault(service, []).append(entry)
     return {"identities": identities, "reasons": {"user": u_reason, "system": s_reason}}
 

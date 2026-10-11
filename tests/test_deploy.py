@@ -10,19 +10,33 @@ from macos_apps_mcp import deploy
 from macos_apps_mcp.errors import NativeError
 
 
-def _fake_tcc(path):
+def _tcc_db(path, rows):
+    """A five-column ``access`` table (#318) holding the given 5-tuples."""
     c = sqlite3.connect(path)
-    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
-    c.executemany(
-        "INSERT INTO access VALUES (?,?,?)",
-        [
-            ("kTCCServiceCalendar", "com.apple.Terminal", 2),
-            ("kTCCServiceCalendar", "ren.lav.macos-apps-mcp", 2),
-            ("kTCCServiceSystemPolicyAllFiles", "ren.lav.macos-apps-mcp", 0),
-        ],
+    c.execute(
+        "CREATE TABLE access (service TEXT, client TEXT, auth_value INT, "
+        "auth_reason INT, indirect_object_identifier TEXT)"
     )
+    c.executemany("INSERT INTO access VALUES (?,?,?,?,?)", rows)
     c.commit()
     c.close()
+
+
+def _fake_tcc(path):
+    _tcc_db(
+        path,
+        [
+            ("kTCCServiceCalendar", "com.apple.Terminal", 2, 2, "UNUSED"),
+            ("kTCCServiceCalendar", "ren.lav.macos-apps-mcp", 2, 2, "UNUSED"),
+            (
+                "kTCCServiceSystemPolicyAllFiles",
+                "ren.lav.macos-apps-mcp",
+                0,
+                3,
+                "UNUSED",
+            ),
+        ],
+    )
 
 
 def test_grant_identities_maps_rows(tmp_path, monkeypatch):
@@ -39,7 +53,7 @@ def test_grant_identities_maps_rows(tmp_path, monkeypatch):
     assert {"client": "ren.lav.macos-apps-mcp", "granted": True} in cal
     assert {"client": "com.apple.Terminal", "granted": True} in cal
     assert out["kTCCServiceSystemPolicyAllFiles"] == [
-        {"client": "ren.lav.macos-apps-mcp", "granted": False}
+        {"client": "ren.lav.macos-apps-mcp", "granted": False, "reason": "user-set"}
     ]
 
 
@@ -47,22 +61,14 @@ def test_grant_identities_merges_system_db_fda(tmp_path, monkeypatch):
     # #123: FDA rows live ONLY in the system TCC db — the merge must surface them
     # even when the user db has no AllFiles row at all.
     user_db = tmp_path / "user.db"
-    c = sqlite3.connect(user_db)
-    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
-    c.execute(
-        "INSERT INTO access VALUES ('kTCCServiceCalendar','ren.lav.macos-apps-mcp',2)"
+    _tcc_db(
+        user_db, [("kTCCServiceCalendar", "ren.lav.macos-apps-mcp", 2, 2, "UNUSED")]
     )
-    c.commit()
-    c.close()
     sys_db = tmp_path / "system.db"
-    c = sqlite3.connect(sys_db)
-    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
-    c.execute(
-        "INSERT INTO access VALUES "
-        "('kTCCServiceSystemPolicyAllFiles','ren.lav.macos-apps-mcp',2)"
+    _tcc_db(
+        sys_db,
+        [("kTCCServiceSystemPolicyAllFiles", "ren.lav.macos-apps-mcp", 2, 2, "UNUSED")],
     )
-    c.commit()
-    c.close()
     monkeypatch.setattr(deploy, "_TCC_DB", user_db)
     monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", sys_db)
     out = deploy.grant_identities()
@@ -137,11 +143,7 @@ def test_grant_identities_limited_carries_status(tmp_path, monkeypatch):
     # C7: limited(3) (partial access) used to masquerade as a plain denial — it still
     # reports granted=False (wire-stable) but now carries status="limited".
     db = tmp_path / "TCC.db"
-    c = sqlite3.connect(db)
-    c.execute("CREATE TABLE access (service TEXT, client TEXT, auth_value INT)")
-    c.execute("INSERT INTO access VALUES ('kTCCServiceCalendar','limited.app',3)")
-    c.commit()
-    c.close()
+    _tcc_db(db, [("kTCCServiceCalendar", "limited.app", 3, 2, "UNUSED")])
     monkeypatch.setattr(deploy, "_TCC_DB", db)
     monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
     out = deploy.grant_identities(["kTCCServiceCalendar"])
@@ -310,3 +312,89 @@ def test_allow_send_file_reaches_the_gate_only_under_the_daemon(tmp_path, monkey
     # READ_ONLY still wins unconditionally (#104)
     monkeypatch.setenv("MACOS_APPS_READ_ONLY", "1")
     assert tiers.allow_send("mail") is False
+
+
+# --- #318: the grant map names the denial reason and the AppleEvents target --------
+
+_ME = "ren.lav.macos-apps-mcp"
+
+
+def _entries(tmp_path, monkeypatch, rows, service):
+    db = tmp_path / "TCC.db"
+    _tcc_db(db, rows)
+    monkeypatch.setattr(deploy, "_TCC_DB", db)
+    monkeypatch.setattr(deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
+    return deploy.grant_identities([service])[service]
+
+
+def test_timed_out_prompt_is_prompt_timeout_with_remediation(tmp_path, monkeypatch):
+    # #318: reason 9 is a prompt nobody answered; it must say so and name the way out.
+    svc = "kTCCServiceAppleEvents"
+    (entry,) = _entries(
+        tmp_path, monkeypatch, [(svc, _ME, 0, 9, "com.apple.mail")], svc
+    )
+    assert entry["client"] == _ME and entry["target"] == "com.apple.mail"
+    assert entry["granted"] is False and entry["reason"] == "prompt-timeout"
+    assert f"tccutil reset AppleEvents {_ME}" in entry["remediation"]
+    assert "doctor(request=True)" in entry["remediation"]
+
+
+def test_remediation_names_the_rows_own_service(tmp_path, monkeypatch):
+    # #318: never `All`; the command resets the one service the row is about.
+    svc = "kTCCServiceCalendar"
+    (entry,) = _entries(tmp_path, monkeypatch, [(svc, _ME, 0, 9, "UNUSED")], svc)
+    assert f"tccutil reset Calendar {_ME}" in entry["remediation"]
+
+
+def test_user_denial_has_reason_and_no_remediation(tmp_path, monkeypatch):
+    # #318
+    svc = "kTCCServiceAppleEvents"
+    out = _entries(tmp_path, monkeypatch, [(svc, _ME, 0, 2, "com.apple.Notes")], svc)
+    assert out == [
+        {
+            "client": _ME,
+            "target": "com.apple.Notes",
+            "granted": False,
+            "reason": "user-consent",
+        }
+    ]
+
+
+def test_unknown_denial_reason(tmp_path, monkeypatch):
+    # #318
+    svc = "kTCCServiceCalendar"
+    (entry,) = _entries(tmp_path, monkeypatch, [(svc, _ME, 0, 42, "UNUSED")], svc)
+    assert entry["reason"] == "unknown(42)" and "remediation" not in entry
+
+
+def test_granted_entry_carries_target_not_reason(tmp_path, monkeypatch):
+    # #318
+    svc = "kTCCServiceAppleEvents"
+    out = _entries(tmp_path, monkeypatch, [(svc, _ME, 2, 3, "com.apple.Photos")], svc)
+    assert out == [{"client": _ME, "target": "com.apple.Photos", "granted": True}]
+
+
+@pytest.mark.parametrize("target", [None, "", "UNUSED"])
+def test_no_real_target_means_no_target_key(tmp_path, monkeypatch, target):
+    # #318
+    svc = "kTCCServiceCalendar"
+    out = _entries(tmp_path, monkeypatch, [(svc, _ME, 2, 2, target)], svc)
+    assert out == [{"client": _ME, "granted": True}]
+
+
+@pytest.mark.parametrize("dropped", ["auth_reason", "indirect_object_identifier"])
+def test_tcc_rows_missing_new_column_is_schema_drift(tmp_path, dropped):
+    # #318: both new columns are fingerprinted; an older table reads schema-drift.
+    cols = {
+        "service",
+        "client",
+        "auth_value",
+        "auth_reason",
+        "indirect_object_identifier",
+    } - {dropped}
+    db = tmp_path / "TCC.db"
+    c = sqlite3.connect(db)
+    c.execute(f"CREATE TABLE access ({', '.join(sorted(cols))})")
+    c.commit()
+    c.close()
+    assert deploy._tcc_rows(db, ["kTCCServiceCalendar"]) == (None, "schema-drift")
