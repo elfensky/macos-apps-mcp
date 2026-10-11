@@ -5,10 +5,10 @@ current_phase: 04
 current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 status: planning
 stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-10-11T01:37:27.219Z"
+last_updated: "2026-10-11T11:42:45.101Z"
 last_activity: 2026-10-11
 last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: c38a32b02d67e6ff5371198bcba5641b0ea71c9c
+state_head: ff345a58e2dd54074106f9340f88be659aeb2a9c
 progress:
   total_phases: 7
   completed_phases: 4
@@ -144,6 +144,7 @@ Recent decisions affecting current work:
 | 261011-4iv | The 0.14.2 universal .app verified on an Intel CPU (iMac, macOS 15): daemon, doctor, reads, seal; found #317, #318, #322 (#205, PR #323) | 2026-10-11 | 4b404eb | [261011-4iv-205-item-3-the-0-14-2-universal-app-veri](./quick/261011-4iv-205-item-3-the-0-14-2-universal-app-veri/) |
 | 12 | Release bump 0.14.2 — Universal app (#205, #296, #299) | 2026-10-08 | 36827fe | — |
 | 20 | Release bump 0.14.3 — Local reminders: pyproject, Info.plist, uv.lock root line, CHANGELOG header (PR #325; release PR #326, tag v0.14.3) | 2026-10-11 | c38a32b | — |
+| 261011-imn | doctor counts an answered -1728 probe as ok (#317); grant map names the TCC denial reason, prompt-timeout reset command and AppleEvents target (#318); PR #328. Also: PyPI 0.14.3 published, Gmail test label removed | 2026-10-11 | ff345a5 | [261011-imn-317-318-doctor-counts-an-answered-1728-p](./quick/261011-imn-317-318-doctor-counts-an-answered-1728-p/) |
 
 ### Roadmap Evolution
 
