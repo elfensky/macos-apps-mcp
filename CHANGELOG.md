@@ -18,6 +18,12 @@ surface may still shift between minor versions.
   (`prompt-timeout`, `user-consent`, …), and a `prompt-timeout` entry also carries the
   `tccutil reset` command that clears it. AppleEvents entries carry `target`, the controlled
   app's bundle id.
+- **`uvx macos-apps-mcp` installs on an Intel Mac without a Rust toolchain** (#322) —
+  cryptography 49 and later ship macOS wheels for Apple silicon only, so on an Intel Mac
+  uvx resolved cryptography 50 and built it from source, which needs Rust. The package now
+  requires cryptography below 49 on Intel Macs only, so uvx and `uv sync` take the 48.x
+  wheel; Apple silicon is unchanged. The workaround in the 0.14.3 release notes
+  (`uvx --no-build-package cryptography`) is not needed from the next release.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 
