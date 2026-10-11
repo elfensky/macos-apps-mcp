@@ -66,9 +66,9 @@ pycparser. Only auth code uses them: mcp's `pyjwt[crypto]`, fastmcp's auth modul
 and joserfc. The daemon configures no auth, so no daemon, shim or tool path imports them.
 cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
 the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the
-dev venv keeps them. On an Intel Mac, the dev venv and a PyPI install (`uvx`) still resolve
-cryptography; `uv sync --no-install-package cryptography` works for the dev venv, and the
-PyPI install is tracked in #322.
+dev venv keeps them. On an Intel Mac, `pyproject.toml` caps cryptography below 49 (#322).
+The dev venv and a PyPI install (`uvx`) get 48.x, the last release with an Intel wheel, so
+nothing is built from source.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
