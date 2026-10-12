@@ -246,7 +246,21 @@ Plans:
   5. A `.app` built from `develop` at the end of the phase runs as the daemon on the Intel iMac (`doctor().build` names that commit). Through it, `doctor(request=True)` with Photos quit reports the photos surface ok (#317, #337), and criteria 2–4 hold.
   6. The Intel iMac device report carries its three corrections, landed by a records PR, and the iMac's firmware and security detail is gone from every tracked file (#333).
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+**Wave 1**
+- [ ] 03.1-01-PLAN.md — iMac probe first: Contacts, Notes and Mail measured through the 0.14.3 daemon and outside it; every issue gets a mechanical route (D-07..D-11)
+- [ ] 03.1-02-PLAN.md — Every audit record carries `dry_run` and `caller`; the shim forwards the real client identity (D-01..D-06, #222)
+- [ ] 03.1-03-PLAN.md — Device-report corrections and the firmware-detail scrub: one records PR, one docs PR (D-15, D-16, #333)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 03.1-04-PLAN.md — Contacts fix by the measured route: bulk read, contacts host cap, or an error that names the cause (D-09, #334)
+- [ ] 03.1-05-PLAN.md — Notes count settled on device; the filter changes only if it drops a live note (D-10, #335)
+- [ ] 03.1-06-PLAN.md — `mail_overview` labels an account Mail does not list; one bounded map re-read for a stale map (D-11, #336)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 03.1-07-PLAN.md — Build from `develop`, draft-release courier, iMac install, device proofs; closes #317, #337, #334, #335, #336 (D-12..D-14)
 
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
