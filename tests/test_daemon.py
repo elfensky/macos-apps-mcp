@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -399,3 +400,54 @@ def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch)
     assert second["args"] == {"id": "B", "dry_run": "false"}
     assert second["dry_run"] is False
     assert second["caller"] == "claude-code 2.1.9"
+
+
+def _factory_calls(monkeypatch, get_context, shim_id="abc12345", n=1):
+    """Drive `_shim_client_factory` with `daemon.get_context` and `daemon._Client`
+    patched; returns the `client_info` of each client the factory built."""
+    seen = []
+    monkeypatch.setattr(daemon, "get_context", get_context)
+    monkeypatch.setattr(
+        daemon, "_Client", lambda transport, client_info: seen.append(client_info)
+    )
+    f = daemon._shim_client_factory(object(), shim_id)
+    for _ in range(n):
+        f()
+    return seen
+
+
+def _context_with(client_params):
+    return lambda: SimpleNamespace(session=SimpleNamespace(client_params=client_params))
+
+
+def test_shim_client_factory_copies_the_client_info(monkeypatch):
+    params = SimpleNamespace(
+        clientInfo=Implementation(name="claude-code", version="2.1.9")
+    )
+    (info,) = _factory_calls(monkeypatch, _context_with(params))
+    assert (info.name, info.version) == ("claude-code", "2.1.9")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_initialize_path_uses_the_shim_identity(monkeypatch):
+    # proxy.py:90 — initialize runs before the front session stores client_params
+    (info,) = _factory_calls(monkeypatch, _context_with(None))
+    assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_ping_path_uses_the_shim_identity(monkeypatch):
+    # proxy.py:921 — ping_remote runs outside a request, so get_context() raises
+    def no_context():
+        raise RuntimeError("No active context found.")
+
+    (info,) = _factory_calls(monkeypatch, no_context)
+    assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_session_is_stable_per_factory(monkeypatch):
+    first, second = _factory_calls(monkeypatch, _context_with(None), n=2)
+    assert first.session == second.session == "abc12345"
+    (other,) = _factory_calls(monkeypatch, _context_with(None), shim_id="def67890")
+    assert other.session == "def67890"
