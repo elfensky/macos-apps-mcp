@@ -13,8 +13,11 @@ import pytest
 import uvicorn
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.providers.proxy import FastMCPProxy
+from mcp.types import Implementation
 
-from macos_apps_mcp import daemon
+from macos_apps_mcp import audit as au
+from macos_apps_mcp import daemon, registry
 
 
 @pytest.fixture(autouse=True)
@@ -344,3 +347,55 @@ def test_factory_without_a_running_loop_still_builds_the_client(sockdir):
     """#302: no running loop means nothing to install on; the client is returned."""
     client = daemon._uds_client_factory(sockdir / "s.sock")()
     assert isinstance(client, httpx.AsyncClient)
+
+
+def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch):
+    """#222 tracer: front client -> FastMCPProxy(shim client factory) -> real unix
+    socket -> daemon-side AuditMiddleware. The record names the REAL client (not the
+    daemon's `mcp 0.1.0`), carries the shim id, and states the resolved dry_run."""
+
+    def delete_x(id: str, dry_run: bool = True) -> dict:
+        return {"id": id, "dry_run": dry_run}
+
+    records: list[dict] = []
+    monkeypatch.setattr(au, "audit_write", records.append)
+    monkeypatch.setattr(au, "usage_log", lambda tool: None)
+    app = FastMCP("t")
+    app.add_middleware(
+        au.AuditMiddleware(
+            audit_verbs={"delete_x": "delete"},
+            snapshot_sources={},
+            dry_run_defaults={"delete_x": registry._dry_run_default(delete_x)},
+        )
+    )
+    app.tool(delete_x)
+    p = sockdir / "mcp.sock"
+    s = _serve(app, p)
+    transport = StreamableHttpTransport(
+        "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+    )
+    proxy = FastMCPProxy(
+        client_factory=daemon._shim_client_factory(transport, "abc12345")
+    )
+
+    async def go():
+        async with Client(
+            proxy, client_info=Implementation(name="claude-code", version="2.1.9")
+        ) as c:
+            await asyncio.wait_for(c.call_tool("delete_x", {"id": "A"}), timeout=30)
+            await asyncio.wait_for(
+                c.call_tool("delete_x", {"id": "B", "dry_run": "false"}), timeout=30
+            )
+
+    try:
+        asyncio.run(go())
+    finally:
+        s.close()
+    assert len(records) == 2
+    first, second = records
+    assert first["op"] == "delete" and first["args"] == {"id": "A"}
+    assert first["dry_run"] is True
+    assert first["caller"] == "claude-code 2.1.9" and first["session"] == "abc12345"
+    assert second["args"] == {"id": "B", "dry_run": "false"}
+    assert second["dry_run"] is False
+    assert second["caller"] == "claude-code 2.1.9"
