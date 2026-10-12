@@ -20,7 +20,7 @@ actuals:
 PR #323, commit `4b404eb`. The device checks ran on 2026-10-11 through the iMac's own Claude
 session (Remote Control), after the owner's install on 2026-10-09.
 
-## Results (iMac 2012, OpenCore Legacy Patcher, SIP off, macOS 15)
+## Results (iMac 2012, macOS 15)
 
 - launchd `state = running`; app version 0.14.2.
 - `doctor()` through the shim: 0.14.2, build `aa27d32`, mcp 1.29.0 / fastmcp 3.4.7, daemon mode,
