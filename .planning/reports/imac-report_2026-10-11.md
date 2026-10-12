@@ -1,11 +1,11 @@
 # Device report: Intel iMac, v0.14.3 upgrade and verification (2026-10-11)
 
-Machine: `imac2012`, Intel iMac (OCLP, custom SIP), macOS 15.7.9, Local-source
+Machine: `imac2012`, Intel iMac, macOS 15.7.9, Local-source
 Reminders list. Run by Claude Code through the installed daemon
 (`deployment.mode: daemon`) with the user at the screen. Worktree under test:
 `origin/develop` at `4d6c183`. Issues covered: #297, #302, #307, #317, #318, #322.
 
-Outcome: 0.14.3 is installed and verified as the daemon. 20 checks pass. Two did
+Outcome: 0.14.3 is installed and verified as the daemon. 19 checks pass. Two did
 not: the subtask half of Part 4 was blocked because Reminders.app would not nest a
 reminder on this Local list, and `contacts()` timed out twice in Part 7.
 
@@ -50,7 +50,7 @@ reminder on this Local list, and `contacts()` timed out twice in Part 7.
 
 ## Skipped or blocked
 
-- Part 4e–i: nesting is unavailable in Reminders.app on this Local list (Indent greyed out), so the parent/tags read, the subtask refusal and the `with_subtasks` delete of #307 were not exercised. Both test reminders were removed. These paths need an iCloud-backed Mac.
+- Part 4e–i: nesting is unavailable in Reminders.app on this Local list (Indent greyed out), so the parent/tags read, the subtask refusal and the `with_subtasks` delete of #307 were not exercised. Reminders.app cannot indent a reminder on a Local list, so a Local reminder has no subtasks to read, refuse or delete. The iCloud subtask paths were verified in Phase 3 and #307. Tags on a Local list stay untested. Both test reminders were removed.
 - Part 5c: no prompt-timeout TCC entry exists on this Mac, so the `tccutil reset` remediation string was never produced.
 - Part 7 notes: three queries returned 0 with no error. A raw count of titled rows in NoteStore.sqlite returned 2, but checking which folder they sit in was blocked by the session's permission classifier, so whether 0 is correct is unverified.
 - Part 7 contacts: failed twice, stopped per the run rules.
