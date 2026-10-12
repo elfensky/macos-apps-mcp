@@ -36,6 +36,12 @@ see "Hardened-runtime check"; never `codesign --deep`) with
 `--timestamp --options runtime`. Omit `--sign` for an unsigned dev build (no Login Items
 registration will work without a signature, but the bundle still smoke-tests).
 
+The build compiles `packaging/AppIcon.icon`, an Icon Composer file, with Xcode's `actool`
+into `Contents/Resources` (`Assets.car` for macOS 26 and later, `AppIcon.icns` for older
+macOS). The build needs full Xcode, because the Command Line Tools have no `actool`. When
+`xcode-select` points at the Command Line Tools, the build uses `/Applications/Xcode.app`.
+For an Xcode at a different path, set `DEVELOPER_DIR` to its `Contents/Developer`.
+
 The build installs the exact versions in `uv.lock`, except cryptography, cffi and
 pycparser (see below), then runs `scripts/smoke_stream.py` on
 each slice of the bundled interpreter (one streamed tool call through the shim's transport).

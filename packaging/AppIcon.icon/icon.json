@@ -1,0 +1,547 @@
+{
+  "fill-specializations" : [
+    {
+      "value" : {
+        "solid" : "extended-gray:0.00000,1.00000"
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "solid" : "extended-gray:0.00000,1.00000"
+      }
+    }
+  ],
+  "groups" : [
+    {
+      "blur-material" : null,
+      "layers" : [
+
+      ],
+      "lighting" : "combined",
+      "name" : "03 Mark",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.7
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0
+      }
+    },
+    {
+      "blur-material" : null,
+      "layers" : [
+        {
+          "blend-mode" : "soft-light",
+          "fill-specializations" : [
+            {
+              "value" : {
+                "solid" : "extended-gray:0.75000,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "extended-gray:1.00000,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "16-mark.svg",
+          "name" : "16-mark",
+          "opacity" : 1,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              5.110000000000014,
+              31.100000000000023
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "01-outer-red.svg",
+          "name" : "01-outer-red",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              1.2200000000000273,
+              -7.970000000000141
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "02-outer-orange.svg",
+          "name" : "02-outer-orange",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "03-outer-yellow.svg",
+          "name" : "03-outer-yellow",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "04-outer-green.svg",
+          "name" : "04-outer-green",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "05-outer-cyan.svg",
+          "name" : "05-outer-cyan",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "06-outer-blue.svg",
+          "name" : "06-outer-blue",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "07-outer-indigo.svg",
+          "name" : "07-outer-indigo",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "08-outer-purple.svg",
+          "name" : "08-outer-purple",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "09-outer-pink.svg",
+          "name" : "09-outer-pink",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "blend-mode-specializations" : [
+            {
+              "appearance" : "tinted",
+              "value" : "darken"
+            }
+          ],
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : "automatic"
+            }
+          ],
+          "glass" : true,
+          "image-name" : "10-outer-brown.svg",
+          "name" : "10-outer-brown",
+          "opacity-specializations" : [
+            {
+              "value" : 0.33
+            },
+            {
+              "appearance" : "tinted",
+              "value" : 0.66
+            }
+          ],
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "01 Body outer",
+      "opacity-specializations" : [
+        {
+          "appearance" : "tinted",
+          "value" : 0.4
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.6
+      }
+    },
+    {
+      "blur-material" : null,
+      "hidden" : true,
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.03922,0.51765,1.00000,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "11-inner-blue.svg",
+          "name" : "11-inner-blue",
+          "opacity" : 0.7,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,0.62353,0.03922,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "12-inner-orange.svg",
+          "name" : "12-inner-orange",
+          "opacity" : 0.7,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.18824,0.81961,0.34510,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "13-inner-green.svg",
+          "name" : "13-inner-green",
+          "opacity" : 0.7,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,0.27059,0.22745,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "14-inner-red.svg",
+          "name" : "14-inner-red",
+          "opacity" : 0.7,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:0.36863,0.36078,0.90196,1.00000"
+              }
+            }
+          ],
+          "glass" : true,
+          "image-name" : "15-inner-indigo.svg",
+          "name" : "15-inner-indigo",
+          "opacity" : 0.7,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "lighting" : "individual",
+      "name" : "02 Body inner",
+      "opacity-specializations" : [
+        {
+          "appearance" : "tinted",
+          "value" : 0.4
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.6
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}
