@@ -31,7 +31,12 @@ from pathlib import Path
 import anyio
 from fastmcp.server.middleware import Middleware
 
+# pydantic arrives through mcp's declared `pydantic>=2.11,<3` (>=2.12 on Python 3.14).
+# pyproject.toml is not edited: version.yml fails a PR that edits it without a bump.
+from pydantic import TypeAdapter, ValidationError
+
 from .contracts import Snapshotter
+from .text import clean_summary
 
 log = logging.getLogger("macos_apps_mcp")
 
@@ -211,6 +216,42 @@ def _safe_snapshot(source: Snapshotter, ident: str) -> dict | None:
         return None
 
 
+_BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to dry_run
+_FALLBACK_CALLER = "unknown-client"
+
+
+def _resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
+    """The ``dry_run`` the tool will act on (#222): the client's value coerced as
+    pydantic coerces it for the tool (``"false"`` is False), else the signature default;
+    a tool with no ``dry_run`` parameter always acts. The middleware runs BEFORE that
+    validation, so a rejected value falls back to the default — the call then fails
+    and no record is written."""
+    default = defaults.get(tool, False)
+    if "dry_run" not in args:
+        return default
+    try:
+        return _BOOL.validate_python(args["dry_run"])
+    except ValidationError:
+        return default
+
+
+def _caller(context) -> tuple[str, str | None]:
+    """``("<name> <version>", shim id | None)`` from the MCP client's ``clientInfo``.
+
+    Advisory labels, reported by the client: never an identity check, never a gate.
+    A context without ``fastmcp_context`` (in-process call, test double), without a
+    session, or without ``clientInfo`` gives the fixed fallback."""
+    try:
+        info = context.fastmcp_context.session.client_params.clientInfo
+        caller = clean_summary(f"{info.name} {info.version}")
+        session = getattr(info, "session", None)
+    except (AttributeError, RuntimeError):
+        return _FALLBACK_CALLER, None
+    return caller or _FALLBACK_CALLER, (
+        clean_summary(session) if session else ""
+    ) or None
+
+
 # --- middleware ----------------------------------------------------------------------
 
 
@@ -225,18 +266,28 @@ class AuditMiddleware(Middleware):
     A tool is a write IFF it is a key of ``audit_verbs`` — the map both selects what
     gets logged and states under which verb (GATE-06: no separate write-tool set, and
     no generic ``"write"`` fallback for a verb the caller forgot to state).
+
+    Every record carries ``dry_run``, resolved from ``dry_run_defaults`` (a tool name ->
+    its signature default) when the caller omitted it; ``args`` stay as the client sent
+    them. ``caller`` (and ``session``, for a shim) are advisory client labels.
     """
 
     def __init__(
-        self, audit_verbs: Mapping[str, str], snapshot_sources: dict[str, Snapshotter]
+        self,
+        audit_verbs: Mapping[str, str],
+        snapshot_sources: dict[str, Snapshotter],
+        dry_run_defaults: Mapping[str, bool] | None = None,
     ) -> None:
         self._audit_verbs = audit_verbs
         self._snapshot_sources = snapshot_sources
+        self._dry_run_defaults = dry_run_defaults or {}
 
     async def on_call_tool(self, context, call_next):
         tool = context.message.name
         usage_log(tool)  # tally every call (reads included) — swallows its own errors
         args = dict(context.message.arguments or {})
+        dry_run = _resolve_dry_run(tool, args, self._dry_run_defaults)
+        caller, session = _caller(context)
         before = None
         source = self._snapshot_sources.get(tool)
         if source is not None and args.get("id"):
@@ -262,6 +313,9 @@ class AuditMiddleware(Middleware):
                         "tool": tool,
                         "op": self._audit_verbs[tool],
                         "args": _audit_args(args),
+                        "dry_run": dry_run,
+                        "caller": caller,
+                        **({"session": session} if session is not None else {}),
                         "target_id": args.get("id") or (after or {}).get("id"),
                         "before": before,
                         "after": after,

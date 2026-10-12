@@ -16,6 +16,7 @@ through FastMCP).
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -126,6 +127,27 @@ def audit_verbs() -> dict[str, str]:
         n: r.audit_verb
         for n, r in TOOLS.items()
         if r.audit_verb is not None and r.registered
+    }
+
+
+def _dry_run_default(fn) -> bool | None:
+    """The ``dry_run`` default in ``fn``'s signature, or ``None`` when the tool has no
+    ``dry_run`` parameter (or no default for it) — a tool that always acts."""
+    param = inspect.signature(fn).parameters.get("dry_run")
+    if param is None or param.default is inspect.Parameter.empty:
+        return None
+    return bool(param.default)
+
+
+def dry_run_defaults() -> dict[str, bool]:
+    """Every tool with an audit verb -> its signature ``dry_run`` default (#222), the
+    map ``AuditMiddleware`` resolves an omitted ``dry_run`` from. Unlike ``audit_verbs``
+    it does NOT filter on ``registered``: CI's ``MACOS_APPS_READ_ONLY=1`` pass and the
+    send tools (off by default) must see the same map as a fully enabled server."""
+    return {
+        n: d
+        for n, r in TOOLS.items()
+        if r.audit_verb is not None and (d := _dry_run_default(r.fn)) is not None
     }
 
 

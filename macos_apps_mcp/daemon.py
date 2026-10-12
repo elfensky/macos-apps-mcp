@@ -10,6 +10,7 @@ import errno
 import os
 import socket
 import sys
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,9 +18,16 @@ import httpx
 import uvicorn
 from fastmcp import Client as _Client
 from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
-from fastmcp.server import create_proxy
+from fastmcp.server.dependencies import get_context
+from fastmcp.server.providers.proxy import FastMCPProxy
 from mcp.shared.message import SessionMessage
-from mcp.types import ErrorData, JSONRPCError, JSONRPCMessage, JSONRPCResponse
+from mcp.types import (
+    ErrorData,
+    Implementation,
+    JSONRPCError,
+    JSONRPCMessage,
+    JSONRPCResponse,
+)
 
 
 class AlreadyRunning(Exception):
@@ -233,17 +241,43 @@ def shim_check(path: Path) -> None:
         probe.close()
 
 
+_SHIM_NAME = "macos-apps-mcp-shim"
+_SHIM_VERSION = "0"
+
+
+def _shim_client_factory(transport, shim_id: str):
+    """The proxy's per-request client factory (#222): each upstream client carries the
+    REAL client's ``clientInfo`` (name, version) plus ``shim_id`` as an extra field, so
+    the daemon's audit record names who called and which shim carried it. Without it
+    the daemon saw ``mcp 0.1.0`` and a new session on every call.
+
+    Two paths have no client params and use the fixed shim identity: ``initialize``
+    (``proxy.py:90`` — the front client's params are not stored yet) and ``ping``
+    (``proxy.py:921`` — ``get_context()`` raises outside a request)."""
+
+    def f():
+        try:
+            info = get_context().session.client_params.clientInfo
+            name, version = info.name, info.version
+        except Exception:  # noqa: BLE001 — either fallback path above
+            name, version = _SHIM_NAME, _SHIM_VERSION
+        return _Client(
+            transport,
+            client_info=Implementation(name=name, version=version, session=shim_id),
+        )
+
+    return f
+
+
 def run_shim() -> None:
     """Bridge the client's stdio to the daemon over the UDS (FastMCP proxy — the
     fork-resolved ~15-line shim). No TCC surface: this process only moves bytes."""
     path = socket_path()
     shim_check(path)
     fail_loud_on_dead_stream()
-    proxy = create_proxy(
-        _Client(
-            _HttpTransport(
-                "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
-            )
-        )
+    transport = _HttpTransport(
+        "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
     )
+    shim_id = uuid.uuid4().hex[:8]  # once per shim process
+    proxy = FastMCPProxy(client_factory=_shim_client_factory(transport, shim_id))
     proxy.run()  # stdio transport
