@@ -5,10 +5,10 @@ current_phase: "03.1"
 current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
 status: executing
 stopped_at: "Phase 03.1 wave 1: 03.1-02 and 03.1-03 landed (#344, #342, #343); 03.1-01 waits for the owner at the iMac"
-last_updated: "2026-10-12T15:40:55.949Z"
+last_updated: "2026-10-12T20:20:57.696Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 03.1 execution started
-state_head: c40e89dd75e0e5135306200b8be5df5d1930d750
+state_head: 22870dcd984ec26892d04f6d9dd84093b4c338c1
 progress:
   total_phases: 8
   completed_phases: 4
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 Phase: 03.1 (Bug Fixes — Device-Report Findings Before Any Feature) — EXECUTING
 Plan: 1 of 7
 Status: Executing Phase 03.1
-Last activity: 2026-10-12 — Phase 03.1 execution started
+Last activity: 2026-10-12 — Completed quick task 261012-utn: Ship the macOS app icon (packaging/AppIcon.icon, actool compile step, Info.plist icon keys)
 
 Progress: [█████░░░░░] 50%
 
@@ -145,6 +145,7 @@ Recent decisions affecting current work:
 | 20 | Release bump 0.14.3 — Local reminders: pyproject, Info.plist, uv.lock root line, CHANGELOG header (PR #325; release PR #326, tag v0.14.3) | 2026-10-11 | c38a32b | — |
 | 261011-imn | doctor counts an answered -1728 probe as ok (#317); grant map names the TCC denial reason, prompt-timeout reset command and AppleEvents target (#318); PR #328. Also: PyPI 0.14.3 published, Gmail test label removed | 2026-10-11 | ff345a5 | [261011-imn-317-318-doctor-counts-an-answered-1728-p](./quick/261011-imn-317-318-doctor-counts-an-answered-1728-p/) |
 | 261011-p90 | uvx on an Intel Mac installs without Rust: cryptography<49 on darwin x86_64 only (48.0.1 is the last Intel wheel); PR #330, closes #322 | 2026-10-11 | 2fa3524 | [261011-p90-322-uvx-on-an-intel-mac-installs-without](./quick/261011-p90-322-uvx-on-an-intel-mac-installs-without/) |
+| 261012-utn | Ship the macOS app icon: packaging/AppIcon.icon (Icon Composer), actool compile step in build_app.sh, Info.plist icon keys, packaging test, DAEMON.md note | 2026-10-12 | 22870dc | [261012-utn-ship-the-macos-app-icon-packaging-appico](./quick/261012-utn-ship-the-macos-app-icon-packaging-appico/) |
 
 ### Roadmap Evolution
 
