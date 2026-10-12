@@ -36,7 +36,7 @@ from fastmcp.server.middleware import Middleware
 from pydantic import TypeAdapter, ValidationError
 
 from .contracts import Snapshotter
-from .text import clean_summary
+from .text import SUMMARY_MAX, sanitize_line
 
 log = logging.getLogger("macos_apps_mcp")
 
@@ -235,6 +235,12 @@ def _resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> 
         return default
 
 
+def _label(text: object) -> str:
+    """One line, control-free, at most ``SUMMARY_MAX`` characters — a hard cut, since
+    ``clean_summary`` appends a ``[truncated N chars]`` marker past the bound."""
+    return sanitize_line(text)[:SUMMARY_MAX]
+
+
 def _caller(context) -> tuple[str, str | None]:
     """``("<name> <version>", shim id | None)`` from the MCP client's ``clientInfo``.
 
@@ -243,13 +249,11 @@ def _caller(context) -> tuple[str, str | None]:
     session, or without ``clientInfo`` gives the fixed fallback."""
     try:
         info = context.fastmcp_context.session.client_params.clientInfo
-        caller = clean_summary(f"{info.name} {info.version}")
-        session = getattr(info, "session", None)
+        caller = _label(f"{info.name} {info.version}")
+        session = _label(getattr(info, "session", None) or "")
     except (AttributeError, RuntimeError):
         return _FALLBACK_CALLER, None
-    return caller or _FALLBACK_CALLER, (
-        clean_summary(session) if session else ""
-    ) or None
+    return caller or _FALLBACK_CALLER, session or None
 
 
 # --- middleware ----------------------------------------------------------------------
