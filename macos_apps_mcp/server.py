@@ -262,7 +262,11 @@ def audit(since: str | None = None) -> list[dict]:
     """Recent write audit entries (newest first) — what macos-apps-mcp changed, with
     before/after pointers, enough to reverse a change by hand. `since` optional ISO
     datetime (call now() to ground it) drops older entries; bounded to the last 50.
-    Read-only; no permission (reads a local log at ~/.local/state/macos-apps-mcp)."""
+    Each entry carries `dry_run` (resolved from the tool's default when the caller
+    omitted it, so a preview reads true) and `caller` (the MCP client's name and
+    version, plus `session` for a shim); `caller` is reported by the client, never an
+    identity check. Read-only; no permission (reads a local log at
+    ~/.local/state/macos-apps-mcp)."""
     return audit_read(since)
 
 
