@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "03.1"
 current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
 status: executing
-stopped_at: Phase 03.1 context gathered (assumptions mode)
-last_updated: "2026-10-12T15:27:50.245Z"
+stopped_at: "Phase 03.1 wave 1: 03.1-02 and 03.1-03 landed (#344, #342, #343); 03.1-01 waits for the owner at the iMac"
+last_updated: "2026-10-12T15:40:55.949Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 03.1 execution started
-state_head: 5a9f77a995ee47eb534693a1249336c3f2ce7a1c
+state_head: c40e89dd75e0e5135306200b8be5df5d1930d750
 progress:
   total_phases: 8
   completed_phases: 4
@@ -167,5 +167,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 03.1 context gathered (assumptions mode)
+Stopped at: Phase 03.1 wave 1: 03.1-02 and 03.1-03 landed (#344, #342, #343); 03.1-01 waits for the owner at the iMac
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
