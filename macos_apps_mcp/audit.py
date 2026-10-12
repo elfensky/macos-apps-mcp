@@ -4,7 +4,7 @@ Three parts, one seam:
 - **storage** — append-only JSONL under the XDG state dir (rotation, bounded reads;
   never raises: auditing must not fail a user's write);
 - **record schema** — what an audit envelope looks like (op, truncated args,
-  before/after pointers);
+  resolved dry_run, client caller, before/after pointers);
 - **AuditMiddleware** — the central seam: logs an envelope for EVERY tool named in its
   audit-verb map, with before-state captured only for id-addressed update/delete/
   complete tools. Adapters hold no audit logic; before-state comes through the
