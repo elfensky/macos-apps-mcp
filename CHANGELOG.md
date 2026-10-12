@@ -69,7 +69,7 @@ surface may still shift between minor versions.
 ### Notes
 
 - **The universal `.app` runs on an Intel CPU** (#205) — the 0.14.2 release, on an iMac
-  (2012, OpenCore Legacy Patcher) with macOS 15: the daemon registered and runs, `doctor()`
+  (2012) with macOS 15: the daemon registered and runs, `doctor()`
   reports 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to the
   bundle, Mail, Calendar and Reminders reads work through the shim, and the code seal holds
   after the first run. The run found #317, #318 and #322.
