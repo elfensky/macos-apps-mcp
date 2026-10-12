@@ -55,7 +55,7 @@ The build reads that key and picks wheels for it. Before signing, it fails unles
 Mach-O is `x86_64 arm64` and no slice needs a newer macOS. A good build log shows
 `smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. The build smokes both
 slices on an Apple-silicon Mac (x86_64 under Rosetta). The signed 0.14.2 release also runs on
-an Intel CPU: an iMac (2012, OpenCore Legacy Patcher, SIP off) on macOS 15, 2026-10-09..11.
+an Intel CPU: an iMac (2012) on macOS 15, 2026-10-09..11.
 There, the release zip installed and `install-agent` registered the daemon; `doctor()`
 reported 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to
 `ren.lav.macos-apps-mcp`; Mail, Calendar and Reminders reads worked through the shim; and
