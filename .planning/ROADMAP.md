@@ -240,11 +240,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field. A test calls a write tool without `dry_run` and its record states `dry_run: true` (#222).
-  2. On the Intel iMac, `contacts("an")` answers, or fails with an error that names the real cause. The cause is found first: narrow-query timing, the same `whose` scan in Script Editor, and the state of Contacts. The fix is the SQLite plane of #95 or a contacts-specific host timeout whose script backstop stays at or above the host cap (#334).
+  2. On the Intel iMac, `contacts("an")` answers, or fails with an error that names the real cause. The cause is found first: narrow-query timing, the same `whose` scan in Script Editor, and the state of Contacts. The fix follows the measured cause: a bulk read that runs the `whose` scan once, a contacts-specific host timeout whose script backstop stays at or above the host cap, or an error text that names the cause. The SQLite plane of #95 stays v2 (#334).
   3. On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted. A count with the tool's own SQLite filter settles it; if the filter drops a live note, the filter is fixed (#335).
   4. On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none. The cause of the raw UUID is recorded (#336).
   5. A `.app` built from `develop` at the end of the phase runs as the daemon on the Intel iMac (`doctor().build` names that commit). Through it, `doctor(request=True)` with Photos quit reports the photos surface ok (#317, #337), and criteria 2–4 hold.
-  6. The Intel iMac device report carries its three corrections, landed by a records PR (#333).
+  6. The Intel iMac device report carries its three corrections, landed by a records PR, and the iMac's firmware and security detail is gone from every tracked file (#333).
 
 **Plans**: TBD
 
