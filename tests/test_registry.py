@@ -442,3 +442,28 @@ def test_delete_reminder_registration_record():
     assert isinstance(r.snapshot, ReminderDeleteSnapshotter)
     assert inspect.signature(r.fn).parameters["dry_run"].default is True
     assert "delete_reminder" in reg.removes_content_tools()
+
+
+def test_dry_run_defaults_match_d02():
+    # #222 / D-02. Reads registry.TOOLS (every record, registered or not), so it holds
+    # under MACOS_APPS_READ_ONLY=1 and with the send tools off.
+    got = reg.dry_run_defaults()
+    assert {n for n, d in got.items() if d} == {
+        "delete_draft",
+        "move_mail",
+        "trash_mail",
+        "mail_undo",
+        "send_mail",
+        "reply_all",
+        "forward_mail",
+        "delete_reminder",
+        "delete_event",
+        "delete_note",
+        "update_note",
+    }
+    assert got["update_mail_status"] is False
+    assert got["run_shortcut"] is False
+    assert set(got) == {n for n, d in got.items() if d} | {
+        "update_mail_status",
+        "run_shortcut",
+    }

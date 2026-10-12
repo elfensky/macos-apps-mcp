@@ -121,3 +121,13 @@ def test_audit_op_labels_send_tools_distinctly_from_write():
     # ping is not a write — it carries no audit verb at all.
     assert "ping" not in registry.audit_verbs()
     assert registry.TOOLS["ping"].audit_verb is None
+
+
+def test_audit_read_returns_an_old_record_without_dry_run_or_caller(
+    tmp_path, monkeypatch
+):
+    # #222 / D-03: records written before dry_run/caller existed are not migrated.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    old = {"ts": "2026-07-21T10:00:00", "tool": "delete_note", "op": "delete"}
+    (tmp_path / "audit.jsonl").write_text(json.dumps(old) + "\n", encoding="utf-8")
+    assert au.audit_read() == [old]

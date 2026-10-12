@@ -12,16 +12,24 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+from fastmcp import Client, FastMCP
+from fastmcp.exceptions import ToolError
+
 import macos_apps_mcp.audit as au
+import macos_apps_mcp.registry as registry
+import macos_apps_mcp.server as srv
+import macos_apps_mcp.tiers as tiers
 from macos_apps_mcp.contracts import Pointer, Snapshotter
 
 _AUDIT_VERBS = {"create_event": "create", "update_event": "update"}
 
 
-def _mw(snapshot_sources=None, audit_verbs=None):
+def _mw(snapshot_sources=None, audit_verbs=None, dry_run_defaults=None):
     return au.AuditMiddleware(
         audit_verbs=_AUDIT_VERBS if audit_verbs is None else audit_verbs,
         snapshot_sources=snapshot_sources or {},
+        dry_run_defaults=dry_run_defaults,
     )
 
 
@@ -190,3 +198,181 @@ def test_server_snapshot_sources_are_derived_and_satisfy_the_protocol():
     all_writes = {n for n, r in registry.TOOLS.items() if r.is_write}
     # every snapshot-capable tool is also a write tool (every record, registered or not)
     assert set(snapshot_sources) <= all_writes
+
+
+# --- #222: the record tells a preview from a write, and names the client -------------
+
+
+def _delete_x_app():
+    """A local app with the REAL middleware: `delete_x` previews by default."""
+
+    def delete_x(id: str, dry_run: bool = True) -> dict:
+        return {"id": id, "dry_run": dry_run}
+
+    app = FastMCP("t")
+    app.add_middleware(
+        _mw(
+            audit_verbs={"delete_x": "delete"},
+            dry_run_defaults={"delete_x": registry._dry_run_default(delete_x)},
+        )
+    )
+    app.tool(delete_x)
+    return app
+
+
+def _call(app, arguments):
+    async def go():
+        async with Client(app) as c:
+            return await c.call_tool("delete_x", arguments)
+
+    return asyncio.run(go())
+
+
+_OMITTED = object()
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (_OMITTED, True),
+        ("false", False),
+        ("FALSE", False),
+        ("0", False),
+        ("no", False),
+        (0, False),
+        (False, False),
+        ("1", True),
+        ("yes", True),
+        (True, True),
+    ],
+    ids=repr,
+)
+def test_dry_run_coercion_matches_the_tools_own(monkeypatch, value, expected):
+    # A real write is never recorded as a preview, nor a preview as a write.
+    records = _capture(monkeypatch)
+    args = {"id": "A"} if value is _OMITTED else {"id": "A", "dry_run": value}
+    _call(_delete_x_app(), args)
+    assert [r["dry_run"] for r in records] == [expected]
+    assert records[0]["args"] == args  # as the client sent them
+
+
+@pytest.mark.parametrize("value", ["banana", " false", None], ids=repr)
+def test_dry_run_rejected_value_fails_the_call_and_writes_no_record(monkeypatch, value):
+    records = _capture(monkeypatch)
+    with pytest.raises(ToolError):
+        _call(_delete_x_app(), {"id": "A", "dry_run": value})
+    assert records == []
+
+
+def test_dry_run_sent_default_and_omitted_record_the_same(monkeypatch):
+    records = _capture(monkeypatch)
+    _call(_delete_x_app(), {"id": "A", "dry_run": True})
+    _call(_delete_x_app(), {"id": "A"})
+    sent, omitted = records
+    assert sent["dry_run"] is True and omitted["dry_run"] is True
+    assert sent["args"] == {"id": "A", "dry_run": True}
+    assert omitted["args"] == {"id": "A"}
+
+
+def test_dry_run_no_arguments_records_the_tools_default(monkeypatch):
+    records = _capture(monkeypatch)
+    mw = _mw(audit_verbs={"t": "x"}, dry_run_defaults={"t": True})
+    _run(mw, _ctx("t", None), _Result({"id": "X-1"}))
+    _run(mw, _ctx("t", {}), _Result({"id": "X-2"}))
+    assert [r["dry_run"] for r in records] == [True, True]
+
+
+def test_dry_run_false_default_and_unknown_tool_record_false(monkeypatch):
+    records = _capture(monkeypatch)
+    mw = _mw(
+        audit_verbs={"a": "x", "b": "x"},
+        dry_run_defaults={"a": False},  # b has no dry_run parameter at all
+    )
+    _run(mw, _ctx("a", {}), _Result({"id": "1"}))
+    _run(mw, _ctx("b", {}), _Result({"id": "2"}))
+    assert [r["dry_run"] for r in records] == [False, False]
+
+
+def test_caller_without_a_fastmcp_context_is_the_fallback(monkeypatch):
+    records = _capture(monkeypatch)
+    _run(_mw(), _ctx("create_event", {}), _Result({"id": "E-1"}))
+    assert records[0]["caller"] == "unknown-client"
+    assert "session" not in records[0]
+
+
+def _ctx_with_client(info, name="create_event"):
+    ctx = _ctx(name, {})
+    ctx.fastmcp_context = SimpleNamespace(
+        session=SimpleNamespace(client_params=SimpleNamespace(clientInfo=info))
+    )
+    return ctx
+
+
+def test_caller_names_the_client_and_the_shim_session(monkeypatch):
+    records = _capture(monkeypatch)
+    info = SimpleNamespace(name="claude-code", version="2.1.9", session="abc12345")
+    _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
+    assert records[0]["caller"] == "claude-code 2.1.9"
+    assert records[0]["session"] == "abc12345"
+
+
+def test_caller_without_a_shim_session_has_no_session_key(monkeypatch):
+    records = _capture(monkeypatch)
+    info = SimpleNamespace(name="claude-code", version="2.1.9")
+    _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
+    assert records[0]["caller"] == "claude-code 2.1.9"
+    assert "session" not in records[0]
+
+
+def test_caller_is_one_bounded_line(monkeypatch):
+    records = _capture(monkeypatch)
+    info = SimpleNamespace(name="x" * 500 + "\nforged", version="1", session="s\n2")
+    _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
+    for key in ("caller", "session"):
+        assert "\n" not in records[0][key] and len(records[0][key]) <= 200
+
+
+@pytest.mark.parametrize(
+    "info", [SimpleNamespace(name="", version=""), None], ids=["blank", "no-info"]
+)
+def test_caller_blank_or_missing_client_info_is_the_fallback(monkeypatch, info):
+    records = _capture(monkeypatch)
+    _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
+    assert records[0]["caller"] == "unknown-client"
+    assert "session" not in records[0]
+
+
+def test_caller_outside_a_request_is_the_fallback(monkeypatch):
+    # `fastmcp_context.session` raises RuntimeError when no request is active
+    class _Ctx:
+        @property
+        def session(self):
+            raise RuntimeError("no active request")
+
+    records = _capture(monkeypatch)
+    ctx = _ctx("create_event", {})
+    ctx.fastmcp_context = _Ctx()
+    _run(_mw(), ctx, _Result({"id": "E-1"}))
+    assert records[0]["caller"] == "unknown-client"
+
+
+@pytest.mark.skipif(
+    tiers.read_only(), reason="write tools are absent under MACOS_APPS_READ_ONLY"
+)
+def test_dry_run_server_write_tool_called_without_it_records_a_preview(monkeypatch):
+    # ROADMAP 03.1 criterion 1 (#222): the real server, a real write tool, no dry_run.
+    class _Notes:
+        def delete(self, id, expect_title, dry_run):
+            return {"dry_run": dry_run, "would_delete": {"id": id}}
+
+    records = _capture(monkeypatch)
+    monkeypatch.setattr(srv, "_notes", _Notes())
+
+    async def go():
+        async with Client(srv.mcp) as c:
+            await c.call_tool("delete_note", {"id": "N-1"})
+
+    asyncio.run(go())
+    assert [r["tool"] for r in records] == ["delete_note"]
+    assert records[0]["dry_run"] is True
+    assert records[0]["args"] == {"id": "N-1"}
