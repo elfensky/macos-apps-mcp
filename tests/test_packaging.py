@@ -1,3 +1,4 @@
+import json
 import plistlib
 import tomllib
 from pathlib import Path
@@ -47,6 +48,30 @@ def test_info_plist_contract():
         "NSAppleEventsUsageDescription",
     ):
         assert info[key]
+
+
+def test_info_plist_names_the_icon():
+    """macOS 26 finds the Liquid Glass icon in Assets.car by CFBundleIconName, and
+    older macOS loads AppIcon.icns by CFBundleIconFile; both must match the build's
+    `--app-icon AppIcon`, or the .app shows the generic icon."""
+    info = plistlib.loads((PKG / "Info.plist").read_bytes())
+    assert info["CFBundleIconFile"] == "AppIcon"
+    assert info["CFBundleIconName"] == "AppIcon"
+
+
+def test_icon_composer_package_is_consistent():
+    """actool fails, or drops a layer, when a name in icon.json has no file; a stray
+    file is an asset no layer uses."""
+    icon = PKG / "AppIcon.icon"
+    doc = json.loads((icon / "icon.json").read_text())
+    named = {
+        layer["image-name"]
+        for group in doc["groups"]
+        for layer in group.get("layers", [])
+    }
+    assert named
+    assert named == {p.name for p in (icon / "Assets").iterdir()}
+    assert "macOS" in doc["supported-platforms"]["squares"]
 
 
 def test_entitlements_minimal():
@@ -110,6 +135,31 @@ def test_build_script_gates_universal2():
     assert src.index("-m compileall") < src.index('if [[ -n "$SIGN" ]]')
     # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
     assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
+
+
+def test_build_script_compiles_the_icon():
+    """The bundle reset would delete an earlier compile, and codesign seals
+    Contents/Resources, so an icon written after signing breaks the seal."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    for needle in (
+        "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun -f actool",
+        "the Command Line Tools have no actool",
+        '"$ACTOOL" "$REPO/packaging/AppIcon.icon"',
+        '--compile "$APP/Contents/Resources"',
+        "--platform macosx",
+        '--minimum-deployment-target "$MACOS_MIN"',
+        "--app-icon AppIcon",
+        '--output-partial-info-plist "$WORK/',
+        "for f in AppIcon.icns Assets.car",
+        "ICON COMPILE FAILED",
+    ):
+        assert needle in src, needle
+    # a Mac without actool fails before any download
+    assert src.index("the Command Line Tools have no actool") < src.index("curl -fsSL")
+    compile_at = src.index('"$ACTOOL" "$REPO/packaging/AppIcon.icon"')
+    assert src.index('rm -rf "$APP"; mkdir -p') < compile_at
+    assert compile_at < src.index('cp "$REPO/packaging/Info.plist"')
+    assert compile_at < src.index('if [[ -n "$SIGN" ]]')
 
 
 def test_build_script_compiles_hash_pyc():

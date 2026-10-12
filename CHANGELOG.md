@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **The `.app` carries an app icon** — a Liquid Glass icon compiled from an Icon Composer
+  file (`packaging/AppIcon.icon`), with a standard icon for macOS before 26. Building the
+  `.app` needs full Xcode for `actool` (see docs/DAEMON.md).
+
 ### Fixed
 
 - **doctor reports an answered -1728 probe as `ok`** (#317) — Photos, launched by the

@@ -18,7 +18,9 @@ esac; done
 
 [[ -n "$NOTARIZE" && -z "$SIGN" ]] && { echo "--notarize requires --sign" >&2; exit 2; }
 # Preflight: both slices are smoke-run here (x86_64 under Rosetta), and lipo/vtool
-# come from the Xcode Command Line Tools — fail now, not after the installs.
+# come from the Xcode Command Line Tools — fail now, not after the installs. actool
+# (the icon compiler) ships with full Xcode only; the absolute path from `xcrun -f`
+# runs without DEVELOPER_DIR, so it is never exported.
 /usr/bin/arch -arm64 /usr/bin/true 2>/dev/null \
   || { echo "build needs an Apple-silicon Mac (it runs the arm64 slice)" >&2; exit 2; }
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null \
@@ -26,6 +28,11 @@ esac; done
        "--agree-to-license" >&2; exit 2; }
 xcrun -f vtool >/dev/null 2>&1 \
   || { echo "build needs the Xcode Command Line Tools (lipo, vtool)" >&2; exit 2; }
+ACTOOL="$(xcrun -f actool 2>/dev/null \
+  || DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun -f actool 2>/dev/null)" \
+  || { echo "build needs full Xcode to compile packaging/AppIcon.icon;" \
+       "the Command Line Tools have no actool. Install Xcode, or set DEVELOPER_DIR" \
+       "to an Xcode's Contents/Developer" >&2; exit 2; }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
@@ -75,6 +82,17 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
 cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file (codesign)
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
+# The icon goes into Resources after the bundle reset and before signing: codesign
+# seals Resources, so a file written later breaks the seal.
+"$ACTOOL" "$REPO/packaging/AppIcon.icon" --compile "$APP/Contents/Resources" \
+  --platform macosx --minimum-deployment-target "$MACOS_MIN" --app-icon AppIcon \
+  --output-partial-info-plist "$WORK/icon-partial.plist" \
+  --output-format human-readable-text \
+  || { echo "ICON COMPILE FAILED: actool rejected packaging/AppIcon.icon" >&2; exit 1; }
+for f in AppIcon.icns Assets.car; do
+  [[ -s "$APP/Contents/Resources/$f" ]] \
+    || { echo "ICON COMPILE FAILED: no Contents/Resources/$f" >&2; exit 1; }
+done
 
 # 2. Locked deps (#286), one tree per arch, then lipo the thin .so files.
 # cryptography (+cffi, pycparser) is reached only via mcp's pyjwt[crypto] and
