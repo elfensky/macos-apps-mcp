@@ -4,7 +4,7 @@ milestone: v0.11.0
 current_phase: "03.1"
 current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
 status: executing
-stopped_at: "Phase 03.1 wave 1: 03.1-02 and 03.1-03 landed (#344, #342, #343); 03.1-01 waits for the owner at the iMac"
+stopped_at: "Phase 03.1: 03.1-02 and 03.1-03 landed; 03.1-01 waits for the owner at the iMac, run 03.1-01-IMAC-HANDOFF.md there"
 last_updated: "2026-10-12T20:20:57.696Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 03.1 execution started
@@ -168,5 +168,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 03.1 wave 1: 03.1-02 and 03.1-03 landed (#344, #342, #343); 03.1-01 waits for the owner at the iMac
+Stopped at: Phase 03.1: 03.1-02 and 03.1-03 landed; 03.1-01 waits for the owner at the iMac, run 03.1-01-IMAC-HANDOFF.md there
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
