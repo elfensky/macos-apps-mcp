@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "fastmcp>=2.0,<4",                    # <4: tested major (#286)
+    "fastmcp>=2.0,<5",                    # <4: tested major (#286)
     "anyio>=4",                           # imported directly (audit.py)
     "mcp>=1.26,<2",                       # imported directly (server.py: mcp.types); <2: tested major (#286)
     "pyobjc-framework-EventKit>=10.0",    # Calendar + Reminders (v1)
