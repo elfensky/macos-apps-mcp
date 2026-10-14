@@ -1,0 +1,14 @@
+{
+  "macos": "15.7.9",
+  "host": "imac2012",
+  "doctor": {
+    "version": "0.14.3",
+    "build": "85a3baf",
+    "mode": "daemon",
+    "not_ok": [],
+    "fda_ok": true
+  },
+  "contacts_running": false,
+  "contacts_etime": null,
+  "preflight_at": "2026-10-13T22:04:00+02:00"
+}

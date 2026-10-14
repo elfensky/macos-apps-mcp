@@ -1,0 +1,310 @@
+{
+  "notes": {
+    "fp_cols": 11,
+    "fp_uuid": 1,
+    "entity_names_ok": true,
+    "rows": [
+      [
+        0,
+        0,
+        0,
+        0,
+        "ICNote",
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        "ICNote",
+        2
+      ]
+    ],
+    "live_L": 1,
+    "notes_all_len": 1,
+    "notes_all_wall_s": 0.18,
+    "notes_app_count": 1
+  },
+  "mail": {
+    "first": {
+      "wall_s": 0.4,
+      "ids": 5,
+      "local_ids": 1,
+      "bare": 1,
+      "named_nonlocal": 3
+    },
+    "ids": 5,
+    "local_ids": 1,
+    "bare": 1,
+    "named_nonlocal": 3,
+    "stray": [
+      {
+        "mailboxes": 1,
+        "total": 14,
+        "unread": 0,
+        "v10_dir": false,
+        "v10_entries": 0,
+        "named_after_kickstart": false
+      }
+    ],
+    "bare_after": 1,
+    "named_nonlocal_after": 3,
+    "map_empty_after": false,
+    "kickstart": true,
+    "settings_accounts": null,
+    "terminal_ids": null,
+    "terminal_has_stray": null
+  },
+  "contacts": {
+    "sources": 5,
+    "people": 201,
+    "an_like": 62,
+    "store_note": "AddressBook LIKE count over first+last+org; scale check only",
+    "applescript_people": 192,
+    "narrow_store_matches": 1,
+    "narrow_candidates": 99,
+    "v1_backstop_s": 600,
+    "fresh_launch": true,
+    "sample_interval_s": 3,
+    "v1_note": "600 s wall kill hit the bash wrapper; the orphaned osascript ran on to about 665 s and wc counted 4802 bytes; treated as censored per the Task 4 rule",
+    "runs": [
+      {
+        "label": "daemon_narrow_fresh",
+        "etime_start": null,
+        "contacts_running_at_start": false,
+        "wall_s": 7.13,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "n": 1,
+        "error_class": null,
+        "inner_wall_s": 3.46,
+        "samples": 1,
+        "cpu_max": 47.6,
+        "cpu_mean": 47.6,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "daemon_broad_fresh",
+        "etime_start": 4,
+        "contacts_running_at_start": true,
+        "wall_s": 34.16,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": false,
+        "n": null,
+        "error_class": "timeout",
+        "inner_wall_s": 30.3,
+        "samples": 11,
+        "cpu_max": 92.8,
+        "cpu_mean": 28.29,
+        "states": [
+          "R",
+          "S"
+        ]
+      },
+      {
+        "label": "v0",
+        "etime_start": 38,
+        "contacts_running_at_start": true,
+        "wall_s": 0.51,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "people=192 count_s=0 by_index_s=0",
+        "error_class": null,
+        "samples": 1,
+        "cpu_max": 1.2,
+        "cpu_mean": 1.2,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "v1_broad",
+        "etime_start": 39,
+        "contacts_running_at_start": true,
+        "wall_s": 665.07,
+        "timed_out_600": true,
+        "rc": -9,
+        "compile_error": false,
+        "ok": false,
+        "out_bytes": 4802,
+        "error_class": "timeout",
+        "samples": 188,
+        "cpu_max": 56.6,
+        "cpu_mean": 45.74,
+        "states": [
+          "R",
+          "S"
+        ]
+      },
+      {
+        "label": "v2_broad",
+        "etime_start": 704,
+        "contacts_running_at_start": true,
+        "wall_s": 2.46,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "matches=52 scan_s=2",
+        "error_class": null,
+        "samples": 1,
+        "cpu_max": 7.9,
+        "cpu_mean": 7.9,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "v2_narrow",
+        "etime_start": 707,
+        "contacts_running_at_start": true,
+        "wall_s": 0.48,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "matches=1 scan_s=0",
+        "error_class": null,
+        "samples": 1,
+        "cpu_max": 11.4,
+        "cpu_mean": 11.4,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "v3_broad",
+        "etime_start": 707,
+        "contacts_running_at_start": true,
+        "wall_s": 12.07,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "n=50 chars=1601 scan_s=2 loop_s=10",
+        "error_class": null,
+        "samples": 4,
+        "cpu_max": 7.1,
+        "cpu_mean": 5.97,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "v3_narrow",
+        "etime_start": 719,
+        "contacts_running_at_start": true,
+        "wall_s": 0.91,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "n=1 chars=14 scan_s=0 loop_s=0",
+        "error_class": null,
+        "samples": 1,
+        "cpu_max": 0.6,
+        "cpu_mean": 0.6,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "v4_broad",
+        "etime_start": 721,
+        "contacts_running_at_start": true,
+        "wall_s": 9.41,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "n=52 id_s=2 name_s=2 org_s=1 phones_s=2 emails_s=2",
+        "error_class": null,
+        "samples": 3,
+        "cpu_max": 47.4,
+        "cpu_mean": 32.17,
+        "states": [
+          "R",
+          "S"
+        ]
+      },
+      {
+        "label": "v4_narrow",
+        "etime_start": 730,
+        "contacts_running_at_start": true,
+        "wall_s": 1.35,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "out": "n=1 id_s=0 name_s=0 org_s=0 phones_s=0 emails_s=1",
+        "error_class": null,
+        "samples": 1,
+        "cpu_max": 9.0,
+        "cpu_mean": 9.0,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "daemon_narrow_10min",
+        "etime_start": 732,
+        "contacts_running_at_start": true,
+        "wall_s": 6.99,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": true,
+        "n": 1,
+        "error_class": null,
+        "inner_wall_s": 2.58,
+        "samples": 3,
+        "cpu_max": 36.1,
+        "cpu_mean": 14.3,
+        "states": [
+          "S"
+        ]
+      },
+      {
+        "label": "daemon_broad_10min",
+        "etime_start": 739,
+        "contacts_running_at_start": true,
+        "wall_s": 34.72,
+        "timed_out_600": false,
+        "rc": 0,
+        "compile_error": false,
+        "ok": false,
+        "n": null,
+        "error_class": "timeout",
+        "inner_wall_s": 30.35,
+        "samples": 11,
+        "cpu_max": 33.1,
+        "cpu_mean": 24.2,
+        "states": [
+          "R",
+          "S"
+        ]
+      }
+    ]
+  },
+  "prompts": {
+    "contacts": {
+      "rc": 0,
+      "rerun": false,
+      "ok": true
+    },
+    "mail": null
+  },
+  "reruns": [],
+  "cleanup": {
+    "scratch_removed": true
+  }
+}
