@@ -31,6 +31,23 @@ surface may still shift between minor versions.
   wheel; Apple silicon is unchanged. The workaround in the 0.14.3 release notes
   (`uvx --no-build-package cryptography`) is not needed from the next release.
 
+- **Audit records carry a resolved `dry_run` and name the client** (#222) — a write tool
+  called without `dry_run` records `dry_run: true` (a preview), resolved from the tool's
+  signature default and coerced as the tool coerces it; a preview and a real write used to
+  look the same in the audit trail. Every record now also carries `caller` (the MCP client's
+  name and version) and, through the daemon shim, a `session` id.
+- **Contacts search no longer times out on a broad query** (#334) — on the Intel iMac every
+  `whose` reference re-ran the scan, so the search loop re-scanned per property per person
+  and a broad query ran past the 30 s cap. Each property is now read with one Apple event
+  over the whole match list: `contacts("an")` answers in about 8 s on that Mac, down from a
+  timeout. A length mismatch between the property lists raises instead of mixing two
+  people's fields.
+- **`mail_overview` labels an account that Mail does not list** (#336) — the rows of a
+  removed account stay in the Envelope Index and showed a bare uuid as `account`. An id
+  missing from a non-empty account map now shows `(account not in Mail)`; `account_id`
+  keeps the uuid. An empty map (Mail unreachable) still shows the uuid, so a cold cache
+  never makes every account look removed.
+
 ## [0.14.3] - 2026-10-11 — Local reminders
 
 ### Added
