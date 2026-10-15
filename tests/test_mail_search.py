@@ -8,7 +8,7 @@ from fastmcp.exceptions import ToolError
 import macos_apps_mcp.server as srv
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail_index
-from macos_apps_mcp.adapters.mail import MAX_MAILS, MailAdapter
+from macos_apps_mcp.adapters.mail import MAX_MAILS, UNNAMED_ACCOUNT, MailAdapter
 from macos_apps_mcp.errors import NativeError
 from tests.envelope import ACCT_A, ACCT_B, ACCT_LOCAL, seed_base
 
@@ -864,8 +864,10 @@ def test_overview_reports_counts_and_decodes_names(tmp_path, monkeypatch):
     by_box = {r["mailbox"]: r for r in rows}
     assert by_box["INBOX"]["account"] == "Personal"
     assert by_box["INBOX"]["total"] == 5 and by_box["INBOX"]["unread"] == 5
-    # account B has no name in the map -> the UUID stands in, the call still succeeds
-    assert by_box["Travel"]["account"] == ACCT_B
+    # account B is missing from a NON-empty map: Mail answered, so it does not list
+    # that account (#336). The label says why; account_id keeps the uuid.
+    assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
+    assert by_box["Travel"]["account_id"] == ACCT_B
     # the local:// store's name is percent-encoded in mailboxes.url
     assert "Some Folder" in by_box
 
@@ -913,6 +915,69 @@ def test_overview_names_the_on_my_mac_store(tmp_path, monkeypatch):
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
     by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
     assert by_box["Some Folder"]["account"] == "On My Mac"
+
+
+def _overview_over_the_client():
+    async def go():
+        async with Client(srv.mcp) as c:
+            return (await c.call_tool("mail_overview")).data
+
+    return asyncio.run(go())
+
+
+def test_overview_label_tracer_over_the_in_memory_client(tmp_path, monkeypatch):
+    # #336: an id missing from a non-empty map gets the label end to end; the uuid
+    # stays in account_id, the local:// store keeps "On My Mac".
+    import macos_apps_mcp.adapters.mail_addressing as ma
+
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    rows = _overview_over_the_client()
+    assert rows
+    for r in rows:
+        if r["folder"].startswith("local://"):
+            assert r["account"] == "On My Mac"
+        elif r["account_id"] == ACCT_A:
+            assert r["account"] == "Personal"
+        else:
+            assert r["account_id"] == ACCT_B
+            assert r["account"] == UNNAMED_ACCOUNT
+    assert any(r["account"] == UNNAMED_ACCOUNT for r in rows)
+    unread = [r["unread"] for r in rows]
+    assert unread == sorted(unread, reverse=True)
+
+
+def test_overview_label_is_not_shown_for_an_empty_map(tmp_path, monkeypatch):
+    # a cold or failed read must not make every account look removed
+    import time
+
+    import macos_apps_mcp.adapters.mail_addressing as ma
+
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {})
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_FAILURE_AT", time.monotonic())
+    rows = MailAdapter().overview()
+    by_box = {r["mailbox"]: r for r in rows}
+    assert by_box["Travel"]["account"] == ACCT_B
+    assert by_box["INBOX"]["account"] == ACCT_A
+    assert all(r["account"] != UNNAMED_ACCOUNT for r in rows)
+
+
+def test_overview_label_replaces_an_empty_name(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail_addressing as ma
+
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal", ACCT_B: ""})
+    by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
+    assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
+    assert by_box["Travel"]["account_id"] == ACCT_B
+    assert all(r["account"] for r in MailAdapter().overview())
 
 
 def test_overview_survives_mail_being_unreachable(tmp_path, monkeypatch):
