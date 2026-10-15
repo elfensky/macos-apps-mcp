@@ -105,6 +105,9 @@ from .mail_addressing import bare_id, stored_id
 from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
 MAX_MAILS = 25
+# #336: shown in place of an account uuid that Mail's non-empty account list omits
+# (device: a removed account whose rows stay in the Envelope Index).
+UNNAMED_ACCOUNT = "(account not in Mail)"
 MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct)
 # mail_bodies is deliberately smaller than note_bodies' 50: a mail body carries quoted
 # history, signatures and disclaimers, so 50 of them is a context dump, not a read. The
@@ -2336,7 +2339,10 @@ class MailAdapter:
 
         Counts come from sqlite alone. Account NAMES come from Mail (osascript, which
         LAUNCHES Mail if it isn't running) and are best-effort: when Mail is unreachable
-        the UUID stands in and the counts are returned anyway. The On My Mac store is
+        (an empty map) the UUID stands in and the counts are returned anyway. When Mail
+        answers but does not list an account, its rows show "(account not in Mail)" in
+        `account` (#336: a removed account's rows stay in the Envelope Index) and keep
+        the uuid in `account_id`. The On My Mac store is
         the one account Mail never names — AppleScript's `every account` lists only the
         configured mail accounts, device-verified 2026-07-27 — so its `local://` scheme
         is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
@@ -2361,7 +2367,7 @@ class MailAdapter:
             account = (
                 mail_addressing.ON_MY_MAC
                 if scheme == "local"
-                else names.get(uuid, uuid)
+                else names.get(uuid) or (UNNAMED_ACCOUNT if names else uuid)
             )
             out.append(
                 {

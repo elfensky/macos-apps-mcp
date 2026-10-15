@@ -14,7 +14,7 @@ from macos_apps_mcp.adapters.mail import MailAdapter
 pytestmark = pytest.mark.integration
 
 
-def test_overview_lists_mailboxes_with_named_or_uuid_accounts():
+def test_overview_lists_mailboxes_with_named_or_labelled_accounts():
     rows = MailAdapter().overview()
     assert rows, "no mailboxes — is Mail set up on this machine?"
     for r in rows:
@@ -32,6 +32,14 @@ def test_overview_lists_mailboxes_with_named_or_uuid_accounts():
         assert r["unread"] <= r["total"]
     unread = [r["unread"] for r in rows]
     assert unread == sorted(unread, reverse=True)
+    # #336: while Mail names accounts, no non-local row shows a bare uuid
+    if mail_addressing.account_map():
+        assert not [
+            r
+            for r in rows
+            if not r["folder"].startswith("local://")
+            and r["account"] == r["account_id"]
+        ]
     # percent-encoding must be decoded, not passed through
     assert not any("%20" in r["mailbox"] for r in rows)
 
