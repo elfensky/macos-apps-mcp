@@ -526,7 +526,9 @@ def mail_overview() -> list[dict]:
     counted ONCE even when it is filed in the same mailbox twice.
     Account NAMES are looked up through Mail, so this tool does contact Mail (launching
     it if it isn't running); when Mail is unreachable the account UUID stands in and
-    the counts — which never needed Mail — are still correct. The On My Mac store is
+    the counts — which never needed Mail — are still correct. An account Mail answers
+    but does not list (for example a removed one) shows "(account not in Mail)" as its
+    `account`; `account_id` keeps the uuid. The On My Mac store is
     always shown as "On My Mac": Mail never lists it as an account.
     Fast and read-only. Needs Full Disk Access for the counts and Automation access for
     Mail for the account names."""
