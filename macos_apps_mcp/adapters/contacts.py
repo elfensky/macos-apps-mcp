@@ -30,34 +30,47 @@ MAX_CONTACTS = 50  # cap a broad name match
 # Each matching person -> "id|name|org|phone|email" (US-delimited, RS-terminated). Unset
 # fields (`missing value` / no phones / no emails) normalize to "". Phone/email are the
 # first of each — a citable handle to *reach* the person, not the full card.
-# maxN bounds the work IN AppleScript: stop after maxN matches so a broad query ("a")
-# doesn't fetch phone/email for thousands of people just to have Python drop all but the
-# first MAX_CONTACTS. (The `whose name contains` scan itself is one cheap Apple Events
-# call; the per-person property fetches below are the expensive part this `exit repeat`
-# caps.) The cap is passed via argv, not interpolated.
+# #334: on the Intel iMac every `whose` reference re-runs the scan. A broad query ("an",
+# 52 matches of 192 people) scanned in 2 s, but the old loop touched `p` five times per
+# person, so it ran past 600 s. Now each property is read with ONE Apple event over the
+# whole match list (5 scans, 9 s measured on the same query). The five lists pair by
+# index, so a length mismatch (a contact changed mid-read) raises instead of mixing two
+# people's fields. maxN caps the rows built, passed via argv, not interpolated.
 _SEARCH = """on run argv
   set q to item 1 of argv
   set maxN to (item 2 of argv) as integer
   set uSep to character id 31
   set rSep to character id 30
   set out to ""
-  set n to 0
   with timeout of 120 seconds
   tell application "Contacts"
-    repeat with p in (people whose name contains q)
-      set theOrg to organization of p
-      if theOrg is missing value then set theOrg to ""
-      set thePhone to ""
-      if (count of phones of p) > 0 then set thePhone to value of item 1 of phones of p
-      set theEmail to ""
-      if (count of emails of p) > 0 then set theEmail to value of item 1 of emails of p
-      set out to out & (id of p) & uSep & (name of p) & uSep & theOrg
-      set out to out & uSep & thePhone & uSep & theEmail & rSep
-      set n to n + 1
-      if n >= maxN then exit repeat
-    end repeat
+    set idList to id of (people whose name contains q)
+    set nameList to name of (people whose name contains q)
+    set orgList to organization of (people whose name contains q)
+    set phoneLists to value of phones of (people whose name contains q)
+    set emailLists to value of emails of (people whose name contains q)
   end tell
   end timeout
+  set howMany to count of idList
+  if (count of nameList) is not howMany or (count of orgList) is not howMany then
+    error "Contacts changed during the read; retry the search"
+  end if
+  if (count of phoneLists) is not howMany or (count of emailLists) is not howMany then
+    error "Contacts changed during the read; retry the search"
+  end if
+  if howMany > maxN then set howMany to maxN
+  repeat with i from 1 to howMany
+    set theOrg to item i of orgList
+    if theOrg is missing value then set theOrg to ""
+    set phones_i to item i of phoneLists
+    set emails_i to item i of emailLists
+    set thePhone to ""
+    if (count of phones_i) > 0 then set thePhone to item 1 of phones_i
+    set theEmail to ""
+    if (count of emails_i) > 0 then set theEmail to item 1 of emails_i
+    set out to out & (item i of idList) & uSep & (item i of nameList) & uSep & theOrg
+    set out to out & uSep & thePhone & uSep & theEmail & rSep
+  end repeat
   return out
 end run"""
 
