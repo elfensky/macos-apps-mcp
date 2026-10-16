@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "03.1"
-current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
-status: executing
-stopped_at: "Phase 03.1: all 7 plans complete — 03.1-07 proved build e3e3f5f on the Intel iMac (#334, #336, #337 closed; changelog PR #358); phase verification pending"
-last_updated: "2026-10-16T09:01:24.949Z"
-last_activity: 2026-10-12
-last_activity_desc: Phase 03.1 execution started
-state_head: 7b3336fce10e20c5a8fb4af8f72bef682e6600c3
+current_phase: 04
+current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+status: planning
+stopped_at: Phase 03.1 complete, ready to plan Phase 04
+last_updated: "2026-10-16T09:13:28.876Z"
+last_activity: 2026-10-16
+last_activity_desc: Phase 03.1 complete, transitioned to Phase 04
+state_head: cb3888614bd32b09bbdbbc82305a006f934b68c3
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 45
-  completed_plans: 38
+  completed_plans: 45
+  percent: 63
 ---
 
 # Project State
@@ -27,18 +28,18 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 
 ## Current Position
 
-Phase: 03.1 (Bug Fixes — Device-Report Findings Before Any Feature) — EXECUTING
-Plan: 6 of 7
-Status: Executing Phase 03.1
-Last activity: 2026-10-12 — Completed quick task 261012-utn: Ship the macOS app icon (packaging/AppIcon.icon, actool compile step, Info.plist icon keys)
+Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-16 — Phase 03.1 complete, transitioned to Phase 04
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 45
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -50,6 +51,7 @@ Progress: [█████░░░░░] 50%
 | 02 | 6 | - | - |
 | 02.1 | 8 | - | - |
 | 03 | 10 | - | - |
+| 03.1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -172,5 +174,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 03.1: all 7 plans complete — 03.1-07 proved build e3e3f5f on the Intel iMac (#334, #336, #337 closed; changelog PR #358); phase verification pending
+Stopped at: Phase 03.1 complete, ready to plan Phase 04
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
