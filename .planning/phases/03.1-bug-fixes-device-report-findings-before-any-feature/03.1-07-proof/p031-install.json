@@ -1,0 +1,17 @@
+{
+  "courier": "scp (the draft-release courier was refused by the session's permission classifier; scp sets no quarantine attribute either)",
+  "download_ok": true,
+  "sha256": "cae08335950b85f9bda96c4409d0cd68240bc4df3d67fe6f52326e8ac42a347c",
+  "sha_match": true,
+  "quarantine_zip": false,
+  "quarantine_app": false,
+  "codesign_ok": true,
+  "moved_rc": 0,
+  "ditto_rc": 0,
+  "kickstart_rc": 0,
+  "waited_s": 2,
+  "backup": "macos-apps-mcp-0.14.3-85a3baf.app",
+  "doctor": {"version": "0.14.3", "build": "e3e3f5f", "mode": "daemon", "not_ok": [], "fda_ok": true, "wall_s": 1.62},
+  "rolled_back": false,
+  "installed_at": "2026-10-15T21:36:59+02:00"
+}
