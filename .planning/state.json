@@ -26,7 +26,7 @@
     {
       "number": "03.1",
       "name": "Bug Fixes (INSERTED)",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "4",
@@ -46,8 +46,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 03.1 of 8 · executing"
+    "label": "Advance to the next step (plan phase 04)",
+    "reason": "Phase 04 of 8 — needs a plan"
   },
-  "updated_at": "2026-10-12T15:27:50.294Z"
+  "updated_at": "2026-10-16T09:13:28.892Z"
 }
