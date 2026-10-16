@@ -34,12 +34,12 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Bugs — bugs and errors come before any feature (owner, 2026-10-11)
 
-- [ ] **FIX-01**: Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field; a test covers a write tool called without `dry_run` and its record states `dry_run: true` (#222)
-- [ ] **FIX-02**: The cause of the `contacts("an")` 30 s timeout on the Intel iMac is found (narrow-query timing, Script Editor timing, Contacts state) and fixed — by a bulk read that runs the `whose` scan once, a contacts-specific host timeout with the script backstop at or above the host cap, or an error text that names the cause (the SQLite plane of #95 stays v2, CON-04); on the Intel iMac the broad query answers, or fails with an error that names the real cause (#334)
-- [ ] **FIX-03**: On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted; if the tool's SQLite filter drops a live note, the filter is fixed (#335)
-- [ ] **FIX-04**: On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none; the cause of the raw UUID (removed account, stale name cache, or an account kind `every account` omits) is recorded (#336)
-- [ ] **FIX-05**: Through the daemon, `doctor(request=True)` with Photos quit reports the photos surface ok — or Phase 4 removes the Photos Automation probe and the issue closes as moot (#317, #337)
-- [ ] **FIX-06**: The Intel iMac device report carries the three corrections: the pass count, the Local-list subtask conclusion, and the machine line without firmware and security details; the same detail leaves every other tracked file (`docs/DAEMON.md`, the quick-task 261011-4iv PLAN and SUMMARY) (#333)
+- [x] **FIX-01**: Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field; a test covers a write tool called without `dry_run` and its record states `dry_run: true` (#222)
+- [x] **FIX-02**: The cause of the `contacts("an")` 30 s timeout on the Intel iMac is found (narrow-query timing, Script Editor timing, Contacts state) and fixed — by a bulk read that runs the `whose` scan once, a contacts-specific host timeout with the script backstop at or above the host cap, or an error text that names the cause (the SQLite plane of #95 stays v2, CON-04); on the Intel iMac the broad query answers, or fails with an error that names the real cause (#334)
+- [x] **FIX-03**: On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted; if the tool's SQLite filter drops a live note, the filter is fixed (#335)
+- [x] **FIX-04**: On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none; the cause of the raw UUID (removed account, stale name cache, or an account kind `every account` omits) is recorded (#336)
+- [x] **FIX-05**: Through the daemon, `doctor(request=True)` with Photos quit reports the photos surface ok — or Phase 4 removes the Photos Automation probe and the issue closes as moot (#317, #337)
+- [x] **FIX-06**: The Intel iMac device report carries the three corrections: the pass count, the Local-list subtask conclusion, and the machine line without firmware and security details; the same detail leaves every other tracked file (`docs/DAEMON.md`, the quick-task 261011-4iv PLAN and SUMMARY) (#333)
 
 ### Calendar
 
@@ -178,12 +178,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REM-03 | Phase 3 | Complete |
 | REM-04 | Phase 3 | Complete |
 | REM-06 | Phase 3 | Complete |
-| FIX-01 | Phase 03.1 | Pending |
-| FIX-02 | Phase 03.1 | Pending |
-| FIX-03 | Phase 03.1 | Pending |
-| FIX-04 | Phase 03.1 | Pending |
-| FIX-05 | Phase 03.1 | Pending |
-| FIX-06 | Phase 03.1 | Pending |
+| FIX-01 | Phase 03.1 | Complete |
+| FIX-02 | Phase 03.1 | Complete |
+| FIX-03 | Phase 03.1 | Complete |
+| FIX-04 | Phase 03.1 | Complete |
+| FIX-05 | Phase 03.1 | Complete |
+| FIX-06 | Phase 03.1 | Complete |
 | NOTE-01 | Phase 4 | Pending |
 | NOTE-02 | Phase 4 | Pending |
 | PHO-01 | Phase 4 | Pending |
