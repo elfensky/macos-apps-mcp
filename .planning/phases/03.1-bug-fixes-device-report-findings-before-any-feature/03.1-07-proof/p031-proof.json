@@ -1,0 +1,88 @@
+{
+ "build": "e3e3f5f",
+ "proved_at": "2026-10-15T21:38:00+02:00",
+ "notes_app_count_source": "owner reading of 2026-10-13 (03.1-01 Task 3): 1; not re-read on 2026-10-15",
+ "notes_app_count": 1,
+ "photos_running": false,
+ "doctor": {
+  "version": "0.14.3",
+  "build": "e3e3f5f",
+  "mode": "daemon",
+  "not_ok": [],
+  "fda_ok": true,
+  "wall_s": 1.43
+ },
+ "doctor_request": {
+  "version": "0.14.3",
+  "build": "e3e3f5f",
+  "mode": "daemon",
+  "not_ok": [],
+  "fda_ok": true,
+  "wall_s": 18.99,
+  "photos_surfaces": 1,
+  "photos_ok": true
+ },
+ "contacts_broad": {
+  "tool": "contacts",
+  "wall_s": 8.3,
+  "ok": true,
+  "n": 50,
+  "error_class": null
+ },
+ "contacts_narrow": {
+  "narrow_found": true,
+  "tried": 2,
+  "wall_s": 1.0,
+  "ok": true,
+  "n": 1,
+  "error_class": null
+ },
+ "notes_store_C": 1,
+ "notes_all": {
+  "tool": "notes_all",
+  "wall_s": 0.17,
+  "ok": true,
+  "n": 1,
+  "error_class": null
+ },
+ "overview": {
+  "wall_s": 0.66,
+  "rows": 50,
+  "ids": 5,
+  "local_ids": 1,
+  "bare": 0,
+  "labelled": 1,
+  "map_empty": false
+ },
+ "audit_proof": {
+  "create_record_found": true,
+  "create_dry_run": false,
+  "preview_ok": true,
+  "preview_dry_run": true,
+  "preview_caller": "phase-03.1-proof 1",
+  "preview_session_len": 8,
+  "delete_ok": true,
+  "real_dry_run": false,
+  "left": 0,
+  "reminders_read_ok": true
+ },
+ "count_match": true,
+ "criterion3_cap": true,
+ "photos_ok": true,
+ "C": 1,
+ "n": 1,
+ "bare": 0,
+ "labelled": 1,
+ "map_empty": false,
+ "contacts_broad_ok": true,
+ "contacts_broad_n": 50,
+ "contacts_broad_wall_s": 8.3,
+ "contacts_narrow_wall_s": 1.0,
+ "cause_named": null,
+ "create_dry_run": false,
+ "preview_dry_run": true,
+ "preview_caller": "phase-03.1-proof 1",
+ "preview_session_len": 8,
+ "real_dry_run": false,
+ "left": 0
+}
