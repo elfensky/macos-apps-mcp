@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "03.1"
 current_phase_name: Bug Fixes — Device-Report Findings Before Any Feature
 status: executing
-stopped_at: "Phase 03.1: wave 2 complete — 03.1-04 (PR #355), 03.1-05 (route none, #335 closed), 03.1-06 (PR #356) landed; wave 3 (03.1-07: build, iMac install, device proofs) waits for the owner at the iMac"
-last_updated: "2026-10-15T16:31:50.294Z"
+stopped_at: "Phase 03.1: all 7 plans complete — 03.1-07 proved build e3e3f5f on the Intel iMac (#334, #336, #337 closed; changelog PR #358); phase verification pending"
+last_updated: "2026-10-16T09:01:24.949Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 03.1 execution started
-state_head: 7cfc308f1e7fda70e612a20cfe51056406d4e7a8
+state_head: 7b3336fce10e20c5a8fb4af8f72bef682e6600c3
 progress:
   total_phases: 8
   completed_phases: 4
@@ -105,6 +105,7 @@ Recent decisions affecting current work:
 - [Phase 03.1]: #335 premise overturned on the iMac (2026-10-13): the SQLite plane, Notes.app and `notes_all` all count 1 live note; the 2 titled rows of the device report sit in Recently Deleted. No filter change; #335 closed with the record.
 - [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.
 - [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.
+
 ### Pending Todos
 
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
@@ -171,5 +172,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 03.1: wave 2 complete — 03.1-04 (PR #355), 03.1-05 (route none, #335 closed), 03.1-06 (PR #356) landed; wave 3 (03.1-07: build, iMac install, device proofs) waits for the owner at the iMac
+Stopped at: Phase 03.1: all 7 plans complete — 03.1-07 proved build e3e3f5f on the Intel iMac (#334, #336, #337 closed; changelog PR #358); phase verification pending
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md

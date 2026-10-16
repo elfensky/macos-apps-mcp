@@ -246,7 +246,7 @@ Plans:
   5. A `.app` built from `develop` at the end of the phase runs as the daemon on the Intel iMac (`doctor().build` names that commit). Through it, `doctor(request=True)` with Photos quit reports the photos surface ok (#317, #337), and criteria 2–4 hold.
   6. The Intel iMac device report carries its three corrections, landed by a records PR, and the iMac's firmware and security detail is gone from every tracked file (#333).
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -260,7 +260,7 @@ Plans:
 - [x] 03.1-06-PLAN.md — `mail_overview` labels an account Mail does not list; one bounded map re-read for a stale map (D-11, #336)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 03.1-07-PLAN.md — Build from `develop`, draft-release courier, iMac install, device proofs; closes #317, #337, #334, #335, #336 (D-12..D-14)
+- [x] 03.1-07-PLAN.md — Build from `develop`, draft-release courier, iMac install, device proofs; closes #317, #337, #334, #335, #336 (D-12..D-14)
 
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
@@ -319,7 +319,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
-| 03.1. Bug Fixes (INSERTED) | 6/7 | In Progress | - |
+| 03.1. Bug Fixes (INSERTED) | 7/7 | In Progress | - |
 | 4. Notes & Photos | 0/TBD | Not started | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
