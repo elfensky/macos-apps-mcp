@@ -5,10 +5,10 @@ current_phase: 04
 current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 status: planning
 stopped_at: Phase 03.1 complete, ready to plan Phase 04
-last_updated: "2026-10-16T09:13:28.876Z"
-last_activity: 2026-10-16
-last_activity_desc: Phase 03.1 complete, transitioned to Phase 04
-state_head: cb3888614bd32b09bbdbbc82305a006f934b68c3
+last_updated: "2026-10-17T23:32:07.952Z"
+last_activity: 2026-10-18
+last_activity_desc: Completed quick task 261018-1sb (#359)
+state_head: 3fbc3d0a65de14f0937ceff7c38850c823d3bbd8
 progress:
   total_phases: 8
   completed_phases: 5
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-05)
 Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-16 — Phase 03.1 complete, transitioned to Phase 04
+Last activity: 2026-10-18 - Completed quick task 261018-1sb: fix #359 (one map re-read before the label)
 
 Progress: [██████░░░░] 63%
 
@@ -152,6 +152,7 @@ Recent decisions affecting current work:
 | 261011-imn | doctor counts an answered -1728 probe as ok (#317); grant map names the TCC denial reason, prompt-timeout reset command and AppleEvents target (#318); PR #328. Also: PyPI 0.14.3 published, Gmail test label removed | 2026-10-11 | ff345a5 | [261011-imn-317-318-doctor-counts-an-answered-1728-p](./quick/261011-imn-317-318-doctor-counts-an-answered-1728-p/) |
 | 261011-p90 | uvx on an Intel Mac installs without Rust: cryptography<49 on darwin x86_64 only (48.0.1 is the last Intel wheel); PR #330, closes #322 | 2026-10-11 | 2fa3524 | [261011-p90-322-uvx-on-an-intel-mac-installs-without](./quick/261011-p90-322-uvx-on-an-intel-mac-installs-without/) |
 | 261012-utn | Ship the macOS app icon: packaging/AppIcon.icon (Icon Composer), actool compile step in build_app.sh, Info.plist icon keys, packaging test, DAEMON.md note | 2026-10-12 | 22870dc | [261012-utn-ship-the-macos-app-icon-packaging-appico](./quick/261012-utn-ship-the-macos-app-icon-packaging-appico/) |
+| 261018-1sb | mail_overview re-reads the account map once (per minute) before labelling an unknown id; a failed re-read keeps the known names (#359) | 2026-10-18 | 3fbc3d0 | [261018-1sb-fix-359-one-map-re-read-before-the-label](./quick/261018-1sb-fix-359-one-map-re-read-before-the-label/) |
 
 ### Roadmap Evolution
 
