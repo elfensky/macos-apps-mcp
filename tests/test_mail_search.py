@@ -10,6 +10,7 @@ from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail_index
 from macos_apps_mcp.adapters.mail import MAX_MAILS, UNNAMED_ACCOUNT, MailAdapter
 from macos_apps_mcp.errors import NativeError
+from macos_apps_mcp.text import RS, US
 from tests.envelope import ACCT_A, ACCT_B, ACCT_LOCAL, seed_base
 
 # #201 PR-B: the WHOLE battery runs twice — once against the native (Tahoe-shaped)
@@ -925,6 +926,18 @@ def _overview_over_the_client():
     return asyncio.run(go())
 
 
+def _mail_lists(monkeypatch, accounts):
+    """Counting fake for the account-map re-read (#359): Mail lists `accounts`."""
+    calls = []
+
+    def fake(*a):
+        calls.append(a)
+        return "".join(f"{u}{US}{n}{RS}" for u, n in accounts.items())
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    return calls
+
+
 def test_overview_label_tracer_over_the_in_memory_client(tmp_path, monkeypatch):
     # #336: an id missing from a non-empty map gets the label end to end; the uuid
     # stays in account_id, the local:// store keeps "On My Mac".
@@ -978,6 +991,86 @@ def test_overview_label_replaces_an_empty_name(tmp_path, monkeypatch):
     assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
     assert by_box["Travel"]["account_id"] == ACCT_B
     assert all(r["account"] for r in MailAdapter().overview())
+
+
+def _seed_overview(tmp_path, monkeypatch):
+    import macos_apps_mcp.adapters.mail_addressing as ma
+
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    return ma
+
+
+def test_overview_label_rereads_once_and_names_an_added_account(tmp_path, monkeypatch):
+    # #359 Done-when 1: an account added to Mail after the map was cached is named.
+    _seed_overview(tmp_path, monkeypatch)
+    calls = _mail_lists(monkeypatch, {ACCT_A: "Personal", ACCT_B: "Work"})
+    rows = _overview_over_the_client()
+    by_box = {r["mailbox"]: r for r in rows}
+    assert by_box["Travel"]["account"] == "Work"
+    assert by_box["Travel"]["account_id"] == ACCT_B
+    assert by_box["INBOX"]["account"] == "Personal"
+    assert by_box["Some Folder"]["account"] == "On My Mac"
+    assert all(r["account"] != UNNAMED_ACCOUNT for r in rows)
+    assert len(calls) == 1
+
+
+def test_overview_label_rereads_a_removed_account_once_and_keeps_the_label(
+    tmp_path, monkeypatch
+):
+    # #359 Done-when 2: an account Mail no longer lists keeps the label, one re-read.
+    ma = _seed_overview(tmp_path, monkeypatch)
+    calls = _mail_lists(monkeypatch, {ACCT_A: "Personal"})
+    now = [1_000.0]
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
+    by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
+    assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
+    assert by_box["Travel"]["account_id"] == ACCT_B
+    assert len(calls) == 1
+    MailAdapter().overview()
+    assert len(calls) == 1
+
+
+def test_overview_label_rereads_at_most_once_per_ttl(tmp_path, monkeypatch):
+    # #359 Done-when 2 / T-03.1-18: a removed account re-spawns osascript once a TTL.
+    ma = _seed_overview(tmp_path, monkeypatch)
+    calls = _mail_lists(monkeypatch, {ACCT_A: "Personal"})
+    now = [1_000.0]
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
+    MailAdapter().overview()
+    assert len(calls) == 1
+    now[0] += ma._ACCOUNT_MAP_FAILURE_TTL - 1
+    MailAdapter().overview()
+    assert len(calls) == 1
+    now[0] += 1
+    by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
+    assert len(calls) == 2
+    assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
+
+
+def test_overview_label_rereads_keep_the_names_when_mail_does_not_answer(
+    tmp_path, monkeypatch
+):
+    # #359: a failed re-read must not replace a good map with {}.
+    ma = _seed_overview(tmp_path, monkeypatch)
+    calls = []
+
+    def _boom(*a):
+        calls.append(a)
+        raise OSError()
+
+    monkeypatch.setattr(runtime, "run_osascript", _boom)
+    now = [1_000.0]
+    monkeypatch.setattr(ma.time, "monotonic", lambda: now[0])
+    by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
+    assert by_box["INBOX"]["account"] == "Personal"
+    assert by_box["Travel"]["account"] == UNNAMED_ACCOUNT
+    assert len(calls) == 1
+    assert ma.account_map() == {ACCT_A: "Personal"}
+    MailAdapter().overview()
+    assert len(calls) == 1
 
 
 def test_overview_survives_mail_being_unreachable(tmp_path, monkeypatch):
