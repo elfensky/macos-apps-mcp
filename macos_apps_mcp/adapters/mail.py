@@ -2342,7 +2342,10 @@ class MailAdapter:
         (an empty map) the UUID stands in and the counts are returned anyway. When Mail
         answers but does not list an account, its rows show "(account not in Mail)" in
         `account` (#336: a removed account's rows stay in the Envelope Index) and keep
-        the uuid in `account_id`. The On My Mac store is
+        the uuid in `account_id`. Before it labels an id,
+        `overview()` re-reads the map once (#359: an account added after the map was
+        cached), at most once a minute, so a removed account keeps the label and costs
+        at most one osascript run a minute. The On My Mac store is
         the one account Mail never names — AppleScript's `every account` lists only the
         configured mail accounts, device-verified 2026-07-27 — so its `local://` scheme
         is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
@@ -2358,10 +2361,18 @@ class MailAdapter:
         """
         rows = mail_index.query_overview_rows()
         names = mail_addressing.account_map()
+        parsed = [
+            (r, *(mailbox_url.parse(r["mailbox_url"]) or ("", "", ""))) for r in rows
+        ]
+        # #359: an id the cached map omits may be an account added since; ask Mail once.
+        if names and any(
+            scheme != "local" and uuid and uuid not in names
+            for _, scheme, uuid, _ in parsed
+        ):
+            names = mail_addressing.refresh_account_map()
         out = []
-        for r in rows:
+        for r, scheme, uuid, box in parsed:
             url = r["mailbox_url"]
-            scheme, uuid, box = mailbox_url.parse(url) or ("", "", "")
             # local:// is the On My Mac store; Mail never reports it as an account, so
             # its UUID would otherwise be shown raw forever (see the docstring).
             account = (

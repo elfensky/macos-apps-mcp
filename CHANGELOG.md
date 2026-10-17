@@ -47,6 +47,11 @@ surface may still shift between minor versions.
   missing from a non-empty account map now shows `(account not in Mail)`; `account_id`
   keeps the uuid. An empty map (Mail unreachable) still shows the uuid, so a cold cache
   never makes every account look removed.
+- **`mail_overview` names an account added while the daemon runs** (#359) — the account
+  map stayed cached for the daemon's whole life, so the rows of an account added to Mail
+  later showed `(account not in Mail)` until a restart. When the map omits an id,
+  `mail_overview` now reads it again, at most once a minute. A removed account keeps the
+  label, and a re-read that fails keeps the names already known.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 

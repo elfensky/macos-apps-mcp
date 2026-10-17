@@ -41,20 +41,22 @@ def _isolated_state(tmp_path_factory):
 def _reset_account_map_globals(monkeypatch):
     """Reset mail_addressing's account-map cache globals before every test.
 
-    _ACCOUNT_MAP_CACHE and _ACCOUNT_MAP_FAILURE_AT are two halves of ONE cache — the
-    failure timestamp is what lets account_map() reap a stale failure and retry. They
-    must be reset TOGETHER, in one place: resetting only the cache dict leaves a live
-    monotonic timestamp behind, and once real (or monkeypatched) time crosses
-    _ACCOUNT_MAP_FAILURE_TTL past it, account_map() silently wipes a cache dict a
-    LATER test installed for its own purposes and falls through to the real
-    run_osascript — spawning osascript against Mail.app from a unit test. This is set
-    BEFORE each test (not just torn down after) so a leak written by plain global
-    assignment in production code — which monkeypatch can't see coming — never
-    survives into the next test either. If a third global joins this cache, it must be
-    added here too, or it becomes the next leak of this exact class.
+    _ACCOUNT_MAP_CACHE, _ACCOUNT_MAP_FAILURE_AT and _ACCOUNT_MAP_REFRESHED_AT (the #359
+    re-read stamp) are the parts of ONE cache — the failure timestamp is what lets
+    account_map() reap a stale failure and retry. They must be reset TOGETHER, in one
+    place: resetting only the cache dict leaves a live monotonic timestamp behind, and
+    once real (or monkeypatched) time crosses _ACCOUNT_MAP_FAILURE_TTL past it,
+    account_map() silently wipes a cache dict a LATER test installed for its own
+    purposes and falls through to the real run_osascript — spawning osascript against
+    Mail.app from a unit test. This is set BEFORE each test (not just torn down after)
+    so a leak written by plain global assignment in production code — which monkeypatch
+    can't see coming — never survives into the next test either. If another global
+    joins this cache, it must be added here too, or it becomes the next leak of this
+    exact class.
     """
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", None)
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_FAILURE_AT", None)
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_REFRESHED_AT", None)
 
 
 @pytest.fixture(autouse=True)
