@@ -614,6 +614,7 @@ def test_on_my_mac_name_round_trips_from_overview_into_search(tmp_path, monkeypa
     _add_local_message(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    _mail_lists(monkeypatch, {ACCT_A: "Personal"})
     overview = MailAdapter().overview()
     local_name = next(r["account"] for r in overview if r["mailbox"] == "Some Folder")
     assert local_name == "On My Mac"
@@ -861,6 +862,7 @@ def test_overview_reports_counts_and_decodes_names(tmp_path, monkeypatch):
     seed_base(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    _mail_lists(monkeypatch, {ACCT_A: "Personal"})
     rows = MailAdapter().overview()
     by_box = {r["mailbox"]: r for r in rows}
     assert by_box["INBOX"]["account"] == "Personal"
@@ -914,6 +916,7 @@ def test_overview_names_the_on_my_mac_store(tmp_path, monkeypatch):
     seed_base(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    _mail_lists(monkeypatch, {ACCT_A: "Personal"})
     by_box = {r["mailbox"]: r for r in MailAdapter().overview()}
     assert by_box["Some Folder"]["account"] == "On My Mac"
 
@@ -947,6 +950,7 @@ def test_overview_label_tracer_over_the_in_memory_client(tmp_path, monkeypatch):
     seed_base(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    _mail_lists(monkeypatch, {ACCT_A: "Personal"})
     rows = _overview_over_the_client()
     assert rows
     for r in rows:
@@ -1146,6 +1150,7 @@ def test_overview_reports_the_account_id_search_pointers_carry(tmp_path, monkeyp
     seed_base(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
     monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {ACCT_A: "Personal"})
+    _mail_lists(monkeypatch, {ACCT_A: "Personal"})
 
     row = next(r for r in MailAdapter().overview() if r["account"] == "Personal")
     assert row["account_id"] == ACCT_A

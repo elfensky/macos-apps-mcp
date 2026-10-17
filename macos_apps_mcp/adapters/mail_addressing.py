@@ -264,6 +264,11 @@ _ACCOUNT_MAP_FAILURE_AT: float | None = None
 # remember it for this long, then allow exactly one more attempt.
 _ACCOUNT_MAP_FAILURE_TTL = 60.0  # seconds
 
+# monotonic() stamp of the last forced re-read by refresh_account_map() (#359), None
+# until the first. It limits that re-read to one per _ACCOUNT_MAP_FAILURE_TTL: a removed
+# account is permanent and must not re-spawn osascript on every call (T-03.1-18).
+_ACCOUNT_MAP_REFRESHED_AT: float | None = None
+
 _ACCOUNTS = (
     STRIP_FRAMING
     + """
@@ -297,7 +302,8 @@ def account_map() -> dict[str, str]:
     whether Mail is running and whether Automation is granted can both change while
     this long-lived daemon keeps running, so a failure gets one more attempt after
     the TTL instead of being final
-    for the process's whole lifetime. A non-empty success is still cached forever; an
+    for the process's whole lifetime. A non-empty success is cached until
+    ``refresh_account_map()`` drops it (#359); an
     EMPTY success gets the same leash as a failure — Mail launching at login can
     return exit 0 with no records yet, and that transient cached forever is the same
     raw-UUIDs-until-restart bug the failure TTL exists to prevent.
@@ -332,6 +338,33 @@ def account_map() -> dict[str, str]:
         _ACCOUNT_MAP_CACHE = out
         _ACCOUNT_MAP_FAILURE_AT = None if out else time.monotonic()
     return _ACCOUNT_MAP_CACHE
+
+
+def refresh_account_map() -> dict[str, str]:
+    """Re-read the map once: an account added to Mail after it was cached (#359).
+
+    At most one re-read per ``_ACCOUNT_MAP_FAILURE_TTL`` (T-03.1-18: a removed account
+    is permanent and must not re-spawn osascript on every call). A failed or empty
+    re-read keeps the previous non-empty map, because ``resolve_account`` resolves
+    ``mail_search(account=<name>)`` through this cache.
+    """
+    global _ACCOUNT_MAP_CACHE, _ACCOUNT_MAP_FAILURE_AT, _ACCOUNT_MAP_REFRESHED_AT
+    now = time.monotonic()
+    if (
+        _ACCOUNT_MAP_REFRESHED_AT is not None
+        and now - _ACCOUNT_MAP_REFRESHED_AT < _ACCOUNT_MAP_FAILURE_TTL
+    ):
+        return account_map()
+    previous = _ACCOUNT_MAP_CACHE
+    _ACCOUNT_MAP_CACHE = None
+    _ACCOUNT_MAP_FAILURE_AT = None
+    _ACCOUNT_MAP_REFRESHED_AT = time.monotonic()
+    fresh = account_map()
+    if not fresh and previous:
+        _ACCOUNT_MAP_CACHE = previous
+        _ACCOUNT_MAP_FAILURE_AT = None
+        return previous
+    return fresh
 
 
 # _MY_ADDRESSES: the user's own addresses, US-framed (list-join with TID — element
