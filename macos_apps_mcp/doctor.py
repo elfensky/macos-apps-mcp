@@ -34,11 +34,12 @@ from .runtime import app_process_info, run_native
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
 # Automation-backed adapter must add its app name here so doctor probes it.
+# Photos is absent on purpose: its reads go through osxphotos under Full Disk Access
+# (Phase 4), so doctor sends Photos no Apple Event.
 _AUTOMATION_APPS = (
     "Mail",
     "Notes",
     "Contacts",
-    "Photos",
     "Safari",
     "Messages",
     "Music",
