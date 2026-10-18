@@ -160,7 +160,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 
 | Tool | Args | Notes |
 |------|------|-------|
-| `notes` | title/snippet substring | matching notes (id + snippet); diacritic- & smart-punctuation-insensitive |
+| `notes` | title, snippet or body words | `{results, truncated?, plane?, coverage?}` — matching notes (id + snippet), title/snippet hits first, then body-only hits; bodies are searched in memory on the Full Disk Access plane (locked notes skipped); diacritic- & smart-punctuation-insensitive |
 | `notes_all` | — | every live note (id + "Account / Folder" + snippet), Recently Deleted excluded |
 | `note_bodies` | ids (≤ 50) | opt-in plaintext hydration → `[{id, body}]` |
 | `create_note` | title, body, optional `folder` name | returns the **stable x-coredata id**; an unknown/ambiguous folder is refused, not guessed |

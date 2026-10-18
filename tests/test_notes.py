@@ -1155,3 +1155,28 @@ def test_body_search_touches_no_disk_but_the_store(tmp_path, monkeypatch):
     assert len(targets) == 2
     assert targets[0].startswith("file:") and "mode=ro" in targets[0]
     assert targets[1] == ":memory:"
+
+
+def test_no_semantic_extra_and_no_ml_dependency():
+    # NOTE-02 does not apply (D-12): semantic search is not adopted, so the install
+    # stays free of any `[semantic]` extra, `notes_semantic` tool or ML package.
+    import tomllib
+    from pathlib import Path
+
+    from macos_apps_mcp import registry
+    from macos_apps_mcp import server as _srv  # noqa: F401  (registers the tools)
+
+    root = Path(__file__).resolve().parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert "semantic" not in project.get("optional-dependencies", {})
+    assert "notes_semantic" not in registry.TOOLS
+    locked = tomllib.loads((root / "uv.lock").read_text())["package"]
+    banned = {
+        "fastembed",
+        "onnxruntime",
+        "sentence-transformers",
+        "torch",
+        "transformers",
+        "tokenizers",
+    }
+    assert banned.isdisjoint(p["name"] for p in locked)
