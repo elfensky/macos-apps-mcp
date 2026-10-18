@@ -203,7 +203,7 @@ def test_notes_tool_dispatches(monkeypatch):
     monkeypatch.setattr(srv, "_notes", fake)
     out = srv.notes("groceries")
     assert fake.queries == ["groceries"]
-    assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    assert out == {"results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]}
 
 
 def test_notes_all_dispatches(monkeypatch):
@@ -860,6 +860,9 @@ class _EmptySource:
     def get_pointers(self, query: str) -> list[Pointer]:
         return []
 
+    def read(self, query: str) -> dict:
+        return read_result([])
+
 
 def test_read_tool_converts_native_error_to_agent_directive(monkeypatch):
     # A denied read is a loud ToolError carrying the remediation — the model is told to
@@ -872,8 +875,10 @@ def test_read_tool_converts_native_error_to_agent_directive(monkeypatch):
 def test_read_tool_empty_result_is_not_an_error(monkeypatch):
     # The whole point of the taxonomy: no-matches ([]) is distinct from failure. An
     # empty search must return [] cleanly, never raise.
+    monkeypatch.setattr(srv, "_contacts", _EmptySource())
+    assert srv.contacts("nonexistent") == []
     monkeypatch.setattr(srv, "_notes", _EmptySource())
-    assert srv.notes("nonexistent") == []
+    assert srv.notes("nonexistent") == {"results": []}
 
 
 @_write_gate_on_only
