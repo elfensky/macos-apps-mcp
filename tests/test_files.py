@@ -61,12 +61,12 @@ def test_no_separator_convention_survives_into_the_basename(hostile):
 @pytest.mark.parametrize(
     "hostile, expected",
     [
-        ("", "attachment"),
-        ("   ", "attachment"),
-        (".", "attachment"),
-        ("..", "attachment"),
-        ("../", "attachment"),
-        ("evil/", "attachment"),
+        ("", "file"),
+        ("   ", "file"),
+        (".", "file"),
+        ("..", "file"),
+        ("../", "file"),
+        ("evil/", "file"),
         (".ssh", "_.ssh"),
         (".bashrc", "_.bashrc"),
         ("normal.pdf", "normal.pdf"),
@@ -174,17 +174,32 @@ def test_target_path_refuses_an_existing_file_even_via_a_hostile_name(root):
 
 
 def test_size_cap_refuses_before_anything_is_written():
-    with pytest.raises(ValueError, match="larger than"):
-        files.check_size(files.MAX_BYTES + 1, "huge.zip")
+    with pytest.raises(ValueError, match="larger than") as exc:
+        files.check_size(11, "huge.zip", max_bytes=10)
+    assert "cap" in str(exc.value)
 
 
 def test_size_cap_allows_the_boundary():
-    files.check_size(files.MAX_BYTES, "big.zip")
+    files.check_size(10, "big.zip", max_bytes=10)
 
 
 def test_unknown_size_is_allowed_through(root):
     # `file size` is missing on some attachments; the post-write stat is the backstop.
-    files.check_size(None, "unknown.bin")
+    files.check_size(None, "unknown.bin", max_bytes=10)
+
+
+def test_the_cap_is_the_callers_and_keyword_only():
+    """D-11: no module-level cap exists, and a caller cannot forget to pass its own."""
+    assert not hasattr(files, "MAX_BYTES")
+    with pytest.raises(TypeError):
+        files.check_size(11, "a", 10)
+    with pytest.raises(TypeError):
+        files.check_size(11, "a")
+
+
+def test_check_size_hint_is_appended():
+    with pytest.raises(ValueError, match="Save it from Mail directly"):
+        files.check_size(11, "a", max_bytes=10, hint="Save it from Mail directly.")
 
 
 def test_written_file_must_not_be_empty(root):
@@ -197,6 +212,38 @@ def test_written_file_must_not_be_empty(root):
     with pytest.raises(ValueError, match="0 bytes"):
         files.confirm_written(empty)
     assert not empty.exists()
+
+
+def test_confirm_written_names_the_callers_hint(root):
+    empty = root / "empty.jpg"
+    empty.touch()
+    with pytest.raises(ValueError, match="0 bytes.*offline") as exc:
+        files.confirm_written(empty, hint="the photo is offline in iCloud.")
+    assert "has been removed" in str(exc.value)
+    assert not empty.exists()
+
+
+def test_refusals_are_neutral(root, tmp_path):
+    """D-11: the shared module speaks about files, never about one caller's source."""
+    messages = []
+    with pytest.raises(ValueError) as outside:
+        files.resolve_dest(str(tmp_path / "elsewhere"))
+    messages.append(str(outside.value))
+    (root / "x.bin").write_bytes(b"1")
+    with pytest.raises(FileExistsError) as exists:
+        files.target_path("", "x.bin")
+    messages.append(str(exists.value))
+    with pytest.raises(ValueError) as over:
+        files.check_size(11, "x.bin", max_bytes=10)
+    messages.append(str(over.value))
+    empty = root / "empty.bin"
+    empty.touch()
+    with pytest.raises(ValueError) as zero:
+        files.confirm_written(empty)
+    messages.append(str(zero.value))
+    for text in messages:
+        for word in ("mail", "Mail", "attachment"):
+            assert word not in text, (word, text)
 
 
 def test_confirm_written_returns_the_byte_count(root):

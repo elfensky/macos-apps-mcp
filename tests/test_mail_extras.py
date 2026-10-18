@@ -69,7 +69,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
         "deal.pdf",
         "",
         str(root / "invoices" / "deal.pdf"),
-        str(mail.files.MAX_BYTES),
+        str(mail_attachments.MAIL_MAX_BYTES),
     )
     # saving can make Mail FETCH the message off the server, so this is not a 30s read
     assert seen["kw"] == {"timeout": mail_attachments._SAVE_TIMEOUT}
@@ -123,9 +123,28 @@ def test_save_removes_an_empty_file_and_reports_it(root, resolved, monkeypatch):
         return f"0{US}false"
 
     monkeypatch.setattr(runtime, "run_osascript", fake)
-    with pytest.raises(ValueError, match="0 bytes"):
+    with pytest.raises(ValueError, match="0 bytes") as exc:
         mail.MailAdapter().save_attachment("<a@x>", "", name="empty.pdf")
+    assert "not available locally" in str(exc.value)
     assert not (root / "empty.pdf").exists()
+
+
+def test_save_names_a_nameless_attachment_attachment(root, resolved, monkeypatch):
+    """The shared module falls back to `file`; Mail keeps its own word."""
+    seen = {}
+
+    def fake(script, *argv, **kw):
+        seen["dest"] = argv[5]
+        (root / "in" / "attachment").write_bytes(b"x")
+        return f"1{US}true"
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    mail.MailAdapter().save_attachment("<a@x>", "in", name="..")
+    assert seen["dest"] == str(root / "in" / "attachment")
+
+
+def test_mail_cap_is_25_mib():
+    assert mail_attachments.MAIL_MAX_BYTES == 25 * 1024 * 1024
 
 
 def test_save_needs_a_name_or_an_id(root, resolved):
@@ -237,7 +256,7 @@ def test_save_by_attachment_id_refuses_an_oversized_attachment(
 ):
     """#296: the listed size lets the cap refuse before the save Apple Event."""
     calls = []
-    big = [("invoice.pdf", mail.files.MAX_BYTES + 1, "2")]
+    big = [("invoice.pdf", mail_attachments.MAIL_MAX_BYTES + 1, "2")]
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, big))
     with pytest.raises(ValueError, match="cap"):
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
