@@ -37,7 +37,7 @@ mutates stored mail; ``mail_outgoing`` (#160) is the OUTBOUND lifecycle — enve
 build → the one ``would_send`` preview shape → construct → send → outbox truth-check —
 which ``send``/``reply_all``/``forward``/``send(draft_id=…)`` are four
 parametrizations of, and which states once (and enforces) the rules a dry run must
-obey; ``mail_files`` (#81) is the filesystem boundary (allowlisted root, derived
+obey; ``files`` (#81) is the filesystem boundary (allowlisted root, derived
 names, never-overwrite); ``mail_triage`` (#178) owns the needs-response /
 awaiting-reply scans and their pure classifiers; ``mail_drafts`` (#178) owns the draft
 lifecycle — create/list/resolve/delete plus the threaded ``reply`` draft;
@@ -71,7 +71,7 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 
-from .. import runtime
+from .. import files, runtime
 from ..contracts import Pointer, read_result
 from ..errors import BatchTooLarge, NativeError, OutputOverflow, WriteRefused
 from ..runtime import log
@@ -93,7 +93,6 @@ from . import (
     mail_addressing,
     mail_attachments,
     mail_drafts,
-    mail_files,
     mail_ids,
     mail_index,
     mail_outgoing,
@@ -1439,7 +1438,7 @@ class MailAdapter:
         ``MACOS_APPS_FILE_ROOT``). The saved filename is DERIVED from the attachment's
         name, never concatenated: an attachment name arrives in inbound mail from
         anyone, so ``../../.ssh/authorized_keys`` reduces to ``authorized_keys`` inside
-        ``dest_dir`` — see ``mail_files`` for the whole rule set. An existing file is
+        ``dest_dir`` — see ``files`` for the whole rule set. An existing file is
         never overwritten (Mail's own ``save`` verb overwrites silently; the refusal is
         in Python, before the Apple Event) and the write is size-capped.
 
@@ -2471,7 +2470,7 @@ class MailAdapter:
 
         Each file is named ``<sanitized-subject-or-id>.eml`` under ``dest_dir`` — inside
         the allowlisted root, derived not concatenated, never overwriting (see
-        ``mail_files``). A message that cannot be located is reported per-id as
+        ``files``). A message that cannot be located is reported per-id as
         ``absent`` rather than failing the batch: 62% of local messages are
         ``.partial``, and a message with no local file has no bytes here to write.
         """
@@ -2493,7 +2492,7 @@ class MailAdapter:
             if payload is None:
                 out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
                 continue
-            path = mail_files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
+            path = files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
             path.write_bytes(payload)
             out.append(
                 {
@@ -2510,7 +2509,7 @@ class MailAdapter:
         return {
             "results": out,
             "written": sum(1 for r in out if r["status"] == "written"),
-            "dest_dir": str(mail_files.resolve_dest(dest_dir)),
+            "dest_dir": str(files.resolve_dest(dest_dir)),
             "plane": "at-rest",
         }
 
