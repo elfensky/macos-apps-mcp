@@ -133,6 +133,9 @@ def test_build_script_gates_universal2():
     """A missing slice or a too-new binary installs fine and fails only on the user's
     Mac; only the build gate sees it (#205)."""
     src = (ROOT / "scripts" / "build_app.sh").read_text()
+    install = '--target "$WORK/site-$a" -r "$WORK/reqs"'
+    rm_dylibs = 'rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib'
+    guard = 'if grep -q platform_release "$WORK/reqs"; then'
     for needle in (
         "plutil -extract LSMinimumSystemVersion raw",
         'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
@@ -144,20 +147,20 @@ def test_build_script_gates_universal2():
         '/usr/bin/arch "-$a"',
         "smoke_stream.py",
         "universal2 gate ok",
-        "libdisclaim",
-        "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers",
+        install,
+        rm_dylibs,
+        # -s -P: with cwd = the checkout, a bare import would load the repo's package
+        '-E -s -P -c "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers"',
         "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers",
+        guard,
         "EXPORT HOLDS platform_release MARKERS",
     ):
         assert needle in src, needle
     # the thin osxphotos CLI dylibs go inside the install loop, before the tree diff
-    assert src.index("libdisclaim") < src.index("ARCH TREES DIFFER")
+    assert src.index(install) < src.index(rm_dylibs) < src.index("ARCH TREES DIFFER")
     # an export that holds a platform_release marker is refused before anything installs
-    assert (
-        src.index("uv export")
-        < src.index("EXPORT HOLDS platform_release")
-        < src.index("uv pip install")
-    )
+    assert src.index("uv export") < src.index(guard) < src.index(install)
+    assert "exit 1" in src[src.index(guard) : src.index("\nfi\n", src.index(guard))]
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
     # the gate names a bad binary before a smoke can trip over it
     assert src.index("universal2 gate ok") < src.index("BUNDLE SMOKE FAILED")
