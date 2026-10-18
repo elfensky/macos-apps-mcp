@@ -490,8 +490,30 @@ def read_via_sqlite(
     return work() if on_worker() else run_native(work)
 
 
+# The Photos prefs file osxphotos reads to find the library; Full Disk Access guards it.
+_PHOTOS_PREFS = (
+    Path.home()
+    / "Library/Containers/com.apple.Photos/Data/Library/Preferences"
+    / "com.apple.Photos.plist"
+)
+
+
+def _photos_prefs_denied() -> bool:
+    """True when TCC blocks the Photos prefs file. osxphotos swallows that
+    PermissionError and reports a missing library, so this tells the two apart."""
+    try:
+        with open(_PHOTOS_PREFS, "rb") as f:
+            f.read(1)
+    except PermissionError:
+        return True
+    except OSError:  # absent (Photos never opened) or unreadable for another reason
+        pass
+    return False
+
+
 def photos_db():
-    """The osxphotos ``PhotosDB`` for the system Photos library (Full Disk Access).
+    """The osxphotos ``PhotosDB`` for the library Photos last opened (osxphotos
+    ``get_last_library_path``; Full Disk Access).
 
     The one door to osxphotos (D-01, D-06): every Photos read builds its library
     through here, so unit tests fake one name and a test that forgets raises instead of
@@ -514,14 +536,14 @@ def photos_db():
         # and Photos.sqlite-wal when an open passes ~1 s.
         try:
             return osxphotos.PhotosDB()
-        except PermissionError as e:
-            raise FullDiskAccessDenied(
-                "macos-apps-mcp could not read the Photos library — Full Disk Access "
-                f"is not granted. Grant it in {PRIVACY_PANE} → Full Disk Access to the "
-                "app that launched macos-apps-mcp, then restart macos-apps-mcp. Do "
-                "not retry until the next user message."
-            ) from e
-        except FileNotFoundError as e:
+        except (PermissionError, FileNotFoundError) as e:
+            if isinstance(e, PermissionError) or _photos_prefs_denied():
+                raise FullDiskAccessDenied(
+                    "macos-apps-mcp could not read the Photos library — Full Disk "
+                    f"Access is not granted. Grant it in {PRIVACY_PANE} → Full Disk "
+                    "Access to the app that launched macos-apps-mcp, then restart "
+                    "macos-apps-mcp. Do not retry until the next user message."
+                ) from e
             raise NativeError(
                 "osxphotos found no Photos library on this Mac. Open Photos once to "
                 "create one; if Photos already has a library, Full Disk Access may be "
