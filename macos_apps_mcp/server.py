@@ -1070,7 +1070,8 @@ def photos(query: str) -> dict:
     against original filename, filename, title, description, keywords, place name,
     person names and labels. Returns `{results, truncated?}`: pointers (id = the Photos
     uuid, summary = `title · filename · date`), newest first, at most 25; `truncated`
-    means more matched. Pass the id to photo_info or export_photo. Reads the library at
+    means the 25 cap was reached and there may be more. Hidden and Recently Deleted
+    photos never match. Pass the id to photo_info or export_photo. Reads the library at
     rest through osxphotos, so it needs Full Disk Access (not Automation). Read-only;
     never returns image bytes or thumbnails."""
     return _photos.read(query)
@@ -1095,7 +1096,8 @@ def photo_info(id: str) -> dict:
     shutter_speed, iso, width, height. Ids come from photos and photo_albums; the old
     `<UUID>/L0/001` form is accepted too. Reads the Photos library at rest through
     osxphotos, so it needs Full Disk Access (not Automation). Read-only; never returns
-    image bytes, thumbnails or file paths. An unknown or Recently Deleted id raises."""
+    image bytes, thumbnails or file paths. An unknown or Recently Deleted id raises; a
+    Hidden one is refused (unhide it in Photos first)."""
     return _photos.info(id)
 
 

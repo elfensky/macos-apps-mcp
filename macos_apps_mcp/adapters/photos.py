@@ -23,6 +23,7 @@ from ..text import clean_summary, fold_text
 MAX_PHOTOS = 25
 MAX_ALBUMS = 100
 
+_UNKNOWN_PERSON = "_UNKNOWN_"  # osxphotos' name for an unnamed face
 _UUID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
 
 
@@ -39,11 +40,16 @@ def _uuid(ident: str) -> str:
 
 
 def _live(db, uuid: str):
-    """The photo with this uuid; a trashed one counts as unknown (``get_photo`` still
-    returns it)."""
+    """The photo with this uuid; a trashed one counts as unknown and a hidden one is
+    refused (``get_photo`` returns both; D-17)."""
     p = db.get_photo(uuid)
     if p is None or p.intrash:
         raise ValueError(f"no photo with id {uuid} (unknown, or in Recently Deleted)")
+    if p.hidden:
+        raise ValueError(
+            f"photo {uuid} is in the Hidden album, which Photos keeps locked. Unhide "
+            "it in Photos to use it here. Do not retry."
+        )
     return p
 
 
@@ -60,7 +66,8 @@ def _text(v: object) -> str | None:
 
 
 def _haystack(p) -> list[str]:
-    """Every string a search needle may match; None parts are skipped."""
+    """Every string a search needle may match; None parts and unnamed faces are
+    skipped."""
     parts = [
         p.original_filename,
         p.filename,
@@ -68,7 +75,7 @@ def _haystack(p) -> list[str]:
         p.description,
         *p.keywords,
         p.place.name if p.place else None,
-        *p.persons,
+        *(n for n in p.persons if n != _UNKNOWN_PERSON),
         *p.labels,
     ]
     return [str(x) for x in parts if x]
@@ -85,12 +92,11 @@ def _photo_pointer(p) -> Pointer:
 
 
 def _album_pointer(a) -> Pointer:
+    live = sum(not (p.intrash or p.hidden) for p in a.photos)  # D-17
     folder = " / ".join(a.folder_names)
     return Pointer(
         id=a.uuid,
-        summary=clean_summary(
-            f"{a.title or '(untitled album)'} ({len(a.photos)} photos)"
-        ),
+        summary=clean_summary(f"{a.title or '(untitled album)'} ({live} photos)"),
         deeplink="",
         folder=clean_summary(folder) or None,
     )
@@ -101,7 +107,9 @@ def _info(p) -> dict:
     No bytes, no thumbnail, no path. Every string is one clean line (untrusted text)."""
     ex = p.exif_info
     persons = dict.fromkeys(
-        n for n in (clean_summary(n) for n in p.persons if n) if n and n != "_UNKNOWN_"
+        n
+        for n in (clean_summary(n) for n in p.persons if n)
+        if n and n != _UNKNOWN_PERSON
     )
     return {
         "id": p.uuid,
@@ -133,7 +141,8 @@ class PhotosAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
         """query: a search string, folded and matched against original filename,
         filename, title, description, keywords, place name, person names and labels.
-        Newest first, at most ``MAX_PHOTOS``; Recently Deleted photos never match."""
+        Newest first, at most ``MAX_PHOTOS``; Recently Deleted and Hidden photos never
+        match (D-17)."""
         needle = fold_text(query).strip()
         if not needle:
             raise ValueError("photos read needs a search string (got an empty query)")
@@ -142,7 +151,7 @@ class PhotosAdapter:
             hits = [
                 p
                 for p in runtime.photos_db().photos()
-                if any(needle in fold_text(s) for s in _haystack(p))
+                if not p.hidden and any(needle in fold_text(s) for s in _haystack(p))
             ]
             hits.sort(key=lambda p: (p.date, p.uuid), reverse=True)
             return [_photo_pointer(p) for p in hits[:MAX_PHOTOS]]
