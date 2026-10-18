@@ -72,10 +72,11 @@ shares, run the signed `.app` daemon: see [docs/DAEMON.md](docs/DAEMON.md).
 Grant access when macOS prompts — the first call to each app triggers its dialog:
 
 - **EventKit** — Calendar + Reminders (read/write).
-- **Automation** (per app) — Mail, Notes, Contacts, Photos, Safari, Messages actions/reads.
-- **Full Disk Access** — required for **Messages content** (`chat.db`) and the **fast Notes**
-  path (`NoteStore.sqlite`). Notes degrades to Automation without it; Messages content raises a
-  clear, typed error telling you to grant it. Run the `doctor` tool to see what's granted.
+- **Automation** (per app) — Mail, Notes, Contacts, Safari, Messages actions/reads.
+- **Full Disk Access** — required for **Messages content** (`chat.db`), the **fast Notes**
+  path (`NoteStore.sqlite`) and the **Photos library**, which osxphotos reads at rest. Notes
+  degrades to Automation without it; Messages content and Photos raise a clear, typed error
+  telling you to grant it. Run the `doctor` tool to see what's granted.
 
 ## Tools
 
@@ -172,7 +173,9 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | Tool | Args | Returns |
 |------|------|---------|
 | `contacts` | name substring | cards (name, org, first phone + email) |
-| `photos` | search string | media (filename); matches the Photos search field |
+| `photos` | search string | `{results, truncated?}` pointers (title · filename · date), newest first, at most 25; matches filename, title, description, keywords, place, people and labels. The id is the Photos uuid; the old `<UUID>/L0/001` id is still accepted |
+| `photo_albums` | — | `{results, truncated?}` album pointers (id, `title (n photos)`, folder path), at most 100 |
+| `photo_info` | photo id | dates, location, place, people, EXIF subset, pixel size, kind; never image bytes or thumbnails |
 | `safari_tabs` | — | every open tab (url + title) |
 | `shortcuts` | name substring (empty = all) | the user's Shortcuts; id = stable UUID, `shortcuts://` deeplink |
 | `ping` / `now` / `doctor` | — (`doctor` takes optional `request=True` to trigger permission prompts) | health check / time / permission diagnostics |
