@@ -14,6 +14,8 @@ surface may still shift between minor versions.
 
 ### Changed
 
+- **Python 3.11 is no longer supported; the floor is 3.12** (D-16) — osxphotos (Photos, #96)
+  cannot be locked beside pyobjc 10+ on 3.11. Release 0.14.3 stays installable on 3.11.
 - **`notes()` searches note bodies and returns `{results, truncated?, plane?, coverage?}`**
   (#93) — a caller that read the list now reads `results`. A word that sits only in a note's
   body is found: an FTS5 index is built in memory on each call from the bodies the server
