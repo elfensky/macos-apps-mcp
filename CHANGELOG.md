@@ -12,6 +12,17 @@ surface may still shift between minor versions.
   file (`packaging/AppIcon.icon`), with a standard icon for macOS before 26. Building the
   `.app` needs full Xcode for `actool` (see docs/DAEMON.md).
 
+### Changed
+
+- **`notes()` searches note bodies and returns `{results, truncated?, plane?, coverage?}`**
+  (#93) — a caller that read the list now reads `results`. A word that sits only in a note's
+  body is found: an FTS5 index is built in memory on each call from the bodies the server
+  already decodes, so no second copy of note text reaches disk, and locked notes stay out.
+  Title and snippet hits still come first. Without Full Disk Access the AppleScript fallback
+  searches titles only, and `plane` and `coverage` say so. Spike 004 measured hit@1 0.31 to
+  0.54 with no new dependency. Semantic search is not adopted; see
+  [docs/notes-semantic-search.md](docs/notes-semantic-search.md).
+
 ### Fixed
 
 - **doctor reports an answered -1728 probe as `ok`** (#317) — Photos, launched by the
