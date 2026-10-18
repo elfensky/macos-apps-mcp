@@ -1,6 +1,6 @@
 """0.9.4 extras — save an attachment (#81) and statistics + export (#85).
 
-The filesystem boundary itself is pinned in ``test_mail_files.py``; these tests are
+The filesystem boundary itself is pinned in ``test_files.py``; these tests are
 about the two features wired onto it — that #81 refuses BEFORE the Apple Event rather
 than after, and that #85 counts DISTINCT messages rather than rows (raw rows overcount
 by up to 3.6x on a real store, the same margin ``mail_overview`` was fixed for).
@@ -69,7 +69,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
         "deal.pdf",
         "",
         str(root / "invoices" / "deal.pdf"),
-        str(mail.mail_files.MAX_BYTES),
+        str(mail.files.MAX_BYTES),
     )
     # saving can make Mail FETCH the message off the server, so this is not a 30s read
     assert seen["kw"] == {"timeout": mail_attachments._SAVE_TIMEOUT}
@@ -237,7 +237,7 @@ def test_save_by_attachment_id_refuses_an_oversized_attachment(
 ):
     """#296: the listed size lets the cap refuse before the save Apple Event."""
     calls = []
-    big = [("invoice.pdf", mail.mail_files.MAX_BYTES + 1, "2")]
+    big = [("invoice.pdf", mail.files.MAX_BYTES + 1, "2")]
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, big))
     with pytest.raises(ValueError, match="cap"):
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
