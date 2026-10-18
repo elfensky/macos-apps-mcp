@@ -47,7 +47,8 @@ dependencies = [
 
 # Photos (D-01, D-16): osxphotos 0.77.2 resolved on macOS 27 (2026-10-18) with no existing pin
 # moved except the five pairs that served only Python 3.11 or the collapsed win32 fork; the route
-# is the Python 3.12 floor (osxphotos needs pyobjc<10 on 3.11, which EventKit here cannot take).
+# is the Python 3.12 floor: osxphotos caps pyobjc<10 only on Python 3.11 with macOS < 13 (a
+# platform_release marker), and uv's universal lock cannot split that from our pyobjc>=10.
 
 [project.scripts]
 macos-apps-mcp = "macos_apps_mcp:main"
