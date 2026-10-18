@@ -11,11 +11,21 @@ surface may still shift between minor versions.
 - **The `.app` carries an app icon** — a Liquid Glass icon compiled from an Icon Composer
   file (`packaging/AppIcon.icon`), with a standard icon for macOS before 26. Building the
   `.app` needs full Xcode for `actool` (see docs/DAEMON.md).
+- **`photo_albums` and `photo_info`** (#96) — `photo_albums` lists albums as pointers (id,
+  `title (n photos)`, folder path), at most 100. `photo_info` returns one photo's bounded
+  metadata by id: dates, location, place, people, an EXIF subset, pixel size. Neither
+  returns image bytes, thumbnails or file paths.
 
 ### Changed
 
 - **Python 3.11 is no longer supported; the floor is 3.12** (D-16) — osxphotos (Photos, #96)
   cannot be locked beside pyobjc 10+ on 3.11. Release 0.14.3 stays installable on 3.11.
+- **`photos()` reads through osxphotos and returns `{results, truncated?}`** (#96) — a
+  caller that read the list now reads `results`. Ids are now the Photos uuid; ids in the old
+  `<UUID>/L0/001` form still resolve. The tool needs Full Disk Access instead of Automation,
+  and doctor no longer probes Automation for Photos (11 surfaces, not 12). Search matches
+  filename, title, description, keywords, place, people and labels in one pass, newest first,
+  at most 25. osxphotos (MIT) is a new dependency.
 - **`notes()` searches note bodies and returns `{results, truncated?, plane?, coverage?}`**
   (#93) — a caller that read the list now reads `results`. A word that sits only in a note's
   body is found: an FTS5 index is built in memory on each call from the bodies the server
