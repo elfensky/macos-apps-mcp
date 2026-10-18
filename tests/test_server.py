@@ -235,7 +235,27 @@ def test_photos_tool_dispatches(monkeypatch):
     monkeypatch.setattr(srv, "_photos", fake)
     out = srv.photos("beach")
     assert fake.queries == ["beach"]
-    assert out == [{"id": "P-1", "summary": "s", "deeplink": "d"}]
+    assert out == {"results": [{"id": "P-1", "summary": "s", "deeplink": "d"}]}
+
+
+def test_photo_albums_tool_dispatches(monkeypatch):
+    class _FakeAlbums:
+        def albums(self):
+            return read_result(
+                [Pointer(id="AL-1", summary="Trips (2 photos)", deeplink="")]
+            )
+
+    monkeypatch.setattr(srv, "_photos", _FakeAlbums())
+    assert srv.photo_albums() == {
+        "results": [{"id": "AL-1", "summary": "Trips (2 photos)", "deeplink": ""}]
+    }
+
+
+def test_the_photos_tools_are_read_tools_naming_full_disk_access():
+    for name in ("photos", "photo_albums", "photo_info"):
+        rec = registry.TOOLS[name]
+        assert rec.tier == "read" and rec.permission == ("Full Disk Access",)
+        assert "Full Disk Access" in (rec.fn.__doc__ or "")
 
 
 def test_messages_chats_dispatches(monkeypatch):

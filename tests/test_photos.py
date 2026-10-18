@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import sys
 import threading
 import types
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -15,10 +16,10 @@ from fastmcp.exceptions import ToolError
 
 import macos_apps_mcp.server as srv
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters.photos import PhotosAdapter, _parse
+from macos_apps_mcp.adapters import photos as photos_mod
+from macos_apps_mcp.adapters.photos import MAX_ALBUMS, MAX_PHOTOS, PhotosAdapter
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import FullDiskAccessDenied, NativeError, SchemaDrift
-from macos_apps_mcp.text import RS, US
 
 # The seam's own self-tests need the REAL function: conftest replaces runtime.photos_db
 # for every unit test, so bind it at import (the tests/test_runtime.py convention).
@@ -275,35 +276,198 @@ def test_photos_db_without_osxphotos_says_not_installed(monkeypatch):
         _REAL_PHOTOS_DB()
 
 
-def test_parse_id_and_filename():
-    ptrs = _parse(f"ABC123{US}IMG_0001.jpg{RS}DEF456{US}{RS}")
-    assert len(ptrs) == 2
-    assert isinstance(ptrs[0], Pointer)
-    assert ptrs[0].id == "ABC123" and ptrs[0].summary == "IMG_0001.jpg"
-    assert ptrs[0].deeplink == ""
-    assert ptrs[1].summary == "(photo)"
+# --- photos(query): one osxphotos pass, folded, newest first, capped ----------------
 
 
-def test_parse_skips_blank():
-    assert _parse("\n  \n") == []
+def _u(n: int) -> str:
+    return f"A1B2C3D4-0000-4000-8000-{n:012d}"
 
 
-def test_parse_sanitizes_control_chars_in_summary():
-    # #52 routing: a filename carrying a control char is stripped before it reaches the
-    # model (deleting clean_summary from _parse would fail this).
-    ptr = _parse(f"ABC123{US}IMG\x07_1.jpg{RS}")[0]
-    assert ptr.summary == "IMG_1.jpg" and "\x07" not in ptr.summary
+def _search(monkeypatch, query, *photos):
+    _fake_seam(monkeypatch, *photos)
+    return PhotosAdapter().get_pointers(query)
 
 
-def test_parse_survives_newline_in_filename():
-    # US/RS framing (C4-B): a newline in a filename no longer splits the record.
-    ptr = _parse(f"ABC123{US}IMG\n_1.jpg{RS}")[0]
-    assert ptr.summary == "IMG _1.jpg"
+_FIELDS = [
+    ("original_filename", "needle_orig.HEIC"),
+    ("filename", "needle_disk.heic"),
+    ("title", "a needle title"),
+    ("description", "a needle description"),
+    ("keywords", ["plain", "needle"]),
+    ("place", SimpleNamespace(name="Needle Town")),
+    ("persons", ["Needle Person"]),
+    ("labels", ["needle label"]),
+]
 
 
-def test_parse_absent_filename_falls_back_to_the_placeholder():
-    # AppleScript reports an absent property as the literal "missing value" once it is
-    # concatenated into the wire — indistinguishable from a real value, so it defeated
-    # the `or "(photo)"` fallback and shipped `missing value` as the summary.
-    ptr = _parse(f"ABC123{US}missing value{RS}")[0]
-    assert ptr.summary == "(photo)"
+@pytest.mark.parametrize(("field", "value"), _FIELDS, ids=[f for f, _ in _FIELDS])
+def test_photos_search_matches_each_searched_field(monkeypatch, field, value):
+    hit = _photo(uuid=_u(1), **{field: value})
+    miss = _photo(uuid=_u(2), original_filename="IMG_9.HEIC", filename="x.heic")
+    assert [p.id for p in _search(monkeypatch, "needle", hit, miss)] == [_u(1)]
+
+
+@pytest.mark.parametrize(
+    ("title", "query"),
+    [("Café", "cafe"), ("Andrei\u2019s trip", "andrei's"), ("BEACH", "beach")],
+)
+def test_photos_search_folds_case_diacritics_and_smart_punctuation(
+    monkeypatch, title, query
+):
+    assert len(_search(monkeypatch, query, _photo(title=title))) == 1
+
+
+@pytest.mark.parametrize("query", ["", "   ", "\u0301"])
+def test_photos_search_empty_query_asks_for_a_search_string(monkeypatch, query):
+    _fake_seam(monkeypatch, _photo())
+    with pytest.raises(ValueError, match="search string"):
+        PhotosAdapter().get_pointers(query)
+
+
+def test_photos_search_never_matches_trashed_photos(monkeypatch):
+    assert _search(monkeypatch, "beach", _photo(intrash=True)) == []
+
+
+def test_photos_search_is_newest_first_and_ties_break_by_uuid_descending(monkeypatch):
+    old = _photo(uuid=_u(1), date=datetime(2025, 1, 1, tzinfo=UTC))
+    new = _photo(uuid=_u(2), date=datetime(2026, 1, 1, tzinfo=UTC))
+    tie_a = _photo(uuid=_u(3), date=datetime(2026, 1, 1, tzinfo=UTC))
+    got = [p.id for p in _search(monkeypatch, "beach", old, new, tie_a)]
+    assert got == [_u(3), _u(2), _u(1)]
+
+
+@pytest.mark.parametrize(
+    ("n", "want", "truncated"), [(24, 24, False), (25, 25, True), (26, 25, True)]
+)
+def test_photos_search_caps_at_max_photos(monkeypatch, n, want, truncated):
+    assert MAX_PHOTOS == 25
+    _fake_seam(monkeypatch, *[_photo(uuid=_u(i)) for i in range(n)])
+    out = PhotosAdapter().read("beach")
+    assert len(out["results"]) == want
+    assert ("truncated" in out) is truncated
+
+
+def test_photos_search_pointer_shape_holds_no_location_or_person(monkeypatch):
+    p = _photo(
+        uuid=_u(7),
+        title=None,
+        original_filename="IMG_0002.JPG",
+        date=datetime(2026, 1, 3, 9, tzinfo=UTC),
+        keywords=["beach"],
+    )
+    (ptr,) = _search(monkeypatch, "beach", p)
+    assert isinstance(ptr, Pointer)
+    assert ptr.id == _u(7) and ptr.deeplink == ""
+    assert ptr.summary == "IMG_0002.JPG · 2026-01-03"
+    assert set(ptr.as_dict()) == {"id", "summary", "deeplink"}
+    assert "50.85" not in repr(ptr) and "Ana" not in repr(ptr)
+
+
+def test_photos_search_summary_joins_title_filename_and_date(monkeypatch):
+    (ptr,) = _search(monkeypatch, "beach", _photo())
+    assert ptr.summary == "Beach · IMG_0001.HEIC · 2026-01-02"
+
+
+def test_photos_read_is_the_envelope_of_the_same_pointers(monkeypatch):
+    _fake_seam(monkeypatch, _photo())
+    out = PhotosAdapter().read("beach")
+    assert out == {
+        "results": [p.as_dict() for p in PhotosAdapter().get_pointers("beach")]
+    }
+
+
+def test_photos_search_runs_on_the_native_worker(monkeypatch):
+    db = _fake_seam(monkeypatch, _photo())
+    PhotosAdapter().get_pointers("beach")
+    assert db.threads and all(t.startswith("mac-native") for t in db.threads)
+
+
+# --- photo_albums() ----------------------------------------------------------------
+
+
+def _albums(monkeypatch, *albums):
+    _fake_seam(monkeypatch, albums=albums)
+    return PhotosAdapter().albums()
+
+
+def test_photo_albums_pointer_shape_and_nested_folder(monkeypatch):
+    out = _albums(
+        monkeypatch,
+        FakeAlbum(_u(1), "Trips", [1, 2], ["Family", "2026"]),
+        FakeAlbum(_u(2), "Top", [1]),
+    )
+    nested, top = out["results"]
+    assert nested == {
+        "id": _u(1),
+        "summary": "Trips (2 photos)",
+        "deeplink": "",
+        "folder": "Family / 2026",
+    }
+    assert top["id"] == _u(2) and "folder" not in top
+    assert "truncated" not in out
+
+
+def test_photo_albums_same_title_stays_two_albums(monkeypatch):
+    out = _albums(
+        monkeypatch,
+        FakeAlbum(_u(1), "Trips", [1]),
+        FakeAlbum(_u(2), "Trips", [1, 2], ["Family"]),
+        FakeAlbum(_u(3), "Trips", []),
+    )
+    assert sorted(r["id"] for r in out["results"]) == [_u(1), _u(2), _u(3)]
+
+
+def test_photo_albums_empty_library_is_an_empty_envelope(monkeypatch):
+    assert _albums(monkeypatch) == {"results": []}
+
+
+def test_photo_albums_zero_photos_and_untitled(monkeypatch):
+    out = _albums(
+        monkeypatch, FakeAlbum(_u(1), "Empty", []), FakeAlbum(_u(2), None, [1])
+    )
+    assert [r["summary"] for r in out["results"]] == [
+        "(untitled album) (1 photos)",
+        "Empty (0 photos)",
+    ]
+
+
+def test_photo_albums_order_is_folder_then_title_then_uuid(monkeypatch):
+    out = _albums(
+        monkeypatch,
+        FakeAlbum(_u(5), "b", [], ["Z"]),
+        FakeAlbum(_u(4), "B", []),
+        FakeAlbum(_u(3), "a", []),
+        FakeAlbum(_u(2), "A", []),
+        FakeAlbum(_u(1), "a", [], ["A"]),
+    )
+    assert [r["id"] for r in out["results"]] == [_u(2), _u(3), _u(4), _u(1), _u(5)]
+
+
+@pytest.mark.parametrize(
+    ("n", "want", "truncated"), [(99, 99, False), (100, 100, True), (101, 100, True)]
+)
+def test_photo_albums_cap(monkeypatch, n, want, truncated):
+    assert MAX_ALBUMS == 100
+    out = _albums(monkeypatch, *[FakeAlbum(_u(i), f"A{i:03d}", []) for i in range(n)])
+    assert len(out["results"]) == want
+    assert ("truncated" in out) is truncated
+
+
+def test_photo_albums_strings_are_clean_one_liners(monkeypatch):
+    out = _albums(monkeypatch, FakeAlbum(_u(1), "Tr\x07ips\nx", [], ["Fam\x00ily"]))
+    (row,) = out["results"]
+    assert row["summary"] == "Trips x (0 photos)" and row["folder"] == "Family"
+
+
+# --- the adapter holds no AppleScript (D-01, D-07) ------------------------------------
+
+
+def test_the_photos_adapter_has_no_applescript():
+    src = pathlib.Path(photos_mod.__file__).read_text()
+    for banned in (
+        "run_osascript",
+        "tell application",
+        "STRIP_FRAMING",
+        "parse_framed",
+    ):
+        assert banned not in src
