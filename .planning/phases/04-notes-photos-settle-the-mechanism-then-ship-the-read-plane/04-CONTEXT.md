@@ -102,6 +102,13 @@ the first plan proves what the probe could not (D-03).
   adapter still sends to Photos.app (after D-04 and D-09: nothing) — the planner checks and
   removes it if nothing uses it.
 
+- **D-17:** **Hidden photos stay locked** (orchestrator default, 2026-10-18, after the #374 review;
+  the owner may reverse it). Photos keeps the Hidden album behind Touch ID or a password, and
+  osxphotos reads hidden photos like any other. So `photos()` skips hidden photos the way it skips
+  trashed ones, `photo_info` and `export_photo` refuse a hidden id with a typed, agent-directed
+  error ("unhide it in Photos to use it here"), and album counts count only live photos (not
+  trashed, not hidden). Reaching hidden photos would need an explicit owner opt-in.
+
 ### Photos export (PHO-04)
 - **D-08:** `export_photo(id, dest_dir)` writes the **edited still** — the image as Photos
   shows it, crop and edits applied; the original when there is no edit (owner, 2026-10-09).
