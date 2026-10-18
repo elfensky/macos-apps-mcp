@@ -490,6 +490,53 @@ def read_via_sqlite(
     return work() if on_worker() else run_native(work)
 
 
+def photos_db():
+    """The osxphotos ``PhotosDB`` for the system Photos library (Full Disk Access).
+
+    The one door to osxphotos (D-01, D-06): every Photos read builds its library
+    through here, so unit tests fake one name and a test that forgets raises instead of
+    opening the developer's real library. Returns the object, so the caller must use it
+    on the worker too — call it inside ``run_native`` (the adapter does).
+    """
+
+    def work():
+        # Lazy: 0.65 s warm and 5-8 s cold, and it pulls PyObjC Photos/Vision/Metal,
+        # so it stays out of server import and out of every unit test.
+        try:
+            import osxphotos
+        except ImportError as e:
+            raise NativeError(
+                "osxphotos is not installed in this environment, so the Photos tools "
+                "cannot run here. Do not retry."
+            ) from e
+        # shortcut: PhotosDB() per call is O(library) (open about 0.1 s at ~60 assets,
+        # measured in 04-01); cache it on the (st_mtime_ns, st_size) of Photos.sqlite
+        # and Photos.sqlite-wal when an open passes ~1 s.
+        try:
+            return osxphotos.PhotosDB()
+        except PermissionError as e:
+            raise FullDiskAccessDenied(
+                "macos-apps-mcp could not read the Photos library — Full Disk Access "
+                f"is not granted. Grant it in {PRIVACY_PANE} → Full Disk Access to the "
+                "app that launched macos-apps-mcp, then restart macos-apps-mcp. Do "
+                "not retry until the next user message."
+            ) from e
+        except FileNotFoundError as e:
+            raise NativeError(
+                "osxphotos found no Photos library on this Mac. Open Photos once to "
+                "create one; if Photos already has a library, Full Disk Access may be "
+                "missing — run doctor. Do not retry."
+            ) from e
+        except Exception as e:
+            raise SchemaDrift(
+                f"osxphotos {osxphotos.__version__} could not read the Photos library "
+                f"({type(e).__name__}: {e}) — macOS may have changed the Photos "
+                "database. Do not retry; report it."
+            ) from e
+
+    return work() if on_worker() else run_native(work)
+
+
 def mac_region() -> str | None:
     """The Mac's locale region code (e.g. ``'BE'``), for the locale-derived phone
     country-code default (#59 — never a hardcoded +1). ``None`` if unavailable.
