@@ -785,6 +785,49 @@ def test_export_photo_a_different_written_path_is_a_verification_failure(
     assert stray.exists()  # not ours to delete
 
 
+class _ExportError(Exception):
+    """Stands in for osxphotos' ExportError, whose text names the library file."""
+
+
+@pytest.mark.parametrize("writes", [True, False], ids=["partial-file", "no-file"])
+def test_export_photo_a_failing_export_leaves_no_file_and_raises_typed(
+    tmp_path, monkeypatch, writes
+):
+    # #379 review: ENOSPC mid-copy, or osxphotos' post-copy bookkeeping, must not leave
+    # a file that looks like a save, nor leak the library path through _guard untyped.
+    p = _exporting(tmp_path, monkeypatch)
+    lib = str(tmp_path / "lib")
+    cause = _ExportError(f"Error copying {lib}/IMG_0001.HEIC: No space left on device")
+
+    def export(dest, **kw):
+        if writes:
+            (pathlib.Path(dest) / kw["filename"]).write_bytes(b"part")
+        raise cause
+
+    p.export = export
+    with pytest.raises(NativeError) as e:
+        _export()
+    msg = str(e.value)
+    assert UUID in msg and "IMG_0001_A1B2C3D4.HEIC" in msg
+    assert msg.endswith("Do not retry.") and lib not in msg
+    assert e.value.__cause__ is cause
+    assert list(_out(tmp_path).iterdir()) == []
+
+
+def test_export_photo_source_evicted_after_the_isfile_check_is_absent(
+    tmp_path, monkeypatch
+):
+    # the file passes isfile, then iCloud evicts it before os.stat reads its size
+    p = _exporting(tmp_path, monkeypatch)
+    gone = str(tmp_path / "lib" / "evicted.HEIC")
+    p.path = gone
+    real = os.path.isfile
+    monkeypatch.setattr(os.path, "isfile", lambda x: x == gone or real(x))
+    got = _export()
+    assert got == {"id": UUID, "status": "absent", "reason": photos_mod._NOT_ON_DISK}
+    assert p.export_calls == []
+
+
 def test_export_photo_a_zero_byte_result_is_removed_and_reported(tmp_path, monkeypatch):
     _exporting(tmp_path, monkeypatch, size=0)
     with pytest.raises(ValueError, match="0 bytes"):

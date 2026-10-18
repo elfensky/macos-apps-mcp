@@ -201,7 +201,7 @@ def test_search_finds_the_photo_by_its_filename(test_photo):
 
 
 def test_albums_lists_the_test_album(test_photo):
-    summaries = [p.summary for p in PhotosAdapter().albums()["results"]]
+    summaries = [p["summary"] for p in PhotosAdapter().albums()["results"]]
     assert any(s.startswith(f"{ALBUM} (") for s in summaries)
 
 
