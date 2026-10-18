@@ -45,8 +45,7 @@ def _uuid(ident: str) -> str:
     uuid = ident.strip().split("/")[0].upper()
     if not _UUID.fullmatch(uuid):
         raise ValueError(
-            f"{clean_summary(ident)!r} is not a Photos id — use an id from photos or "
-            "photo_albums"
+            f"{clean_summary(ident)!r} is not a Photos id — use a photo id from photos"
         )
     return uuid
 

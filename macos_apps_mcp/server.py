@@ -1093,7 +1093,7 @@ def photo_info(id: str) -> dict:
     """Metadata for one photo by id: id, filename, title, description, kind (photo,
     video, live photo), edited, taken/added/modified (ISO-8601), latitude, longitude,
     place, persons, camera_make, camera_model, lens, focal_length, aperture,
-    shutter_speed, iso, width, height. Ids come from photos and photo_albums; the old
+    shutter_speed, iso, width, height. Photo ids come from photos; the old
     `<UUID>/L0/001` form is accepted too. Reads the Photos library at rest through
     osxphotos, so it needs Full Disk Access (not Automation). Read-only; never returns
     image bytes, thumbnails or file paths. An unknown or Recently Deleted id raises; a
@@ -1106,7 +1106,7 @@ def export_photo(id: str, dest_dir: str) -> dict:
     """Write one photo out as a still image file (Full Disk Access).
 
     Writes the edited still, the image as Photos shows it; the original when there is
-    no edit. `id` comes from photos, photo_albums or photo_info (the old
+    no edit. `id` is a photo id from photos (the old
     `<UUID>/L0/001` form is accepted). `dest_dir` must be inside the allowed root
     (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
     a path outside it is REFUSED. The filename is derived from the original name plus

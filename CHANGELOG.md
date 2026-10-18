@@ -17,7 +17,9 @@ surface may still shift between minor versions.
   returns image bytes, thumbnails or file paths.
 - **`export_photo`** (#96) — writes one photo by id into the allowed root: the edited still
   (the image as Photos shows it), the original when there is no edit. It follows the
-  write-to-disk rules Mail export uses (derived name, no overwrite, size cap 250 MiB). It does
+  write-to-disk rules `export_mail` uses (allowed root, derived name, no overwrite), and
+  adds the 250 MiB size cap and empty-file check `save_mail_attachment` has at 25 MiB
+  (`export_mail` has neither). A failed export leaves no file behind. It does
   no network work: a photo whose file is only in iCloud comes back `absent`. Videos are
   refused; a Live Photo exports its still and says `skipped: "live photo motion"`.
 
