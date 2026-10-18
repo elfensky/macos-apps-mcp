@@ -42,10 +42,12 @@ macOS). The build needs full Xcode, because the Command Line Tools have no `acto
 `xcode-select` points at the Command Line Tools, the build uses `/Applications/Xcode.app`.
 For an Xcode at a different path, set `DEVELOPER_DIR` to its `Contents/Developer`.
 
-The build installs the exact versions in `uv.lock`, except cryptography, cffi and
-pycparser (see below), then runs `scripts/smoke_stream.py` on
+The build installs the exact versions in `uv.lock`, except cryptography (see below), then
+runs `scripts/smoke_stream.py` on
 each slice of the bundled interpreter (one streamed tool call through the shim's transport).
 A failing smoke fails the build; a good build log shows `stream smoke ok` (#286).
+The build drops osxphotos's two thin `libdisclaim` dylibs (CLI only) from both trees, and
+both smokes import osxphotos.
 `doctor().libs` reports the `mcp` and `fastmcp` versions the bundle carries (#285).
 
 **Universal2, macOS 15 floor.** The `.app` carries arm64 and x86_64 slices of the
@@ -67,12 +69,14 @@ reported 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access gra
 `ren.lav.macos-apps-mcp`; Mail, Calendar and Reminders reads worked through the shim; and
 `codesign --verify --strict` was valid after the daemon ran.
 
-**No cryptography in the `.app`** (#205). The build leaves out cryptography, cffi and
-pycparser. Only auth code uses them: mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib
-and joserfc. The daemon configures no auth, so no daemon, shim or tool path imports them.
+**No cryptography in the `.app`** (#205). The build leaves out cryptography only.
+cffi and pycparser ship, because osxphotos → osxmetadata → xattr needs cffi (cffi has per-arch
+cp314 wheels, which the build joins with `lipo`). Only auth code uses cryptography: mcp's
+`pyjwt[crypto]`, fastmcp's auth modules, authlib and joserfc. The daemon configures no auth,
+so no daemon, shim or tool path imports it.
 cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
-the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the
-dev venv keeps them. On an Intel Mac, `pyproject.toml` caps cryptography below 49 (#322).
+the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists it, so the
+dev venv keeps it. On an Intel Mac, `pyproject.toml` caps cryptography below 49 (#322).
 The dev venv and a PyPI install (`uvx`) get 48.x, the last release with an Intel wheel, so
 nothing is built from source.
 
