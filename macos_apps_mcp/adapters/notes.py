@@ -532,8 +532,10 @@ def _fts_expr(query: str) -> str | None:
 
     Words of 4+ characters only (the measured configuration, spike 004) — all words when
     none is that long, so "tax" still reaches the bodies. Each word is a double-quoted
-    phrase (``"`` doubled), so query text is never FTS5 syntax; words join with OR."""
-    words = re.findall(r"\w+", fold_text(query))
+    phrase (``"`` doubled), so query text is never FTS5 syntax; words join with OR.
+    NFC, not fold_text: the tokenizer folds case and Latin accents itself, and a
+    fold it can't reproduce (ё→е, ß→ss, Hangul→jamo) misses every body (#367)."""
+    words = re.findall(r"\w+", norm_text(query) or "")
     use = [w for w in words if len(w) >= 4] or words
     return " OR ".join('"' + w.replace('"', '""') + '"' for w in use) or None
 
@@ -553,8 +555,8 @@ def _body_hits(conn, expr: str) -> list[int]:
     rows = conn.execute(
         "SELECT o.Z_PK, o.ZTITLE1, d.ZDATA, o.ZISPASSWORDPROTECTED " + frm
     )
-    live = [
-        (pk, f"{title or ''}\n{text}")
+    live = [  # NFC like the query: the tokenizer drops or splits at NFD combining marks
+        (pk, norm_text(f"{title or ''}\n{text}"))
         for pk, title, blob, locked in rows
         if not locked and (text := _decode_note_data(blob)) is not None
     ]
