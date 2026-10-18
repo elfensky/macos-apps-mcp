@@ -98,7 +98,6 @@ def test_automation_unprobed_when_request_false(monkeypatch):
         "mail",
         "notes",
         "contacts",
-        "photos",
         "safari",
         "messages",
         "music",
@@ -369,11 +368,11 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "deployment",
     }
     assert set(report["libs"]) == {"mcp", "fastmcp"}
-    # 2 EventKit + 7 Automation + shortcuts + FDA + mail_index
-    assert len(report["surfaces"]) == 12
+    # 2 EventKit + 6 Automation + shortcuts + FDA + mail_index
+    assert len(report["surfaces"]) == 11
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 12 surfaces OK"
+    assert report["summary"] == "all 11 surfaces OK"
 
 
 def test_version_reads_any_distribution():
@@ -388,7 +387,7 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 12 surfaces need attention")
+    assert report["summary"].startswith("2 of 11 surfaces need attention")
 
 
 def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
@@ -406,7 +405,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 12 surfaces OK" not in report["summary"]
+    assert "all 11 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -489,11 +488,10 @@ def test_probe_carries_applescript_side_timeout():
 @pytest.mark.integration
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
-    # 2 eventkit (calendar, reminders) + 7 automation (mail, notes, contacts,
-    # photos, safari, messages, music) + shortcuts_cli + full_disk_access +
-    # mail_index = 12. Was 11 before mail_index shipped in the Sequoia plane
-    # (#199/#201, released 0.11.0) — the count here was never bumped.
-    assert len(report["surfaces"]) == 12
+    # 2 eventkit (calendar, reminders) + 6 automation (mail, notes, contacts,
+    # safari, messages, music) + shortcuts_cli + full_disk_access + mail_index = 11.
+    # Photos left the Automation list in Phase 4 (osxphotos reads it at rest).
+    assert len(report["surfaces"]) == 11
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:
