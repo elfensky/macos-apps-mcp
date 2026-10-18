@@ -28,6 +28,13 @@ MAX_ALBUMS = 100
 # A ProRAW still is about 75 MB, so a file past this is something unusual (PHO-04).
 PHOTO_MAX_BYTES = 250 * 1024 * 1024
 
+_NOT_ON_DISK = "the file is not on this Mac (iCloud only); nothing was downloaded"
+_RENDER_PENDING = (
+    "the edited version is not on this Mac yet: Photos may still be rendering the "
+    "edit (try again in a minute), or the edit is only in iCloud. Nothing was "
+    "exported or downloaded"
+)
+
 _UNKNOWN_PERSON = "_UNKNOWN_"  # osxphotos' name for an unnamed face
 _UUID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
 
@@ -221,7 +228,7 @@ class PhotosAdapter:
                 return absent(_NOT_ON_DISK)
             files.check_size(
                 size,
-                p.original_filename or uuid,
+                clean_summary(p.original_filename or uuid),
                 max_bytes=PHOTO_MAX_BYTES,
                 hint="Export it from Photos directly.",
             )
@@ -257,11 +264,3 @@ class PhotosAdapter:
             return out
 
         return runtime.run_native(work)
-
-
-_NOT_ON_DISK = "the file is not on this Mac (iCloud only); nothing was downloaded"
-_RENDER_PENDING = (
-    "the edited version is not on this Mac yet: Photos may still be rendering the "
-    "edit (try again in a minute), or the edit is only in iCloud. Nothing was "
-    "exported or downloaded"
-)
