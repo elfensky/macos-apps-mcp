@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: 04
 current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 status: executing
-stopped_at: Phase 03.1 complete, ready to plan Phase 04
-last_updated: "2026-10-18T01:54:30.667Z"
+stopped_at: "Phase 04 wave 1: 04-02 (#364) and 04-03 (#365) landed; 04-01 at its gate decision (osxphotos does not resolve beside pyobjc>=10)"
+last_updated: "2026-10-18T13:28:04.345Z"
 last_activity: 2026-10-18
-last_activity_desc: "Completed quick task 261018-1sb (#359)"
-state_head: 450cc86fa34525f78dd0bfb1c14ba132ad014350
+last_activity_desc: Phase 04 execution started
+state_head: cb36415af39880bb2de1e5c4b898ded4abaa1fbf
 progress:
   total_phases: 8
   completed_phases: 5
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-05)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 03.1 — Bug Fixes — Device-Report Findings Before Any Feature
+**Current focus:** Phase 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
 ## Current Position
 
-Phase: 04 (Notes & Photos — Settle the Mechanism, Then Ship the Read Plane) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-18 - Completed quick task 261018-1sb: fix #359 (one map re-read before the label)
+Phase: 04 (Notes & Photos — Settle the Mechanism, Then Ship the Read Plane) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 04
+Last activity: 2026-10-18 — Phase 04 execution started
 
 Progress: [██████░░░░] 63%
 
@@ -174,5 +174,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 03.1 complete, ready to plan Phase 04
+Stopped at: Phase 04 wave 1: 04-02 (#364) and 04-03 (#365) landed; 04-01 at its gate decision (osxphotos does not resolve beside pyobjc>=10)
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
