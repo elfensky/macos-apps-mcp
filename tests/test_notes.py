@@ -938,3 +938,39 @@ def test_update_dry_run_refuses_folder_before_any_native_call(monkeypatch):
 def test_update_dry_run_rejects_empty_id():
     with pytest.raises(ValueError, match="needs a note id"):
         NotesAdapter().update("   ", NoteData(title="T"), dry_run=True)
+
+
+# --- body search (#93, D-13/D-14): in-memory FTS5 over the decoded bodies -------------
+
+_P = "x-coredata://STORE-UUID/ICNote/p"
+_DEFAULT_BODIES = {99: "Milk, eggs, bread — the full note body", 98: "Secret full body"}
+
+
+@pytest.fixture
+def body_notestore(tmp_path, monkeypatch):
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite",
+        bodies={**_DEFAULT_BODIES, 30: "quarterly tax return due"},
+        extra_notes=[(30, "Errands", "list")],
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    return path
+
+
+def test_notes_tool_finds_a_word_only_in_a_body(body_notestore):
+    # tracer: tool -> NotesAdapter.read -> store -> in-memory FTS5 hit, in the envelope
+    from macos_apps_mcp import server as srv
+
+    out = srv.notes("quarterly")
+    assert out == {"results": [{"id": f"{_P}30", "summary": "list", "deeplink": ""}]}
+
+
+def test_notes_tool_keeps_the_snippet_hit(body_notestore):
+    from macos_apps_mcp import server as srv
+
+    assert [r["id"] for r in srv.notes("eggs")["results"]] == [f"{_P}3"]
+
+
+def test_get_pointers_includes_body_hits(body_notestore):
+    ptrs = NotesAdapter().get_pointers("quarterly")
+    assert [p.id for p in ptrs] == [f"{_P}30"]
