@@ -15,9 +15,6 @@ will build on, and depends on. Corrections welcome — open an issue.
 - **[apple-mcp / per-app servers](https://github.com/griches/apple-mcp)** by **Gary Riches**
   (**no license declared**) — architectural inspiration for the modular *one-adapter-per-app* shape.
   Because no license is declared, **no code is copied** from it; the influence is pattern only.
-- **[osxphotos](https://github.com/RhetTbull/osxphotos)** by **Rhet Turnbull** (MIT) — the reference
-  for any future Apple Photos access. Currently **deferred and unused** (media lives in Immich; the
-  Photos extra is intentionally omitted), credited for the design influence.
 
 ## Code we build on / will port
 
@@ -30,6 +27,10 @@ will build on, and depends on. Corrections welcome — open an issue.
   - **ahharvey** — raw RFC 822 source ([#66](https://github.com/patrickfreyer/apple-mail-mcp/pull/66))
   - **Brendan DeBeasi** — email attachments ([#51](https://github.com/patrickfreyer/apple-mail-mcp/pull/51)) and reply-by-id ([#49](https://github.com/patrickfreyer/apple-mail-mcp/pull/49))
   - **elfensky** — `message_id` / `mail_link` surfacing ([#76](https://github.com/patrickfreyer/apple-mail-mcp/pull/76))
+
+- **[osxphotos](https://github.com/RhetTbull/osxphotos)** by **Rhet Turnbull** (MIT) — a runtime
+  dependency since Phase 4: Photos search, albums, per-photo metadata and export read the library
+  through it.
 
 ## Standards & dependencies
 
