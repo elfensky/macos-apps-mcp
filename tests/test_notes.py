@@ -198,6 +198,7 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
 import gzip  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
+import unicodedata  # noqa: E402
 
 from macos_apps_mcp.adapters import notes as notes_mod  # noqa: E402
 from macos_apps_mcp.adapters.notes import (  # noqa: E402
@@ -1056,19 +1057,61 @@ def test_body_search_folds_diacritics(tmp_path, monkeypatch):
     _body_store(
         tmp_path,
         monkeypatch,
-        [(60, "One", "a", "morning Café"), (61, "Two", "b", "my résumé")],
+        [
+            (60, "One", "a", "morning Café"),
+            (61, "Two", "b", "my résumé"),
+            (62, "Three", "c", "a naive plan"),
+        ],
     )
     assert _ids(NotesAdapter().read("cafe")) == ["60"]
     assert _ids(NotesAdapter().read("resume")) == ["61"]
+    assert _ids(NotesAdapter().read("naïve")) == ["62"]  # accent in the query only
+
+
+# Escaped on purpose: an editor may re-normalise a literal glyph and hollow the test.
+_SCRIPT_WORDS = [
+    "ёлка",  # Cyrillic with yo
+    "чайник",  # Cyrillic with short i
+    "Straße",  # sharp s
+    "회의",  # Hangul syllables
+    "ガス料金",  # katakana with dakuten, then kanji
+    "ＡＢＣＤ",  # full-width Latin
+    "café",  # Latin with a diacritic
+]
+
+
+@pytest.mark.parametrize("query_form", ["NFC", "NFD"])
+@pytest.mark.parametrize("body_form", ["NFC", "NFD"])
+@pytest.mark.parametrize("word", _SCRIPT_WORDS)
+def test_body_search_finds_a_word_in_any_script(
+    tmp_path, monkeypatch, word, body_form, query_form
+):
+    # #367: the query and the index must normalise alike, or a body-only hit is lost
+    # while the envelope still reads as a complete search
+    body = f"buy {unicodedata.normalize(body_form, word)} today"
+    _body_store(tmp_path, monkeypatch, [(80, "Misc", "x", body)])
+    out = NotesAdapter().read(unicodedata.normalize(query_form, word))
+    assert _ids(out) == ["80"]
+    assert "coverage" not in out
 
 
 def test_body_query_is_never_fts_syntax(tmp_path, monkeypatch):
-    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
-    for hostile in ('tax" OR "x', "NEAR(a b)", "tax AND NOT", '"', "*"):
-        try:
-            NotesAdapter().read(hostile)
-        except ValueError:  # only the empty-after-fold guard may refuse
-            assert not any(c.isalnum() for c in hostile)
+    # A query that reached MATCH as syntax fails into `coverage` or matches nothing, so
+    # each case asserts both: no coverage, and the ids the quoted words find (#367).
+    body = "quarterly tax due near the end"
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", body)])
+    expected = {
+        'tax" OR "x': ["30"],
+        "NEAR(a b)": ["30"],
+        "tax AND NOT": ["30"],
+        "OR": [],
+        '"': [],
+        "*": [],
+    }
+    for hostile, ids in expected.items():
+        out = NotesAdapter().read(hostile)
+        assert "coverage" not in out, hostile
+        assert _ids(out) == ids, hostile
 
 
 @pytest.mark.parametrize("n", [24, 25, 26])
