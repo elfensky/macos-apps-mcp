@@ -26,6 +26,10 @@ surface may still shift between minor versions.
   and doctor no longer probes Automation for Photos (11 surfaces, not 12). Search matches
   filename, title, description, keywords, place, people and labels in one pass, newest first,
   at most 25. osxphotos (MIT) is a new dependency.
+- **The Photos tools leave hidden photos out** (#96, D-17) — `photos()` skips them,
+  `photo_info` refuses a hidden id ("unhide it in Photos"), and album counts count only
+  photos that are not hidden or deleted. A missing Full Disk Access grant now raises the
+  typed Full Disk Access error (`full_disk_access_denied`), not "no Photos library".
 - **`notes()` searches note bodies and returns `{results, truncated?, plane?, coverage?}`**
   (#93) — a caller that read the list now reads `results`. A word that sits only in a note's
   body is found: an FTS5 index is built in memory on each call from the bodies the server
