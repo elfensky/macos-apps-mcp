@@ -42,6 +42,7 @@ _DEVELOP_ADDITIVE = frozenset(
         "create_mailbox",
         "save_mail_attachment",
         "export_mail",
+        "export_photo",
         "music_control",
         "play_playlist",
         "set_volume",
@@ -121,6 +122,7 @@ _DEVELOP_PERMISSION = {
     "photos": "Full Disk Access",
     "photo_albums": "Full Disk Access",
     "photo_info": "Full Disk Access",
+    "export_photo": "Full Disk Access",
     "messages_chats": "Automation",
     "messages_search": "Full Disk Access",
     "messages_with": "Full Disk Access",
@@ -242,6 +244,7 @@ def test_gate06_verbs():
     # complete prefix each carry an explicit, non-generic verb.
     want = {
         "export_mail": "export",
+        "export_photo": "export",
         "save_mail_attachment": "save",
         "mail_reply": "reply",
         "move_mail": "move",

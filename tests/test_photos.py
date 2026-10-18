@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import pathlib
 import sys
@@ -16,7 +17,8 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 import macos_apps_mcp.server as srv
-from macos_apps_mcp import runtime
+import macos_apps_mcp.tiers as tiers
+from macos_apps_mcp import registry, runtime
 from macos_apps_mcp.adapters import photos as photos_mod
 from macos_apps_mcp.adapters.photos import MAX_ALBUMS, MAX_PHOTOS, PhotosAdapter
 from macos_apps_mcp.contracts import Pointer
@@ -37,7 +39,14 @@ INFO_KEYS = {
 
 
 def _photo(**over):
-    """A PhotoInfo stand-in carrying every attribute the adapter reads."""
+    """A PhotoInfo stand-in carrying every attribute the adapter reads. ``export`` is a
+    recorder (``export_calls``) that writes nothing, like osxphotos on a missing file."""
+    calls: list = []
+
+    def export(dest, *args, **kw):
+        calls.append((dest, args, kw))
+        return []
+
     p = SimpleNamespace(
         uuid=UUID,
         original_filename="IMG_0001.HEIC",
@@ -69,6 +78,10 @@ def _photo(**over):
         hasadjustments=False,
         intrash=False,
         hidden=False,
+        path=None,
+        path_edited=None,
+        export=export,
+        export_calls=calls,
     )
     for k, v in over.items():
         setattr(p, k, v)
@@ -576,3 +589,59 @@ def test_the_photos_adapter_has_no_applescript():
         "parse_framed",
     ):
         assert banned not in src
+
+
+# --- export_photo: the tracer, end to end through FastMCP (PHO-04, D-08..D-11) ------
+
+
+_write_gate_on_only = pytest.mark.skipif(
+    tiers.read_only(), reason="export_photo is absent under MACOS_APPS_READ_ONLY"
+)
+
+
+def _exporting(tmp_path, monkeypatch, *, name="IMG_0001.HEIC", size=1234, **over):
+    """A photo whose source file is real and whose fake ``export`` copies it to
+    ``dest/filename`` like osxphotos; the file root is ``tmp_path/root``."""
+    monkeypatch.setenv("MACOS_APPS_FILE_ROOT", str(tmp_path / "root"))
+    src = tmp_path / "lib" / name
+    src.parent.mkdir(exist_ok=True)
+    src.write_bytes(b"x" * size)
+    edited = bool(over.get("hasadjustments"))
+    over.setdefault("path_edited" if edited else "path", str(src))
+    p = _photo(**over)
+
+    def export(dest, filename=None, **kw):
+        p.export_calls.append((dest, filename, kw))
+        out = pathlib.Path(dest) / filename
+        out.write_bytes(src.read_bytes())
+        return [str(out)]
+
+    p.export = export
+    _fake_seam(monkeypatch, p)
+    return p
+
+
+@_write_gate_on_only
+def test_export_photo_end_to_end_writes_the_original_into_the_root(
+    tmp_path, monkeypatch
+):
+    p = _exporting(tmp_path, monkeypatch)
+    got = _call("export_photo", {"id": UUID, "dest_dir": "exports"}).structured_content
+    out = (tmp_path / "root").resolve() / "exports"
+    assert got == {
+        "id": UUID,
+        "status": "written",
+        "path": str(out / "IMG_0001_A1B2C3D4.HEIC"),
+        "bytes": 1234,
+        "edited": False,
+        "dest_dir": str(out),
+    }
+    assert (out / "IMG_0001_A1B2C3D4.HEIC").stat().st_size == 1234
+    assert len(p.export_calls) == 1
+
+
+def test_export_photo_is_an_additive_audited_export_without_dry_run_or_snapshot():
+    t = registry.TOOLS["export_photo"]
+    assert (t.tier, t.audit_verb, t.snapshot) == ("additive", "export", None)
+    assert t.permission == ("Full Disk Access",)
+    assert "dry_run" not in inspect.signature(srv.export_photo).parameters
