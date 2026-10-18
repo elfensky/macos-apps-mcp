@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .. import files, runtime
 from ..contracts import Pointer, read_result
-from ..errors import VerificationFailed, WriteRefused
+from ..errors import NativeError, VerificationFailed, WriteRefused
 from ..text import clean_summary, fold_text
 
 MAX_PHOTOS = 25
@@ -237,13 +237,22 @@ class PhotosAdapter:
                 dest_dir, f"{stem}_{uuid[:8]}{Path(src).suffix}", fallback="photo"
             )
             # No download option, no osxphotos naming: D-09 and D-11.
-            written = p.export(
-                str(dest.parent),
-                filename=dest.name,
-                edited=edited,
-                overwrite=False,
-                increment=False,
-            )
+            try:
+                written = p.export(
+                    str(dest.parent),
+                    filename=dest.name,
+                    edited=edited,
+                    overwrite=False,
+                    increment=False,
+                )
+            except Exception as e:
+                # target_path proved dest absent, so whatever is there now is ours.
+                dest.unlink(missing_ok=True)
+                raise NativeError(
+                    f"exporting photo {uuid} as {dest.name} failed; any partial file "
+                    "was removed and nothing was exported. Export it from Photos "
+                    "directly. Do not retry."
+                ) from e
             if not written or Path(written[0]).resolve() != dest:
                 other = f" It wrote {written[0]} instead." if written else ""
                 raise VerificationFailed(
