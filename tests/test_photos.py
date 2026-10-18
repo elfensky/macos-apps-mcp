@@ -40,7 +40,8 @@ INFO_KEYS = {
 
 def _photo(**over):
     """A PhotoInfo stand-in carrying every attribute the adapter reads. ``export`` is a
-    recorder (``export_calls``) that writes nothing, like osxphotos on a missing file."""
+    recorder (``export_calls``) that writes nothing, like osxphotos on a missing
+    file."""
     calls: list = []
 
     def export(dest, *args, **kw):

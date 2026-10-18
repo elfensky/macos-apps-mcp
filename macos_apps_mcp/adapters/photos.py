@@ -13,15 +13,20 @@ Every osxphotos object is touched on the single native worker, and only through
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
+from pathlib import Path
 
-from .. import runtime
+from .. import files, runtime
 from ..contracts import Pointer, read_result
+from ..errors import VerificationFailed, WriteRefused
 from ..text import clean_summary, fold_text
 
 MAX_PHOTOS = 25
 MAX_ALBUMS = 100
+# A ProRAW still is about 75 MB, so a file past this is something unusual (PHO-04).
+PHOTO_MAX_BYTES = 250 * 1024 * 1024
 
 _UNKNOWN_PERSON = "_UNKNOWN_"  # osxphotos' name for an unnamed face
 _UUID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
@@ -183,3 +188,80 @@ class PhotosAdapter:
         """Bounded metadata for one photo, by uuid (or an alias ``_uuid`` reduces)."""
         uuid = _uuid(ident)
         return runtime.run_native(lambda: _info(_live(runtime.photos_db(), uuid)))
+
+    def export(self, ident: str, dest_dir: str) -> dict:
+        """Write one photo's still image into ``dest_dir`` under the allowed root: the
+        edited render when Photos holds an edit, the original otherwise (D-08). A file
+        that is not on disk is ``absent`` and nothing is downloaded (D-09); the disk
+        rules come from ``files`` (D-11)."""
+        uuid = _uuid(ident)
+
+        def absent(reason: str) -> dict:
+            return {"id": uuid, "status": "absent", "reason": reason}
+
+        def work() -> dict:
+            p = _live(runtime.photos_db(), uuid)
+            if p.ismovie:
+                raise WriteRefused(
+                    f"{uuid} is a video — export_photo writes still images only. "
+                    "Export videos from Photos. Do not retry."
+                )
+            edited = bool(p.hasadjustments)
+            src = p.path_edited if edited else p.path
+            # Decided from the source, never from an empty export result (D-09).
+            if not src or not os.path.isfile(src):
+                if edited and p.path and os.path.isfile(p.path):
+                    # Photos sets the edit flag first and writes the render up to a
+                    # minute later (04-01); the original is here, so not an iCloud case.
+                    return absent(_RENDER_PENDING)
+                return absent(_NOT_ON_DISK)
+            try:
+                size = os.stat(src).st_size
+            except FileNotFoundError:
+                return absent(_NOT_ON_DISK)
+            files.check_size(
+                size,
+                p.original_filename or uuid,
+                max_bytes=PHOTO_MAX_BYTES,
+                hint="Export it from Photos directly.",
+            )
+            stem = Path(p.original_filename or "photo").stem
+            dest = files.target_path(
+                dest_dir, f"{stem}_{uuid[:8]}{Path(src).suffix}", fallback="photo"
+            )
+            # No download option, no osxphotos naming: D-09 and D-11.
+            written = p.export(
+                str(dest.parent),
+                filename=dest.name,
+                edited=edited,
+                overwrite=False,
+                increment=False,
+            )
+            if not written or Path(written[0]).resolve() != dest:
+                other = f" It wrote {written[0]} instead." if written else ""
+                raise VerificationFailed(
+                    f"osxphotos reported no file at {dest} for {uuid} — nothing was "
+                    f"exported.{other} Do not retry; check that Photos still holds "
+                    "the file."
+                )
+            out = {
+                "id": uuid,
+                "status": "written",
+                "path": str(dest),
+                "bytes": files.confirm_written(dest, hint="the photo's file was empty"),
+                "edited": edited,
+                "dest_dir": str(dest.parent),
+            }
+            if p.live_photo:
+                out["skipped"] = "live photo motion"  # D-08: still only, said so
+            return out
+
+        return runtime.run_native(work)
+
+
+_NOT_ON_DISK = "the file is not on this Mac (iCloud only); nothing was downloaded"
+_RENDER_PENDING = (
+    "the edited version is not on this Mac yet: Photos may still be rendering the "
+    "edit (try again in a minute), or the edit is only in iCloud. Nothing was "
+    "exported or downloaded"
+)

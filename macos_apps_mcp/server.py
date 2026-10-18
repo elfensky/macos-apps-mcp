@@ -1101,6 +1101,28 @@ def photo_info(id: str) -> dict:
     return _photos.info(id)
 
 
+@_additive_tool(audit="export", adapter="photos", permission="Full Disk Access")
+def export_photo(id: str, dest_dir: str) -> dict:
+    """Write one photo out as a still image file (Full Disk Access).
+
+    Writes the edited still, the image as Photos shows it; the original when there is
+    no edit. `id` comes from photos, photo_albums or photo_info (the old
+    `<UUID>/L0/001` form is accepted). `dest_dir` must be inside the allowed root
+    (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
+    a path outside it is REFUSED. The filename is derived from the original name plus
+    the first 8 characters of the id, and an existing file is never overwritten.
+    Files over 250 MiB are refused.
+
+    Reads the library at rest, so it never launches Photos and needs no Automation. A
+    photo whose file is only in iCloud comes back `status: "absent"` with a reason:
+    nothing is downloaded. Videos are refused; a Live Photo exports its still only and
+    says `skipped: "live photo motion"`. Hidden and Recently Deleted ids are refused.
+
+    Returns {id, status: "written", path, bytes, edited, dest_dir}.
+    Additive: writes a new file, never modifies the Photos library."""
+    return _photos.export(id, dest_dir)
+
+
 @_read_tool(adapter="messages", permission="Automation")
 def messages_chats() -> list[dict[str, str]]:
     """List Messages conversations (id + name). No content; sending isn't supported.
