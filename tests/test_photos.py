@@ -22,7 +22,13 @@ from macos_apps_mcp import registry, runtime
 from macos_apps_mcp.adapters import photos as photos_mod
 from macos_apps_mcp.adapters.photos import MAX_ALBUMS, MAX_PHOTOS, PhotosAdapter
 from macos_apps_mcp.contracts import Pointer
-from macos_apps_mcp.errors import FullDiskAccessDenied, NativeError, SchemaDrift
+from macos_apps_mcp.errors import (
+    FullDiskAccessDenied,
+    NativeError,
+    SchemaDrift,
+    VerificationFailed,
+    WriteRefused,
+)
 
 # The seam's own self-tests need the REAL function: conftest replaces runtime.photos_db
 # for every unit test, so bind it at import (the tests/test_runtime.py convention).
@@ -611,9 +617,9 @@ def _exporting(tmp_path, monkeypatch, *, name="IMG_0001.HEIC", size=1234, **over
     over.setdefault("path_edited" if edited else "path", str(src))
     p = _photo(**over)
 
-    def export(dest, filename=None, **kw):
-        p.export_calls.append((dest, filename, kw))
-        out = pathlib.Path(dest) / filename
+    def export(dest, *args, **kw):
+        p.export_calls.append((dest, args, kw))
+        out = pathlib.Path(dest) / kw["filename"]
         out.write_bytes(src.read_bytes())
         return [str(out)]
 
@@ -646,3 +652,205 @@ def test_export_photo_is_an_additive_audited_export_without_dry_run_or_snapshot(
     assert (t.tier, t.audit_verb, t.snapshot) == ("additive", "export", None)
     assert t.permission == ("Full Disk Access",)
     assert "dry_run" not in inspect.signature(srv.export_photo).parameters
+
+
+# --- export_photo: every edge (D-08 to D-11) ----------------------------------------
+
+DEST = "exports"
+
+
+def _out(tmp_path):
+    return (tmp_path / "root").resolve() / DEST
+
+
+def _export(ident=UUID, dest=DEST):
+    return PhotosAdapter().export(ident, dest)
+
+
+def test_export_photo_writes_the_edited_still_when_there_are_adjustments(
+    tmp_path, monkeypatch
+):
+    p = _exporting(
+        tmp_path, monkeypatch, name="IMG_0001_edit.jpeg", hasadjustments=True
+    )
+    got = _export()
+    assert got["edited"] is True and got["status"] == "written"
+    assert pathlib.Path(got["path"]).name == "IMG_0001_A1B2C3D4.jpeg"
+    assert p.export_calls[0][2]["edited"] is True
+
+
+@pytest.mark.parametrize("over", [{"path": None}, {"hasadjustments": True}])
+def test_export_photo_absent_when_the_source_path_is_unset(tmp_path, monkeypatch, over):
+    p = _exporting(tmp_path, monkeypatch, **{"path": None, **over})
+    p.path_edited = None
+    got = _export()
+    assert got.keys() == {"id", "status", "reason"}
+    assert got["status"] == "absent" and "iCloud" in got["reason"]
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_absent_when_path_set_but_file_missing(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    p.path = str(tmp_path / "lib" / "gone.HEIC")
+    got = _export()
+    assert got["status"] == "absent" and got["id"] == UUID and got["reason"]
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_absent_when_path_is_a_directory(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    p.path = str(tmp_path / "lib")
+    assert _export()["status"] == "absent" and p.export_calls == []
+
+
+def test_export_photo_edit_render_not_written_yet_does_not_blame_icloud(
+    tmp_path, monkeypatch
+):
+    # 04-01: Photos sets hasadjustments first and writes the render up to a minute later
+    p = _exporting(tmp_path, monkeypatch)
+    p.hasadjustments, p.path_edited = True, None
+    got = _export()
+    assert got["status"] == "absent" and "rendering" in got["reason"]
+    assert got["reason"] != photos_mod._NOT_ON_DISK
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_refuses_a_video_before_any_file_work(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch, ismovie=True)
+    with pytest.raises(WriteRefused, match="video"):
+        _export()
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_live_photo_exports_the_still_and_says_motion_was_skipped(
+    tmp_path, monkeypatch
+):
+    _exporting(tmp_path, monkeypatch, live_photo=True)
+    got = _export()
+    assert got["status"] == "written" and got["skipped"] == "live photo motion"
+
+
+def test_export_photo_never_overwrites(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    _out(tmp_path).mkdir(parents=True)
+    (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").write_bytes(b"mine")
+    with pytest.raises(FileExistsError):
+        _export()
+    assert p.export_calls == []
+    assert (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").read_bytes() == b"mine"
+
+
+@pytest.mark.parametrize("dest", ["/etc", "../../x"])
+def test_export_photo_outside_the_root_is_refused_and_creates_nothing(
+    tmp_path, monkeypatch, dest
+):
+    p = _exporting(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="outside"):
+        _export(dest=dest)
+    assert p.export_calls == [] and not (tmp_path.parent / "x").exists()
+    assert not (tmp_path / "root").exists()
+
+
+def test_export_photo_cap_refuses_before_the_export(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)  # 1,234 bytes
+    monkeypatch.setattr(photos_mod, "PHOTO_MAX_BYTES", 1000)
+    with pytest.raises(ValueError, match="cap"):
+        _export()
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_empty_osxphotos_result_is_a_verification_failure(
+    tmp_path, monkeypatch
+):
+    p = _exporting(tmp_path, monkeypatch)
+    p.export = lambda dest, **kw: []
+    with pytest.raises(VerificationFailed, match="nothing was exported"):
+        _export()
+    assert not (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").exists()
+
+
+def test_export_photo_a_different_written_path_is_a_verification_failure(
+    tmp_path, monkeypatch
+):
+    p = _exporting(tmp_path, monkeypatch)
+    stray = tmp_path / "stray.bin"
+
+    def export(dest, **kw):
+        stray.write_bytes(b"s")
+        return [str(stray)]
+
+    p.export = export
+    with pytest.raises(VerificationFailed, match="stray.bin"):
+        _export()
+    assert stray.exists()  # not ours to delete
+
+
+def test_export_photo_a_zero_byte_result_is_removed_and_reported(tmp_path, monkeypatch):
+    _exporting(tmp_path, monkeypatch, size=0)
+    with pytest.raises(ValueError, match="0 bytes"):
+        _export()
+    assert not (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").exists()
+
+
+def test_export_never_passes_a_download_option(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    _export()
+    ((dest, args, kw),) = p.export_calls
+    assert dest == str(_out(tmp_path)) and args == ()
+    assert kw["filename"] == "IMG_0001_A1B2C3D4.HEIC"
+    assert set(kw) == {"filename", "edited", "overwrite", "increment"}
+    assert kw["overwrite"] is False and kw["increment"] is False
+    assert not {"use_photos_export", "use_photokit", "download_missing"} & set(kw)
+
+
+@pytest.mark.parametrize(
+    "ident", ["not-a-uuid", "", "A1B2C3D4-0000-4000-8000-0000000000FF"]
+)
+def test_export_photo_unknown_and_malformed_ids_raise(tmp_path, monkeypatch, ident):
+    p = _exporting(tmp_path, monkeypatch)
+    with pytest.raises(ValueError):
+        _export(ident)
+    assert p.export_calls == []
+
+
+def test_export_photo_trashed_id_raises(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch, intrash=True)
+    with pytest.raises(ValueError, match="Recently Deleted"):
+        _export()
+    assert p.export_calls == []
+
+
+def test_export_photo_hidden_id_is_refused_with_the_unhide_directive(
+    tmp_path, monkeypatch
+):
+    p = _exporting(tmp_path, monkeypatch, hidden=True)
+    with pytest.raises(ValueError, match="Unhide it in Photos"):
+        _export()
+    assert p.export_calls == [] and not _out(tmp_path).exists()
+
+
+def test_export_photo_accepts_the_old_applescript_id(tmp_path, monkeypatch):
+    _exporting(tmp_path, monkeypatch)
+    assert _export(f"{UUID}/L0/001")["id"] == UUID
+
+
+def test_export_photo_hostile_original_filename_stays_inside_the_destination(
+    tmp_path, monkeypatch
+):
+    _exporting(tmp_path, monkeypatch, original_filename="../../.ssh/x.HEIC")
+    got = pathlib.Path(_export()["path"])
+    assert got.parent == _out(tmp_path) and got.name.endswith("_A1B2C3D4.HEIC")
+    assert not (tmp_path / ".ssh").exists()
+
+
+def test_export_photo_runs_on_the_native_worker(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    inner, threads = p.export, []
+
+    def export(dest, **kw):
+        threads.append(threading.current_thread().name)
+        return inner(dest, **kw)
+
+    p.export = export
+    _export()
+    assert threads and all(t.startswith("mac-native") for t in threads)
