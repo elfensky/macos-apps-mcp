@@ -1,10 +1,14 @@
-"""Photos adapter — Photos.app via osascript (Automation TCC). Read-only: media search.
+"""Photos adapter — the Photos library at rest, read through osxphotos (FDA).
 
-Photos.app is scriptable, so NO PhotoKit bundle is needed (the bundle wall was a false
-alarm). Uses Photos' own ``search`` command (same matching as the Search field).
-``Pointer.id`` = media item id; ``summary`` = filename; ``deeplink`` empty (no per-photo
-URL scheme). Pointers, not media. Capped + osascript-timeout-bounded (Photos AppleScript
-is slow — a cold search takes ~20s); user input via argv (no injection).
+No AppleScript and no PhotoKit: osxphotos reads the library database directly, so no
+Apple Event reaches Photos.app and the tools need Full Disk Access, not Automation
+(Phase 4, D-01, D-07). One id for every tool, the Photos uuid; the old AppleScript form
+``<UUID>/L0/001`` is still accepted as input (D-04). Pointers, not media: search and
+albums return citable handles, ``info`` a fixed whitelist of metadata (D-05) — never
+image bytes, thumbnails or file paths.
+
+Every osxphotos object is touched on the single native worker, and only through
+``runtime.photos_db()`` — the one lazy, fail-closed door (D-06).
 """
 
 from __future__ import annotations
@@ -13,52 +17,13 @@ import re
 from datetime import datetime
 
 from .. import runtime
-from ..contracts import Pointer
-from ..text import (
-    STRIP_FRAMING,
-    Field,
-    blank_if_missing,
-    clean_summary,
-    parse_framed,
-)
+from ..contracts import Pointer, read_result
+from ..text import clean_summary, fold_text
 
 MAX_PHOTOS = 25
 MAX_ALBUMS = 100
 
 _UUID = re.compile(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}")
-
-# with timeout (#56): bound the Apple Events so an orphaned osascript can't pin Photos.
-# US/RS-framed (#68); id and filename pass through the shared STRIP_FRAMING handler.
-_SEARCH = (
-    STRIP_FRAMING
-    + """
-
-on run argv
-  set q to item 1 of argv
-  set us to character id 31
-  set rs to character id 30
-  set out to ""
-  with timeout of 120 seconds
-  tell application "Photos"
-    repeat with m in (search for q)
-      set out to out & (my stripFraming(id of m)) & us & ¬
-        (my stripFraming(filename of m)) & rs
-    end repeat
-  end tell
-  end timeout
-  return out
-end run"""
-)
-
-
-def _parse(raw: str) -> list[Pointer]:
-    """Parse the _SEARCH payload: US/RS-framed (media id, filename) records."""
-    return [
-        Pointer(id=r["id"], summary=clean_summary(r["name"]) or "(photo)", deeplink="")
-        for r in parse_framed(
-            raw, [Field("id"), Field("name", blank_if_missing)], min_fields=1
-        )
-    ]
 
 
 def _uuid(ident: str) -> str:
@@ -92,6 +57,43 @@ def _iso(dt: datetime | None) -> str | None:
 
 def _text(v: object) -> str | None:
     return None if v is None else clean_summary(v)
+
+
+def _haystack(p) -> list[str]:
+    """Every string a search needle may match; None parts are skipped."""
+    parts = [
+        p.original_filename,
+        p.filename,
+        p.title,
+        p.description,
+        *p.keywords,
+        p.place.name if p.place else None,
+        *p.persons,
+        *p.labels,
+    ]
+    return [str(x) for x in parts if x]
+
+
+def _photo_pointer(p) -> Pointer:
+    taken = p.date.strftime("%Y-%m-%d") if p.date else ""
+    parts = [p.title, p.original_filename or p.filename, taken]
+    return Pointer(
+        id=p.uuid,
+        summary=clean_summary(" · ".join(x for x in parts if x)) or "(photo)",
+        deeplink="",
+    )
+
+
+def _album_pointer(a) -> Pointer:
+    folder = " / ".join(a.folder_names)
+    return Pointer(
+        id=a.uuid,
+        summary=clean_summary(
+            f"{a.title or '(untitled album)'} ({len(a.photos)} photos)"
+        ),
+        deeplink="",
+        folder=clean_summary(folder) or None,
+    )
 
 
 def _info(p) -> dict:
@@ -129,11 +131,44 @@ def _info(p) -> dict:
 
 class PhotosAdapter:
     def get_pointers(self, query: str) -> list[Pointer]:
-        """query: a Photos search string (filename, place, etc.)."""
-        q = query.strip()
-        if not q:
+        """query: a search string, folded and matched against original filename,
+        filename, title, description, keywords, place name, person names and labels.
+        Newest first, at most ``MAX_PHOTOS``; Recently Deleted photos never match."""
+        needle = fold_text(query).strip()
+        if not needle:
             raise ValueError("photos read needs a search string (got an empty query)")
-        return _parse(runtime.run_osascript(_SEARCH, q))[:MAX_PHOTOS]
+
+        def work() -> list[Pointer]:
+            hits = [
+                p
+                for p in runtime.photos_db().photos()
+                if any(needle in fold_text(s) for s in _haystack(p))
+            ]
+            hits.sort(key=lambda p: (p.date, p.uuid), reverse=True)
+            return [_photo_pointer(p) for p in hits[:MAX_PHOTOS]]
+
+        return runtime.run_native(work)
+
+    def read(self, query: str) -> dict:
+        """``get_pointers`` in the bounded-read envelope: ``{results, truncated?}``."""
+        return read_result(self.get_pointers(query), cap=MAX_PHOTOS)
+
+    def albums(self) -> dict:
+        """Every non-shared album as a Pointer (id = album uuid, folder path in
+        ``folder``), ordered by folder then title; at most ``MAX_ALBUMS``."""
+
+        def work() -> list[Pointer]:
+            rows = sorted(
+                runtime.photos_db().album_info,
+                key=lambda a: (
+                    fold_text(" / ".join(a.folder_names)),
+                    fold_text(a.title),
+                    a.uuid,
+                ),
+            )
+            return [_album_pointer(a) for a in rows[:MAX_ALBUMS]]
+
+        return read_result(runtime.run_native(work), cap=MAX_ALBUMS)
 
     def info(self, ident: str) -> dict:
         """Bounded metadata for one photo, by uuid (or an alias ``_uuid`` reduces)."""

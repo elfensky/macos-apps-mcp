@@ -396,7 +396,7 @@ def test_photo_albums_pointer_shape_and_nested_folder(monkeypatch):
         FakeAlbum(_u(1), "Trips", [1, 2], ["Family", "2026"]),
         FakeAlbum(_u(2), "Top", [1]),
     )
-    nested, top = out["results"]
+    top, nested = out["results"]  # top level sorts first
     assert nested == {
         "id": _u(1),
         "summary": "Trips (2 photos)",
