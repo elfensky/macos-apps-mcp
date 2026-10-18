@@ -40,6 +40,9 @@ will build on, and depends on. Corrections welcome — open an issue.
   (Apache-2.0) — the server framework macos-apps-mcp is built on.
 - **[PyObjC](https://github.com/ronaldoussoren/pyobjc)** by **Ronald Oussoren** and contributors
   (MIT) — the EventKit bindings the Calendar/Reminders adapters call into.
+- **[bpylist2](https://github.com/parabolala/bpylist2)** 4.1.1 by **Jenia Varavva** (MIT, declared
+  only in the package metadata; upstream ships no licence text) — bundled in the `.app` as an
+  osxphotos dependency.
 
 ## License notes
 
