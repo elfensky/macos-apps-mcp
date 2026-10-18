@@ -275,7 +275,7 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: 3/6 plans executed
+**Plans**: 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -284,7 +284,7 @@ Plans:
 - [x] 04-03-PLAN.md — NOTE-01 closes as "not adopted" in a decision doc committed first; `notes()` gains in-memory FTS5 body search and the `read_result` envelope; NOTE-02 guard test; closes #93 (D-12..D-14)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 04-04-PLAN.md — Photos read plane on osxphotos: `runtime.photos_db()` fail-closed seam, `photo_info` whitelist, `photos()` rewired to the uuid id with the old id form as alias, `photo_albums`; Photos leaves the Automation probe (D-04..D-07, PHO-02, PHO-03)
+- [x] 04-04-PLAN.md — Photos read plane on osxphotos: `runtime.photos_db()` fail-closed seam, `photo_info` whitelist, `photos()` rewired to the uuid id with the old id form as alias, `photo_albums`; Photos leaves the Automation probe (D-04..D-07, PHO-02, PHO-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 04-05-PLAN.md — `export_photo`: the edited still into an allowlisted directory, `absent` for iCloud-only files, video refused, Live Photo motion skipped, download options pinned off by test (D-08..D-11, PHO-04)
@@ -335,6 +335,6 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
-| 4. Notes & Photos | 3/6 | In Progress | - |
+| 4. Notes & Photos | 4/6 | In Progress | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
