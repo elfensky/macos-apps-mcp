@@ -275,11 +275,11 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 04-01-PLAN.md — Photos mechanism gate on device: `uv add osxphotos`, the thin-dylib build fix, a signed build; inside the bundle `PhotosDB()` opens and a throwaway photo reads back by id and exports (D-01..D-03, D-15, PHO-01, #96)
+- [x] 04-01-PLAN.md — Photos mechanism gate on device: `uv add osxphotos`, the thin-dylib build fix, a signed build; inside the bundle `PhotosDB()` opens and a throwaway photo reads back by id and exports (D-01..D-03, D-15, PHO-01, #96)
 - [x] 04-02-PLAN.md — `adapters/mail_files.py` becomes the shared `macos_apps_mcp/files.py`: per-caller size cap, Mail keeps its wording and 25 MiB cap, one device save and export with the watchdog (D-11)
 - [x] 04-03-PLAN.md — NOTE-01 closes as "not adopted" in a decision doc committed first; `notes()` gains in-memory FTS5 body search and the `read_result` envelope; NOTE-02 guard test; closes #93 (D-12..D-14)
 
@@ -335,6 +335,6 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
-| 4. Notes & Photos | 2/6 | In Progress | - |
+| 4. Notes & Photos | 3/6 | In Progress | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
