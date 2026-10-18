@@ -983,3 +983,175 @@ def test_notes_tool_keeps_the_snippet_hit(body_notestore):
 def test_get_pointers_includes_body_hits(body_notestore):
     ptrs = NotesAdapter().get_pointers("quarterly")
     assert [p.id for p in ptrs] == [f"{_P}30"]
+
+
+def _body_store(tmp_path, monkeypatch, rows):
+    """A synthetic NoteStore plus ``rows`` of (pk, title, snippet, body) live notes."""
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite",
+        bodies={**_DEFAULT_BODIES, **{pk: body for pk, _t, _s, body in rows}},
+        extra_notes=[(pk, title, snip) for pk, title, snip, _b in rows],
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    return path
+
+
+def _ids(out):
+    return [r["id"].rpartition("/p")[2] for r in out["results"]]
+
+
+def test_body_merge_puts_title_snippet_hits_first_without_duplicates(
+    tmp_path, monkeypatch
+):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [
+            (40, "Plan", "budget plan", "budget plan details"),  # snippet hit
+            (41, "Misc", "x", "annual budget review"),  # body-only hit
+            (42, "Budget", "b", "budget budget"),  # hits both ways
+        ],
+    )
+    out = NotesAdapter().read("budget")
+    assert _ids(out) == ["42", "40", "41"]  # substring hits newest first, then body
+    assert "plane" not in out and "coverage" not in out
+
+
+def test_locked_note_body_is_never_indexed(tmp_path, monkeypatch):
+    path = _body_store(
+        tmp_path, monkeypatch, [(31, "Vault", "x", "launch codes zebra")]
+    )
+    assert _ids(NotesAdapter().read("zebra")) == ["31"]  # control: found while unlocked
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "UPDATE ZICCLOUDSYNCINGOBJECT SET ZISPASSWORDPROTECTED = 1 WHERE Z_PK = 31"
+    )
+    conn.commit()
+    conn.close()
+    assert NotesAdapter().read("zebra")["results"] == []
+    # the seeded locked note (p4) keeps its decodable body out, yet its title matches
+    assert "4" not in _ids(NotesAdapter().read("full"))
+    assert _ids(NotesAdapter().read("secret")) == ["4"]
+
+
+def test_short_word_query_reaches_bodies(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
+    assert _ids(NotesAdapter().read("tax")) == ["30"]
+
+
+def test_short_words_are_dropped_when_a_long_word_exists(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [
+            (50, "One", "a", "tax only here"),
+            (51, "Two", "b", "refund issued"),
+        ],
+    )
+    # "tax" (3 chars) is left out of the body expression; "refund" alone decides
+    assert _ids(NotesAdapter().read("tax refund")) == ["51"]
+
+
+def test_body_search_folds_diacritics(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(60, "One", "a", "morning Café"), (61, "Two", "b", "my résumé")],
+    )
+    assert _ids(NotesAdapter().read("cafe")) == ["60"]
+    assert _ids(NotesAdapter().read("resume")) == ["61"]
+
+
+def test_body_query_is_never_fts_syntax(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
+    for hostile in ('tax" OR "x', "NEAR(a b)", "tax AND NOT", '"', "*"):
+        try:
+            NotesAdapter().read(hostile)
+        except ValueError:  # only the empty-after-fold guard may refuse
+            assert not any(c.isalnum() for c in hostile)
+
+
+@pytest.mark.parametrize("n", [24, 25, 26])
+def test_body_cap_boundary(tmp_path, monkeypatch, n):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(100 + i, f"Note {i}", "s", "zebra stripes") for i in range(n)],
+    )
+    out = NotesAdapter().read("zebra")
+    assert len(out["results"]) == min(n, MAX_NOTES)
+    assert ("truncated" in out) == (n >= MAX_NOTES)
+
+
+def test_body_tie_goes_to_the_higher_pk(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(70, "Same", "s", "ocelot"), (71, "Same", "s", "ocelot")],
+    )
+    assert _ids(NotesAdapter().read("ocelot")) == ["71", "70"]
+
+
+def test_coverage_says_body_search_unavailable_on_body_drift(tmp_path, monkeypatch):
+    path = _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "tax due")])
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE ZICNOTEDATA DROP COLUMN ZDATA")
+    conn.commit()
+    conn.close()
+    out = NotesAdapter().read("eggs")  # a snippet hit on p3 still returns
+    assert _ids(out) == ["3"]
+    assert "plane" not in out
+    assert out["coverage"].startswith("body search unavailable")
+
+
+def test_coverage_says_body_search_unavailable_without_fts5(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "tax due")])
+    real = sqlite3.connect
+
+    class _NoFts:
+        def execute(self, *a, **kw):
+            raise sqlite3.OperationalError("no such module: fts5")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        notes_mod.sqlite3,
+        "connect",
+        lambda db, *a, **kw: _NoFts() if db == ":memory:" else real(db, *a, **kw),
+    )
+    out = NotesAdapter().read("eggs")
+    assert _ids(out) == ["3"]
+    assert out["coverage"].startswith("body search unavailable")
+
+
+def test_fallback_searches_titles_only_and_says_so(tmp_path, monkeypatch):
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Shopping{RS}"
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
+    out = NotesAdapter().read("shopping")
+    assert _ids(out) == ["1"]
+    assert out["plane"] == "applescript"
+    assert "titles only" in out["coverage"]
+
+
+def test_body_search_touches_no_disk_but_the_store(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
+    real = sqlite3.connect
+    targets = []
+
+    def spy(db, *a, **kw):
+        targets.append(db)
+        return real(db, *a, **kw)
+
+    monkeypatch.setattr(notes_mod.sqlite3, "connect", spy)
+    assert _ids(NotesAdapter().read("quarterly")) == ["30"]
+    assert len(targets) == 2
+    assert targets[0].startswith("file:") and "mode=ro" in targets[0]
+    assert targets[1] == ":memory:"
