@@ -1064,11 +1064,27 @@ def now_playing() -> dict:
     return _music.now_playing()
 
 
-@_read_tool(adapter="photos", permission="Automation")
-def photos(query: str) -> list[dict[str, str]]:
-    """Search Photos (filename, place, date). Returns pointers (id + filename).
-    Read-only; needs Automation access for Photos."""
-    return [p.as_dict() for p in _photos.get_pointers(query)]
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photos(query: str) -> dict:
+    """Search Photos by one string, matched (case, accent and smart-quote blind)
+    against original filename, filename, title, description, keywords, place name,
+    person names and labels. Returns `{results, truncated?}`: pointers (id = the Photos
+    uuid, summary = `title · filename · date`), newest first, at most 25; `truncated`
+    means more matched. Pass the id to photo_info or export_photo. Reads the library at
+    rest through osxphotos, so it needs Full Disk Access (not Automation). Read-only;
+    never returns image bytes or thumbnails."""
+    return _photos.read(query)
+
+
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photo_albums() -> dict:
+    """List Photos albums as pointers: id = the album uuid, summary = `title (n
+    photos)`, folder = the album's folder path (` / ` joined) when it sits in a folder.
+    Returns
+    `{results, truncated?}`, at most 100, ordered by folder then title; same-title
+    albums stay separate. Needs Full Disk Access (osxphotos reads the library at rest).
+    Read-only; the albums' photos are not listed — search with photos."""
+    return _photos.albums()
 
 
 @_read_tool(adapter="photos", permission="Full Disk Access")
