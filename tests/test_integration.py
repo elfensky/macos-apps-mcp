@@ -583,7 +583,7 @@ def test_safari_tabs_runs():
 
 
 def test_photos_search_runs():
-    """#20: Photos search via osascript runs (Automation TCC)."""
+    """#96: Photos search reads the library through osxphotos (Full Disk Access)."""
     from macos_apps_mcp.adapters.photos import PhotosAdapter
 
     assert isinstance(
