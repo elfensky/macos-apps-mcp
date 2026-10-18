@@ -1071,6 +1071,18 @@ def photos(query: str) -> list[dict[str, str]]:
     return [p.as_dict() for p in _photos.get_pointers(query)]
 
 
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photo_info(id: str) -> dict:
+    """Metadata for one photo by id: id, filename, title, description, kind (photo,
+    video, live photo), edited, taken/added/modified (ISO-8601), latitude, longitude,
+    place, persons, camera_make, camera_model, lens, focal_length, aperture,
+    shutter_speed, iso, width, height. Ids come from photos and photo_albums; the old
+    `<UUID>/L0/001` form is accepted too. Reads the Photos library at rest through
+    osxphotos, so it needs Full Disk Access (not Automation). Read-only; never returns
+    image bytes, thumbnails or file paths. An unknown or Recently Deleted id raises."""
+    return _photos.info(id)
+
+
 @_read_tool(adapter="messages", permission="Automation")
 def messages_chats() -> list[dict[str, str]]:
     """List Messages conversations (id + name). No content; sending isn't supported.

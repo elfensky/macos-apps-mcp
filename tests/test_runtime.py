@@ -432,6 +432,7 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
         "body_file",
         "verify_sqlite_schema",
         "read_via_sqlite",
+        "photos_db",
         "mac_region",
         "log",
     }

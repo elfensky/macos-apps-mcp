@@ -11,10 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 import macos_apps_mcp.server as srv
 from macos_apps_mcp import runtime
-from macos_apps_mcp.adapters.photos import _parse
+from macos_apps_mcp.adapters.photos import PhotosAdapter, _parse
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import FullDiskAccessDenied, NativeError, SchemaDrift
 from macos_apps_mcp.text import RS, US
@@ -162,6 +163,8 @@ def test_photo_info_aliases_resolve_to_one_record(monkeypatch, ident):
 def test_photo_info_unknown_uuid_names_the_id(monkeypatch):
     _fake_seam(monkeypatch, _photo())
     with pytest.raises(ValueError, match=OTHER):
+        PhotosAdapter().info(OTHER)
+    with pytest.raises(ToolError, match=OTHER):  # the tool surfaces it as an error
         srv.photo_info(OTHER)
 
 
@@ -172,13 +175,13 @@ def test_photo_info_malformed_id_raises_before_the_seam(monkeypatch, ident):
 
     monkeypatch.setattr(runtime, "photos_db", boom)
     with pytest.raises(ValueError):
-        srv.photo_info(ident)
+        PhotosAdapter().info(ident)
 
 
 def test_photo_info_trashed_photo_is_unknown(monkeypatch):
     _fake_seam(monkeypatch, _photo(intrash=True))
     with pytest.raises(ValueError, match="Recently Deleted"):
-        srv.photo_info(UUID)
+        PhotosAdapter().info(UUID)
 
 
 def test_photo_info_strings_are_one_clean_line(monkeypatch):

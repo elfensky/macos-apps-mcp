@@ -201,8 +201,9 @@ def _no_real_osascript(request, monkeypatch):
     subprocess against a live app (#176, GATE-01).
 
     Covers every seam name — ``run_osascript``, ``body_file``, ``tracked_run``,
-    ``photos_db`` — and only reaches code that calls each one qualified (``runtime.<seam>``); adapters
-    still holding a module-global copy are unaffected. A test's own
+    ``photos_db`` — and only reaches code that calls each one qualified
+    (``runtime.<seam>``); adapters still holding a module-global copy are
+    unaffected. A test's own
     ``monkeypatch.setattr(runtime, <seam>, ...)`` simply overrides this fixture (last
     write wins), and a seam's own self-tests bind the real function at test-module
     import time instead (the ``tests/test_runtime.py`` convention for
