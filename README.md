@@ -17,7 +17,7 @@ what's landed.
 
 ## Install
 
-Requires macOS, Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
+Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
 
 The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so
 there is no clone and no venv path:

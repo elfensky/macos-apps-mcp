@@ -95,19 +95,30 @@ for f in AppIcon.icns Assets.car; do
 done
 
 # 2. Locked deps (#286), one tree per arch, then lipo the thin .so files.
-# cryptography (+cffi, pycparser) is reached only via mcp's pyjwt[crypto] and
-# fastmcp's auth modules; no auth is configured, so the bundle never imports it,
-# and 49+ has no x86_64 wheel (#205). --prune drops it from the export; --no-deps
-# stops uv re-resolving it unpinned from PyPI. --no-build: a cross-arch sdist
+# cryptography is reached only via mcp's pyjwt[crypto] and fastmcp's auth modules; no
+# auth is configured, so the bundle never imports it, and 49+ has no x86_64 wheel
+# (#205). --prune cryptography still drops it from the export, but cffi and pycparser
+# now ship, because osxphotos -> osxmetadata -> xattr needs cffi. --no-deps
+# stops uv re-resolving cryptography unpinned from PyPI. --no-build: a cross-arch sdist
 # build would compile for the HOST arch. MACOSX_DEPLOYMENT_TARGET applies only
 # with --python-platform (else uv takes the build host's macOS tags).
 uv export --project "$REPO" --frozen --no-dev --no-emit-project \
   --prune cryptography > "$WORK/reqs"
+# D-16: --python-platform drops a requirement that carries a platform_release marker and
+# still exits 0, so a silent hole would reach the bundle; refuse the export instead.
+if grep -q platform_release "$WORK/reqs"; then
+  echo "EXPORT HOLDS platform_release MARKERS (uv drops them under --python-platform)" >&2
+  grep platform_release "$WORK/reqs" >&2
+  exit 1
+fi
 for a in aarch64 x86_64; do
   MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" uv pip install -q \
     --python "$STD/bin/python${PYVER}" --python-platform "$a-apple-darwin" \
     --python-version "$PYVER" --no-build --no-deps --require-hashes \
     --target "$WORK/site-$a" -r "$WORK/reqs"
+  # The two libdisclaim dylibs are thin (one arch each) and only the osxphotos CLI loads them;
+  # the universal2 gate would reject them, and deleting after ditto trips ARCH-SPECIFIC instead.
+  rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib
 done
 diff <(cd "$WORK/site-aarch64" && find . | sort) \
   <(cd "$WORK/site-x86_64" && find . | sort) >&2 \
@@ -145,7 +156,7 @@ echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 # Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
 for a in arm64 x86_64; do
-  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
+  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers" \
     || { echo "BUNDLE SMOKE FAILED ($a): import failed (getpath layout, or a" \
          "slice-specific extension)"; exit 1; }
   # one streamed tool call through the shim's transport, on the bundled libraries (#286)
@@ -257,7 +268,7 @@ if [[ -n "$SIGN" ]]; then
   # -B: no .pyc into the sealed bundle; --verify below proves the seal held.
   for a in arm64 x86_64; do
     /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 /usr/bin/arch "-$a" "$EXE" \
-      -E -s -P -B -c "import ctypes, macos_apps_mcp.server
+      -E -s -P -B -c "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers
 ctypes.CFUNCTYPE(None)(lambda: None)" \
       || { echo "SIGNED SMOKE FAILED ($a): the hardened runtime breaks it"; exit 1; }
     echo "signed smoke ok: $a"

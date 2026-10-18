@@ -33,6 +33,29 @@ def test_only_intel_macs_cap_cryptography():
     assert not crypto.marker.evaluate({**intel, "sys_platform": "linux"})
 
 
+def test_osxphotos_is_a_capped_base_dependency():
+    """Photos (D-01) reads the library through osxphotos: a base dependency, capped
+    below 0.78 (0.x, its export must never start a download). D-16: the Python 3.12
+    floor is what lets it lock beside pyobjc 10+, and UniformTypeIdentifiers is a base
+    line with no marker, because the bundle install drops a platform_release marker
+    in silence."""
+    text = (ROOT / "pyproject.toml").read_text()
+    project = tomllib.loads(text)["project"]
+    reqs = [Requirement(d) for d in project["dependencies"]]
+    (photos,) = [r for r in reqs if r.name == "osxphotos"]
+    assert {str(s) for s in photos.specifier} == {">=0.77.2", "<0.78"}
+    assert not any(
+        Requirement(d).name == "osxphotos"
+        for group in project.get("optional-dependencies", {}).values()
+        for d in group
+    )
+    assert "Photos extra deferred" not in text
+    assert project["requires-python"] == ">=3.12"
+    assert not any("3.11" in c for c in project["classifiers"])
+    (uti,) = [r for r in reqs if r.name == "pyobjc-framework-uniformtypeidentifiers"]
+    assert uti.marker is None
+
+
 def test_info_plist_contract():
     info = plistlib.loads((PKG / "Info.plist").read_bytes())
     assert info["CFBundleIdentifier"] == "ren.lav.macos-apps-mcp"
@@ -121,8 +144,20 @@ def test_build_script_gates_universal2():
         '/usr/bin/arch "-$a"',
         "smoke_stream.py",
         "universal2 gate ok",
+        "libdisclaim",
+        "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers",
+        "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers",
+        "EXPORT HOLDS platform_release MARKERS",
     ):
         assert needle in src, needle
+    # the thin osxphotos CLI dylibs go inside the install loop, before the tree diff
+    assert src.index("libdisclaim") < src.index("ARCH TREES DIFFER")
+    # an export that holds a platform_release marker is refused before anything installs
+    assert (
+        src.index("uv export")
+        < src.index("EXPORT HOLDS platform_release")
+        < src.index("uv pip install")
+    )
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
     # the gate names a bad binary before a smoke can trip over it
     assert src.index("universal2 gate ok") < src.index("BUNDLE SMOKE FAILED")
