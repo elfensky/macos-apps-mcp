@@ -119,6 +119,7 @@ def test_every_write_tool_is_audit_classified():
         "create_mailbox",
         "save_mail_attachment",
         "export_mail",
+        "export_photo",
         "move_mail",
         "trash_mail",
         "mail_undo",
