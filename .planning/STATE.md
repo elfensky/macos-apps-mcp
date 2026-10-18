@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: 04
 current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 status: executing
-stopped_at: "Phase 04 wave 2 complete (04-04 #374); review of #374 before wave 3 (04-05)"
-last_updated: "2026-10-18T15:25:00.543Z"
+stopped_at: "Phase 04 wave 3 complete (04-05 #379; review fixes #369, #375, #378); 04-06 device proof next"
+last_updated: "2026-10-18T16:07:55.817Z"
 last_activity: 2026-10-18
 last_activity_desc: Phase 04 execution started
-state_head: 8382ebb838ae12038d264006dd341b0d80090886
+state_head: 31136ac0885a64c128799d49624ef19e0327f190
 progress:
   total_phases: 8
   completed_phases: 5
@@ -174,5 +174,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 04 wave 2 complete (04-04 #374); review of #374 before wave 3 (04-05)
+Stopped at: Phase 04 wave 3 complete (04-05 #379; review fixes #369, #375, #378); 04-06 device proof next
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md

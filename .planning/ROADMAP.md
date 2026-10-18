@@ -275,7 +275,7 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: 4/6 plans executed
+**Plans**: 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -287,7 +287,7 @@ Plans:
 - [x] 04-04-PLAN.md — Photos read plane on osxphotos: `runtime.photos_db()` fail-closed seam, `photo_info` whitelist, `photos()` rewired to the uuid id with the old id form as alias, `photo_albums`; Photos leaves the Automation probe (D-04..D-07, PHO-02, PHO-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 04-05-PLAN.md — `export_photo`: the edited still into an allowlisted directory, `absent` for iCloud-only files, video refused, Live Photo motion skipped, download options pinned off by test (D-08..D-11, PHO-04)
+- [x] 04-05-PLAN.md — `export_photo`: the edited still into an allowlisted directory, `absent` for iCloud-only files, video refused, Live Photo motion skipped, download options pinned off by test (D-08..D-11, PHO-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 04-06-PLAN.md — Device proof through the installed daemon after an owner install decision: search, albums, info and export verified; one owner sitting removes the throwaway photos; closes #96 (PHO-01..PHO-04)
@@ -335,6 +335,6 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
-| 4. Notes & Photos | 4/6 | In Progress | - |
+| 4. Notes & Photos | 5/6 | In Progress | - |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
