@@ -200,8 +200,8 @@ def _no_real_osascript(request, monkeypatch):
     instead of spawning osascript, writing a real tempfile, or running a real
     subprocess against a live app (#176, GATE-01).
 
-    Covers all three seam names — ``run_osascript``, ``body_file``, ``tracked_run`` —
-    and only reaches code that calls each one qualified (``runtime.<seam>``); adapters
+    Covers every seam name — ``run_osascript``, ``body_file``, ``tracked_run``,
+    ``photos_db`` — and only reaches code that calls each one qualified (``runtime.<seam>``); adapters
     still holding a module-global copy are unaffected. A test's own
     ``monkeypatch.setattr(runtime, <seam>, ...)`` simply overrides this fixture (last
     write wins), and a seam's own self-tests bind the real function at test-module
@@ -212,7 +212,7 @@ def _no_real_osascript(request, monkeypatch):
     if "integration" in request.keywords:
         return
 
-    for seam in ("run_osascript", "body_file", "tracked_run"):
+    for seam in ("run_osascript", "body_file", "tracked_run", "photos_db"):
 
         def _refuse(*_args, _seam=seam, **_kwargs):
             raise AssertionError(

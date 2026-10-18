@@ -119,6 +119,7 @@ _DEVELOP_PERMISSION = {
     "notes_all": "Automation",
     "note_bodies": "Automation",
     "photos": "Automation",
+    "photo_info": "Full Disk Access",
     "messages_chats": "Automation",
     "messages_search": "Full Disk Access",
     "messages_with": "Full Disk Access",
