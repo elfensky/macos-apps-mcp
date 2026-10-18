@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 import sys
 import threading
@@ -67,6 +68,7 @@ def _photo(**over):
         live_photo=False,
         hasadjustments=False,
         intrash=False,
+        hidden=False,
     )
     for k, v in over.items():
         setattr(p, k, v)
@@ -89,7 +91,7 @@ class FakePhotosDB:
     def _touch(self):
         self.threads.append(threading.current_thread().name)
 
-    def photos(self, **kw):
+    def photos(self, **kw):  # like osxphotos: Hidden photos are returned too
         self._touch()
         trash = kw.get("intrash", False)
         return [p for p in self._photos if p.intrash == trash]
@@ -185,6 +187,27 @@ def test_photo_info_trashed_photo_is_unknown(monkeypatch):
         PhotosAdapter().info(UUID)
 
 
+def test_photo_info_hidden_photo_refuses_with_the_unhide_directive(monkeypatch):
+    # D-17: Photos keeps the Hidden album locked; osxphotos would read it anyway
+    _fake_seam(monkeypatch, _photo(hidden=True))
+    with pytest.raises(ValueError, match="Unhide it in Photos") as e:
+        PhotosAdapter().info(UUID)
+    assert "Beach" not in str(e.value) and "IMG_0001" not in str(e.value)
+    with pytest.raises(ToolError, match="Hidden album"):
+        srv.photo_info(UUID)
+
+
+def test_photo_info_dates_and_shutter_speed_carry_their_values(monkeypatch):
+    got = _info(
+        monkeypatch,
+        date_added=datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC),
+        date_modified=datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC),
+    )
+    assert got["added"] == "2026-02-03T04:05:06+00:00"
+    assert got["modified"] == "2026-03-04T05:06:07+00:00"
+    assert got["shutter_speed"] == 1 / 60
+
+
 def test_photo_info_strings_are_one_clean_line(monkeypatch):
     got = _info(monkeypatch, title="Beach\x07 day\nnight", description="a\x00b\nc")
     assert got["title"] == "Beach day night"
@@ -251,13 +274,41 @@ def test_photos_db_builds_the_library_on_the_native_worker(monkeypatch):
     assert seen["thread"].startswith("mac-native")
 
 
-def test_photos_db_permission_error_is_full_disk_access(monkeypatch):
+def _prefs(monkeypatch, path):
+    """Point the Full Disk Access probe at a test file, never the real Photos prefs."""
+    monkeypatch.setattr(runtime, "_PHOTOS_PREFS", path, raising=False)
+
+
+@pytest.mark.skipif(os.getuid() == 0, reason="root bypasses file permissions")
+def test_photos_db_tcc_denial_is_full_disk_access(monkeypatch, tmp_path):
+    # osxphotos swallows the PermissionError on the Photos prefs and reports
+    # FileNotFoundError; the unreadable prefs file tells a TCC denial apart.
+    locked = tmp_path / "prefs.plist"
+    locked.write_bytes(b"x")
+    locked.chmod(0o000)
+    _prefs(monkeypatch, locked)
+    _fake_osxphotos(monkeypatch, raises=FileNotFoundError("no library path"))
+    try:
+        with pytest.raises(FullDiskAccessDenied, match="Full Disk Access"):
+            _REAL_PHOTOS_DB()
+    finally:
+        locked.chmod(0o600)
+
+
+def test_photos_db_permission_error_that_escapes_is_full_disk_access(monkeypatch):
     _fake_osxphotos(monkeypatch, raises=PermissionError("denied"))
     with pytest.raises(FullDiskAccessDenied, match="Full Disk Access"):
         _REAL_PHOTOS_DB()
 
 
-def test_photos_db_missing_library_is_a_plain_native_error(monkeypatch):
+@pytest.mark.parametrize("readable", [True, False], ids=["prefs-readable", "no-prefs"])
+def test_photos_db_missing_library_is_a_plain_native_error(
+    monkeypatch, tmp_path, readable
+):
+    prefs = tmp_path / "prefs.plist"
+    if readable:
+        prefs.write_bytes(b"x")
+    _prefs(monkeypatch, prefs)
     _fake_osxphotos(monkeypatch, raises=FileNotFoundError("gone"))
     with pytest.raises(NativeError, match="no Photos library") as e:
         _REAL_PHOTOS_DB()
@@ -328,6 +379,37 @@ def test_photos_search_never_matches_trashed_photos(monkeypatch):
     assert _search(monkeypatch, "beach", _photo(intrash=True)) == []
 
 
+def test_photos_search_never_matches_hidden_photos(monkeypatch):
+    # D-17: a hidden photo stays behind the Hidden album's lock
+    assert _search(monkeypatch, "beach", _photo(hidden=True)) == []
+
+
+@pytest.mark.parametrize("query", ["unknown", "own", "now", "unk"])
+def test_photos_search_skips_the_unknown_face_placeholder(monkeypatch, query):
+    # osxphotos names an unnamed face "_UNKNOWN_"; it is not a person to match
+    assert _search(monkeypatch, query, _photo(persons=["_UNKNOWN_", None])) == []
+
+
+_DOC_FIELDS = {
+    "original filename": "original_filename",
+    "filename": "filename",
+    "title": "title",
+    "description": "description",
+    "keywords": "keywords",
+    "place name": "place",
+    "person names": "persons",
+    "labels": "labels",
+}
+
+
+def test_photos_docstrings_name_the_searched_fields():
+    # the docstring is the MCP tool description: it names what _haystack searches
+    assert set(_DOC_FIELDS.values()) == {f for f, _ in _FIELDS}
+    for doc in (srv.photos.__doc__, PhotosAdapter.get_pointers.__doc__):
+        flat = " ".join(doc.split())
+        assert all(name in flat for name in _DOC_FIELDS), flat
+
+
 def test_photos_search_is_newest_first_and_ties_break_by_uuid_descending(monkeypatch):
     old = _photo(uuid=_u(1), date=datetime(2025, 1, 1, tzinfo=UTC))
     new = _photo(uuid=_u(2), date=datetime(2026, 1, 1, tzinfo=UTC))
@@ -393,8 +475,8 @@ def _albums(monkeypatch, *albums):
 def test_photo_albums_pointer_shape_and_nested_folder(monkeypatch):
     out = _albums(
         monkeypatch,
-        FakeAlbum(_u(1), "Trips", [1, 2], ["Family", "2026"]),
-        FakeAlbum(_u(2), "Top", [1]),
+        FakeAlbum(_u(1), "Trips", [_photo(), _photo()], ["Family", "2026"]),
+        FakeAlbum(_u(2), "Top", [_photo()]),
     )
     top, nested = out["results"]  # top level sorts first
     assert nested == {
@@ -410,8 +492,8 @@ def test_photo_albums_pointer_shape_and_nested_folder(monkeypatch):
 def test_photo_albums_same_title_stays_two_albums(monkeypatch):
     out = _albums(
         monkeypatch,
-        FakeAlbum(_u(1), "Trips", [1]),
-        FakeAlbum(_u(2), "Trips", [1, 2], ["Family"]),
+        FakeAlbum(_u(1), "Trips", [_photo()]),
+        FakeAlbum(_u(2), "Trips", [_photo(), _photo()], ["Family"]),
         FakeAlbum(_u(3), "Trips", []),
     )
     assert sorted(r["id"] for r in out["results"]) == [_u(1), _u(2), _u(3)]
@@ -423,12 +505,35 @@ def test_photo_albums_empty_library_is_an_empty_envelope(monkeypatch):
 
 def test_photo_albums_zero_photos_and_untitled(monkeypatch):
     out = _albums(
-        monkeypatch, FakeAlbum(_u(1), "Empty", []), FakeAlbum(_u(2), None, [1])
+        monkeypatch, FakeAlbum(_u(1), "Empty", []), FakeAlbum(_u(2), None, [_photo()])
     )
     assert [r["summary"] for r in out["results"]] == [
         "(untitled album) (1 photos)",
         "Empty (0 photos)",
     ]
+
+
+def test_photo_albums_count_only_live_photos(monkeypatch):
+    # AlbumInfo.photos holds trashed and hidden photos too (D-17)
+    live, gone, hidden = _photo(), _photo(intrash=True), _photo(hidden=True)
+    out = _albums(monkeypatch, FakeAlbum(_u(1), "Trips", [live, gone, hidden]))
+    assert out["results"][0]["summary"] == "Trips (1 photos)"
+
+
+def test_photo_albums_reads_the_library_on_the_native_worker(monkeypatch):
+    db = _fake_seam(monkeypatch, albums=[FakeAlbum(_u(1), "Trips", [_photo()])])
+    PhotosAdapter().albums()
+    assert db.threads and all(t.startswith("mac-native") for t in db.threads)
+
+
+def test_photo_albums_folder_sort_is_folded(monkeypatch):
+    out = _albums(
+        monkeypatch,
+        FakeAlbum(_u(1), "x", [], ["Zoo"]),
+        FakeAlbum(_u(2), "x", [], ["\u00c9t\u00e9"]),
+        FakeAlbum(_u(3), "x", [], ["apple"]),
+    )
+    assert [r["id"] for r in out["results"]] == [_u(3), _u(2), _u(1)]
 
 
 def test_photo_albums_order_is_folder_then_title_then_uuid(monkeypatch):
