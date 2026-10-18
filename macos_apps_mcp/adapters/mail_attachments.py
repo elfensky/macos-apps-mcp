@@ -209,6 +209,17 @@ end run"""
 # possibly-remote IMAP store.
 _SAVE_TIMEOUT = 300.0
 
+# 25 MiB — above every mainstream provider's own attachment ceiling, so a refusal here
+# means something genuinely unusual rather than a normal mail this tool cannot handle.
+# Mail's cap, not the shared module's: `files.check_size` takes it from each caller.
+MAIL_MAX_BYTES = 25 * 1024 * 1024
+
+# Why a saved attachment can come back empty — `files.confirm_written` appends it.
+_NOT_LOCAL_HINT = (
+    "the attachment is not available locally (the account may be offline, or the "
+    "message not downloaded). Open the message in Mail once, then retry."
+)
+
 
 def _parse_attachments(raw: str) -> list[dict]:
     """Parse the _ATTACHMENTS payload: RS-separated records, each US-separated as
@@ -323,9 +334,14 @@ def save_attachment(
     file_name = wanted_name
     if not file_name:
         row = _listed_attachment(target, wanted_id)
-        files.check_size(row["size"], row["name"])
+        files.check_size(
+            row["size"],
+            row["name"],
+            max_bytes=MAIL_MAX_BYTES,
+            hint="Save it from Mail directly.",
+        )
         file_name = row["name"]
-    path = files.target_path(dest_dir, file_name)
+    path = files.target_path(dest_dir, file_name, fallback="attachment")
     raw = runtime.run_osascript(
         _SAVE_ATTACHMENT,
         target.id,
@@ -333,7 +349,7 @@ def save_attachment(
         wanted_name,
         wanted_id,
         str(path),
-        str(files.MAX_BYTES),
+        str(MAIL_MAX_BYTES),
         timeout=_SAVE_TIMEOUT,
     )
     size, _, downloaded = raw.strip().partition(US)
@@ -341,7 +357,7 @@ def save_attachment(
         "saved": str(path),
         "name": path.name,
         "original_name": file_name,
-        "bytes": files.confirm_written(path),
+        "bytes": files.confirm_written(path, hint=_NOT_LOCAL_HINT),
         "reported_size": int_or_none(size),
         "was_downloaded": bool_or_none(downloaded),
         "id": target.id,

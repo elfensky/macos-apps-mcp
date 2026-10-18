@@ -1,35 +1,38 @@
-"""Where mail stops being mail and becomes a file on disk (#81 save, #85 export).
+"""The write-to-disk rules, once, for every feature that puts a file on disk (#81
+Mail attachment save, #85 Mail export, Photos export next).
 
-Every other mail module treats a message as data to cite. These two features write it
-out, and that changes the threat model completely: **an attachment's NAME is
-attacker-controlled** — it arrives in inbound mail from anyone — and this is the first
-place in the repo that turns untrusted mail into a FILESYSTEM PATH.
+Everything else in this repo treats an item as data to cite. These features write it
+out, and that changes the threat model completely: **the NAME is attacker-controlled**
+— an attachment name arrives in inbound mail from anyone, a photo's original filename
+comes from whoever shared it — and this is the place that turns an untrusted name into a
+FILESYSTEM PATH.
 
-So the rules live here, once, and both features route through them:
+So the rules live here, once, and every writer routes through them:
 
 * The basename is **DERIVED**, never concatenated. The last component under every
   separator convention macOS has ever used (POSIX ``/``, Windows ``\\``, HFS ``:``),
   with C0/C1 controls, NULs and Unicode format characters removed — U+202E
-  RIGHT-TO-LEFT OVERRIDE makes the real name ``invoice‮gpj.exe`` *display* as
-  ``invoiceexe.jpg`` and is not a path character, so no amount of path checking
-  catches it. A leading dot is
-  prefixed away (an attachment must not become a dotfile) and a name that reduces to
-  nothing, ``.`` or ``..`` falls back to a fixed literal.
+  RIGHT-TO-LEFT OVERRIDE makes the real name ``invoice`` + U+202E + ``gpj.exe``
+  *display* as ``invoiceexe.jpg`` and is not a path character, so no amount of path
+  checking catches it. A leading dot is prefixed away (an incoming file must not
+  become a dotfile) and a name that reduces to nothing, ``.`` or ``..`` falls back to a
+  fixed literal the caller may choose.
 * The destination is inside an **allowlisted root**, and containment is checked AFTER
   ``resolve()`` — a symlink inside the root that points at ``/`` passes an un-resolved
-  check. The root is ``~/Downloads`` (where a user already expects a downloaded
-  attachment, and never a code or config location); ``MACOS_APPS_FILE_ROOT`` moves it.
-  The model picks a path INSIDE it — the tools ask for a ``dest_dir`` rather than
-  defaulting to somewhere and hoping.
+  check. The root is ``~/Downloads`` (where a user already expects a downloaded file,
+  and never a code or config location); ``MACOS_APPS_FILE_ROOT`` moves it. The model
+  picks a path INSIDE it — the tools ask for a ``dest_dir`` rather than defaulting to
+  somewhere and hoping.
 * An existing file is **never silently overwritten**. Mail's own ``save`` verb does
   overwrite silently — device-verified 2026-08-05, a 0-byte placeholder came back with
   192 KB in it — so the refusal has to happen in Python, before the Apple Event.
-* Writes are **size-capped**, and a file that lands empty is removed and reported as a
-  failure rather than left looking like a successful save.
+* Writes are **size-capped by the caller** (``check_size`` takes ``max_bytes``; there is
+  no module default, so no writer can forget it), and a file that lands empty is
+  removed and reported as a failure rather than left looking like a successful save.
 
 ``target_path`` checks existence and then hands back a path someone else writes to, so
-there is a TOCTOU window between the check and Mail's ``save``. That is accepted: the
-window is milliseconds, the root is the user's own Downloads directory, and closing it
+there is a TOCTOU window between the check and the write. That is accepted: the window
+is milliseconds, the root is the user's own Downloads directory, and closing it
 properly (O_EXCL) is not available through an Apple Event that opens the file itself.
 """
 
@@ -39,11 +42,7 @@ import os
 import unicodedata
 from pathlib import Path
 
-_FALLBACK = "attachment"
-
-# 25 MiB — above every mainstream provider's own attachment ceiling, so a refusal here
-# means something genuinely unusual rather than a normal mail this tool cannot handle.
-MAX_BYTES = 25 * 1024 * 1024
+_FALLBACK = "file"
 
 # Enough for any real filename; short enough to survive a further path prefix on any
 # filesystem (APFS caps a component at 255 BYTES, not characters).
@@ -63,7 +62,7 @@ def root() -> Path:
 
 
 def safe_basename(name: str, fallback: str = _FALLBACK) -> str:
-    """A hostile attachment name reduced to ONE filesystem-safe path component.
+    """A hostile name reduced to ONE filesystem-safe path component.
 
     Derived, never trusted: the input can be ``../../.ssh/authorized_keys``,
     ``/etc/passwd``, ``..\\..\\evil.dll``, ``HD:Users:me:.zshrc``, 4 KB of ``A``, a NUL
@@ -78,7 +77,7 @@ def safe_basename(name: str, fallback: str = _FALLBACK) -> str:
     if n in ("", ".", ".."):
         return fallback
     if n.startswith("."):
-        # never let inbound mail create a dotfile
+        # never let an outside name create a dotfile
         n = "_" + n
     return _truncate(n)
 
@@ -114,9 +113,9 @@ def resolve_dest(dest_dir: str) -> Path:
     resolved = candidate.resolve()
     if resolved != base and not resolved.is_relative_to(base):
         raise ValueError(
-            f"{dest_dir!r} resolves outside the allowed root {base} — mail can only be "
-            f"written under it. Pass a path inside {base}, or set MACOS_APPS_FILE_ROOT "
-            "to move the root. Do not retry the same path."
+            f"{dest_dir!r} resolves outside the allowed root {base} — files can only "
+            f"be written under it. Pass a path inside {base}, or set "
+            "MACOS_APPS_FILE_ROOT to move the root. Do not retry the same path."
         )
     resolved.mkdir(parents=True, exist_ok=True)
     return resolved
@@ -139,27 +138,29 @@ def target_path(dest_dir: str, name: str, fallback: str = _FALLBACK) -> Path:
     return path
 
 
-def check_size(size: int | None, name: str) -> None:
-    """Refuse an oversized write BEFORE anything is fetched or created. ``None`` (Mail
-    could not report a size) passes — ``confirm_written`` is the backstop."""
-    if size is not None and size > MAX_BYTES:
+def check_size(size: int | None, name: str, *, max_bytes: int, hint: str = "") -> None:
+    """Refuse an oversized write BEFORE anything is fetched or created. The cap is the
+    caller's (keyword-only, no default). ``None`` (the source could not report a size)
+    passes — ``confirm_written`` is the backstop."""
+    if size is not None and size > max_bytes:
         raise ValueError(
-            f"{name!r} is {size} bytes, larger than the {MAX_BYTES}-byte cap. Save it "
-            "from Mail directly. Do not retry."
+            f"{name!r} is {size} bytes, larger than the {max_bytes}-byte cap. "
+            + (hint + " " if hint else "")
+            + "Do not retry."
         )
 
 
-def confirm_written(path: Path) -> int:
+def confirm_written(path: Path, *, hint: str = "") -> int:
     """Byte count of what actually landed. A 0-byte file is deleted and reported as a
-    failure: Mail fetches an undownloaded attachment on demand (device-verified), but
-    an offline account cannot, and an empty file that looks like a successful save is
-    the reassuring-direction lie this repo keeps refusing."""
+    failure: an empty file that looks like a successful save is the
+    reassuring-direction lie this repo keeps refusing. ``hint`` is the caller's
+    explanation of why a source can come back empty (Mail fetches an undownloaded
+    attachment on demand, device-verified, but an offline account cannot)."""
     size = path.stat().st_size
     if size == 0:
         path.unlink(missing_ok=True)
         raise ValueError(
-            f"{path.name} was written as 0 bytes and has been removed — the attachment "
-            "is not available locally (the account may be offline, or the message not "
-            "downloaded). Open the message in Mail once, then retry."
+            f"{path.name} was written as 0 bytes and has been removed — "
+            + (hint or "the source was empty or not available locally")
         )
     return size
