@@ -27,7 +27,7 @@ import pytest
 
 from macos_apps_mcp import runtime
 
-_SEAM = frozenset({"run_osascript", "body_file", "tracked_run"})
+_SEAM = frozenset({"run_osascript", "body_file", "tracked_run", "photos_db"})
 _SPAWNERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 _ADAPTERS_DIR = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters"
 _NATIVE_MODULES = sorted(
@@ -90,10 +90,12 @@ def test_the_tripwire_sees_the_native_modules():
 # The AST tests above catch a *static* regression — a by-name import. They cannot
 # catch a *new* test that calls ``runtime.<seam>`` qualified for real. That is what
 # conftest.py's autouse ``_no_real_osascript`` fixture is for; these tests prove it
-# actually fires, for each of the three seam names.
+# actually fires, for each seam name.
 
 
-@pytest.mark.parametrize("seam", sorted(["run_osascript", "body_file", "tracked_run"]))
+@pytest.mark.parametrize(
+    "seam", sorted(["run_osascript", "body_file", "tracked_run", "photos_db"])
+)
 def test_unit_tests_cannot_reach_a_seam_unfaked(seam):
     # a unit test that forgets to fake a seam must fail closed, not spawn a real
     # process or write a real tempfile against a live app.
