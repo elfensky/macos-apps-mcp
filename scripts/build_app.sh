@@ -156,7 +156,8 @@ echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 # Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
 for a in arm64 x86_64; do
-  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers" \
+  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" \
+    -E -s -P -c "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers" \
     || { echo "BUNDLE SMOKE FAILED ($a): import failed (getpath layout, or a" \
          "slice-specific extension)"; exit 1; }
   # one streamed tool call through the shim's transport, on the bundled libraries (#286)
