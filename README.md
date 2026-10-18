@@ -189,6 +189,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `create_contact` | given_name, family_name, organization | |
 | `run_shortcut` | name **or** id, optional `input_text` | runs a Shortcut; returns a bounded output snippet |
 | `safari_open` | url | opens in a new tab; bare host → `https://`; only `http`/`https` allowed |
+| `export_photo` | photo id, `dest_dir` inside the allowed root | writes the edited still (the original when there is no edit) as a new file, name `<original stem>_<id prefix>.<ext>`, never overwritten, capped at 250 MiB; a photo only in iCloud is `absent` (nothing is downloaded); videos refused, a Live Photo exports its still only; additive, audited |
 
 ### Read-only mode
 
