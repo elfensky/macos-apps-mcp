@@ -962,7 +962,16 @@ def test_notes_tool_finds_a_word_only_in_a_body(body_notestore):
     from macos_apps_mcp import server as srv
 
     out = srv.notes("quarterly")
-    assert out == {"results": [{"id": f"{_P}30", "summary": "list", "deeplink": ""}]}
+    assert out == {
+        "results": [
+            {
+                "id": f"{_P}30",
+                "summary": "list",
+                "deeplink": "",
+                "folder": "iCloud / Groceries",
+            }
+        ]
+    }
 
 
 def test_notes_tool_keeps_the_snippet_hit(body_notestore):

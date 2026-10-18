@@ -17,14 +17,17 @@ from __future__ import annotations
 import contextlib
 import gzip
 import html
+import re
+import sqlite3
 import zlib
 from pathlib import Path
 
 from .. import runtime
-from ..contracts import NoteData, Pointer, deletion_result
+from ..contracts import NoteData, Pointer, deletion_result, read_result
 from ..errors import (
     NativeError,
     OutputOverflow,
+    SchemaDrift,
     VerificationFailed,
     verify_persisted,
 )
@@ -524,16 +527,63 @@ def _verify_note(
     verify_persisted("note", expected, actual)
 
 
+def _fts_expr(query: str) -> str | None:
+    """The FTS5 MATCH expression for ``query``, or None when it holds no word.
+
+    Words of 4+ characters only (the measured configuration, spike 004) — all words when
+    none is that long, so "tax" still reaches the bodies. Each word is a double-quoted
+    phrase (``"`` doubled), so query text is never FTS5 syntax; words join with OR."""
+    words = re.findall(r"\w+", fold_text(query))
+    use = [w for w in words if len(w) >= 4] or words
+    return " OR ".join('"' + w.replace('"', '""') + '"' for w in use) or None
+
+
+def _body_hits(conn, expr: str) -> list[int]:
+    """Z_PKs of the live, unlocked notes whose title+body match ``expr``, best first.
+
+    Builds an FTS5 table in a ``:memory:`` connection from the bodies
+    ``_decode_note_data`` decodes — note text never reaches disk (notes hold
+    credentials). A locked note is dropped before decode. Ties on bm25 come back higher
+    Z_PK first.
+    shortcut: every call decodes and indexes every live note, O(library) — instant at 17
+    notes; past a few thousand, persist the index as spike 004's sidecar design says."""
+    runtime.verify_sqlite_schema(conn, _BODY_FINGERPRINT)
+    head = "FROM ZICCLOUDSYNCINGOBJECT o"
+    frm = _FROM.replace(head, f"{head} JOIN ZICNOTEDATA d ON d.Z_PK = o.ZNOTEDATA", 1)
+    rows = conn.execute(
+        "SELECT o.Z_PK, o.ZTITLE1, d.ZDATA, o.ZISPASSWORDPROTECTED " + frm
+    )
+    live = [
+        (pk, f"{title or ''}\n{text}")
+        for pk, title, blob, locked in rows
+        if not locked and (text := _decode_note_data(blob)) is not None
+    ]
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute(
+            "create virtual table f using fts5(id unindexed, body, "
+            "tokenize='porter unicode61 remove_diacritics 2')"
+        )
+        db.executemany("insert into f values (?, ?)", live)
+        return [
+            r[0]
+            for r in db.execute(
+                "select id from f where f match ? order by bm25(f), id desc", (expr,)
+            )
+        ]
+    finally:
+        db.close()
+
+
+_TITLES_ONLY = (
+    "titles only — the NoteStore read is unavailable (Full Disk Access missing or the "
+    "store changed), so snippets and note bodies were not searched"
+)
+
+
 class NotesAdapter:
-    def get_pointers(self, query: str) -> list[Pointer]:
-        """Search notes by title/snippet (sqlite, read-only), newest first. `query` a
-        substring, matched diacritic- and smart-punctuation-insensitively via fold_text
-        (#64): "cafe" finds "café", ASCII "'" finds a U+2019 apostrophe. That fold can't
-        be expressed in SQL LIKE (ASCII-only), so the match is a Python post-filter over
-        the same rows get_all reads — bounded by library size (title/snippet strings).
-        Falls back to the AppleScript enumeration, folded identically, on missing FDA /
-        drift. ponytail: O(all-notes) fold per search; add a LIKE prefilter for the
-        common ASCII case only if a huge library makes it show up."""
+    def _search(self, query: str) -> tuple[list[Pointer], str | None, str | None]:
+        """``(pointers, plane, coverage)`` for a notes search — see ``get_pointers``."""
         # Guard on the FOLDED value, not the raw query (#64 review): a non-empty query
         # made only of punctuation/combining marks folds to "" or " " (e.g. a lone
         # diaeresis "¨" NFKD-decomposes to a space; a bare combining accent to nothing).
@@ -542,16 +592,40 @@ class NotesAdapter:
         needle = fold_text(query).strip()
         if not needle:
             raise ValueError("notes read needs a title substring (got an empty query)")
+        expr = _fts_expr(query)
 
         def read(conn):
             uuid = _store_uuid(conn)
-            out = []
-            for r in conn.execute(_ALL_SQL):  # r: pk, title, snippet, pinned, locked...
+            rows = conn.execute(_ALL_SQL).fetchall()  # pk, title, snippet, pinned, ...
+            out, seen = [], set()
+            for r in rows:
                 if needle in fold_text(r[1]) or needle in fold_text(r[2]):
                     out.append(_note_pointer(r, uuid))
+                    seen.add(r[0])
                     if len(out) >= MAX_NOTES:
-                        break
-            return out
+                        return out, None, None
+            if expr is None:
+                return out, None, None
+            # Body-only hits go AFTER every title/snippet hit, so nothing the substring
+            # pass returned is lost. A failure must stay inside this try: reaching
+            # read_via_sqlite would switch to AppleScript and lose the snippets.
+            try:
+                hits = _body_hits(conn, expr)
+            except (SchemaDrift, sqlite3.Error) as e:
+                return (
+                    out,
+                    None,
+                    f"body search unavailable: {e} — results match titles and "
+                    "snippets only",
+                )
+            by_pk = {r[0]: r for r in rows}
+            for pk in hits:
+                if pk in seen or pk not in by_pk:
+                    continue
+                out.append(_note_pointer(by_pk[pk], uuid))
+                if len(out) >= MAX_NOTES:
+                    break
+            return out, None, None
 
         def fallback():
             # degraded path folds the same way, matching on the RAW title only (no
@@ -565,7 +639,7 @@ class NotesAdapter:
                 runtime.run_osascript(_LIST_ALL), _ALL_FIELDS, min_fields=1
             )
             kept = [r for r in recs if needle in fold_text(r["title"])]
-            return _all_pointers(kept[:MAX_NOTES])
+            return _all_pointers(kept[:MAX_NOTES]), "applescript", _TITLES_ONLY
 
         return read_via_sqlite(
             NOTESTORE,
@@ -574,6 +648,25 @@ class NotesAdapter:
             fallback=fallback,
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
+
+    def get_pointers(self, query: str) -> list[Pointer]:
+        """Search notes by title, snippet and body (sqlite, read-only). `query` is
+        matched diacritic- and smart-punctuation-insensitively via fold_text (#64):
+        "cafe" finds "café", ASCII "'" finds a U+2019 apostrophe. Title/snippet hits
+        come first, newest first, exactly as before; body-only hits (in-memory FTS5,
+        bm25 order) follow. The substring fold can't be expressed in SQL LIKE
+        (ASCII-only), so it is a Python post-filter over the same rows get_all reads.
+        Falls back to the AppleScript enumeration, titles only, on missing FDA / drift.
+        ponytail: O(all-notes) fold per search; add a LIKE prefilter for the common
+        ASCII case only if a huge library makes it show up."""
+        return self._search(query)[0]
+
+    def read(self, query: str) -> dict:
+        """``get_pointers`` in the bounded-read envelope: ``{results, truncated?,
+        plane?, coverage?}``. ``plane``/``coverage`` say when only titles (or only
+        titles and snippets) were searched (D-14)."""
+        pointers, plane, coverage = self._search(query)
+        return read_result(pointers, cap=MAX_NOTES, plane=plane, coverage=coverage)
 
     def get_all(self) -> list[Pointer]:
         """The MAX_NOTES newest live notes (excludes Recently Deleted + tombstoned) as
