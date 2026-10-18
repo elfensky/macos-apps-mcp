@@ -275,7 +275,22 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: TBD
+**Plans**: 0/6 plans complete
+
+Plans:
+**Wave 1**
+- [ ] 04-01-PLAN.md — Photos mechanism gate on device: `uv add osxphotos`, the thin-dylib build fix, a signed build; inside the bundle `PhotosDB()` opens and a throwaway photo reads back by id and exports (D-01..D-03, D-15, PHO-01, #96)
+- [ ] 04-02-PLAN.md — `adapters/mail_files.py` becomes the shared `macos_apps_mcp/files.py`: per-caller size cap, Mail keeps its wording and 25 MiB cap, one device save and export with the watchdog (D-11)
+- [ ] 04-03-PLAN.md — NOTE-01 closes as "not adopted" in a decision doc committed first; `notes()` gains in-memory FTS5 body search and the `read_result` envelope; NOTE-02 guard test; closes #93 (D-12..D-14)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-04-PLAN.md — Photos read plane on osxphotos: `runtime.photos_db()` fail-closed seam, `photo_info` whitelist, `photos()` rewired to the uuid id with the old id form as alias, `photo_albums`; Photos leaves the Automation probe (D-04..D-07, PHO-02, PHO-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-05-PLAN.md — `export_photo`: the edited still into an allowlisted directory, `absent` for iCloud-only files, video refused, Live Photo motion skipped, download options pinned off by test (D-08..D-11, PHO-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 04-06-PLAN.md — Device proof through the installed daemon after an owner install decision: search, albums, info and export verified; one owner sitting removes the throwaway photos; closes #96 (PHO-01..PHO-04)
 
 ### Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
 
