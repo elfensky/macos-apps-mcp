@@ -960,6 +960,29 @@ def test_export_photo_a_failing_export_never_deletes_another_writer_s_file(
     assert dest.read_bytes() == b"theirs" and _private_dirs(tmp_path) == []
 
 
+@pytest.mark.parametrize(
+    ("target", "said"),
+    [(os, "hard links"), (photos_mod.files.tempfile, "cannot write in")],
+    ids=["no-hard-links", "unwritable-dir"],
+)
+def test_export_photo_a_volume_that_refuses_the_write_is_typed(
+    tmp_path, monkeypatch, target, said
+):
+    # exFAT and FAT have no hard links (link() fails EPERM); a directory can refuse a
+    # new entry. Either way a typed error, nothing at dest, no staging left.
+    p = _exporting(tmp_path, monkeypatch)
+    name = "link" if target is os else "mkdtemp"
+
+    def refuse(*a, **kw):
+        raise PermissionError(errno.EPERM, "Operation not permitted")
+
+    monkeypatch.setattr(target, name, refuse)
+    with pytest.raises(NativeError, match=said):
+        _export()
+    assert os.listdir(_out(tmp_path)) == []
+    assert len(p.export_calls) == (1 if target is os else 0)
+
+
 def test_export_photo_source_evicted_after_the_isfile_check_is_absent(
     tmp_path, monkeypatch
 ):

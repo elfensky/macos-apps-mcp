@@ -31,16 +31,25 @@ So the rules live here, once, and every writer routes through them:
   removed and reported as a failure rather than left looking like a successful save.
 
 ``target_path`` checks existence and then hands back a path someone else writes to, so
-there is a TOCTOU window between the check and the write. That is accepted: the window
-is milliseconds, the root is the user's own Downloads directory, and closing it
-properly (O_EXCL) is not available through an Apple Event that opens the file itself.
+there is a TOCTOU window between the check and the write: a file or a symlink another
+writer puts there is overwritten or written through. A writer that controls its own
+output closes it: it writes into ``staging(dest)``, a directory only that call owns, and
+``publish`` links the result in, which fails on any existing entry. ``export_photo``
+does this. Mail's writers still accept the window: the Apple Event opens the file
+itself, the window is milliseconds and the root is the user's own Downloads directory.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
+import shutil
+import tempfile
 import unicodedata
+from collections.abc import Iterator
 from pathlib import Path
+
+from .errors import NativeError
 
 _FALLBACK = "file"
 
@@ -142,6 +151,45 @@ def exists_refusal(path: Path) -> FileExistsError:
         f"{path} already exists — this never overwrites. Choose another dest_dir, "
         "or move the existing file out of the way first."
     )
+
+
+@contextlib.contextmanager
+def staging(dest: Path) -> Iterator[Path]:
+    """A new directory beside ``dest`` (same volume, so ``publish`` can link) that only
+    this call owns. On exit it is removed with everything in it, and it is the only
+    place a writer deletes from: a file at ``dest`` is never this call's to remove."""
+    try:
+        d = Path(tempfile.mkdtemp(prefix=".macos-apps-mcp-export-", dir=dest.parent))
+    except OSError as e:
+        raise NativeError(
+            f"cannot write in {dest.parent} ({e.strerror}); nothing was written. "
+            "Do not retry."
+        ) from e
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, onexc=_gone_ok)
+
+
+def _gone_ok(_func, _path, exc: BaseException) -> None:
+    if not isinstance(exc, FileNotFoundError):
+        raise exc
+
+
+def publish(staged: Path, dest: Path) -> None:
+    """Put ``staged`` at ``dest`` only if nothing is there: ``os.link`` is atomic, fails
+    on any entry at ``dest`` (a file, a symlink, a case variant on APFS) and never
+    follows a symlink there. ``staged`` comes from ``staging(dest)``."""
+    try:
+        os.link(staged, dest)
+    except FileExistsError as e:
+        raise exists_refusal(dest) from e
+    except OSError as e:
+        raise NativeError(
+            f"could not place {dest.name} in {dest.parent} ({e.strerror}); nothing "
+            "was written there. The volume must support hard links (APFS and HFS+ "
+            "do, exFAT and FAT do not). Do not retry."
+        ) from e
 
 
 def check_size(size: int | None, name: str, *, max_bytes: int, hint: str = "") -> None:
