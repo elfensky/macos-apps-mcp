@@ -238,47 +238,45 @@ class PhotosAdapter:
             dest = files.target_path(
                 dest_dir, f"{stem}_{uuid[:8]}{Path(src).suffix}", fallback="photo"
             )
-            before = set(os.listdir(dest.parent))
-            # No download option, no osxphotos naming: D-09 and D-11.
-            try:
-                written = p.export(
-                    str(dest.parent),
-                    filename=dest.name,
-                    edited=edited,
-                    overwrite=False,
-                    increment=False,
-                )
-            except FileExistsError as e:
-                # osxphotos found a file at dest after target_path checked: another
-                # writer's (a parallel session), never ours to delete (CR-01).
-                raise files.exists_refusal(dest) from e
-            except Exception as e:
-                # target_path proved dest absent, and osxphotos refuses an existing
-                # dest, so whatever is there now is ours.
-                dest.unlink(missing_ok=True)
-                raise NativeError(
-                    f"exporting photo {uuid} as {dest.name} failed; any partial file "
-                    "was removed and nothing was exported. Export it from Photos "
-                    "directly. Do not retry."
-                ) from e
-            if not written or Path(written[0]).resolve() != dest:
+            # osxphotos checks dest once, then copies with O_TRUNC through any symlink,
+            # so it writes only into a directory this call owns; publish links the file
+            # in and refuses anything a parallel writer put at dest meanwhile.
+            with files.staging(dest) as private:
+                staged = private / dest.name
+                # No download option, no osxphotos naming: D-09 and D-11.
+                try:
+                    written = p.export(
+                        str(private),
+                        filename=dest.name,
+                        edited=edited,
+                        overwrite=False,
+                        increment=False,
+                    )
+                except Exception as e:
+                    raise NativeError(
+                        f"exporting photo {uuid} as {dest.name} failed; any partial "
+                        "file was removed and nothing was exported. Export it from "
+                        "Photos directly. Do not retry."
+                    ) from e
                 got = Path(written[0]).resolve() if written else None
-                other = ""
-                if got and got.parent == dest.parent and got.name not in before:
-                    got.unlink(missing_ok=True)  # this call's by-product (WR-02)
-                    other = f" It wrote {got.name} instead, which was removed."
-                elif got:
-                    other = f" It reported {written[0]} instead; that file stays."
-                raise VerificationFailed(
-                    f"osxphotos reported no file at {dest} for {uuid} — nothing was "
-                    f"exported.{other} Do not retry; check that Photos still holds "
-                    "the file."
-                )
+                if got != staged:
+                    other = ""
+                    if got and got.parent == private:
+                        other = f" It wrote {got.name} instead, which was removed."
+                    elif got:
+                        other = f" It reported {written[0]} instead; that file stays."
+                    raise VerificationFailed(
+                        f"osxphotos reported no file at {dest} for {uuid} — nothing "
+                        f"was exported.{other} Do not retry; check that Photos still "
+                        "holds the file."
+                    )
+                size = files.confirm_written(staged, hint="the photo's file was empty")
+                files.publish(staged, dest)
             out = {
                 "id": uuid,
                 "status": "written",
                 "path": str(dest),
-                "bytes": files.confirm_written(dest, hint="the photo's file was empty"),
+                "bytes": size,
                 "edited": edited,
                 "dest_dir": str(dest.parent),
             }
