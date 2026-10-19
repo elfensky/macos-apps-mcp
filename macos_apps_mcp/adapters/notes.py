@@ -531,11 +531,13 @@ def _fts_expr(query: str) -> str | None:
     """The FTS5 MATCH expression for ``query``, or None when it holds no word.
 
     Words of 4+ characters only (the measured configuration, spike 004) — all words when
-    none is that long, so "tax" still reaches the bodies. Each word is a double-quoted
-    phrase (``"`` doubled), so query text is never FTS5 syntax; words join with OR.
+    none is that long, so "tax" still reaches the bodies. A 1-character word never
+    does: the "t" of "don't" or the "C" of "C++" matches nearly every body (WR-01).
+    Each word is a double-quoted phrase (``"`` doubled), so query text is never FTS5
+    syntax; words join with OR.
     NFC, not fold_text: the tokenizer folds case and Latin accents itself, and a
     fold it can't reproduce (ё→е, ß→ss, Hangul→jamo) misses every body (#367)."""
-    words = re.findall(r"\w+", norm_text(query) or "")
+    words = [w for w in re.findall(r"\w+", norm_text(query) or "") if len(w) >= 2]
     use = [w for w in words if len(w) >= 4] or words
     return " OR ".join('"' + w.replace('"', '""') + '"' for w in use) or None
 
@@ -552,6 +554,7 @@ def _body_hits(conn, expr: str) -> list[int]:
     runtime.verify_sqlite_schema(conn, _BODY_FINGERPRINT)
     head = "FROM ZICCLOUDSYNCINGOBJECT o"
     frm = _FROM.replace(head, f"{head} JOIN ZICNOTEDATA d ON d.Z_PK = o.ZNOTEDATA", 1)
+    assert frm != _FROM, f"_FROM no longer holds {head!r}; the body join is lost"
     rows = conn.execute(
         "SELECT o.Z_PK, o.ZTITLE1, d.ZDATA, o.ZISPASSWORDPROTECTED " + frm
     )

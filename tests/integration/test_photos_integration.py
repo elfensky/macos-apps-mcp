@@ -121,14 +121,16 @@ def _write_jpeg(out: Path) -> None:
     assert CGImageDestinationFinalize(dest)
 
 
-def _existing_test_photo_names() -> list[str]:
-    """Original filenames of the non-trashed test photos already in the album."""
+def _existing_test_photos() -> list[tuple[str, str]]:
+    """(original filename, uuid) of the live test photos already in the album. Plain
+    strings leave the worker, never a PhotoInfo; a hidden photo is skipped, as every
+    tool refuses it (D-17)."""
 
-    def work() -> list[str]:
+    def work() -> list[tuple[str, str]]:
         return sorted(
-            p.original_filename
+            (p.original_filename, p.uuid)
             for p in runtime.photos_db().photos(albums=[ALBUM])
-            if (p.original_filename or "").startswith(PREFIX)
+            if not p.hidden and (p.original_filename or "").startswith(PREFIX)
         )
 
     return runtime.run_native(work)
@@ -155,18 +157,10 @@ def _import_new(tmp: Path) -> tuple[str, str]:
 
 @pytest.fixture(scope="module")
 def test_photo(tmp_path_factory):
-    names = _existing_test_photo_names()
-    if names:
-        name = names[0]
+    existing = _existing_test_photos()
+    if existing:
+        name, uuid = existing[0]
         print(f"REUSED TEST PHOTO: {name} in album {ALBUM}")
-        hits = [
-            p.uuid
-            for p in runtime.run_native(
-                lambda: runtime.photos_db().photos(albums=[ALBUM])
-            )
-            if p.original_filename == name
-        ]
-        uuid = hits[0]
     else:
         uuid, name = _import_new(tmp_path_factory.mktemp("photo-import"))
         print(f"NEW TEST PHOTO for the owner: {name} in album {ALBUM}")

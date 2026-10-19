@@ -131,11 +131,17 @@ def target_path(dest_dir: str, name: str, fallback: str = _FALLBACK) -> Path:
     if not path.is_relative_to(directory):
         raise ValueError(f"refusing to write outside {directory}")
     if path.exists():
-        raise FileExistsError(
-            f"{path} already exists — this never overwrites. Choose another dest_dir, "
-            "or move the existing file out of the way first."
-        )
+        raise exists_refusal(path)
     return path
+
+
+def exists_refusal(path: Path) -> FileExistsError:
+    """The never-overwrite refusal for ``path`` — also for a writer that finds the file
+    there after ``target_path`` checked (the TOCTOU window above)."""
+    return FileExistsError(
+        f"{path} already exists — this never overwrites. Choose another dest_dir, "
+        "or move the existing file out of the way first."
+    )
 
 
 def check_size(size: int | None, name: str, *, max_bytes: int, hint: str = "") -> None:

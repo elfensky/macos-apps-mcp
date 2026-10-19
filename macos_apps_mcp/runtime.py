@@ -550,9 +550,12 @@ def photos_db():
                 "missing — run doctor. Do not retry."
             ) from e
         except Exception as e:
+            # The cause's text can name the library path: log it, keep it out of the
+            # agent-facing text (IN-02).
+            log.warning("osxphotos could not read the Photos library: %r", e)
             raise SchemaDrift(
                 f"osxphotos {osxphotos.__version__} could not read the Photos library "
-                f"({type(e).__name__}: {e}) — macOS may have changed the Photos "
+                f"({type(e).__name__}) — macOS may have changed the Photos "
                 "database. Do not retry; report it."
             ) from e
 
