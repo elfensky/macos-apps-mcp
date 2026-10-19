@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import inspect
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import threading
@@ -622,7 +624,8 @@ _write_gate_on_only = pytest.mark.skipif(
 
 def _exporting(tmp_path, monkeypatch, *, name="IMG_0001.HEIC", size=1234, **over):
     """A photo whose source file is real and whose fake ``export`` copies it to
-    ``dest/filename`` like osxphotos; the file root is ``tmp_path/root``."""
+    ``dest/filename`` with ``shutil.copy`` like osxphotos 0.77.2 (O_TRUNC, follows a
+    symlink at the target); the file root is ``tmp_path/root``."""
     monkeypatch.setenv("MACOS_APPS_FILE_ROOT", str(tmp_path / "root"))
     src = tmp_path / "lib" / name
     src.parent.mkdir(exist_ok=True)
@@ -634,7 +637,7 @@ def _exporting(tmp_path, monkeypatch, *, name="IMG_0001.HEIC", size=1234, **over
     def export(dest, *args, **kw):
         p.export_calls.append((dest, args, kw))
         out = pathlib.Path(dest) / kw["filename"]
-        out.write_bytes(src.read_bytes())
+        shutil.copy(src, out)
         return [str(out)]
 
     p.export = export
@@ -659,6 +662,10 @@ def test_export_photo_end_to_end_writes_the_original_into_the_root(
     }
     assert (out / "IMG_0001_A1B2C3D4.HEIC").stat().st_size == 1234
     assert len(p.export_calls) == 1
+    # published by a link out of a private directory, which is gone again
+    assert os.listdir(out) == ["IMG_0001_A1B2C3D4.HEIC"]
+    assert (out / "IMG_0001_A1B2C3D4.HEIC").stat().st_nlink == 1
+    assert pathlib.Path(p.export_calls[0][0]).name.startswith(".macos-apps-mcp-export-")
 
 
 def test_export_photo_is_an_additive_audited_export_without_dry_run_or_snapshot():
@@ -679,6 +686,26 @@ def _out(tmp_path):
 
 def _export(ident=UUID, dest=DEST):
     return PhotosAdapter().export(ident, dest)
+
+
+NAME = "IMG_0001_A1B2C3D4.HEIC"
+
+
+def _private_dirs(tmp_path) -> list:
+    """The per-call staging directories still in the destination: always none."""
+    return list(_out(tmp_path).glob(".macos-apps-mcp-export-*"))
+
+
+def _racing(p, before):
+    """Wrap the fake export so ``before(filename)`` runs first: another writer acting
+    after target_path proved the name free, the window osxphotos' own check misses."""
+    inner = p.export
+
+    def export(dest, **kw):
+        before(kw["filename"])
+        return inner(dest, **kw)
+
+    p.export = export
 
 
 def test_export_photo_writes_the_edited_still_when_there_are_adjustments(
@@ -780,64 +807,121 @@ def test_export_photo_empty_osxphotos_result_is_a_verification_failure(
     p.export = lambda dest, **kw: []
     with pytest.raises(VerificationFailed, match="nothing was exported"):
         _export()
-    assert not (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").exists()
+    assert os.listdir(_out(tmp_path)) == []
 
 
-@pytest.mark.parametrize("where", ["outside", "inside-existing", "inside-new"])
+@pytest.mark.parametrize(
+    "where", ["private", "dest-dir", "dest-dir-case-variant", "outside"]
+)
 def test_export_photo_a_different_written_path_is_a_verification_failure(
     tmp_path, monkeypatch, where
 ):
-    # WR-02: a file this call made in the destination is removed; any other file stays,
-    # and the message names it either way
+    # A name osxphotos writes in this call's private directory goes with it. A path it
+    # reports anywhere else is not this call's and stays, also when it is a case
+    # variant of another writer's file on APFS (WR-02 compared names case-sensitively).
     p = _exporting(tmp_path, monkeypatch)
     _out(tmp_path).mkdir(parents=True)
-    stray = (tmp_path if where == "outside" else _out(tmp_path)) / "stray.bin"
-    if where == "inside-existing":
-        stray.write_bytes(b"before")
+    theirs = _out(tmp_path) / "Stray.bin"
+    theirs.write_bytes(b"theirs")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"outside")
+    reported = {
+        "dest-dir": theirs,
+        "dest-dir-case-variant": theirs.with_name("stray.bin"),
+        "outside": outside,
+    }
 
     def export(dest, **kw):
-        if not stray.exists():
-            stray.write_bytes(b"s")
-        return [str(stray)]
+        if where != "private":
+            return [str(reported[where])]
+        (pathlib.Path(dest) / "other.bin").write_bytes(b"s")
+        return [str(pathlib.Path(dest) / "other.bin")]
 
     p.export = export
     with pytest.raises(VerificationFailed, match="nothing was exported") as e:
         _export()
-    assert "stray.bin" in str(e.value)
-    assert stray.exists() == (where != "inside-new")
-    assert ("removed" in str(e.value)) == (where == "inside-new")
+    msg = str(e.value)
+    name = "other.bin" if where == "private" else reported[where].name
+    assert name in msg and ("removed" in msg) == (where == "private")
+    assert theirs.read_bytes() == b"theirs" and outside.read_bytes() == b"outside"
+    assert os.listdir(_out(tmp_path)) == ["Stray.bin"]
 
 
-def test_export_photo_a_racing_writer_s_file_is_refused_and_never_deleted(
+def test_export_photo_a_file_another_writer_lands_at_dest_is_never_overwritten(
     tmp_path, monkeypatch
 ):
-    # CR-01: another session's export lands between target_path and osxphotos' own
-    # check; osxphotos refuses, and that file is not this call's to delete
+    # Phase 4 close re-verification: osxphotos checks dest once, early, then copies
+    # with O_TRUNC. A file a parallel session lands in that window survives byte for
+    # byte, and the call refuses instead of reporting `written`.
     p = _exporting(tmp_path, monkeypatch)
-
-    def export(dest, **kw):
-        (pathlib.Path(dest) / kw["filename"]).write_bytes(b"theirs")
-        raise FileExistsError(f"destination exists ({dest}/{kw['filename']})")
-
-    p.export = export
+    dest = _out(tmp_path) / NAME
+    _racing(p, lambda name: dest.write_bytes(b"theirs"))
     with pytest.raises(FileExistsError, match="never overwrites"):
         _export()
-    assert (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").read_bytes() == b"theirs"
+    assert dest.read_bytes() == b"theirs" and _private_dirs(tmp_path) == []
+
+
+def test_export_photo_a_symlink_at_dest_is_never_written_through(tmp_path, monkeypatch):
+    # shutil.copy follows a symlink at its target: one dropped at dest after the check
+    # must not carry the export to a file outside the root
+    p = _exporting(tmp_path, monkeypatch)
+    victim = tmp_path / "outside.txt"
+    victim.write_bytes(b"keep")
+    dest = _out(tmp_path) / NAME
+    _racing(p, lambda name: dest.symlink_to(victim))
+    with pytest.raises(FileExistsError, match="never overwrites"):
+        _export()
+    assert victim.read_bytes() == b"keep" and dest.is_symlink()
+    assert _private_dirs(tmp_path) == []
+
+
+def _case_insensitive(d: pathlib.Path) -> bool:
+    probe = d / "Case-Probe"
+    probe.touch()
+    try:
+        return (d / "case-probe").exists()
+    finally:
+        probe.unlink()
+
+
+def test_export_photo_a_case_variant_at_dest_is_never_overwritten(
+    tmp_path, monkeypatch
+):
+    # APFS is case-insensitive by default, so img_0001_a1b2c3d4.heic IS the dest entry
+    if not _case_insensitive(tmp_path):
+        pytest.skip("the tmp filesystem is case-sensitive")
+    p = _exporting(tmp_path, monkeypatch)
+    variant = _out(tmp_path) / NAME.lower()
+    _racing(p, lambda name: variant.write_bytes(b"theirs"))
+    with pytest.raises(FileExistsError, match="never overwrites"):
+        _export()
+    assert variant.read_bytes() == b"theirs"
+    assert os.listdir(_out(tmp_path)) == [NAME.lower()]
 
 
 class _ExportError(Exception):
     """Stands in for osxphotos' ExportError, whose text names the library file."""
 
 
+def _causes(lib: str) -> dict:
+    return {
+        "export-error": _ExportError(
+            f"Error copying {lib}/IMG_0001.HEIC: No space left on device"
+        ),
+        "enospc": OSError(errno.ENOSPC, "No space left on device", f"{lib}/x.HEIC"),
+    }
+
+
+@pytest.mark.parametrize("cause", ["export-error", "enospc"])
 @pytest.mark.parametrize("writes", [True, False], ids=["partial-file", "no-file"])
 def test_export_photo_a_failing_export_leaves_no_file_and_raises_typed(
-    tmp_path, monkeypatch, writes
+    tmp_path, monkeypatch, writes, cause
 ):
     # #379 review: ENOSPC mid-copy, or osxphotos' post-copy bookkeeping, must not leave
     # a file that looks like a save, nor leak the library path through _guard untyped.
     p = _exporting(tmp_path, monkeypatch)
     lib = str(tmp_path / "lib")
-    cause = _ExportError(f"Error copying {lib}/IMG_0001.HEIC: No space left on device")
+    cause = _causes(lib)[cause]
 
     def export(dest, **kw):
         if writes:
@@ -848,10 +932,32 @@ def test_export_photo_a_failing_export_leaves_no_file_and_raises_typed(
     with pytest.raises(NativeError) as e:
         _export()
     msg = str(e.value)
-    assert UUID in msg and "IMG_0001_A1B2C3D4.HEIC" in msg
+    assert UUID in msg and NAME in msg
     assert msg.endswith("Do not retry.") and lib not in msg
     assert e.value.__cause__ is cause
     assert list(_out(tmp_path).iterdir()) == []
+
+
+@pytest.mark.parametrize("cause", ["export-error", "enospc"])
+def test_export_photo_a_failing_export_never_deletes_another_writer_s_file(
+    tmp_path, monkeypatch, cause
+):
+    # #381's cleanup unlinked dest on any failure: a file another writer landed there
+    # after target_path was deleted with it. Only the private directory is cleaned.
+    p = _exporting(tmp_path, monkeypatch)
+    cause = _causes(str(tmp_path / "lib"))[cause]
+    dest = _out(tmp_path) / NAME
+
+    def export(d, **kw):
+        dest.write_bytes(b"theirs")
+        (pathlib.Path(d) / kw["filename"]).write_bytes(b"part")
+        raise cause
+
+    p.export = export
+    with pytest.raises(NativeError) as e:
+        _export()
+    assert e.value.__cause__ is cause
+    assert dest.read_bytes() == b"theirs" and _private_dirs(tmp_path) == []
 
 
 def test_export_photo_source_evicted_after_the_isfile_check_is_absent(
@@ -872,14 +978,16 @@ def test_export_photo_a_zero_byte_result_is_removed_and_reported(tmp_path, monke
     _exporting(tmp_path, monkeypatch, size=0)
     with pytest.raises(ValueError, match="0 bytes"):
         _export()
-    assert not (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").exists()
+    assert os.listdir(_out(tmp_path)) == []  # never published; the staged file is gone
 
 
 def test_export_never_passes_a_download_option(tmp_path, monkeypatch):
     p = _exporting(tmp_path, monkeypatch)
     _export()
     ((dest, args, kw),) = p.export_calls
-    assert dest == str(_out(tmp_path)) and args == ()
+    # osxphotos writes into this call's private directory beside dest, never at dest
+    assert pathlib.Path(dest).parent == _out(tmp_path) and args == ()
+    assert pathlib.Path(dest).name.startswith(".macos-apps-mcp-export-")
     assert kw["filename"] == "IMG_0001_A1B2C3D4.HEIC"
     assert set(kw) == {"filename", "edited", "overwrite", "increment"}
     assert kw["overwrite"] is False and kw["increment"] is False
