@@ -48,6 +48,13 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **`export_photo` publishes atomically and never overwrites or deletes another writer's
+  file** (#96) — osxphotos checks the destination once and then copies over whatever is
+  there, through a symlink too. The export now goes into a private directory beside the
+  destination and is published with a hard link, which fails when anything is already at
+  that name (a file, a symlink, or a name that differs only in case). That is the
+  never-overwrite refusal, and a failed export removes only the private directory. The
+  allowed root must be on a volume with hard links (APFS or HFS+; exFAT and FAT have none).
 - **`export_photo` never deletes a file it did not write, and `notes()` body search skips
   1-character words** (#96, #93) — when a parallel session's export lands at the same path
   first, the export is refused with the never-overwrite error and that file stays. A file
