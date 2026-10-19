@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import pathlib
+import subprocess
 import sys
 import threading
 import types
@@ -335,10 +336,23 @@ def test_photos_db_missing_library_is_a_plain_native_error(
     assert not isinstance(e.value, FullDiskAccessDenied)
 
 
-def test_photos_db_any_other_failure_is_schema_drift_naming_the_version(monkeypatch):
-    _fake_osxphotos(monkeypatch, raises=KeyError("ZNEWCOLUMN"))
-    with pytest.raises(SchemaDrift, match=r"osxphotos 9\.9\.9"):
+def test_photos_db_any_other_failure_is_schema_drift_naming_the_version(
+    monkeypatch, caplog
+):
+    # IN-02: the cause's text can name the library path, so only the log carries it
+    detail = "/x/Photos Library.photoslibrary/database/Photos.sqlite"
+    _fake_osxphotos(monkeypatch, raises=KeyError(detail))
+    with pytest.raises(SchemaDrift, match=r"osxphotos 9\.9\.9.*KeyError") as e:
         _REAL_PHOTOS_DB()
+    assert detail not in str(e.value)
+    assert detail in caplog.text
+
+
+def test_server_import_leaves_osxphotos_unloaded():
+    # 04-04 must-have (W-03): osxphotos loads only inside runtime.photos_db. A fresh
+    # interpreter proves it; this one may hold a fake module from another test.
+    code = "import sys, macos_apps_mcp.server; sys.exit('osxphotos' in sys.modules)"
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=120)
 
 
 def test_photos_db_without_osxphotos_says_not_installed(monkeypatch):
@@ -769,20 +783,46 @@ def test_export_photo_empty_osxphotos_result_is_a_verification_failure(
     assert not (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").exists()
 
 
+@pytest.mark.parametrize("where", ["outside", "inside-existing", "inside-new"])
 def test_export_photo_a_different_written_path_is_a_verification_failure(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, where
 ):
+    # WR-02: a file this call made in the destination is removed; any other file stays,
+    # and the message names it either way
     p = _exporting(tmp_path, monkeypatch)
-    stray = tmp_path / "stray.bin"
+    _out(tmp_path).mkdir(parents=True)
+    stray = (tmp_path if where == "outside" else _out(tmp_path)) / "stray.bin"
+    if where == "inside-existing":
+        stray.write_bytes(b"before")
 
     def export(dest, **kw):
-        stray.write_bytes(b"s")
+        if not stray.exists():
+            stray.write_bytes(b"s")
         return [str(stray)]
 
     p.export = export
-    with pytest.raises(VerificationFailed, match="stray.bin"):
+    with pytest.raises(VerificationFailed, match="nothing was exported") as e:
         _export()
-    assert stray.exists()  # not ours to delete
+    assert "stray.bin" in str(e.value)
+    assert stray.exists() == (where != "inside-new")
+    assert ("removed" in str(e.value)) == (where == "inside-new")
+
+
+def test_export_photo_a_racing_writer_s_file_is_refused_and_never_deleted(
+    tmp_path, monkeypatch
+):
+    # CR-01: another session's export lands between target_path and osxphotos' own
+    # check; osxphotos refuses, and that file is not this call's to delete
+    p = _exporting(tmp_path, monkeypatch)
+
+    def export(dest, **kw):
+        (pathlib.Path(dest) / kw["filename"]).write_bytes(b"theirs")
+        raise FileExistsError(f"destination exists ({dest}/{kw['filename']})")
+
+    p.export = export
+    with pytest.raises(FileExistsError, match="never overwrites"):
+        _export()
+    assert (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").read_bytes() == b"theirs"
 
 
 class _ExportError(Exception):
@@ -884,6 +924,16 @@ def test_export_photo_hostile_original_filename_stays_inside_the_destination(
     got = pathlib.Path(_export()["path"])
     assert got.parent == _out(tmp_path) and got.name.endswith("_A1B2C3D4.HEIC")
     assert not (tmp_path / ".ssh").exists()
+
+
+@pytest.mark.parametrize("stem", ["a" * 295, "\u00e9" * 148], ids=["ascii", "2-byte"])
+def test_export_photo_a_long_filename_keeps_the_id_suffix(tmp_path, monkeypatch, stem):
+    # IN-03: the stem is cut, never the _<id8> that keeps two photos apart
+    name = stem + ".HEIC"
+    assert len(name.encode()) >= 300
+    _exporting(tmp_path, monkeypatch, original_filename=name)
+    got = pathlib.Path(_export()["path"]).name
+    assert got.endswith("_A1B2C3D4.HEIC") and len(got.encode()) <= 200
 
 
 def test_export_photo_runs_on_the_native_worker(tmp_path, monkeypatch):
