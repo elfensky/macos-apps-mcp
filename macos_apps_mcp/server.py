@@ -1018,10 +1018,12 @@ def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -
 def notes(title: str) -> dict:
     """Search Notes by title, snippet and note body. Returns {results, truncated?,
     plane?, coverage?}: results are pointers (id + snippet); title/snippet hits come
-    first, body-only hits after. Read-only. Fast path reads NoteStore.sqlite (needs Full
-    Disk Access) and searches bodies in memory, never on disk, skipping locked notes;
-    without it, degrades to an Automation (Notes) title search, and plane/coverage say
-    so. Automation access is the floor. See notes_all, note_bodies."""
+    first, body-only hits after. Body words split at spaces and punctuation only, so a
+    word inside unspaced Chinese or Japanese text is found in a title or snippet, never
+    in a body. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk Access) and
+    searches bodies in memory, never on disk, skipping locked notes; without it,
+    degrades to an Automation (Notes) title search, and plane/coverage say so.
+    Automation access is the floor. See notes_all, note_bodies."""
     return _notes.read(title)
 
 

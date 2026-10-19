@@ -24,7 +24,9 @@ Spike 004 measured the real library on this Mac
 
 `notes()` searches note bodies with an FTS5 index. The index lives in memory for one call.
 It is built from the bodies the adapter already decodes. No file is written. Locked notes
-are never indexed.
+are never indexed. The `unicode61` tokenizer splits words at spaces and punctuation only,
+so it does not segment Chinese or Japanese text. A word inside such a sentence is not found
+in a body; the title and snippet match still finds it there.
 
 ## If it is ever adopted
 

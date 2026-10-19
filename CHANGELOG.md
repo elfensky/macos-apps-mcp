@@ -48,6 +48,12 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **`export_photo` never deletes a file it did not write, and `notes()` body search skips
+  1-character words** (#96, #93) — when a parallel session's export lands at the same path
+  first, the export is refused with the never-overwrite error and that file stays. A file
+  osxphotos writes under another name is removed, and the error says so. A body query
+  ignores 1-character words: `don't` no longer matches every note with a contraction, and
+  `C++` matches titles and snippets only.
 - **doctor reports an answered -1728 probe as `ok`** (#317) — Photos, launched by the
   probe, had no window yet and answered `count windows` with "Can't get every window"
   (-1728), so doctor reported a granted, working surface as `native_error`. The probe now
