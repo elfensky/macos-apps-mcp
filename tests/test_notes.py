@@ -1053,6 +1053,29 @@ def test_short_words_are_dropped_when_a_long_word_exists(tmp_path, monkeypatch):
     assert _ids(NotesAdapter().read("tax refund")) == ["51"]
 
 
+@pytest.mark.parametrize(
+    ("query", "expr"),
+    [
+        ("don't", '"don"'),  # a "t" would match every isn't, can't and it's
+        ("C++", None),  # a "C" would match every lone c: titles and snippets only
+        ("tax 2024", '"2024"'),  # the D-13 4-character rule still drops "tax"
+        ("tax", '"tax"'),  # no 4+ word: the short words reach the bodies
+    ],
+)
+def test_body_expression_never_holds_a_one_character_word(query, expr):
+    # WR-01
+    assert notes_mod._fts_expr(query) == expr
+
+
+def test_a_contraction_query_does_not_match_every_contraction(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(70, "One", "a", "it isn't here"), (71, "Two", "b", "don't forget")],
+    )
+    assert _ids(NotesAdapter().read("don't")) == ["71"]
+
+
 def test_body_search_folds_diacritics(tmp_path, monkeypatch):
     _body_store(
         tmp_path,
@@ -1070,13 +1093,13 @@ def test_body_search_folds_diacritics(tmp_path, monkeypatch):
 
 # Escaped on purpose: an editor may re-normalise a literal glyph and hollow the test.
 _SCRIPT_WORDS = [
-    "ёлка",  # Cyrillic with yo
-    "чайник",  # Cyrillic with short i
-    "Straße",  # sharp s
-    "회의",  # Hangul syllables
-    "ガス料金",  # katakana with dakuten, then kanji
-    "ＡＢＣＤ",  # full-width Latin
-    "café",  # Latin with a diacritic
+    "\u0451\u043b\u043a\u0430",  # Cyrillic with yo
+    "\u0447\u0430\u0439\u043d\u0438\u043a",  # Cyrillic with short i
+    "Stra\u00dfe",  # sharp s
+    "\ud68c\uc758",  # Hangul syllables
+    "\u30ac\u30b9\u6599\u91d1",  # katakana with dakuten, then kanji
+    "\uff21\uff22\uff23\uff24",  # full-width Latin
+    "caf\u00e9",  # Latin with a diacritic
 ]
 
 
@@ -1223,3 +1246,20 @@ def test_no_semantic_extra_and_no_ml_dependency():
         "tokenizers",
     }
     assert banned.isdisjoint(p["name"] for p in locked)
+
+
+def test_the_note01_decision_record_is_kept():
+    # W-01: NOTE-01 closes on this record (D-12); a deleted or emptied doc fails here
+    from pathlib import Path
+
+    doc = Path(__file__).resolve().parent.parent / "docs" / "notes-semantic-search.md"
+    text = doc.read_text()
+    for term in (
+        "is not adopted",
+        "all-MiniLM-L6-v2",  # the model
+        "1,000-character chunks",  # chunking
+        "ZMODIFICATIONDATE1",  # refresh
+        "10,000 notes",  # size cap
+        "`[semantic]` extra",  # the optional-extra boundary
+    ):
+        assert term in text, term
