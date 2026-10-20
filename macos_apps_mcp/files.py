@@ -211,7 +211,8 @@ def _sweep_dead_staging(parent: Path) -> None:
             ):
                 continue
             shutil.rmtree(e.path)
-            logger.info(
+            # WARNING, not INFO: nothing configures logging; a delete leaves a trace
+            logger.warning(
                 "removed staging directory %s left by dead pid %s", e.path, m[1]
             )
         except OSError as err:
