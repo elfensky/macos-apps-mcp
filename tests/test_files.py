@@ -17,9 +17,12 @@ The rules being pinned:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from macos_apps_mcp import files
+from macos_apps_mcp.errors import WriteRefused
 
 
 @pytest.fixture
@@ -159,14 +162,21 @@ def test_target_path_of_a_traversal_name_stays_in_the_root(root):
 
 def test_target_path_refuses_an_existing_file(root):
     (root / "x.pdf").write_bytes(b"mine")
-    with pytest.raises(FileExistsError, match="already exists"):
+    with pytest.raises(WriteRefused, match="already exists"):
         files.target_path("", "x.pdf")
     assert (root / "x.pdf").read_bytes() == b"mine"  # untouched
 
 
+def test_exists_refusal_is_a_typed_write_refusal():
+    e = files.exists_refusal(Path("/x/y"))
+    assert isinstance(e, WriteRefused) and e.kind == "write_refused"
+    assert not isinstance(e, OSError)
+    assert str(e).startswith("/x/y already exists")
+
+
 def test_target_path_refuses_an_existing_file_even_via_a_hostile_name(root):
     (root / "passwd").write_bytes(b"mine")
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         files.target_path("", "../../etc/passwd")
 
 
@@ -230,7 +240,7 @@ def test_refusals_are_neutral(root, tmp_path):
         files.resolve_dest(str(tmp_path / "elsewhere"))
     messages.append(str(outside.value))
     (root / "x.bin").write_bytes(b"1")
-    with pytest.raises(FileExistsError) as exists:
+    with pytest.raises(WriteRefused) as exists:
         files.target_path("", "x.bin")
     messages.append(str(exists.value))
     with pytest.raises(ValueError) as over:
