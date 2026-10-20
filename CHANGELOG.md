@@ -99,6 +99,8 @@ surface may still shift between minor versions.
   later showed `(account not in Mail)` until a restart. When the map omits an id,
   `mail_overview` now reads it again, at most once a minute. A removed account keeps the
   label, and a re-read that fails keeps the names already known.
+- **ruff lints for Python 3.12** (#384) — `[tool.ruff] target-version` now matches the
+  3.12 floor (D-16), and the five generic functions use the PEP 695 form.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 
