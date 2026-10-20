@@ -1,0 +1,1 @@
+No external API integration: the phase fixes four local bugs — the `.app` build script and `uv.lock` (#373), the shared files module's error types (#383), the ruff target and five signatures (#384), and `export_photo`'s staging directory on local disk (#387); the MCP tools it touches are this repo's own, and it adds no call to any external service.
