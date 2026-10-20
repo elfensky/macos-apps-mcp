@@ -58,15 +58,15 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Notes
 
-- [ ] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code (#93)
-- [ ] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies (#93)
+- [x] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code (#93)
+- [x] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies (#93)
 
 ### Photos
 
-- [ ] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback (#96)
-- [ ] **PHO-02**: User can list albums as Pointers (#96)
-- [ ] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset) (#96)
-- [ ] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes) (#96)
+- [x] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback (#96)
+- [x] **PHO-02**: User can list albums as Pointers (#96)
+- [x] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset) (#96)
+- [x] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes) (#96)
 
 ### Platform
 
@@ -184,12 +184,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-04 | Phase 03.1 | Complete |
 | FIX-05 | Phase 03.1 | Complete |
 | FIX-06 | Phase 03.1 | Complete |
-| NOTE-01 | Phase 4 | Pending |
-| NOTE-02 | Phase 4 | Pending |
-| PHO-01 | Phase 4 | Pending |
-| PHO-02 | Phase 4 | Pending |
-| PHO-03 | Phase 4 | Pending |
-| PHO-04 | Phase 4 | Pending |
+| NOTE-01 | Phase 4 | Complete |
+| NOTE-02 | Phase 4 | Complete |
+| PHO-01 | Phase 4 | Complete |
+| PHO-02 | Phase 4 | Complete |
+| PHO-03 | Phase 4 | Complete |
+| PHO-04 | Phase 4 | Complete |
 | PLAT-01 | Phase 5 | Pending |
 | PLAT-02 | Phase 5 | Pending |
 | DIST-01 | Phase 6 | Pending |

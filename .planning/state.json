@@ -31,7 +31,7 @@
     {
       "number": "4",
       "name": "Notes & Photos",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "5",
@@ -46,8 +46,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 04 of 8 · executing"
+    "label": "Advance to the next step (plan phase 5)",
+    "reason": "Phase 5 of 8 — needs a plan"
   },
-  "updated_at": "2026-10-18T13:13:45.686Z"
+  "updated_at": "2026-10-20T11:12:50.482Z"
 }

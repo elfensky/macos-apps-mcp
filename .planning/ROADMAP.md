@@ -36,7 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names (completed 2026-10-05)
 - [x] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness (completed 2026-10-11)
 - [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
-- [ ] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented
+- [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
@@ -275,7 +275,7 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: 6/6 plans executed
+**Plans**: 6/6 plans complete
 
 Plans:
 **Wave 1**
@@ -335,6 +335,6 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
-| 4. Notes & Photos | 6/6 | In Progress | - |
+| 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
 | 5. Operator Control Plane | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
