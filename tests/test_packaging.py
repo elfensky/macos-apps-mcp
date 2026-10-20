@@ -1,8 +1,12 @@
 import json
 import plistlib
+import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +184,61 @@ def test_build_script_gates_universal2():
     assert src.index("-m compileall") < src.index('if [[ -n "$SIGN" ]]')
     # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
     assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
+
+
+def test_build_script_builds_the_project_wheel_in_a_hash_locked_environment():
+    """#373: hatchling and its dependencies come from uv.lock under --require-hashes,
+    and the bundle gets the built wheel, never the source directory."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    export = 'uv export --project "$REPO" --frozen --only-group build'
+    start = src.index("uv build")
+    build = src[start : src.index("\n", src.index("--out-dir", start))]
+    for needle in (
+        "--wheel",
+        '--build-constraints "$WORK/build-reqs"',
+        "--require-hashes",
+    ):
+        assert needle in build, needle
+    assert export in src
+    assert not re.search(r'uv pip install[^\n]*"\$REPO"', src)  # no directory install
+    install = src[src.index("uv pip install -q --python", start) :].split("\n", 1)[0]
+    assert "--no-deps" in install and ".whl" in install
+    assert src.index(export) < src.index("uv build") < src.index(install)
+    assert src.index(install) < src.index("universal2 gate ok")
+
+
+def test_the_build_group_pins_the_backend_with_hashes():
+    """The backend named in [build-system].requires is in the `build` group, and the
+    export carries a sha256 for every requirement (so --require-hashes can hold)."""
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv not on PATH")
+    out = subprocess.run(
+        [
+            uv,
+            "export",
+            "--project",
+            str(ROOT),
+            "--frozen",
+            "--only-group",
+            "build",
+            "--no-emit-project",
+            "--no-header",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    reqs = [b for b in re.split(r"\n(?=\S)", out.strip()) if not b.startswith("#")]
+    assert reqs and all("--hash=sha256:" in r for r in reqs)
+    pinned = {r.split("==")[0] for r in reqs}
+    required = {
+        Requirement(r).name
+        for r in tomllib.loads((ROOT / "pyproject.toml").read_text())["build-system"][
+            "requires"
+        ]
+    }
+    assert required <= pinned
 
 
 def test_build_script_compiles_the_icon():
