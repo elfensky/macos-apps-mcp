@@ -1,20 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 5
-current_phase_name: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+current_phase: "04.1"
+current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature
 status: planning
-stopped_at: Phase 04 complete, ready to plan Phase 5
-last_updated: "2026-10-20T11:12:50.470Z"
+stopped_at: "Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan"
+last_updated: "2026-10-20T11:15:35.387Z"
 last_activity: 2026-10-20
-last_activity_desc: Phase 04 complete, transitioned to Phase 5
-state_head: 8f2b2dba99a550569ca8ad34f376ac57bd13d522
+last_activity_desc: Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
+state_head: e6617fc6bbac984c1d27e01476d05f8a391ff80e
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 6
   total_plans: 51
   completed_plans: 51
-  percent: 75
 ---
 
 # Project State
@@ -28,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-20)
 
 ## Current Position
 
-Phase: 5 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+Phase: 04.1 — Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-20 — Phase 04 complete, transitioned to Phase 5
+Last activity: 2026-10-20 — Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
 
 Progress: [████████░░] 75%
 
@@ -164,6 +163,7 @@ Recent decisions affecting current work:
 - Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
 - Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
 - Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
+- Phase 04.1 inserted after Phase 4: Bug Fixes — Phase 4 Follow-ups Before Any Feature (#373, #383, #384, #387) (URGENT)
 
 ## Deferred Items
 
@@ -176,5 +176,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 04 complete, ready to plan Phase 5
+Stopped at: Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
