@@ -49,7 +49,7 @@ import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 
-from .errors import NativeError
+from .errors import NativeError, WriteRefused
 
 _FALLBACK = "file"
 
@@ -132,7 +132,7 @@ def resolve_dest(dest_dir: str) -> Path:
 
 def target_path(dest_dir: str, name: str, fallback: str = _FALLBACK) -> Path:
     """The full path to write ``name`` to — sanitized, contained, and PROVEN not to
-    exist yet. Raises ``FileExistsError`` rather than overwriting."""
+    exist yet. Raises ``WriteRefused`` rather than overwriting."""
     directory = resolve_dest(dest_dir)
     path = (directory / safe_basename(name, fallback)).resolve()
     # belt and braces: safe_basename cannot emit a separator, so this cannot fail —
@@ -144,10 +144,10 @@ def target_path(dest_dir: str, name: str, fallback: str = _FALLBACK) -> Path:
     return path
 
 
-def exists_refusal(path: Path) -> FileExistsError:
+def exists_refusal(path: Path) -> WriteRefused:
     """The never-overwrite refusal for ``path`` — also for a writer that finds the file
     there after ``target_path`` checked (the TOCTOU window above)."""
-    return FileExistsError(
+    return WriteRefused(
         f"{path} already exists — this never overwrites. Choose another dest_dir, "
         "or move the existing file out of the way first."
     )
