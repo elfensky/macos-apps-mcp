@@ -26,6 +26,7 @@ import pytest
 
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters.photos import PhotosAdapter
+from macos_apps_mcp.errors import WriteRefused
 
 pytestmark = pytest.mark.integration
 
@@ -222,7 +223,7 @@ def test_export_writes_an_image_and_a_second_export_is_refused(
         assert Path(got["path"]).parent == out_dir and got["bytes"] > 0
         # a reused 04-01 photo is rotated, a new one is not: both are 320x240 sides
         assert _size(got["path"]) == [240, 320]
-        with pytest.raises(FileExistsError):
+        with pytest.raises(WriteRefused):
             a.export(test_photo.uuid, "out")
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)

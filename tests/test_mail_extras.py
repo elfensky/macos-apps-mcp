@@ -21,7 +21,7 @@ from macos_apps_mcp.adapters import (
     mail_index,
     mail_recover,
 )
-from macos_apps_mcp.errors import BatchTooLarge, NativeError
+from macos_apps_mcp.errors import BatchTooLarge, NativeError, WriteRefused
 from macos_apps_mcp.text import RS, US
 
 _ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
@@ -108,7 +108,7 @@ def test_save_refuses_an_existing_file_before_any_native_call(
         raise AssertionError("must refuse before touching Mail")
 
     monkeypatch.setattr(runtime, "run_osascript", boom)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         mail.MailAdapter().save_attachment("<a@x>", "", name="deal.pdf")
     assert (root / "deal.pdf").read_bytes() == b"mine"
 
@@ -245,7 +245,7 @@ def test_save_by_attachment_id_refuses_an_existing_file(root, resolved, monkeypa
     (root / "in" / "invoice.pdf").write_bytes(b"mine")
     calls = []
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, _TWO))
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
     assert [c[0] for c in calls] == [mail_attachments._ATTACHMENTS]
     assert (root / "in" / "invoice.pdf").read_bytes() == b"mine"

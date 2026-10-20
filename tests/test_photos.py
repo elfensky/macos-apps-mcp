@@ -775,10 +775,24 @@ def test_export_photo_never_overwrites(tmp_path, monkeypatch):
     p = _exporting(tmp_path, monkeypatch)
     _out(tmp_path).mkdir(parents=True)
     (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").write_bytes(b"mine")
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         _export()
     assert p.export_calls == []
     assert (_out(tmp_path) / "IMG_0001_A1B2C3D4.HEIC").read_bytes() == b"mine"
+
+
+@_write_gate_on_only
+def test_export_photo_an_existing_target_is_a_typed_tool_error(tmp_path, monkeypatch):
+    p = _exporting(tmp_path, monkeypatch)
+    _out(tmp_path).mkdir(parents=True)
+    (_out(tmp_path) / NAME).write_bytes(b"mine")
+    with pytest.raises(ToolError) as e:
+        _call("export_photo", {"id": UUID, "dest_dir": DEST})
+    assert str(e.value).startswith(str(_out(tmp_path) / NAME))
+    assert "never overwrites" in str(e.value)
+    assert "Error calling tool" not in str(e.value)
+    assert (_out(tmp_path) / NAME).read_bytes() == b"mine"
+    assert p.export_calls == []
 
 
 @pytest.mark.parametrize("dest", ["/etc", "../../x"])
@@ -856,7 +870,7 @@ def test_export_photo_a_file_another_writer_lands_at_dest_is_never_overwritten(
     p = _exporting(tmp_path, monkeypatch)
     dest = _out(tmp_path) / NAME
     _racing(p, lambda name: dest.write_bytes(b"theirs"))
-    with pytest.raises(FileExistsError, match="never overwrites"):
+    with pytest.raises(WriteRefused, match="never overwrites"):
         _export()
     assert dest.read_bytes() == b"theirs" and _private_dirs(tmp_path) == []
 
@@ -869,7 +883,7 @@ def test_export_photo_a_symlink_at_dest_is_never_written_through(tmp_path, monke
     victim.write_bytes(b"keep")
     dest = _out(tmp_path) / NAME
     _racing(p, lambda name: dest.symlink_to(victim))
-    with pytest.raises(FileExistsError, match="never overwrites"):
+    with pytest.raises(WriteRefused, match="never overwrites"):
         _export()
     assert victim.read_bytes() == b"keep" and dest.is_symlink()
     assert _private_dirs(tmp_path) == []
@@ -893,7 +907,7 @@ def test_export_photo_a_case_variant_at_dest_is_never_overwritten(
     p = _exporting(tmp_path, monkeypatch)
     variant = _out(tmp_path) / NAME.lower()
     _racing(p, lambda name: variant.write_bytes(b"theirs"))
-    with pytest.raises(FileExistsError, match="never overwrites"):
+    with pytest.raises(WriteRefused, match="never overwrites"):
         _export()
     assert variant.read_bytes() == b"theirs"
     assert os.listdir(_out(tmp_path)) == [NAME.lower()]
