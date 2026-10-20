@@ -24,13 +24,10 @@ import sqlite3
 from collections.abc import Callable
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import TypeVar
 
 from ..errors import PRIVACY_PANE, FullDiskAccessDenied, NativeError, SchemaDrift
 from ..runtime import read_via_sqlite
 from ..text import clean_summary
-
-T = TypeVar("T")
 
 _STORES = (
     Path.home()
@@ -131,7 +128,7 @@ def store_paths() -> list[Path]:
     return [_STORES / name for name in sorted(sizes, key=lambda n: (-sizes[n], n))]
 
 
-def _read_all(query: Callable[[sqlite3.Connection], T]) -> list[T]:
+def _read_all[T](query: Callable[[sqlite3.Connection], T]) -> list[T]:
     """``query`` against every store file that has the Reminders table, in order.
 
     A file without ``ZREMCDREMINDER`` is an account shell and is skipped; if no file has

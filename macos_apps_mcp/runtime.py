@@ -27,7 +27,6 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TypeVar
 from urllib.parse import quote
 
 import Foundation as F
@@ -42,15 +41,13 @@ from .errors import (
     SchemaDrift,
 )
 
-T = TypeVar("T")
-
 # ponytail: one process-wide native thread. If a future app needs a *second* isolated
 # native context, give it its own executor — don't widen this one to max_workers>1
 # (breaks EKEventStore).
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mac-native")
 
 
-def run_native(fn: Callable[[], T]) -> T:
+def run_native[T](fn: Callable[[], T]) -> T:
     """Run a blocking native callable on the single dedicated worker thread and return
     its result.
 
@@ -430,7 +427,7 @@ def verify_sqlite_schema(
 _STORE_UNAVAILABLE = (FullDiskAccessDenied, SchemaDrift)
 
 
-def read_via_sqlite(
+def read_via_sqlite[T](
     path: Path | str,
     fingerprint: dict[str, set[str]],
     query: Callable[[sqlite3.Connection], T],

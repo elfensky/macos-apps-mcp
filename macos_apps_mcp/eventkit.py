@@ -11,7 +11,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from datetime import datetime
-from typing import TypeVar
 
 import EventKit as EK
 import Foundation as F
@@ -19,8 +18,6 @@ import Foundation as F
 from .contracts import CLEAR_RECURRENCE, Recurrence
 from .errors import PRIVACY_PANE, AccessDenied, NativeTimeout
 from .runtime import log, on_worker, run_native
-
-T = TypeVar("T")
 
 _FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
 
@@ -130,7 +127,7 @@ def bootstrap() -> None:
 _ASYNC_TIMEOUT = 30.0  # seconds
 
 
-def run_native_async(
+def run_native_async[T](
     start: Callable[[Callable[[T | None], None]], None],
     timeout: float = _ASYNC_TIMEOUT,
 ) -> T | None:
