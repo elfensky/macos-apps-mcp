@@ -87,7 +87,8 @@ class SubtasksRequired(NativeError):
 
 class WriteRefused(NativeError):
     """The store refused a save/remove — a read-only or subscribed calendar/list, or
-    the account rejected the change."""
+    the account rejected the change — or the filesystem refused a file write (an
+    existing target, or a directory that cannot be created)."""
 
     kind = "write_refused"
 
