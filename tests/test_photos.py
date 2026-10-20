@@ -696,6 +696,36 @@ def _private_dirs(tmp_path) -> list:
     return list(_out(tmp_path).glob(".macos-apps-mcp-export-*"))
 
 
+# The code a child runs: it dies inside ``files.staging`` without its ``finally``, the
+# way the stdio role's SIGTERM and orphan handlers end the process (``os._exit``).
+_DIES_IN_STAGING = (
+    "import os, sys\n"
+    "from pathlib import Path\n"
+    "from macos_apps_mcp import files\n"
+    "with files.staging(Path(sys.argv[1])) as d:\n"
+    "    (d / 'x.heic').write_bytes(b'photo')\n"
+    "    os._exit(0)\n"
+)
+
+
+def test_export_photo_removes_the_staging_copy_a_killed_export_left(
+    tmp_path, monkeypatch
+):
+    _exporting(tmp_path, monkeypatch)
+    _out(tmp_path).mkdir(parents=True)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _DIES_IN_STAGING, str(_out(tmp_path) / "IMG_dead.HEIC")],
+        env=dict(os.environ),
+    )
+    assert child.wait(timeout=60) == 0
+    left = _private_dirs(tmp_path)
+    assert len(left) == 1
+    assert left[0].name.startswith(f".macos-apps-mcp-export-{child.pid}-")
+    assert _export()["status"] == "written"
+    assert _private_dirs(tmp_path) == []
+    assert os.listdir(_out(tmp_path)) == [NAME]
+
+
 def _racing(p, before):
     """Wrap the fake export so ``before(filename)`` runs first: another writer acting
     after target_path proved the name free, the window osxphotos' own check misses."""
