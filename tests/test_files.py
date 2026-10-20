@@ -391,6 +391,30 @@ def test_staging_keeps_its_own_process_s_directory(root):
     _swept_beside(root, _leftover(root, os.getpid()))
 
 
+def test_staging_keeps_a_directory_another_user_owns(root, monkeypatch):
+    # chown needs root, so the sweep's scandir of `root` reports this one entry as
+    # owned by another uid; every other scandir (rmtree's included) is untouched.
+    foreign = _leftover(root, _dead_pid(), "frgn0000")
+    real_scandir = os.scandir
+
+    class _OtherOwner:
+        def __init__(self, e):
+            self._e, self.name, self.path = e, e.name, e.path
+
+        def stat(self, *, follow_symlinks=True):
+            st = self._e.stat(follow_symlinks=follow_symlinks)
+            return os.stat_result((*st[:4], st.st_uid + 1, *st[5:10]))
+
+    def scandir(path="."):
+        if path != root:
+            return real_scandir(path)
+        entries = list(real_scandir(path))
+        return iter([_OtherOwner(e) if e.name == foreign.name else e for e in entries])
+
+    monkeypatch.setattr(files.os, "scandir", scandir)
+    _swept_beside(root, foreign)
+
+
 @pytest.mark.parametrize(
     ("pid", "suffix"),
     [
