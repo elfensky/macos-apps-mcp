@@ -237,7 +237,18 @@ def staging(dest: Path) -> Iterator[Path]:
     try:
         yield d
     finally:
-        shutil.rmtree(d, onexc=_gone_ok)
+        try:
+            shutil.rmtree(d, onexc=_gone_ok)
+        except OSError as e:
+            # Not raised: it would replace the body's result or its typed error.
+            logger.warning(
+                "staging directory %s was left behind (%s); the next export into %s "
+                "removes it once pid %s is gone",
+                d,
+                e.strerror,
+                d.parent,
+                os.getpid(),
+            )
 
 
 def _gone_ok(_func, _path, exc: BaseException) -> None:
