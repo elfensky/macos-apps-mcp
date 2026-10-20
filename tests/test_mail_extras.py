@@ -12,7 +12,10 @@ import itertools
 import time
 
 import pytest
+from fastmcp.exceptions import ToolError
 
+import macos_apps_mcp.server as srv
+import macos_apps_mcp.tiers as tiers
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import (
     mail,
@@ -23,6 +26,11 @@ from macos_apps_mcp.adapters import (
 )
 from macos_apps_mcp.errors import BatchTooLarge, NativeError, WriteRefused
 from macos_apps_mcp.text import RS, US
+
+_write_gate_on_only = pytest.mark.skipif(
+    tiers.read_only(),
+    reason="the Mail write tools are absent under MACOS_APPS_READ_ONLY",
+)
 
 _ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 _BOX = f"imap://{_ACCT}/INBOX"
@@ -459,6 +467,42 @@ def test_export_writes_eml_files_and_reports_absent_ids(root, monkeypatch):
     }
     assert out["results"][1] == {"id": "b@x", "status": "absent", "fidelity": "absent"}
     assert (root / "archive" / "a@x.eml").read_bytes() == b"From: x\r\n"
+
+
+def _fake_export_sources(monkeypatch):
+    monkeypatch.setattr(mail_recover, "locate", lambda t: [_located("a@x", 1)])
+    monkeypatch.setattr(mail_recover, "read_payloads", lambda t: {"a@x": b"new"})
+
+
+def test_export_refuses_an_existing_file_before_writing(root, monkeypatch):
+    (root / "archive").mkdir()
+    (root / "archive" / "a@x.eml").write_bytes(b"mine")
+    _fake_export_sources(monkeypatch)
+    with pytest.raises(WriteRefused, match="never overwrites"):
+        mail.MailAdapter().export("<a@x>", "archive")
+    assert (root / "archive" / "a@x.eml").read_bytes() == b"mine"
+
+
+@_write_gate_on_only
+def test_the_mail_write_tools_refuse_an_existing_file_as_a_typed_tool_error(
+    root, resolved, monkeypatch
+):
+    def boom(*a, **k):
+        raise AssertionError("must refuse before touching Mail")
+
+    monkeypatch.setattr(runtime, "run_osascript", boom)
+    (root / "deal.pdf").write_bytes(b"mine")
+    with pytest.raises(ToolError, match="never overwrites") as saved:
+        srv.save_mail_attachment("<a@x>", "", name="deal.pdf")
+    assert isinstance(saved.value.__cause__, WriteRefused)
+    (root / "archive").mkdir()
+    (root / "archive" / "a@x.eml").write_bytes(b"mine")
+    _fake_export_sources(monkeypatch)
+    with pytest.raises(ToolError, match="never overwrites") as exported:
+        srv.export_mail("<a@x>", "archive")
+    assert isinstance(exported.value.__cause__, WriteRefused)
+    assert (root / "deal.pdf").read_bytes() == b"mine"
+    assert (root / "archive" / "a@x.eml").read_bytes() == b"mine"
 
 
 def test_export_reports_partial_fidelity_rather_than_pretending(root, monkeypatch):

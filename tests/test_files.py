@@ -17,6 +17,7 @@ The rules being pinned:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -180,6 +181,42 @@ def test_target_path_refuses_an_existing_file_even_via_a_hostile_name(root):
         files.target_path("", "../../etc/passwd")
 
 
+@pytest.mark.parametrize(
+    ("setup", "reason"),
+    [
+        ("file_as_dest", "File exists"),
+        ("file_as_parent", "Not a directory"),
+        ("read_only_parent", "Permission denied"),
+    ],
+)
+def test_resolve_dest_refuses_a_directory_it_cannot_create(root, setup, reason):
+    """A dest_dir that cannot be made is a typed refusal with the OS reason, never a
+    raw OSError — and nothing is created."""
+    if setup == "file_as_dest":
+        (root / "taken").write_bytes(b"x")
+        dest, shown = "taken", root / "taken"
+    elif setup == "file_as_parent":
+        (root / "f").write_bytes(b"x")
+        dest, shown = "f/sub", root / "f" / "sub"
+    else:
+        if os.geteuid() == 0:
+            pytest.skip("root ignores directory permissions")
+        (root / "ro").mkdir(mode=0o500)
+        dest, shown = "ro/sub", root / "ro" / "sub"
+    try:
+        with pytest.raises(WriteRefused) as e:
+            files.resolve_dest(dest)
+    finally:
+        if (root / "ro").exists():
+            (root / "ro").chmod(0o700)
+    text = str(e.value)
+    assert str(shown.resolve()) in text and reason in text
+    assert "nothing was written" in text and "Do not retry" in text
+    assert isinstance(e.value.__cause__, OSError)
+    if dest != "taken":
+        assert not shown.exists()
+
+
 # --- the size cap --------------------------------------------------------------------
 
 
@@ -243,6 +280,10 @@ def test_refusals_are_neutral(root, tmp_path):
     with pytest.raises(WriteRefused) as exists:
         files.target_path("", "x.bin")
     messages.append(str(exists.value))
+    (root / "taken").write_bytes(b"1")
+    with pytest.raises(WriteRefused) as cannot:
+        files.resolve_dest("taken")
+    messages.append(str(cannot.value))
     with pytest.raises(ValueError) as over:
         files.check_size(11, "x.bin", max_bytes=10)
     messages.append(str(over.value))
