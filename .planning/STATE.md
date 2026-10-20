@@ -21,10 +21,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-05)
+See: .planning/PROJECT.md (updated 2026-10-20)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
+**Current focus:** Phase 04.1 (inserted) — Phase 4 follow-up bugs (#373, #383, #384, #387) before Phase 5
 
 ## Current Position
 

@@ -35,6 +35,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 - ✓ Gate close — the suite fails closed in every deployment shape: the `MACOS_APPS_READ_ONLY=1` run is green with gated-off tools absent (CI runs it as a second step); doctor's process probes go through the locked `tracked_run` seam with an AST tripwire against direct spawns; the full 80-test device sweep is green on macOS 27.0 against the daemon built from the gate (0 failed, 0 errors; #229/#230 xfailed and routed to 02.1) — released and installed as 0.12.0 — Phase 2 (GATE-07, GATE-11, GATE-12)
 - ✓ Phase 2 sweep findings settled in 0.13.1 — replies, reply-all and forwards wait 120 s for the original, the same cap as their script backstop (#230: 5 of 5 device runs at 52–72 s, xfail removed); the outbound leftover warning is the caller contract for Mail's windowless-delete state and names its recovery (#229) — MAIL-05/06; `doctor()` answers Full Disk Access on macOS 27, which has no per-user TCC.db (#261)
 - ✓ Mail fixes — a 25-message `move_mail`/`trash_mail`, their dry runs and `mail_undo` finish inside scaled host caps on a 9k+ IMAP mailbox (by-ID acts from one bulk read; device worst ratio 0.092 of cap); a timeout inside `recoverable()` still writes a receipt whose `unknown` targets `mail_undo` replays; `create_draft` takes `from_address`; `send_mail` and `create_draft` refuse an address no account owns before any native write, and the read behind the refusal fails closed — released and installed as 0.13.0 — Phase 02.1 (MAIL-01..04, #206, #208)
+- ✓ Notes & Photos — NOTE-01 closed as a written "not adopted" decision (no ML dependency); `notes()` finds words in note bodies (in-memory FTS5, NFC on both sides) in the bounded-read envelope; Photos on osxphotos 0.77.x, proven inside the signed bundle on both slices before any feature code: `photos`, `photo_albums`, `photo_info` (one uuid id, old AppleScript id accepted) and `export_photo` (edited still, never downloads, published atomically, never overwrites); hidden photos stay locked; Photos needs Full Disk Access, not Automation; device-proven through the installed daemon with zero residue — Phase 4 (NOTE-01, NOTE-02, PHO-01..04; #93, #96)
 
 ### Active
 
@@ -46,8 +47,6 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 **Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
 - [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
 - [ ] Reminders: delete + list management (#92); subtasks and tags read-only from the Reminders sqlite store — no public write route exists (spike 002, 2026-09-28) (#91)
-- [ ] Notes: semantic search sidecar — decision first, then an optional `[semantic]` extra (#93)
-- [ ] Photos: settle osxphotos vs PhotoKit by running `uv add`; albums, bounded metadata, export to disk (#96)
 
 **Platform & distribution — let others use it, safely**
 - [ ] Per-adapter enable/disable (want Mail, not Photos) read at daemon start; a disabled adapter's tools are absent, `doctor` reports the active set
@@ -78,7 +77,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 ## Constraints
 
-- **Tech stack**: Python 3 + FastMCP, `uv`, `ruff` (E, F, I, UP, B, SIM; line-length 88), no mypy — same setup as the sibling repos; the Protocol seam keeps the tool layer testable without it.
+- **Tech stack**: Python 3.12+ (D-16: osxphotos cannot be locked beside pyobjc 10+ on 3.11) + FastMCP, `uv`, `ruff` (E, F, I, UP, B, SIM; line-length 88), no mypy — same setup as the sibling repos; the Protocol seam keeps the tool layer testable without it.
 - **Architecture**: tools are thin dispatch; adapters are typed `Protocol`s (reads uniform → `list[Pointer]`, writes per-adapter typed); one adapter module per app, no cross-adapter reach; all native access through `runtime.run_native()` on the single serialized worker (`max_workers=1`, never widened) — EventKit thread affinity + TCC.
 - **Safety tiers**: read → write (`@_write_tool`/`@_additive_tool`, skipped by `MACOS_APPS_READ_ONLY`) → outbound (`@_send_tool("<adapter>")`, only when `MACOS_APPS_ALLOW_SEND` names the adapter; `READ_ONLY` wins). A gated-off tool is absent, never registered-and-erroring. Outbound defaults `dry_run=True` and its dry-run path makes no native call.
 - **Shim↔daemon hop**: no read deadline (`Timeout(None, connect=10.0)`); per-operation limits belong in the adapter.
@@ -109,6 +108,10 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Batch moves and trashes act by internal id from one bulk read, behind a per-copy identity guard | Per-id `whose` scans did not fit the cap on a 9k+ mailbox; `ok` needs every source reference dead (-1728) and a destination count rise | ✓ Good — MAIL-01, 25-message device run at 0.092 of cap (Phase 02.1) |
 | A timeout receipt marks its targets `unknown`, and `mail_undo` replays `unknown` as well as `ok` | The act may still finish in Mail after the host gives up, so "do not know" must read as "may have moved" | ✓ Good — MAIL-02 (Phase 02.1) |
 | `dry_run=True` on every destructive tool, enforced from the registry | Before Phase 1, `delete_event`/`delete_draft` defaulted False and `delete_note` had none — three safety contracts for one class of call | ✓ Good — GATE-05, a registry test fails closed on a new `delete_*`; live client check 2026-09-26 |
+| osxphotos for everything Photos, a base dependency, proven in the signed bundle first | One surface instead of PhotoKit + store reads; the signed-bundle gate (D-03) settles AMFI and the macOS 27 model before feature code | ✓ Good — PHO-01 gate passed on both slices, daemon device proof (Phase 4) |
+| Python 3.12 is the floor (D-16) | osxphotos ≥ 0.66 caps pyobjc < 10 on Python 3.11 + macOS 12 and uv's universal lock cannot split it; chosen over a 3.12+ marker, an override of upstream caps, or Notes-only. uv 0.13.1 also drops `platform_release` markers under `--python-platform`, so the build refuses such an export | ✓ Good — owner's call 2026-10-18 (Phase 4) |
+| Hidden photos stay locked (D-17) | Photos keeps the Hidden album behind Touch ID; the tools skip and refuse hidden photos instead of reading past the lock | ✓ Good — owner kept the default 2026-10-20 (Phase 4) |
+| Notes semantic search not adopted; FTS5 body search instead (D-12, D-13) | Spike 004: the measured gain did not justify a model, an index and its refresh policy | ✓ Good — NOTE-01 decision record, body search shipped (Phase 4) |
 
 ## Evolution
 
@@ -128,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-05 after Phase 02.1 — Mail fixes validated (MAIL-01..04 device-verified), 0.13.0 released and installed, #229/#230 still open behind non-strict xfails, #261 (FDA probe on macOS 27) added*
+*Last updated: 2026-10-20 after Phase 4 — Notes & Photos validated (NOTE-01/02, PHO-01..04), daemon reinstalled with the close fixes; follow-up bugs #373, #383, #384, #387 open*
