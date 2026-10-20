@@ -332,11 +332,15 @@ def test_staging_names_carry_the_pid(root):
     assert not d.exists()
 
 
-def test_staging_removes_a_dead_process_s_leftover(root):
+def test_staging_removes_a_dead_process_s_leftover(root, caplog):
     gone = _leftover(root, _dead_pid())
-    with files.staging(root / "y"):
+    with (
+        caplog.at_level(logging.WARNING, logger="macos_apps_mcp.files"),
+        files.staging(root / "y"),
+    ):
         pass
     assert not gone.exists()
+    assert str(gone) in caplog.text  # the delete leaves a trace at WARNING
 
 
 def _swept_beside(root: Path, kept: Path) -> None:
