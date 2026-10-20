@@ -305,7 +305,7 @@ Plans:
   3. `[tool.ruff] target-version` is `py312` and the UP047 rewrites land with the suite and ruff green (#384).
   4. A killed `export_photo` (SIGTERM, orphan `_exit`, SIGKILL) leaves no hidden staging copy that a later call does not remove, only dead-pid staging directories are ever removed, and a cleanup error after a successful publish does not replace the written result (#387).
 
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -318,7 +318,7 @@ Plans:
 - [x] 04.1-03-PLAN.md — the staging name carries the pid, a dead-pid sweep runs on entry, a cleanup error is logged and never raised (FIX-10, #387)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 04.1-04-PLAN.md — a hash-locked `build` group in `uv.lock`; `build_app.sh` builds the wheel with `uv build --require-hashes` and installs it with `--no-deps`; two negative probes and one unsigned build prove it (FIX-07, #373)
+- [x] 04.1-04-PLAN.md — a hash-locked `build` group in `uv.lock`; `build_app.sh` builds the wheel with `uv build --require-hashes` and installs it with `--no-deps`; two negative probes and one unsigned build prove it (FIX-07, #373)
 
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR merged with the required `check` job green
