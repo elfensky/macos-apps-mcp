@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "04.1"
 current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature
-status: planning
+status: executing
 stopped_at: "Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan"
-last_updated: "2026-10-20T11:15:35.387Z"
+last_updated: "2026-10-20T19:03:46.854Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
-state_head: e6617fc6bbac984c1d27e01476d05f8a391ff80e
+state_head: 9bd5a61bb0001115452ce76514f90ac866e9c9fb
 progress:
   total_phases: 9
   completed_phases: 6
-  total_plans: 51
+  total_plans: 55
   completed_plans: 51
 ---
 
@@ -27,9 +27,9 @@ See: .planning/PROJECT.md (updated 2026-10-20)
 
 ## Current Position
 
-Phase: 04.1 — Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
+Phase: 04.1 (Bug Fixes — Phase 4 Follow-ups Before Any Feature) — READY TO EXECUTE
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-10-20 — Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
 
 Progress: [████████░░] 75%
