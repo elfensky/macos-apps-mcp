@@ -18,6 +18,8 @@ The rules being pinned:
 from __future__ import annotations
 
 import os
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -302,3 +304,35 @@ def test_confirm_written_returns_the_byte_count(root):
     f.write_bytes(b"%PDF-1.4 hello")
     assert files.confirm_written(f) == 14
     assert f.exists()
+
+
+# --- staging: a killed export's leftover (#387) -------------------------------------
+
+
+def _dead_pid() -> int:
+    p = subprocess.Popen(["true"])
+    p.wait()
+    return p.pid
+
+
+def _leftover(parent: Path, pid: int, suffix: str = "abcd1234", mode: int = 0o700):
+    d = parent / f".macos-apps-mcp-export-{pid}-{suffix}"
+    d.mkdir()
+    (d / "photo.heic").write_bytes(b"photo")
+    d.chmod(mode)
+    return d
+
+
+def test_staging_names_carry_the_pid(root):
+    with files.staging(root / "x") as d:
+        assert d.parent == root
+        assert d.name.startswith(f".macos-apps-mcp-export-{os.getpid()}-")
+        assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    assert not d.exists()
+
+
+def test_staging_removes_a_dead_process_s_leftover(root):
+    gone = _leftover(root, _dead_pid())
+    with files.staging(root / "y"):
+        pass
+    assert not gone.exists()
