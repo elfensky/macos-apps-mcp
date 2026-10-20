@@ -37,6 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness (completed 2026-10-11)
 - [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
+- [ ] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
@@ -291,6 +292,16 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 04-06-PLAN.md — Device proof through the installed daemon after an owner install decision: search, albums, info and export verified; one owner sitting removes the throwaway photos; closes #96 (PHO-01..PHO-04)
+
+### Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
+
+**Goal**: Every bug the Phase 4 reviews left open is fixed before the next feature phase: the build installs the project with an unpinned, unhashed hatchling (#373); `_guard` lets `FileExistsError` and `mkdir` `OSError` from the files module through untyped (#383); ruff still targets py311 after the D-16 floor (#384); a killed `export_photo` leaves a hidden photo copy, and a cleanup error after publish replaces the written result (#387). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: TBD (planned from #373, #383, #384, #387)
+**Depends on:** Phase 4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 04.1 to break down)
 
 ### Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
 
