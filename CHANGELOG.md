@@ -105,6 +105,12 @@ surface may still shift between minor versions.
   `save_mail_attachment`, `export_mail` and `export_photo` give the agent the directive
   (kind `write_refused`), no longer an untyped `Error calling tool …` with a traceback
   in the log.
+- **A killed `export_photo` no longer leaves its hidden copy behind for good** (#387) —
+  the staging directory's name carries the pid, and the next export into the same
+  `dest_dir` removes a directory whose process is gone (never a live one, never a
+  symlink); a `dest_dir` never exported to again keeps it. A cleanup error after the
+  photo was written is logged with the leftover path instead of replacing the `written`
+  result.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 
