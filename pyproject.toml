@@ -83,7 +83,7 @@ packages = ["macos_apps_mcp"]
 # ruff config imported verbatim from the sibling repos (same rule set + line length for cross-repo
 # consistency). No src= (macos-apps-mcp is flat-layout, not src/). No mypy — neither sibling uses one.
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 88
 # ruff 0.16 formats Python code blocks inside markdown; docs/superpowers/ and the GSD
 # planning records under .planning/ are frozen — leave their snippets as written.
