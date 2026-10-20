@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "04.1"
 current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
 status: executing
-stopped_at: "Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan"
-last_updated: "2026-10-20T19:20:56.024Z"
+stopped_at: "Phase 04.1 executed (4/4 plans, PRs #390 #392 #394 #396, close PR #398); verification human_needed — UAT 04.1-UAT.md awaits /gsd-verify-work 04.1"
+last_updated: "2026-10-20T20:49:10.962Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 04.1 execution started
-state_head: 92020ee59edc4d0fa730194853450b616286602c
+state_head: ab0b1036d2006c54bbd9a452076d162ddaaa8a14
 progress:
   total_phases: 9
   completed_phases: 6
@@ -176,5 +176,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan
+Stopped at: Phase 04.1 executed (4/4 plans, PRs #390 #392 #394 #396, close PR #398); verification human_needed — UAT 04.1-UAT.md awaits /gsd-verify-work 04.1
 Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
