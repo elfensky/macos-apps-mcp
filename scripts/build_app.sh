@@ -129,7 +129,15 @@ ditto "$WORK/site-aarch64" "$SITE"
   if is_macho "$SITE/$f"; then lipo2 "$SITE/$f" "$WORK/site-x86_64/$f"
   elif [[ "$f" != *.dist-info/* ]]; then echo "ARCH-SPECIFIC NON-BINARY: $f"; exit 1; fi
 done
-uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
+# #373: the build backend is hash-locked like the runtime deps. The `build` group in uv.lock
+# (hatchling and its dependencies) is the build constraint set, and --require-hashes fails the
+# build on any build requirement that has no hash. The wheel installs --no-deps, so the D-16
+# export above stays the only source of runtime dependencies.
+uv export --project "$REPO" --frozen --only-group build --no-emit-project > "$WORK/build-reqs"
+uv build -q --wheel --python "$STD/bin/python${PYVER}" \
+  --build-constraints "$WORK/build-reqs" --require-hashes \
+  --out-dir "$WORK/wheel" "$REPO"
+uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$WORK"/wheel/*.whl
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.

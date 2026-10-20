@@ -72,6 +72,10 @@ dev = [
     "python-dateutil>=2.9.0.post0",
     "ruff>=0.15,<0.17",
 ]
+# #373: the build backend and its dependencies, hash-locked in uv.lock. build_app.sh
+# exports this group as the build constraints. Not a default group, so `uv sync` never
+# installs it. Refresh it with `uv lock --upgrade-package hatchling`.
+build = ["hatchling"]
 
 [build-system]
 requires = ["hatchling"]
