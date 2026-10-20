@@ -17,6 +17,7 @@ The rules being pinned:
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import subprocess
@@ -25,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from macos_apps_mcp import files
-from macos_apps_mcp.errors import WriteRefused
+from macos_apps_mcp.errors import NativeError, WriteRefused
 
 
 @pytest.fixture
@@ -336,3 +337,95 @@ def test_staging_removes_a_dead_process_s_leftover(root):
     with files.staging(root / "y"):
         pass
     assert not gone.exists()
+
+
+def _swept_beside(root: Path, kept: Path) -> None:
+    """Run one ``staging`` call after planting a control leftover whose process is dead.
+    The control must be gone (the sweep ran) and ``kept`` must be judged on its own."""
+    control = _leftover(root, _dead_pid(), "ctrl0000")
+    with files.staging(root / "y"):
+        pass
+    assert not control.exists(), "the sweep did not run"
+    assert kept.exists()
+
+
+def test_staging_keeps_a_live_process_s_directory(root):
+    live = subprocess.Popen(["sleep", "30"])
+    try:
+        kept = _leftover(root, live.pid)
+        _swept_beside(root, kept)
+        assert (kept / "photo.heic").read_bytes() == b"photo"
+    finally:
+        live.kill()
+        live.wait()
+
+
+def test_staging_keeps_a_directory_whose_pid_answers_eperm(root, monkeypatch):
+    real_kill = os.kill
+
+    def fake(pid, sig):
+        if pid == 424242:
+            raise PermissionError(1, "Operation not permitted")
+        return real_kill(pid, sig)
+
+    monkeypatch.setattr(files.os, "kill", fake)
+    _swept_beside(root, _leftover(root, 424242))
+
+
+def test_staging_never_follows_a_symlink_named_like_a_staging_directory(root):
+    victim = root / "victim"
+    victim.mkdir()
+    (victim / "f").write_text("keep")
+    link = root / f".macos-apps-mcp-export-{_dead_pid()}-abcd1234"
+    link.symlink_to(victim)
+    _swept_beside(root, victim)
+    assert link.is_symlink()
+    assert (victim / "f").read_text() == "keep"
+
+
+def test_staging_keeps_a_directory_wider_than_0700(root):
+    _swept_beside(root, _leftover(root, _dead_pid(), mode=0o755))
+
+
+def test_staging_keeps_its_own_process_s_directory(root):
+    _swept_beside(root, _leftover(root, os.getpid()))
+
+
+@pytest.mark.parametrize(
+    ("pid", "suffix"),
+    [
+        ("0", "abcd1234"),
+        ("1", "abcd1234"),
+        ("99999999999999999999", "abcd1234"),
+        ("x1", "abcd1234"),
+        ("DEAD", "abc"),
+        ("DEAD", "abcd1234.bak"),
+        ("DEAD", "ABCD1234"),
+    ],
+)
+def test_staging_keeps_names_outside_the_exact_pattern(root, pid, suffix):
+    kept = _leftover(root, _dead_pid() if pid == "DEAD" else pid, suffix)
+    _swept_beside(root, kept)
+
+
+def _boom(*args, **kwargs):
+    # takes **kwargs: staging() calls rmtree with the onexc keyword
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_staging_cleanup_error_after_success_is_logged_not_raised(
+    root, monkeypatch, caplog
+):
+    monkeypatch.setattr(files.shutil, "rmtree", _boom)
+    with (
+        caplog.at_level(logging.WARNING, logger="macos_apps_mcp.files"),
+        files.staging(root / "y") as d,
+    ):
+        pass
+    assert str(d) in caplog.text
+
+
+def test_staging_cleanup_error_does_not_replace_the_body_s_error(root, monkeypatch):
+    monkeypatch.setattr(files.shutil, "rmtree", _boom)
+    with pytest.raises(NativeError, match="typed"), files.staging(root / "y"):
+        raise NativeError("typed")

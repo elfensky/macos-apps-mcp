@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import inspect
+import logging
 import os
 import pathlib
 import shutil
@@ -724,6 +725,22 @@ def test_export_photo_removes_the_staging_copy_a_killed_export_left(
     assert _export()["status"] == "written"
     assert _private_dirs(tmp_path) == []
     assert os.listdir(_out(tmp_path)) == [NAME]
+
+
+def test_export_photo_a_cleanup_error_after_publish_keeps_the_written_result(
+    tmp_path, monkeypatch, caplog
+):
+    _exporting(tmp_path, monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(photos_mod.files.shutil, "rmtree", boom)
+    with caplog.at_level(logging.WARNING, logger="macos_apps_mcp.files"):
+        got = _export()
+    assert got["status"] == "written"
+    assert (_out(tmp_path) / NAME).stat().st_size == 1234
+    assert f".macos-apps-mcp-export-{os.getpid()}-" in caplog.text
 
 
 def _racing(p, before):
