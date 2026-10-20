@@ -111,6 +111,11 @@ surface may still shift between minor versions.
   symlink); a `dest_dir` never exported to again keeps it. A cleanup error after the
   photo was written is logged with the leftover path instead of replacing the `written`
   result.
+- **The `.app` build no longer takes its build backend fresh from PyPI** (#373) —
+  `scripts/build_app.sh` builds the bundled package as a wheel with hatchling and its
+  dependencies hash-locked in `uv.lock` (a `build` dependency group, enforced with
+  `--require-hashes`), then installs that wheel without dependencies. Refresh the
+  backend with `uv lock --upgrade-package hatchling`.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 
