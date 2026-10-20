@@ -101,6 +101,10 @@ surface may still shift between minor versions.
   label, and a re-read that fails keeps the names already known.
 - **ruff lints for Python 3.12** (#384) — `[tool.ruff] target-version` now matches the
   3.12 floor (D-16), and the five generic functions use the PEP 695 form.
+- **An existing file, or a `dest_dir` that cannot be created, is a typed refusal** (#383) —
+  `save_mail_attachment`, `export_mail` and `export_photo` give the agent the directive
+  (kind `write_refused`), no longer an untyped `Error calling tool …` with a traceback
+  in the log.
 
 ## [0.14.3] - 2026-10-11 — Local reminders
 
