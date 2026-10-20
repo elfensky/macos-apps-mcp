@@ -223,7 +223,14 @@ def _sweep_dead_staging(parent: Path) -> None:
 def staging(dest: Path) -> Iterator[Path]:
     """A new directory beside ``dest`` (same volume, so ``publish`` can link) that only
     this call owns. On exit it is removed with everything in it, and it is the only
-    place a writer deletes from: a file at ``dest`` is never this call's to remove."""
+    place a writer deletes from: a file at ``dest`` is never this call's to remove.
+
+    The directory is named with the pid of the process that made it. On entry the call
+    removes the directories a killed process left in the same parent (dead pid, exact
+    name, real 0700 directory of this user) and never a live one. Residue is therefore
+    removed by the next export into that same dest_dir, and a directory never exported
+    to again keeps it. A cleanup error is logged with the directory's path, never raised
+    over the outcome."""
     _sweep_dead_staging(dest.parent)
     try:
         d = Path(
