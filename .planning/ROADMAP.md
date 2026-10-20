@@ -305,7 +305,7 @@ Plans:
   3. `[tool.ruff] target-version` is `py312` and the UP047 rewrites land with the suite and ruff green (#384).
   4. A killed `export_photo` (SIGTERM, orphan `_exit`, SIGKILL) leaves no hidden staging copy that a later call does not remove, only dead-pid staging directories are ever removed, and a cleanup error after a successful publish does not replace the written result (#387).
 
-**Plans:** 4/4 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -319,6 +319,9 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 04.1-04-PLAN.md — a hash-locked `build` group in `uv.lock`; `build_app.sh` builds the wheel with `uv build --require-hashes` and installs it with `--no-deps`; two negative probes and one unsigned build prove it (FIX-07, #373)
+
+**Gap closure** *(UAT gap G-04.1-3)*
+- [ ] 04.1-05-PLAN.md — the Photos device-test fixture builds its `POSIX file` list outside the Photos tell block, so the import path runs and the FIX-08 `WriteRefused` assertion is proven on device; the owner removes the test photo (FIX-08, #383)
 
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR merged with the required `check` job green
