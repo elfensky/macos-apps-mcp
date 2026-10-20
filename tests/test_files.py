@@ -408,6 +408,13 @@ def test_staging_keeps_names_outside_the_exact_pattern(root, pid, suffix):
     _swept_beside(root, kept)
 
 
+def test_staging_ignores_a_pid_written_in_non_ascii_digits(root):
+    # int() reads Arabic-Indic digits, a str regex's \d matches them: both would turn
+    # this name into a pid. The pattern is ASCII-only, so the entry is not ours.
+    kept = _leftover(root, "\u0663\u0660\u0660")
+    _swept_beside(root, kept)
+
+
 def _boom(*args, **kwargs):
     # takes **kwargs: staging() calls rmtree with the onexc keyword
     raise PermissionError(1, "Operation not permitted")
