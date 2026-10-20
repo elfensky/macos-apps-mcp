@@ -42,14 +42,19 @@ itself, the window is milliseconds and the root is the user's own Downloads dire
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
+import re
 import shutil
+import stat
 import tempfile
 import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 
 from .errors import NativeError, WriteRefused
+
+logger = logging.getLogger(__name__)
 
 _FALLBACK = "file"
 
@@ -161,13 +166,69 @@ def exists_refusal(path: Path) -> WriteRefused:
     )
 
 
+_STAGING_PREFIX = ".macos-apps-mcp-export-"
+# mkdtemp appends 8 characters of [a-z0-9_] after the pid
+_STAGING_NAME = re.compile(re.escape(_STAGING_PREFIX) + r"(\d+)-[a-z0-9_]{8}")
+
+
+def _pid_alive(pid: int) -> bool:
+    # kill(0, 0) hits our process group, kill(-1, 0) everyone; 1 is launchd
+    if pid <= 1:
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OverflowError):  # exists under another user / not a pid
+        return True
+    return True
+
+
+def _sweep_dead_staging(parent: Path) -> None:
+    """Remove the staging directories a killed export left in ``parent`` (#387): named
+    exactly like ours, a real directory (never a symlink) this user owns at mode 0700,
+    with a pid that is not this process's and is dead. A live process's directory is
+    never touched, and nothing else is.
+
+    shortcut: a pid reused by a stranger keeps a dead export's residue until that pid
+    dies, and a pid from another host (network root) means nothing here; upgrade if
+    MACOS_APPS_FILE_ROOT is ever expected to sit on a shared volume."""
+    try:
+        entries = list(os.scandir(parent))
+    except OSError:
+        return
+    for e in entries:
+        m = _STAGING_NAME.fullmatch(e.name)
+        if not m or int(m[1]) == os.getpid() or _pid_alive(int(m[1])):
+            continue
+        try:
+            st = e.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(st.st_mode)
+                or st.st_uid != os.getuid()
+                or stat.S_IMODE(st.st_mode) != 0o700
+            ):
+                continue
+            shutil.rmtree(e.path)
+            logger.info(
+                "removed staging directory %s left by dead pid %s", e.path, m[1]
+            )
+        except OSError as err:
+            logger.warning(
+                "could not remove stale staging directory %s (%s)", e.path, err.strerror
+            )
+
+
 @contextlib.contextmanager
 def staging(dest: Path) -> Iterator[Path]:
     """A new directory beside ``dest`` (same volume, so ``publish`` can link) that only
     this call owns. On exit it is removed with everything in it, and it is the only
     place a writer deletes from: a file at ``dest`` is never this call's to remove."""
+    _sweep_dead_staging(dest.parent)
     try:
-        d = Path(tempfile.mkdtemp(prefix=".macos-apps-mcp-export-", dir=dest.parent))
+        d = Path(
+            tempfile.mkdtemp(prefix=f"{_STAGING_PREFIX}{os.getpid()}-", dir=dest.parent)
+        )
     except OSError as e:
         raise NativeError(
             f"cannot write in {dest.parent} ({e.strerror}); nothing was written. "
