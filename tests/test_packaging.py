@@ -56,6 +56,13 @@ def test_osxphotos_is_a_capped_base_dependency():
     assert uti.marker is None
 
 
+def test_ruff_targets_the_python_floor():
+    """#384, D-16: the ruff target must track the requires-python floor."""
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    floor = cfg["project"]["requires-python"].removeprefix(">=")
+    assert cfg["tool"]["ruff"]["target-version"] == "py" + floor.replace(".", "")
+
+
 def test_info_plist_contract():
     info = plistlib.loads((PKG / "Info.plist").read_bytes())
     assert info["CFBundleIdentifier"] == "ren.lav.macos-apps-mcp"
