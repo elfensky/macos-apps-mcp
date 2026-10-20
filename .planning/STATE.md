@@ -2,13 +2,13 @@
 gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "04.1"
-current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature
+current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
 status: executing
 stopped_at: "Phase 04 complete; Phase 04.1 (follow-up bugs #373, #383, #384, #387) inserted, ready to plan"
-last_updated: "2026-10-20T19:03:46.854Z"
+last_updated: "2026-10-20T19:20:56.024Z"
 last_activity: 2026-10-20
-last_activity_desc: Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
-state_head: 9bd5a61bb0001115452ce76514f90ac866e9c9fb
+last_activity_desc: Phase 04.1 execution started
+state_head: 92020ee59edc4d0fa730194853450b616286602c
 progress:
   total_phases: 9
   completed_phases: 6
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-20)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 04.1 (inserted) — Phase 4 follow-up bugs (#373, #383, #384, #387) before Phase 5
+**Current focus:** Phase 04.1 — Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
 
 ## Current Position
 
-Phase: 04.1 (Bug Fixes — Phase 4 Follow-ups Before Any Feature) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-20 — Phase 04 complete; Phase 04.1 inserted for the follow-up bugs
+Phase: 04.1 (Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 04.1
+Last activity: 2026-10-20 — Phase 04.1 execution started
 
 Progress: [████████░░] 75%
 
