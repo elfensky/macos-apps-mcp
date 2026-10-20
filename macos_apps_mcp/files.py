@@ -167,8 +167,9 @@ def exists_refusal(path: Path) -> WriteRefused:
 
 
 _STAGING_PREFIX = ".macos-apps-mcp-export-"
-# mkdtemp appends 8 characters of [a-z0-9_] after the pid
-_STAGING_NAME = re.compile(re.escape(_STAGING_PREFIX) + r"(\d+)-[a-z0-9_]{8}")
+# mkdtemp appends 8 characters of [a-z0-9_] after the pid. The pid is ASCII digits
+# only: \d and int() also accept other scripts.
+_STAGING_NAME = re.compile(re.escape(_STAGING_PREFIX) + r"([0-9]+)-[a-z0-9_]{8}")
 
 
 def _pid_alive(pid: int) -> bool:
