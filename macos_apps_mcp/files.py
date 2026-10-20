@@ -126,7 +126,15 @@ def resolve_dest(dest_dir: str) -> Path:
             f"be written under it. Pass a path inside {base}, or set "
             "MACOS_APPS_FILE_ROOT to move the root. Do not retry the same path."
         )
-    resolved.mkdir(parents=True, exist_ok=True)
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        # a dest_dir naming a file lands here as FileExistsError: not the overwrite case
+        raise WriteRefused(
+            f"cannot create {resolved} ({e.strerror}); nothing was written. Choose "
+            f"another dest_dir under {base}, or fix the permissions on that path. "
+            "Do not retry the same path."
+        ) from e
     return resolved
 
 
