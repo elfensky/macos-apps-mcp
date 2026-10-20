@@ -34,11 +34,14 @@ ALBUM = "macos-apps-mcp-test"
 PREFIX = "macos-apps-mcp-test-"
 
 # Argv-driven, so no value is interpolated into the script. Photos cannot add a photo to
-# an album that does not exist, hence the make-if-absent first.
+# an album that does not exist, hence the make-if-absent first. The file list is built
+# before the Photos tell: inside it Photos gets `POSIX file` of a variable as an object
+# specifier and fails -1728 (G-04.1-3); photoscript builds its import list the same way.
 _IMPORT = """
 on run argv
     set theFile to item 1 of argv
     set albumName to item 2 of argv
+    set theList to {POSIX file theFile}
     with timeout of 120 seconds
         tell application "Photos"
             set theAlbum to missing value
@@ -48,7 +51,6 @@ on run argv
             if theAlbum is missing value then
                 set theAlbum to make new album named albumName
             end if
-            set theList to {POSIX file theFile}
             set imported to import theList into theAlbum skip check duplicates true
             return id of item 1 of imported
         end tell
