@@ -305,14 +305,14 @@ Plans:
   3. `[tool.ruff] target-version` is `py312` and the UP047 rewrites land with the suite and ruff green (#384).
   4. A killed `export_photo` (SIGTERM, orphan `_exit`, SIGKILL) leaves no hidden staging copy that a later call does not remove, only dead-pid staging directories are ever removed, and a cleanup error after a successful publish does not replace the written result (#387).
 
-**Plans:** 1/4 plans executed
+**Plans:** 2/4 plans executed
 
 Plans:
 **Wave 1**
 - [x] 04.1-01-PLAN.md — ruff targets py312 (D-16): the five generics move to PEP 695 form, a drift-guard test ties the ruff target to `requires-python` (FIX-09, #384)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 04.1-02-PLAN.md — `exists_refusal` and the `resolve_dest` mkdir failure raise `WriteRefused`, `_guard` unchanged; client-level and tool-level tests for `export_photo`, `save_mail_attachment` and `export_mail` (FIX-08, #383)
+- [x] 04.1-02-PLAN.md — `exists_refusal` and the `resolve_dest` mkdir failure raise `WriteRefused`, `_guard` unchanged; client-level and tool-level tests for `export_photo`, `save_mail_attachment` and `export_mail` (FIX-08, #383)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 04.1-03-PLAN.md — the staging name carries the pid, a dead-pid sweep runs on entry, a cleanup error is logged and never raised (FIX-10, #387)
