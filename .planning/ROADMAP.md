@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness (completed 2026-10-11)
 - [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
-- [ ] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5
+- [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
@@ -305,7 +305,7 @@ Plans:
   3. `[tool.ruff] target-version` is `py312` and the UP047 rewrites land with the suite and ruff green (#384).
   4. A killed `export_photo` (SIGTERM, orphan `_exit`, SIGKILL) leaves no hidden staging copy that a later call does not remove, only dead-pid staging directories are ever removed, and a cleanup error after a successful publish does not replace the written result (#387).
 
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 **Wave 1**
@@ -321,7 +321,7 @@ Plans:
 - [x] 04.1-04-PLAN.md — a hash-locked `build` group in `uv.lock`; `build_app.sh` builds the wheel with `uv build --require-hashes` and installs it with `--no-deps`; two negative probes and one unsigned build prove it (FIX-07, #373)
 
 **Gap closure** *(UAT gap G-04.1-3)*
-- [ ] 04.1-05-PLAN.md — the Photos device-test fixture builds its `POSIX file` list outside the Photos tell block, so the import path runs and the FIX-08 `WriteRefused` assertion is proven on device; the owner removes the test photo (FIX-08, #383)
+- [x] 04.1-05-PLAN.md — the Photos device-test fixture builds its `POSIX file` list outside the Photos tell block, so the import path runs and the FIX-08 `WriteRefused` assertion is proven on device; the owner removes the test photo (FIX-08, #383)
 
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR merged with the required `check` job green

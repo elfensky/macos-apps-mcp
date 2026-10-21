@@ -1,36 +1,37 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "04.1"
-current_phase_name: Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
-status: executing
-stopped_at: "Phase 04.1 executed (4/4 plans, PRs #390 #392 #394 #396, close PR #398); verification human_needed — UAT 04.1-UAT.md awaits /gsd-verify-work 04.1"
-last_updated: "2026-10-20T20:49:10.962Z"
-last_activity: 2026-10-20
-last_activity_desc: Phase 04.1 execution started
-state_head: ab0b1036d2006c54bbd9a452076d162ddaaa8a14
+current_phase: 5
+current_phase_name: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+status: planning
+stopped_at: Phase 04.1 complete, ready to plan Phase 5
+last_updated: "2026-10-21T09:07:59.746Z"
+last_activity: 2026-10-21
+last_activity_desc: Phase 04.1 complete, transitioned to Phase 5
+state_head: 496e67dad815d20f08c16a92b9147a2968385acf
 progress:
   total_phases: 9
   completed_phases: 6
-  total_plans: 55
-  completed_plans: 51
+  total_plans: 56
+  completed_plans: 56
+  percent: 75
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-20)
+See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 04.1 — Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
+**Current focus:** Phase 5 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
 
 ## Current Position
 
-Phase: 04.1 (Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 04.1
-Last activity: 2026-10-20 — Phase 04.1 execution started
+Phase: 5 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-21 — Phase 04.1 complete, transitioned to Phase 5
 
 Progress: [████████░░] 75%
 
@@ -38,7 +39,7 @@ Progress: [████████░░] 75%
 
 **Velocity:**
 
-- Total plans completed: 51
+- Total plans completed: 56
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -52,6 +53,7 @@ Progress: [████████░░] 75%
 | 03 | 10 | - | - |
 | 03.1 | 7 | - | - |
 | 04 | 6 | - | - |
+| 04.1 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -107,6 +109,8 @@ Recent decisions affecting current work:
 - [Phase 03.1]: #335 premise overturned on the iMac (2026-10-13): the SQLite plane, Notes.app and `notes_all` all count 1 live note; the 2 titled rows of the device report sit in Recently Deleted. No filter change; #335 closed with the record.
 - [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.
 - [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.
+- [Phase 04.1]: Bugs before any feature: #373 (hash-locked `build` group, the bundled wheel installed `--no-deps`), #383 (an existing target and a failed `mkdir` raise `WriteRefused`; `_guard` untouched), #384 (ruff on py312 with a drift-guard test), #387 (pid-tagged staging, a dead-pid sweep with five guards, a cleanup error never replaces a written result) — PRs #390/#392/#394/#396, close PR #398.
+- [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
 
 ### Pending Todos
 
@@ -115,6 +119,8 @@ Recent decisions affecting current work:
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
 
 ### Blockers/Concerns
+
+- [Phase 04.1] Deferred: `export_mail` refuses mid-batch after earlier files were written, and the typed refusal hides that (review WR-02, tracked in #399).
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
@@ -175,6 +181,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-12T11:57:33.510Z
-Stopped at: Phase 04.1 executed (4/4 plans, PRs #390 #392 #394 #396, close PR #398); verification human_needed — UAT 04.1-UAT.md awaits /gsd-verify-work 04.1
-Resume file: .planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature/03.1-CONTEXT.md
+Last session: 2026-10-21T09:09:18Z
+Stopped at: Phase 04.1 complete, ready to plan Phase 5
+Resume file: None
