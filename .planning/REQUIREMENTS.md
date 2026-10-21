@@ -40,10 +40,10 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **FIX-04**: On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none; the cause of the raw UUID (removed account, stale name cache, or an account kind `every account` omits) is recorded (#336)
 - [x] **FIX-05**: Through the daemon, `doctor(request=True)` with Photos quit reports the photos surface ok — or Phase 4 removes the Photos Automation probe and the issue closes as moot (#317, #337)
 - [x] **FIX-06**: The Intel iMac device report carries the three corrections: the pass count, the Local-list subtask conclusion, and the machine line without firmware and security details; the same detail leaves every other tracked file (`docs/DAEMON.md`, the quick-task 261011-4iv PLAN and SUMMARY) (#333)
-- [ ] **FIX-07**: `scripts/build_app.sh` installs the bundled `macos_apps_mcp` package from a wheel built in a hash-pinned build environment — hatchling and its build dependencies come from a hashed constraints file or lock, never fresh and unhashed from PyPI under build isolation; the `--no-deps` install and the D-16 export guard stay as they are (#373)
-- [ ] **FIX-08**: A `FileExistsError` from `files.target_path` and an `OSError` from the `mkdir` in `files.resolve_dest` reach the client as a typed tool error with an error kind and the agent-directed text, for `save_mail_attachment`, `export_mail` and `export_photo`, so a caller can tell the never-overwrite refusal from a crash; the Mail tests that pin the raw exception types follow (#383)
-- [ ] **FIX-09**: `[tool.ruff] target-version` is `py312`, matching `requires-python = ">=3.12"` (D-16), and the UP047 rewrites it raises land in the same PR with the suite and ruff green (#384)
-- [ ] **FIX-10**: `export_photo` leaves no hidden staging copy behind when the process is killed (SIGTERM, orphan `_exit`, SIGKILL): the staging prefix carries the pid and a later call removes only staging directories whose pid is dead, never a live one; and a staging cleanup error after a successful publish does not replace the written result — the outcome stands, the error is logged and the leftover directory is named (#387)
+- [x] **FIX-07**: `scripts/build_app.sh` installs the bundled `macos_apps_mcp` package from a wheel built in a hash-pinned build environment — hatchling and its build dependencies come from a hashed constraints file or lock, never fresh and unhashed from PyPI under build isolation; the `--no-deps` install and the D-16 export guard stay as they are (#373)
+- [x] **FIX-08**: A `FileExistsError` from `files.target_path` and an `OSError` from the `mkdir` in `files.resolve_dest` reach the client as a typed tool error with an error kind and the agent-directed text, for `save_mail_attachment`, `export_mail` and `export_photo`, so a caller can tell the never-overwrite refusal from a crash; the Mail tests that pin the raw exception types follow (#383)
+- [x] **FIX-09**: `[tool.ruff] target-version` is `py312`, matching `requires-python = ">=3.12"` (D-16), and the UP047 rewrites it raises land in the same PR with the suite and ruff green (#384)
+- [x] **FIX-10**: `export_photo` leaves no hidden staging copy behind when the process is killed (SIGTERM, orphan `_exit`, SIGKILL): the staging prefix carries the pid and a later call removes only staging directories whose pid is dead, never a live one; and a staging cleanup error after a successful publish does not replace the written result — the outcome stands, the error is logged and the leftover directory is named (#387)
 
 ### Calendar
 
@@ -188,10 +188,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-04 | Phase 03.1 | Complete |
 | FIX-05 | Phase 03.1 | Complete |
 | FIX-06 | Phase 03.1 | Complete |
-| FIX-07 | Phase 04.1 | Pending |
-| FIX-08 | Phase 04.1 | Pending |
-| FIX-09 | Phase 04.1 | Pending |
-| FIX-10 | Phase 04.1 | Pending |
+| FIX-07 | Phase 04.1 | Complete |
+| FIX-08 | Phase 04.1 | Complete |
+| FIX-09 | Phase 04.1 | Complete |
+| FIX-10 | Phase 04.1 | Complete |
 | NOTE-01 | Phase 4 | Complete |
 | NOTE-02 | Phase 4 | Complete |
 | PHO-01 | Phase 4 | Complete |
