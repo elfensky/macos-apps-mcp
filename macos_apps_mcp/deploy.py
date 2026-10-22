@@ -9,7 +9,9 @@ import os
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from .errors import NativeError
@@ -349,6 +351,27 @@ def adapters_off_file() -> str:
         return ""
     except OSError:
         return ADAPTERS_ALL_OFF
+
+
+def write_adapters_off(names: Iterable[str]) -> None:
+    """Replace the persisted deny-list with ``names`` (sorted, de-duplicated).
+
+    Temp file in the same directory, fsync, then ``os.replace``: a daemon killed
+    mid-write must not leave a truncated file, which would read as "everything on"
+    (RESEARCH "Don't Hand-Roll"). Any failure removes the temp file and re-raises,
+    and the previous file stays as it was."""
+    path = _ADAPTERS_OFF_FILE
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".adapters_off.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(",".join(sorted(set(names))))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def allow_send(argv: list[str]) -> None:

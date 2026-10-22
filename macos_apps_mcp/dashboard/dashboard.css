@@ -292,3 +292,33 @@ a.nav-item:hover { text-decoration: none; }
   .b-page { grid-column: 1; padding: var(--space-4); }
   .usage-tool { width: 110px; }
 }
+
+/* Adapters (sketch 004, variant A): the switch is a submit button, so it works with no JS. */
+.switch-form { margin: 0; display: contents; }
+button.switch { padding: 0; border: 0; background: none; cursor: pointer; }
+button.switch span {
+  position: absolute; inset: 0; border-radius: 9px;
+  background: var(--color-neutral-bg); box-shadow: inset 0 0 0 0.5px var(--color-border);
+  transition: all .15s ease;
+}
+button.switch span::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: all .15s ease;
+}
+button.switch[aria-pressed="true"] span { background: var(--color-primary); }
+button.switch[aria-pressed="true"] span::before { transform: translateX(14px); }
+button.switch:disabled { opacity: .45; cursor: default; }
+button.switch:focus-visible { outline: 3px solid var(--color-selection); outline-offset: 2px; border-radius: 9px; }
+.restart-bar {
+  position: sticky; top: calc(-1 * var(--space-6)); z-index: 2; margin: 0 0 var(--space-4);
+  display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-lg);
+  background: var(--color-surface); box-shadow: 0 0 0 1.5px var(--color-accent), var(--shadow-md);
+  animation: drop .18s ease;
+}
+.restart-bar .grow { flex: 1; min-width: 200px; }
+.restart-bar form { margin: 0; }
+@keyframes drop { from { transform: translateY(-6px); opacity: 0; } }
+.chip.pending { background: var(--color-accent-bg); color: #c77700; }
+:root[data-theme="dark"] .chip.pending { color: var(--color-accent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.pending { color: var(--color-accent); } }

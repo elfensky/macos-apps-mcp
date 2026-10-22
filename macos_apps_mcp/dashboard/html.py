@@ -35,6 +35,7 @@ def join(parts) -> Safe:
 
 # (group, label, href, key): one list, so a page plan adds its entry in one line.
 SIDEBAR: list[tuple[str, str, str, str]] = [
+    ("System", "Adapters", "/adapters", "adapters"),
     ("System", "Usage", "/usage", "usage"),
 ]
 
