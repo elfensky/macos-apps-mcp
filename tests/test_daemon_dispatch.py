@@ -2,7 +2,10 @@
 no port held. Dispatcher cases use hand-built scopes and recording stub apps."""
 
 import asyncio
+import os
 import socket
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,3 +85,32 @@ def test_dispatcher_without_a_dashboard_answers_404_and_never_reaches_mcp():
     log, sent = _dispatch({"type": "http", "server": ("127.0.0.1", 47632)}, dash=False)
     assert log == []
     assert sent[0]["status"] == 404
+
+
+def test_restart_flags_the_server_and_arms_one_watchdog_once(monkeypatch):
+    monkeypatch.setattr(daemon, "_restart_armed", False)
+
+    def no_shell(*a, **kw):
+        raise AssertionError("restart must not shell out from inside the launchd job")
+
+    monkeypatch.setattr(subprocess, "run", no_shell)
+    timers = []
+
+    class FakeTimer:
+        def __init__(self, delay, fn, args):
+            self.delay, self.fn, self.args = delay, fn, args
+            self.daemon, self.started = False, False
+            timers.append(self)
+
+        def start(self):
+            self.started = True
+
+    server = SimpleNamespace(should_exit=False, force_exit=False)
+    assert daemon.restart(server, timer=FakeTimer) is True
+    assert server.should_exit and server.force_exit
+    (t,) = timers
+    assert (t.delay, t.fn, t.args) == (3.0, os._exit, (0,))
+    assert t.daemon is True and t.started
+
+    assert daemon.restart(server, timer=FakeTimer) is False  # already armed
+    assert len(timers) == 1
