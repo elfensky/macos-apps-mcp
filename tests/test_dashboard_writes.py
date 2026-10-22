@@ -587,3 +587,21 @@ def test_dashboard_records_render_truthfully():
             assert absent not in text
         assert "<b>x</b>" not in text and "<b>X</b>" not in text
     assert "Turned Mail off" in page("/write/2026-09-28T08:00:00/0")
+
+
+def test_corrupt_records_never_crash_a_page():
+    odd = {
+        "ts": "2026-09-28T07:00:00",
+        "tool": "update_event",
+        "op": ["not", "a", "string"],
+        "args": ["x"],
+        "caller": {"a": 1},
+        "target_id": {"b": 2},
+        "before": ["nope"],
+        "after": "text",
+    }
+    put(odd, {"ts": 5, "tool": "x"}, {"tool": "update_event"}, [1, 2])
+    batch()
+    put({"tool": "mail_recover", "phase": "done", "receipt": ["r"], "ts": TS})
+    assert len(rows_in(page("/"))) == 2  # the odd write and the batch
+    assert "Write" in page("/write/2026-09-28T07:00:00/0")
