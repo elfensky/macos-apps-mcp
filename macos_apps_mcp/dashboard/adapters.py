@@ -148,23 +148,35 @@ def _row(
     )
 
 
+def outbound_command(sending: list[str]) -> str:
+    """The Terminal command that flips the gate: the Adapters and Health pages show it
+    and never a control."""
+    return "macos-apps-mcp allow-send " + ("off" if sending else "mail")
+
+
+def cmd_box(command: str) -> Safe:
+    """A command in mono with a Copy button (``data-copy``, dashboard.js)."""
+    return h(
+        '<div class="cmd"><code>{}</code>'
+        '<button class="btn" type="button" data-copy="{}">Copy</button></div>',
+        command,
+        command,
+    )
+
+
 def _outbound() -> Safe:
     """The locked Outbound group (D-14, sketch rule 5): text and a command, never a
     form or an input. Any website can POST to 127.0.0.1, so the gate that lets the
     model send mail stays a Terminal command."""
     sending = registry.outbound_status()["registered"]
-    command = "macos-apps-mcp allow-send " + ("off" if sending else "mail")
     return h(
         '<div class="group-title">Sending off this Mac</div>\n'
         '<div class="group"><div class="row locked"><div class="grow">'
         '<div class="title">Outbound: {}</div><div class="sub">'
         "Never changed from this page — any website could send a request to "
-        '127.0.0.1. Change it in Terminal:</div><div class="cmd"><code>{}</code>'
-        '<button class="btn" type="button" data-copy="{}">Copy</button></div>'
-        "</div></div></div>\n",
+        "127.0.0.1. Change it in Terminal:</div>{}</div></div></div>\n",
         ", ".join(sending) or "off",
-        command,
-        command,
+        cmd_box(outbound_command(sending)),
     )
 
 

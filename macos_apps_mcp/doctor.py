@@ -448,6 +448,13 @@ def diagnose(request: bool = False) -> dict:
     # Daemon role only: only the daemon serves the dashboard (and the stdio budget test
     # stays as it is). The note never reads the key file.
     if deploy.is_daemon_role():
+        # D-07: read here, not stored in deploy.py: only the daemon module knows
+        # whether the dashboard bound, and in the daemon role it is already loaded
+        # (the stdio server never reaches this branch, so it never imports it).
+        from . import daemon
+
+        if daemon.dashboard_state:
+            deployment["dashboard"] = daemon.dashboard_state
         deployment["dashboard_note"] = (
             "every dashboard page needs the page key: the USER (not the model) opens "
             "it by running `macos-apps-mcp dashboard` in Terminal."

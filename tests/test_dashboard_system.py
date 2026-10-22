@@ -19,12 +19,7 @@ import pytest
 
 from macos_apps_mcp import deploy, doctor, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
-from macos_apps_mcp.dashboard import grants
-
-try:  # RED: the module does not exist yet
-    from macos_apps_mcp.dashboard import health
-except ImportError:
-    health = None
+from macos_apps_mcp.dashboard import grants, health
 from tests._dashboard import get
 
 BUNDLE = deploy._BUNDLE_ID
@@ -111,10 +106,9 @@ def state(tmp_path, monkeypatch):
     """A private state dir and a fresh single-flight lock; the daemon role."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
-    if health is not None:
-        monkeypatch.setattr(health, "_lock", threading.Lock())
-        monkeypatch.setattr(health, "_last", None)
-        monkeypatch.setattr(health, "_dot", None)
+    monkeypatch.setattr(health, "_lock", threading.Lock())
+    monkeypatch.setattr(health, "_last", None)
+    monkeypatch.setattr(health, "_dot", None)
     return tmp_path
 
 
@@ -211,7 +205,7 @@ def test_health_adapters_row_counts_pending_changes(doc, monkeypatch):
 
 
 def test_health_busy_and_single_flight(doc, monkeypatch):
-    monkeypatch.setattr(health, "_WAIT", 0.2, raising=False)
+    monkeypatch.setattr(health, "_WAIT", 0.2)
     doc.gate = threading.Event()
     try:
         first = get("/health")  # the fake blocks; the wait bound ends the request
