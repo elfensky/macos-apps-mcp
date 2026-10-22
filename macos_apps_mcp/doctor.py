@@ -445,6 +445,13 @@ def diagnose(request: bool = False) -> dict:
             + (", ".join(ad["configured"]) or "none")
             + ") — restart the daemon to apply it."
         )
+    # Daemon role only: only the daemon serves the dashboard (and the stdio budget test
+    # stays as it is). The note never reads the key file.
+    if deploy.is_daemon_role():
+        deployment["dashboard_note"] = (
+            "every dashboard page needs the page key: the USER (not the model) opens "
+            "it by running `macos-apps-mcp dashboard` in Terminal."
+        )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's
     # "no daemon restarted" branch), say so instead of reporting config as live state.

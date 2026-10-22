@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import webbrowser
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -416,6 +417,36 @@ def dashboard_key(*, create: bool = False) -> str | None:
     except OSError:
         return None
     return key
+
+
+def dashboard(argv: list[str]) -> None:
+    """`dashboard` — print the dashboard link with its page key and open it (D-19).
+
+    A CLI role, not an MCP tool, for the `allow-send` reason: the key is the operator's.
+    The boundary is the account (the model's shell runs as the same account and could
+    read the file), so the key stays out of `doctor`, logs and pages, where it would
+    reach a transcript by accident. It reads the key file only: it never writes it,
+    binds a socket or starts a server. The opener hands the URL to `osascript` on
+    stdin: other macOS accounts can read every process's arguments (`ps -axo
+    user,args`), and a set `BROWSER` variable would route a plain open through a
+    subprocess with the URL as an argument."""
+    key = dashboard_key()
+    if key is None:
+        print(
+            f"macos-apps-mcp: no usable dashboard key at {_DASHBOARD_KEY_FILE}. The "
+            "daemon writes it when it starts: remove the file if it exists, then "
+            f"restart the daemon (launchctl kickstart -k gui/$(id -u)/{_BUNDLE_ID}), "
+            "or install it (macos-apps-mcp install-agent).",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    from .daemon import DASHBOARD_HOST, DASHBOARD_PORT  # lazy: see uninstall_agent
+
+    # "/key" is the Guard's KEY_PATH, written out: deploy does not import the dashboard.
+    url = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/key?k={key}"
+    print(url)
+    if not webbrowser.MacOSXOSAScript("default").open(url):
+        print("no browser opened: open the link above in your browser", file=sys.stderr)
 
 
 def allow_send(argv: list[str]) -> None:
