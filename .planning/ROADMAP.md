@@ -338,13 +338,13 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: 0/8 plans complete
+**Plans**: 3/8 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 05-01-PLAN.md — Adapter deny-list gate read at daemon start, doctor adapter keys, no probe or prompt for an OFF adapter (PLAT-01)
-- [ ] 05-02-PLAN.md — Loopback dashboard transport, request Guard and the Usage page; merges after 05-08 (PLAT-02)
-- [ ] 05-08-PLAN.md — Declare starlette and bump to 0.15.0, in wave 1 beside 05-02 (PLAT-02)
+- [x] 05-01-PLAN.md — Adapter deny-list gate read at daemon start, doctor adapter keys, no probe or prompt for an OFF adapter (PLAT-01)
+- [x] 05-02-PLAN.md — Loopback dashboard transport, request Guard and the Usage page; merges after 05-08 (PLAT-02)
+- [x] 05-08-PLAN.md — Declare starlette and bump to 0.15.0, in wave 1 beside 05-02 (PLAT-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 05-03-PLAN.md — Adapter switches, restart and Discard on the dashboard (PLAT-01, PLAT-02)
@@ -395,5 +395,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
-| 5. Operator Control Plane | 0/TBD | Not started | - |
+| 5. Operator Control Plane | 3/8 | In Progress | - |
 | 6. Distribution | 0/TBD | Not started | - |
