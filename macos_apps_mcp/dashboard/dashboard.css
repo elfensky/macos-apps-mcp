@@ -330,3 +330,26 @@ button.switch:focus-visible { outline: 3px solid var(--color-selection); outline
 .cmd { display: flex; gap: var(--space-2); align-items: center; padding: 6px var(--space-2); margin-top: 6px; border-radius: var(--radius-md); background: var(--color-surface-2); box-shadow: inset 0 0 0 0.5px var(--color-border); }
 .cmd code { flex: 1; min-width: 0; font: 12px var(--font-mono); overflow-wrap: anywhere; }
 .note { font-size: var(--text-sm); margin: var(--space-3); }
+
+/* ---------- the write list and detail (sketches 001 and 002, variant D) ---------- */
+a.row { color: inherit; }
+a.row:hover { text-decoration: none; }
+.appico.Dashboard { background: var(--color-neutral-bg); color: var(--color-text-muted); }
+.b-detail > * { max-width: 680px; }
+.b-detail .head { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.card { background: var(--color-surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); padding: var(--space-3) var(--space-4); }
+.dim { opacity: .55; }
+.diffline { font-size: var(--text-lg); line-height: 1.6; }
+del.w { background: var(--color-danger-bg); color: var(--color-danger); text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+ins.w { background: var(--color-success-bg); color: var(--color-success); text-decoration: none; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+.note { font-size: var(--text-sm); }
+pre.json {
+  margin: 0; padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-2);
+  box-shadow: inset 0 0 0 0.5px var(--color-border); font: 11.5px/1.55 var(--font-mono); overflow: auto; white-space: pre;
+}
+pre.json .k { color: var(--color-primary); } pre.json .s { color: #b3541e; } pre.json .n { color: var(--color-outbound); }
+:root[data-theme="dark"] pre.json .s { color: #ff9f6b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) pre.json .s { color: #ff9f6b; } }
+details.raw { margin-top: var(--space-6); }
+details.raw > summary { cursor: pointer; color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-2) 0; }
+details.raw > summary:hover { color: var(--color-text); }

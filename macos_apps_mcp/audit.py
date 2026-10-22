@@ -118,6 +118,34 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     return out[:limit]
 
 
+def read_all() -> list[dict]:
+    """Every audit record, ``audit.jsonl.1`` then ``audit.jsonl``, oldest to newest:
+    the dashboard's reader (D-12). No cache and no limit: the whole log is two plain
+    file reads. A missing file contributes nothing and a corrupt line is skipped; an
+    unreadable file adds one ``{"error": …}`` entry so the page can say so (never an
+    empty list masquerading as "no writes"). ``audit_read`` and the ``audit`` tool are
+    deliberately unchanged."""
+    live = _audit_path()
+    out: list[dict] = []
+    for path in (live.with_name(live.name + ".1"), live):
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            log.debug("read_all failed: %s", e)
+            out.append({"error": f"audit log unreadable: {e}"})
+            continue
+        for line in text.splitlines():
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue  # a truncated/corrupt line never fails the read
+            if isinstance(rec, dict):
+                out.append(rec)
+    return out
+
+
 # --- per-tool usage tally (#67 addendum) -------------------------------------------
 # ponytail: append-only jsonl, aggregate on read — mirrors the audit log. Timestamps
 # preserved so "how often" is a real rate, not just a total. Rotates like audit.

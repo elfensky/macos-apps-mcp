@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from starlette.applications import Starlette
-from starlette.responses import PlainTextResponse, RedirectResponse, Response
+from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
-from . import adapters, usage
+from . import adapters, usage, writes
 from .guard import Guard
 
 # The only files /static serves, read once at import: a bundle that lacks one fails
@@ -25,10 +25,6 @@ _STATIC = {
         ("dashboard.js", "text/javascript; charset=utf-8"),
     )
 }
-
-
-async def _home(request):
-    return RedirectResponse("/usage")  # 05-04 replaces this with the write list
 
 
 async def _static(request):
@@ -47,7 +43,8 @@ def build_app(*, port: int, token: str, key: str | None, restart=None) -> Guard:
     has none."""
     app = Starlette(
         routes=[
-            Route("/", _home),
+            Route("/", writes.index),
+            Route("/write/{ts}/{n:int}", writes.detail),
             Route("/usage", usage.page),
             Route("/adapters", adapters.page, methods=["GET"]),
             Route("/adapters", adapters.toggle, methods=["POST"]),
