@@ -74,8 +74,8 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Platform
 
-- [ ] **PLAT-01**: Operator can enable/disable adapters per app (e.g. Mail on, Photos off) via a config setting read at daemon start; a disabled adapter's tools are absent, never registered-and-erroring — the same rule as the tiers; `doctor` reports the active set
-- [ ] **PLAT-02**: A localhost dashboard served by the daemon shows grants/`doctor`, `usage`, the audit trail, and the recoverable-plane backups (browsable recovery/history), and exposes the adapter toggles; loopback-only, no framework SPA (#126)
+- [x] **PLAT-01**: Operator can enable/disable adapters per app (e.g. Mail on, Photos off) via a config setting read at daemon start; a disabled adapter's tools are absent, never registered-and-erroring — the same rule as the tiers; `doctor` reports the active set
+- [x] **PLAT-02**: A localhost dashboard served by the daemon shows grants/`doctor`, `usage`, the audit trail, and the recoverable-plane backups (browsable recovery/history), and exposes the adapter toggles; loopback-only, no framework SPA (#126)
 
 ### Distribution
 
@@ -198,8 +198,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PHO-02 | Phase 4 | Complete |
 | PHO-03 | Phase 4 | Complete |
 | PHO-04 | Phase 4 | Complete |
-| PLAT-01 | Phase 5 | Pending |
-| PLAT-02 | Phase 5 | Pending |
+| PLAT-01 | Phase 5 | Complete |
+| PLAT-02 | Phase 5 | Complete |
 | DIST-01 | Phase 6 | Pending |
 | DIST-02 | Phase 6 | Pending |
 | DIST-03 | Phase 6 | Pending |
