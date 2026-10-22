@@ -185,14 +185,20 @@ def outbound_status() -> dict[str, list[str]]:
     Card 2 (GATE-04, RESEARCH Pitfall 3): this is now the ONE outbound ledger — a view
     over the send records already sitting in ``TOOLS``, not a second hand-maintained
     set. ``tiers.py`` keeps only the pure gate predicates (``read_only``,
-    ``allow_send``); this is the sole caller doctor and the tests read."""
+    ``allow_send``); this is the sole caller doctor and the tests read.
+
+    ``configured`` also requires the adapter to be ON (PLAT-01): allow_send=mail with
+    Mail OFF registers nothing, so reporting it would show a pending delta that no
+    restart clears."""
     send_adapters = {r.adapter for r in TOOLS.values() if r.tier == "send"}
     registered = {
         r.adapter for r in TOOLS.values() if r.tier == "send" and r.registered
     }
     return {
         "registered": sorted(registered),
-        "configured": sorted(a for a in send_adapters if tiers.allow_send(a)),
+        "configured": sorted(
+            a for a in send_adapters if tiers.allow_send(a) and tiers.adapter_enabled(a)
+        ),
     }
 
 

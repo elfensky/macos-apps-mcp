@@ -25,7 +25,7 @@ from pathlib import Path
 
 import EventKit as EK
 
-from . import deploy, registry, runtime
+from . import deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
@@ -406,6 +406,26 @@ def diagnose(request: bool = False) -> dict:
     if ids is not None and failed:
         deployment["note"] += " PARTIAL read — " + ", ".join(
             f"{k} db: {v}" for k, v in failed.items()
+        )
+    # Adapter deny-list (PLAT-01, D-03/D-05): `adapters` is what this process serves,
+    # `adapters_off` what it does not. No CLI twin — the note names the file instead.
+    ad = registry.adapter_status()
+    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    deployment["adapters"] = ad["registered"]
+    deployment["adapters_off"] = sorted(known - set(ad["registered"]))
+    deployment["adapters_note"] = (
+        "OFF adapters: a comma list in ~/.local/state/macos-apps-mcp/adapters_off "
+        "(the dashboard writes it too); apply: "
+        "launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp."
+    )
+    if unknown_adapters := tiers.adapters_off() - known:
+        deployment["adapters_unknown"] = sorted(unknown_adapters)
+    if ad["configured"] != ad["registered"]:
+        deployment["adapters_pending"] = ad["configured"]
+        deployment["adapters_note"] += (
+            " Adapter config changed since this process launched (configured: "
+            + (", ".join(ad["configured"]) or "none")
+            + ") — restart the daemon to apply it."
         )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's
