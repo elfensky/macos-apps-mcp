@@ -13,6 +13,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 from starlette.responses import HTMLResponse
 
+from .. import registry
+
 
 class Safe(str):
     """Markup built by dashboard code. Only dashboard code constructs it."""
@@ -47,6 +49,21 @@ def _version() -> str:
         return "dev"
 
 
+def _badge(key: str) -> Safe:
+    """The Adapters entry shows ``registered/known``, or a chip while changes wait."""
+    if key != "adapters":
+        return Safe("")
+    st = registry.adapter_status()
+    registered, configured = set(st["registered"]), set(st["configured"])
+    pending = len(registered ^ configured)
+    inner = (
+        h('<span class="chip pending">{} pending</span>', pending)
+        if pending
+        else h("{}/{}", len(registered), len(registered | configured))
+    )
+    return h('<span class="count">{}</span>', inner)
+
+
 def _sidebar(active: str) -> Safe:
     parts: list[Safe] = []
     group = None
@@ -57,11 +74,12 @@ def _sidebar(active: str) -> Safe:
         on = key == active
         parts.append(
             h(
-                '<a class="nav-item{}" href="{}"{}>{}</a>',
+                '<a class="nav-item{}" href="{}"{}>{}{}</a>',
                 " active" if on else "",
                 href,
                 Safe(' aria-current="page"') if on else Safe(""),
                 label,
+                _badge(key),
             )
         )
     foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', _version())
