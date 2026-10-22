@@ -69,6 +69,8 @@ class Guard:
                 deny = PlainTextResponse("Forbidden origin", 403)
             else:
                 body = await self._read_body(receive)
+                if body is None:
+                    return  # the client went away mid-body: nothing to answer or run
                 got = parse_qs(body.decode("utf-8", "replace")).get("token", [""])[0]
                 if len(body) > MAX_BODY:
                     deny = PlainTextResponse("Request body too large", 403)
@@ -86,10 +88,14 @@ class Guard:
         return await self.app(scope, receive, send_h)
 
     @staticmethod
-    async def _read_body(receive: Receive) -> bytes:
+    async def _read_body(receive: Receive) -> bytes | None:
+        """The body, or None when the client disconnects first: a form cut short must
+        never reach a handler as if it were complete."""
         body = b""
         while len(body) <= MAX_BODY:
             msg = await receive()
+            if msg["type"] == "http.disconnect":
+                return None
             body += msg.get("body", b"")
             if not msg.get("more_body"):
                 break
