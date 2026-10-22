@@ -1,6 +1,6 @@
 ---
 phase: 05-operator-control-plane-adapter-toggles-and-the-localhost-das
-verified: 2026-10-22T23:00:00Z
+verified: 2026-10-22T23:45:00Z
 status: passed
 score: 4/4 must-haves verified
 covered_files:
@@ -42,7 +42,9 @@ covered_files:
   - "macos_apps_mcp/server.py"
   - "macos_apps_mcp/tiers.py"
   - "pyproject.toml"
-covered_digest: "v3:sha256:a6a44075b095d2df60a383b8005c9e57458247e08f322b096ea7463bba99e5ea"
+  - "tests/test_audit.py"
+  - "tests/test_doctor.py"
+covered_digest: "v3:sha256:a7ee7ec6e9246f3023fda5d75dd54c7c8f70060cb8a46cee015fe98edfddc3f3"
 behavior_unverified: 0
 overrides_applied: 0
 ---
@@ -50,10 +52,10 @@ overrides_applied: 0
 # Phase 5: Operator Control Plane Verification Report
 
 **Phase Goal:** An operator who wants Mail but not Photos gets exactly that, and can see the server's grants, usage, audit trail and recoverable backups without reading JSONL by hand.
-**Verified:** 2026-10-22
+**Verified:** 2026-10-22T23:45:00Z
 **Status:** passed
-**Re-verification:** No, initial verification
-**Code verified:** origin/develop at 3cab97e. It has no source difference from tag v0.15.0 (`git diff --stat v0.15.0 origin/develop -- macos_apps_mcp` is empty), and no `macos_apps_mcp/` or `tests/` difference from the records lane HEAD.
+**Re-verification:** Yes, after fix PR #431 (stale fingerprint). Initial verdict kept; the four files #431 changed were re-checked.
+**Code verified:** origin/develop at 4ceb433. Against 3cab97e (the first run) the only source difference is PR #431: `macos_apps_mcp/audit.py`, `macos_apps_mcp/doctor.py`, `tests/test_audit.py`, `tests/test_doctor.py` (30 insertions, 5 deletions). The v0.15.0 daemon the owner exercised does not carry #431; see Re-verification.
 
 ## Goal Achievement
 
@@ -104,8 +106,9 @@ overrides_applied: 0
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Full unit suite | `uv run pytest -q` | 2460 passed, 102 deselected, exit 0 | PASS |
-| Lint and format | `uv run ruff check .` / `ruff format --check .` | No issues; 128 files formatted | PASS |
+| Full unit suite | `uv run pytest -q` | 2461 passed, 102 deselected (was 2460; +1 CR-01 test) | PASS |
+| Lint and format | `uv run ruff check .` / `ruff format --check .` | No issues; 128 files already formatted | PASS |
+| CR-01 and WR-04 tests | `pytest -k "unicode_line or token_budget"` on `tests/test_audit.py`, `tests/test_doctor.py` | 3 passed | PASS |
 | Photos absent when off | scratch-HOME subprocess, `MACOS_APPS_ADAPTERS_OFF=photos` | 64 tools, 0 photo tools | PASS |
 | Dashboard end to end | in-process ASGI, scratch HOME, page key | 5 pages 200; toggle 303; bad token/Origin 403; bad Host 400; file and audit record written | PASS |
 
@@ -123,7 +126,7 @@ SKIPPED: the phase declares no `probe-*.sh`. The release plan used `.daemon_prob
 | PLAT-02 (localhost dashboard: grants/doctor, usage, audit trail, recoverable backups, adapter toggles; loopback-only; no SPA) | 05-02, 05-03, 05-04, 05-05, 05-06, 05-07, 05-08, 05-09 | SATISFIED | Truths 2, 3, 4, 5, 6. |
 
 Both IDs appear in plan frontmatter and in REQUIREMENTS.md. No orphaned requirement: REQUIREMENTS.md maps only PLAT-01 and PLAT-02 to Phase 5.
-Records item: REQUIREMENTS.md still shows both as `Pending` (lines 77-78 unchecked, lines 201-202 `Pending`). The phase-close step must tick them.
+REQUIREMENTS.md now shows both ticked (lines 77-78 `[x]`) and `Complete` in the traceability table (lines 201-202).
 
 ### Prohibitions (`verification: flagged`)
 
@@ -142,6 +145,16 @@ All plan prohibitions are covered by the device proof or by static and probe evi
 
 None. No `TBD`, `FIXME` or `XXX` markers in `macos_apps_mcp/dashboard/`, `tiers.py` or `registry.py`.
 
+### Re-verification: what PR #431 changed
+
+| Finding | Check | Result |
+|---------|-------|--------|
+| CR-01 (an audit record holding U+2028, U+2029 or U+0085 vanished from every reader) | `grep splitlines macos_apps_mcp` finds only `adapters/shortcuts.py:68` (CLI stdout) and `adapters/mail_outgoing.py:652` (quote text); neither reads the audit log. `audit_read`, `read_all` and `usage_read` now call `text.split("\n")`. Every dashboard page (`writes.py`, `backups.py`, `adapters.py`) and `mail_recover` (via `audit_read`) go through these three. The new test writes the raw separators into the log (asserts the bytes are in the file) and checks that `audit_read`, `read_all` and `usage_read` each return the record. | FIXED, VERIFIED |
+| WR-04 (one long unknown adapter name broke the `doctor` budget) | `doctor.py:433-436` cuts each unknown name at 40 characters plus an ellipsis, then keeps three names and a "+N more" tail. `test_report_stays_under_token_budget` now adds a 4000-character name and passes for both roles. | FIXED, VERIFIED |
+| Regression | Full suite 2461 passed; ruff check and format clean. No `TBD`, `FIXME` or `XXX` in the files checked. The four files changed only inside the quoted hunks. | No regression |
+
+The criteria that rest on device evidence (1, 3, 4) were proven on the installed 0.15.0, which predates #431. #431 touches neither tool registration, nor the toggle path, nor the bind. It changes how the audit log is split into records and how `doctor` prints unknown names. The change reaches the installed daemon only with the next release and reinstall.
+
 ### Accepted Residuals (05-POSTMERGE-REVIEW.md, none blocking)
 
 PM-03, PM-06, PM-07, PM-08, PM-10, PM-11, PM-16 (a `CancelledError` traceback in the daemon log at each restart), PM-23, PM-28, PM-29, PM-30 (page render reads the log on the shared event loop, +0.3-0.7 s MCP latency on a 25k-record log), PM-33, PM-38, PM-39, PM-41. PM-04 (no test for `deployment.adapters_off` while an adapter is off at registration) is an open test gap, advisory. PM-20 is resolved as documented: this Mac has no user TCC database, so the AppleEvents target ids in `grants.ADAPTER_GRANTS` are unconfirmed against live rows; confirmable only on the iMac (macOS 15). T-05-44 (the cookie reaches every 127.0.0.1 port) is accepted by the owner.
@@ -154,12 +167,13 @@ None new. The owner's browser sitting and the scripted off/restore/on runs (05-0
 
 - GitHub issue #427: the write detail and recovery pages show raw `imap://<account-UUID>/...` mailbox URLs instead of account names. A display bug, filed for an inserted phase; not a must-have of this phase.
 - PM-04 test gap; the iMac confirmation of the grant target ids (PM-20).
+- GitHub issue #430: the deferred review findings (WR-01, WR-03, WR-05, WR-06, IN-02 to IN-05). WR-02 is accepted as AR-05-08; IN-01 is skipped. Issues #427, #428 and #430 are follow-ups for an inserted bug-fix phase, not must-haves.
 
 ### Gaps Summary
 
-No gaps. The goal holds in the shipped code: an operator can turn Photos off with a file or the dashboard, restart, and find the Photos tools absent from the tool list and from `doctor`; the dashboard shows Health/grants, Usage, the audit trail and the recoverable backups behind loopback, Host, page-key, Origin and token checks. The unit suite (2460 tests) and lint pass on the released code, and the owner exercised the installed 0.15.0.
+No gaps. The goal holds in the shipped code: an operator can turn Photos off with a file or the dashboard, restart, and find the Photos tools absent from the tool list and from `doctor`; the dashboard shows Health/grants, Usage, the audit trail and the recoverable backups behind loopback, Host, page-key, Origin and token checks. The unit suite (2461 tests) and lint pass on origin/develop at 4ceb433 including the #431 fix, and the owner exercised the installed 0.15.0.
 
 ---
 
-_Verified: 2026-10-22_
+_Verified: 2026-10-22T23:45:00Z_
 _Verifier: Claude (gsd-verifier)_
