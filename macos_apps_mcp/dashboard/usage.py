@@ -46,4 +46,4 @@ async def page(request):
         rows,
         tail,
     )
-    return render_page(title="Usage", body=body)
+    return render_page(request, title="Usage", active="usage", body=body)
