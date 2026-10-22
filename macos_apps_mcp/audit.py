@@ -100,7 +100,7 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
         return [{"error": f"audit log unreadable: {e}"}]
     since_i = _instant(since) if since else None
     out = []
-    for line in text.splitlines():
+    for line in text.split("\n"):
         try:
             rec = json.loads(line)
         except ValueError:
@@ -138,7 +138,7 @@ def read_all() -> list[dict]:
             log.debug("read_all failed: %s", e)
             out.append({"error": f"audit log unreadable: {e}"})
             continue
-        for line in text.splitlines():
+        for line in text.split("\n"):
             try:
                 rec = json.loads(line)
             except ValueError:
@@ -184,7 +184,7 @@ def usage_read() -> dict[str, dict]:
     except OSError as e:
         log.debug("usage_read failed: %s", e)
         return out
-    for line in text.splitlines():
+    for line in text.split("\n"):
         try:
             rec = json.loads(line)
             tool, ts = rec["tool"], rec.get("ts", "")

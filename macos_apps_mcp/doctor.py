@@ -431,8 +431,9 @@ def diagnose(request: bool = False) -> dict:
     )
     off = tiers.adapters_off()
     if unknown_adapters := off - known - {deploy.ADAPTERS_ALL_OFF}:
-        # operator input, so unbounded: three names keep the report in budget
-        names = sorted(unknown_adapters)
+        # operator input, so unbounded in count AND length: three names of at most 40
+        # characters keep the report in budget
+        names = sorted(n if len(n) <= 40 else n[:40] + "…" for n in unknown_adapters)
         deployment["adapters_unknown"] = names[:3] + (
             [f"+{len(names) - 3} more"] if len(names) > 3 else []
         )
