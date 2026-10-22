@@ -166,7 +166,8 @@ def _subprocess_registry_snapshot(env_extra: dict[str, str]) -> dict:
         "print(json.dumps({"
         "'tools': asyncio.run(_run()), "
         "'registered': sorted(n for n, r in reg.TOOLS.items() if r.registered), "
-        "'all_recorded': sorted(reg.TOOLS)}))"
+        "'all_recorded': sorted(reg.TOOLS), "
+        "'adapters': {n: r.adapter for n, r in reg.TOOLS.items()}}))"
     )
     env = {"PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"], **env_extra}
     out = subprocess.run(
@@ -207,6 +208,45 @@ def test_fastmcp_lists_exactly_the_registered_records():
     assert "send_mail" not in got_ro["tools"]
     assert "create_event" in got_ro["all_recorded"]
     assert "send_mail" in got_ro["all_recorded"]
+
+
+_PHOTOS_TOOLS = {"photos", "photo_albums", "photo_info", "export_photo"}
+_META_TOOLS = {"ping", "now", "doctor", "audit", "usage"}
+
+
+def test_adapters_off_env_unregisters_the_adapter_but_keeps_the_records():
+    # D-02: an OFF adapter's tools are ABSENT (never registered-and-erroring) but still
+    # RECORDED; meta tools (adapter=None) are never gated.
+    got = _subprocess_registry_snapshot({"MACOS_APPS_ADAPTERS_OFF": "photos"})
+    assert got["tools"] == got["registered"]
+    assert not _PHOTOS_TOOLS & set(got["tools"])
+    assert set(got["all_recorded"]) >= _PHOTOS_TOOLS
+    assert set(got["tools"]) >= _META_TOOLS
+
+
+def test_adapters_off_file_is_read_only_in_the_daemon_role(tmp_path):
+    # D-01: the file is the daemon's fallback, the twin of allow_send. HOME is a tmp dir
+    # so the subprocess reads <tmp>/.local/state/macos-apps-mcp/adapters_off.
+    f = tmp_path / ".local/state/macos-apps-mcp/adapters_off"
+    f.parent.mkdir(parents=True)
+    f.write_text("photos\n")
+    daemon = _subprocess_registry_snapshot(
+        {"HOME": str(tmp_path), "MACOS_APPS_MCP_ROLE": "daemon"}
+    )
+    assert not _PHOTOS_TOOLS & set(daemon["tools"])
+    assert set(daemon["all_recorded"]) >= _PHOTOS_TOOLS
+    stdio = _subprocess_registry_snapshot({"HOME": str(tmp_path)})
+    assert set(stdio["tools"]) >= _PHOTOS_TOOLS
+
+
+def test_adapters_off_wins_over_allow_send_for_mail():
+    # T-05-04: allow_send=mail must not re-open Mail's send tools while Mail is OFF.
+    got = _subprocess_registry_snapshot(
+        {"MACOS_APPS_ALLOW_SEND": "mail", "MACOS_APPS_ADAPTERS_OFF": "mail"}
+    )
+    assert got["tools"] == got["registered"]
+    mail = {n for n, a in got["adapters"].items() if a == "mail"}
+    assert mail and not mail & set(got["tools"])
 
 
 def test_duplicate_registration_raises():
