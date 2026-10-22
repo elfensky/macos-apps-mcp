@@ -26,6 +26,10 @@ surface may still shift between minor versions.
   (`export_mail` has neither). A failed export leaves no file behind. It does
   no network work: a photo whose file is only in iCloud comes back `absent`. Videos are
   refused; a Live Photo exports its still and says `skipped: "live photo motion"`.
+- **A localhost dashboard** (PLAT-02) — the daemon serves `http://127.0.0.1:47632`
+  (loopback only; a non-loopback bind is refused). Every request checks the Host header,
+  every form post checks Origin and a per-session token, and the MCP endpoint stays on the
+  unix socket. This release adds the Usage page.
 
 ### Changed
 
