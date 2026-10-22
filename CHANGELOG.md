@@ -44,6 +44,10 @@ surface may still shift between minor versions.
   arguments with `dry_run` resolved, and the raw log lines. A batch Mail write shows each
   message's backup and a prompt to copy for Claude's `mail_undo`; the page itself never
   moves or deletes anything. New middleware records carry the batch `receipt`.
+- **Health and Backups on the dashboard** (PLAT-02) — `/health` shows the `doctor` report
+  and warns only for an adapter that is on and whose macOS grant is denied; `/backups`
+  lists every Mail backup receipt on disk and opens each one read-only. `doctor` now
+  reports where the dashboard listens (`deployment.dashboard`).
 
 ### Changed
 
