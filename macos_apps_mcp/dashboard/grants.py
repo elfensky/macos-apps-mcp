@@ -52,10 +52,13 @@ def grant_state(
             if r.get("client") == client
             and (target is None or r.get("target") == target)
         ]
-        if any(not r["granted"] for r in rows):
+        # A row with a ``status`` (limited, prompt) is neither granted nor denied.
+        if any(not r["granted"] and "status" not in r for r in rows):
             states.add("denied")
-        elif rows:
+        elif rows and all(r["granted"] for r in rows):
             states.add("granted")
+        elif rows:
+            states.add("unknown")
         else:
             states.add("not asked" if complete else "unknown")
     for state in ("denied", "not asked", "unknown"):

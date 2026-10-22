@@ -195,7 +195,7 @@ def _restart_app(fake):
 
 
 def test_restart_answers_the_restarting_page_then_runs_the_hook_once(state):
-    fake = _Restart()
+    fake = _OneShot()
     r = _post("/restart", app=_restart_app(fake))
     assert r.status_code == 200
     assert "Restarting the daemon…" in r.text
@@ -375,7 +375,7 @@ def test_grant_chips_and_the_row_sub_with_tool_and_call_counts(state, monkeypatc
     mail = _row_html(page, "Mail")
     assert '<span class="chip">not asked</span>' in mail
     assert "Automation · Full Disk Access · " in mail
-    n = len(registry.by_adapter("photos"))
+    n = sum(registry.TOOLS[t].registered for t in registry.by_adapter("photos"))
     assert f'<div class="sub">Full Disk Access · {n} tools · 3 calls</div>' in page
     photos = _row_html(page, "Photos")  # granted: no grant chip before the switch
     assert 'class="chip' not in photos.split("<form")[0]
@@ -420,3 +420,84 @@ def test_sidebar_badge_counts_active_adapters_then_pending_changes(state):
         '<span class="count"><span class="chip pending">2 pending</span></span>'
         in badge()
     )
+
+
+# --- post-merge review of #412 --------------------------------------------------------
+
+
+def test_sidebar_badge_divides_by_every_known_adapter(state, monkeypatch):
+    # Photos off at start and in the file: 9 registered of 10, never "9/9".
+    running = [a for a in ADAPTERS if a != "photos"]
+    monkeypatch.setattr(
+        registry,
+        "adapter_status",
+        lambda: {"registered": running, "configured": running},
+    )
+    assert '<span class="count">9/10</span>' in _get().text
+
+
+def test_a_file_that_turns_unreadable_mid_request_is_not_overwritten(
+    state, monkeypatch
+):
+    from macos_apps_mcp.dashboard import adapters
+
+    real, seen = adapters._lock_reason, []
+
+    def early_check_passes():  # the file becomes unreadable after the early check
+        seen.append(1)
+        return None if len(seen) == 1 else real()
+
+    monkeypatch.setattr(adapters, "_lock_reason", early_check_passes)
+    _file().parent.mkdir(parents=True)
+    _file().write_text("music")
+    _file().chmod(0)
+    try:
+        r = _toggle("photos", "0")
+        assert r.status_code == 409 and "permissions" in r.text
+        assert _records() == []
+    finally:
+        _file().chmod(0o600)
+    assert _file().read_text() == "music"
+
+
+class _OneShot(_Restart):
+    """The daemon's hook: True the first time, False while a restart is under way."""
+
+    def __call__(self):
+        super().__call__()
+        return self.calls == 1
+
+
+def test_a_second_restart_while_one_is_under_way_logs_nothing(state):
+    fake = _OneShot()
+    app = _restart_app(fake)
+    _post("/restart", app=app)
+    _post("/restart", app=app)
+    assert fake.calls == 2
+    assert [r["op"] for r in _records()] == ["restart"]
+
+
+def test_a_failed_write_leaves_no_audit_record(state, monkeypatch):
+    def boom(names):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(deploy, "write_adapters_off", boom)
+    with pytest.raises(OSError, match="disk full"):
+        _toggle("photos", "0")
+    assert _records() == []
+
+
+@pytest.mark.parametrize("status", ["limited", "unknown"])
+def test_a_non_binary_grant_is_no_denied_chip(status):
+    grants = _grants()
+    row = _ident(("kTCCServiceCalendar", False, {"status": status}))
+    assert grants.grant_state(row, "calendar") is None
+
+
+def test_the_row_counts_registered_tools_only(state, monkeypatch):
+    import dataclasses
+
+    for name in registry.by_adapter("photos"):
+        rec = dataclasses.replace(registry.TOOLS[name], registered=False)
+        monkeypatch.setitem(registry.TOOLS, name, rec)
+    assert "Full Disk Access · 0 tools</div>" in _row_html(_get().text, "Photos")
