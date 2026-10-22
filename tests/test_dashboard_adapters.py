@@ -278,3 +278,145 @@ def test_unreadable_file_reads_every_switch_off_and_refuses_writes(state):
     finally:
         _file().chmod(0o600)
     assert _file().read_text() == "music"  # the unreadable file's intent survived
+
+
+# --- the rows say why: grants, counts, the locked Outbound row (Task 3) ---------------
+
+CLIENT = "ren.lav.macos-apps-mcp"
+_KIND = {
+    "kTCCServiceCalendar": "EventKit",
+    "kTCCServiceReminders": "EventKit",
+    "kTCCServiceAppleEvents": "Automation",
+    "kTCCServiceSystemPolicyAllFiles": "Full Disk Access",
+}
+
+
+def _grants():
+    from macos_apps_mcp.dashboard import grants
+
+    return grants
+
+
+def test_grants_cover_every_adapter_with_the_permissions_its_records_name():
+    grants = _grants()
+    assert set(grants.ADAPTER_GRANTS) == set(ADAPTERS)
+    for adapter in ADAPTERS:
+        named = {
+            p
+            for r in registry.TOOLS.values()
+            if r.adapter == adapter
+            for p in r.permission
+        } - {"Shortcuts CLI"}  # the CLI needs no TCC grant
+        listed = {_KIND[svc] for svc, _target in grants.ADAPTER_GRANTS[adapter]}
+        assert listed == named, adapter
+        for svc, target in grants.ADAPTER_GRANTS[adapter]:
+            assert (target is not None) == (svc == "kTCCServiceAppleEvents")
+
+
+def _ident(*rows):
+    out = {}
+    for svc, granted, extra in rows:
+        out.setdefault(svc, []).append({"client": CLIENT, "granted": granted, **extra})
+    return out
+
+
+def test_grant_state_reads_granted_denied_and_not_asked():
+    grants = _grants()
+    cal = "kTCCServiceCalendar"
+    fda = "kTCCServiceSystemPolicyAllFiles"
+    events = "kTCCServiceAppleEvents"
+    assert grants.grant_state(_ident((cal, True, {})), "calendar") == "granted"
+    assert grants.grant_state(_ident((fda, False, {})), "photos") == "denied"
+    mail_fda = _ident((fda, True, {}))
+    assert grants.grant_state(mail_fda, "mail") == "not asked"  # no AppleEvents row
+    other = _ident((fda, True, {}), (events, True, {"target": "com.apple.Notes"}))
+    assert grants.grant_state(other, "mail") == "not asked"  # another app's target
+    both = _ident((fda, True, {}), (events, True, {"target": "com.apple.mail"}))
+    assert grants.grant_state(both, "mail") == "granted"
+
+
+def test_grant_state_is_unknown_when_it_cannot_tell():
+    grants = _grants()
+    cal = "kTCCServiceCalendar"
+    assert grants.grant_state(None, "calendar") is None
+    assert grants.grant_state(_ident((cal, True, {})), "shortcuts") is None
+    other = {cal: [{"client": "com.example.other", "granted": False}]}
+    assert grants.grant_state(other, "calendar") == "not asked"  # not our client
+    # A TCC database that could not be read cannot say "not asked" (a wrong claim).
+    assert grants.grant_state({}, "calendar", complete=False) is None
+    assert grants.grant_state(_ident((cal, False, {})), "calendar", complete=False) == (
+        "denied"
+    )
+
+
+def _row_html(page, label):
+    (row,) = [
+        r for r in page.split('<div class="row">') if f'aria-label="{label}"' in r
+    ]
+    return row
+
+
+def test_grant_chips_and_the_row_sub_with_tool_and_call_counts(state, monkeypatch):
+    report = {
+        "identities": _ident(
+            ("kTCCServiceCalendar", False, {}),
+            ("kTCCServiceSystemPolicyAllFiles", True, {}),
+        ),
+        "reasons": {"user": None, "system": None},
+    }
+    monkeypatch.setattr(deploy, "grant_report", lambda *a, **kw: report)
+    tool = sorted(registry.by_adapter("photos"))[0]
+    usage = audit._usage_path()
+    usage.write_text(
+        "".join(json.dumps({"ts": "t", "tool": tool}) + "\n" for _ in "abc")
+    )
+    page = _get().text
+    assert '<span class="chip danger">denied</span>' in _row_html(page, "Calendar")
+    mail = _row_html(page, "Mail")
+    assert '<span class="chip">not asked</span>' in mail
+    assert "Automation · Full Disk Access · " in mail
+    n = len(registry.by_adapter("photos"))
+    assert f'<div class="sub">Full Disk Access · {n} tools · 3 calls</div>' in page
+    photos = _row_html(page, "Photos")  # granted: no grant chip before the switch
+    assert 'class="chip' not in photos.split("<form")[0]
+
+
+def test_outbound_row_is_locked_text_with_the_command_and_no_form(state):
+    sending = registry.outbound_status()["registered"]
+    page = _get().text
+    title = f"Outbound: {', '.join(sending) or 'off'}"
+    assert f'<div class="title">{title}</div>' in page
+    section = page.split("Sending off this Mac")[1].split('<p class="muted note">')[0]
+    assert 'class="row locked"' in section
+    assert (
+        "Never changed from this page — any website could send a request to "
+        "127.0.0.1. Change it in Terminal:" in section
+    )
+    command = "macos-apps-mcp allow-send " + ("off" if sending else "mail")
+    assert f"<code>{command}</code>" in section
+    assert f'data-copy="{command}"' in section
+    assert "<form" not in section and "<input" not in section
+
+
+def test_footer_note_names_the_file_and_the_dashboard_caller(state):
+    assert (
+        '<p class="muted note">Toggles write ~/.local/state/macos-apps-mcp/'
+        "adapters_off. Each change is logged in audit.jsonl with caller "
+        "<b>dashboard</b>.</p>"
+    ) in _get().text
+
+
+def test_sidebar_badge_counts_active_adapters_then_pending_changes(state):
+    def badge():
+        (nav,) = re.findall(
+            r'<a class="nav-item[^"]*" href="/adapters".*?</a>', _get().text
+        )
+        return nav
+
+    assert '<span class="count">10/10</span>' in badge()
+    _toggle("photos", "0")
+    _toggle("music", "0")
+    assert (
+        '<span class="count"><span class="chip pending">2 pending</span></span>'
+        in badge()
+    )
