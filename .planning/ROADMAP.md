@@ -338,7 +338,32 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: TBD
+**Plans**: 0/8 plans complete
+
+Plans:
+**Wave 1**
+- [ ] 05-01-PLAN.md — Adapter deny-list gate read at daemon start, doctor adapter keys, no probe or prompt for an OFF adapter (PLAT-01)
+- [ ] 05-02-PLAN.md — Loopback dashboard transport, request Guard and the Usage page; merges after 05-08 (PLAT-02)
+- [ ] 05-08-PLAN.md — Declare starlette and bump to 0.15.0, in wave 1 beside 05-02 (PLAT-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05-03-PLAN.md — Adapter switches, restart and Discard on the dashboard (PLAT-01, PLAT-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 05-04-PLAN.md — Write list, write detail and read-only recovery with the undo prompt (PLAT-02)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 05-05-PLAN.md — Health, Backups and the dashboard docs (PLAT-02)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 05-06-PLAN.md — Release 0.15.0: owner-approved one-way cut, notarized build, install, doctor proof (D-18)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
+
+**Cross-cutting constraints:**
+- The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #126` with no closing keyword
+
 **UI hint**: yes
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
