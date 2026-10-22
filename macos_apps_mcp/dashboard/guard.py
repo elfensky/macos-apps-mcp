@@ -1,4 +1,4 @@
-"""The request layer of the localhost dashboard (PLAT-02, D-08).
+"""The request layer of the localhost dashboard (PLAT-02, D-08, D-19).
 
 A loopback bind keeps other machines out; it does not keep other WEBSITES out. Any page
 in the operator's browser can POST to 127.0.0.1 (CSRF), and DNS rebinding lets a remote
@@ -6,6 +6,11 @@ page read loopback responses. So every request passes this pure-ASGI wrapper fir
 
 * ``Host`` must be ``127.0.0.1:<port>`` or ``localhost:<port>`` on EVERY request, reads
   included (DNS rebinding).
+* After the Host check, every request but the ``/key`` link needs the page key as the
+  ``macos_apps_mcp_key`` cookie (PM-12, D-19): other macOS accounts and sandboxed apps
+  reach 127.0.0.1 too. Cookies do not isolate by port (RFC 6265 section 8.5), so ANY
+  cookie of that name that equals the key passes; a planted duplicate cannot shadow
+  the real one. ``/key?k=<key>`` sets the cookie and redirects to ``/``.
 * A POST (any method but GET and HEAD, so a later PUT or DELETE route is born
   guarded) needs ``Origin`` equal to one of those origins; with no ``Origin`` it needs
   ``Sec-Fetch-Site: same-origin``. ``Origin: null`` is foreign (RESEARCH C1: Chrome
@@ -23,7 +28,7 @@ from __future__ import annotations
 import hmac
 from urllib.parse import parse_qs
 
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, RedirectResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 HEADERS = [
@@ -37,11 +42,19 @@ HEADERS = [
     (b"cache-control", b"no-store"),
 ]
 MAX_BODY = 8 * 1024
+KEY_COOKIE = "macos_apps_mcp_key"
+KEY_PATH = "/key"
+KEY_MAX_AGE = 400 * 24 * 3600  # the link sets it once; 400 days is Chrome's cap
+NEEDS_KEY = (
+    "This dashboard needs its page key. "
+    "Open it with `macos-apps-mcp dashboard` in Terminal."
+)
 
 
 class Guard:
-    def __init__(self, app: ASGIApp, *, port: int, token: str) -> None:
+    def __init__(self, app: ASGIApp, *, port: int, token: str, key: str | None) -> None:
         self.app, self.token = app, token
+        self.key = None if key is None else key.encode()
         self.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.origins = {f"http://{h}" for h in self.hosts}
 
@@ -58,6 +71,10 @@ class Guard:
         deny = None
         if headers.get("host") not in self.hosts:
             deny = PlainTextResponse("Invalid host header", 400)
+        elif scope["method"] == "GET" and scope["path"] == KEY_PATH:
+            deny = self._link(scope)
+        elif not self._has_key(scope):
+            deny = PlainTextResponse(NEEDS_KEY, 403)
         elif scope["method"] not in ("GET", "HEAD"):  # POST today; PUT/DELETE too
             origin = headers.get("origin")
             same = (
@@ -86,6 +103,34 @@ class Guard:
         if deny is not None:
             return await deny(scope, receive, send_h)
         return await self.app(scope, receive, send_h)
+
+    def _link(self, scope: Scope) -> Response:
+        """``/key?k=<key>``: the right key sets the cookie and redirects to ``/``."""
+        got = parse_qs(scope.get("query_string", b"").decode("utf-8", "replace"))
+        if not hmac.compare_digest(got.get("k", [""])[0].encode(), self.key):
+            return PlainTextResponse(NEEDS_KEY, 403)
+        r = RedirectResponse("/", 303)
+        r.set_cookie(
+            KEY_COOKIE,
+            self.key.decode(),
+            max_age=KEY_MAX_AGE,
+            path="/",
+            httponly=True,
+            samesite="strict",
+        )
+        return r
+
+    def _has_key(self, scope: Scope) -> bool:
+        """True when any cookie named ``KEY_COOKIE`` equals the key; scanned on the raw
+        header bytes, so a non-ASCII byte is a mismatch and never an exception."""
+        for name, value in scope["headers"]:
+            if name != b"cookie":
+                continue
+            for pair in value.split(b";"):
+                k, _, v = pair.strip().partition(b"=")
+                if k == KEY_COOKIE.encode() and hmac.compare_digest(v, self.key):
+                    return True
+        return False
 
     @staticmethod
     async def _read_body(receive: Receive) -> bytes | None:

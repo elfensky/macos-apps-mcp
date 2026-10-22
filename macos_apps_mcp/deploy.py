@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
 import subprocess
 import sys
@@ -307,6 +308,10 @@ _ADAPTERS_OFF_FILE = Path.home() / ".local/state/macos-apps-mcp/adapters_off"
 # What an adapters_off file that exists but cannot be read means: every adapter OFF
 # (owner, 2026-10-22 — the deny-list fails closed, never open). No adapter has it.
 ADAPTERS_ALL_OFF = "*"
+# The dashboard page key (D-19): home-pinned for the same three-process reason as the
+# constants above (the daemon writes it, the `dashboard` CLI role reads it), in the
+# daemon's 0700 socket folder; tests patch the constant (tests/conftest.py).
+_DASHBOARD_KEY_FILE = Path.home() / ".local/state/macos-apps-mcp/daemon/dashboard_key"
 
 
 def is_daemon_role() -> bool:
@@ -360,18 +365,45 @@ def write_adapters_off(names: Iterable[str]) -> None:
     mid-write must not leave a truncated file, which would read as "everything on"
     (RESEARCH "Don't Hand-Roll"). Any failure removes the temp file and re-raises,
     and the previous file stays as it was."""
-    path = _ADAPTERS_OFF_FILE
+    _atomic_write(_ADAPTERS_OFF_FILE, ",".join(sorted(set(names))))
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` through a temp file in the same folder (mode 0600),
+    fsync, then ``os.replace``; any failure removes the temp file and re-raises."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".adapters_off.")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w") as f:
-            f.write(",".join(sorted(set(names))))
+            f.write(text)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+def dashboard_key(*, create: bool = False) -> str | None:
+    """The dashboard page key (D-19), or None when there is none to use.
+
+    The daemon calls it once at start with ``create=True``: the file is written, from
+    ``secrets.token_urlsafe(32)``, only when it is absent. The CLI role calls it
+    without ``create``, so it never writes."""
+    path = _DASHBOARD_KEY_FILE
+    if create:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)  # mkdir's mode does not apply to an existing dir
+    try:
+        key = path.read_bytes().decode("utf-8", "replace").strip()
+    except FileNotFoundError:
+        if not create:
+            return None
+        key = secrets.token_urlsafe(32)
+        _atomic_write(path, key)
+    if create:
+        os.chmod(path, 0o600)
+    return key
 
 
 def allow_send(argv: list[str]) -> None:

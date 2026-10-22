@@ -5,24 +5,20 @@ Same harness as ``test_dashboard_guard.py``: ``httpx.ASGITransport`` inside
 dir at ``tmp_path``, so no test touches the developer's real files.
 """
 
-import asyncio
 import json
 import os
 import re
 import stat
 from urllib.parse import urlencode
 
-import httpx
 import pytest
 
-from macos_apps_mcp import audit, dashboard, deploy, registry
+from macos_apps_mcp import audit, deploy, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
+from tests import _dashboard
+from tests._dashboard import ORIGIN, TOKEN
 
-PORT = 47632
-TOKEN = "tok"
-HOST = f"127.0.0.1:{PORT}"
-ORIGIN = f"http://{HOST}"
-FORM = {"content-type": "application/x-www-form-urlencoded", "origin": ORIGIN}
+FORM = {**_dashboard.FORM, "origin": ORIGIN}
 ADAPTERS = sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
 
 
@@ -50,14 +46,7 @@ def _records():
 
 
 def _call(method, path, *, content=None, headers=None, app=None):
-    async def go():
-        transport = httpx.ASGITransport(
-            app=app or dashboard.build_app(port=PORT, token=TOKEN)
-        )
-        async with httpx.AsyncClient(transport=transport, base_url=ORIGIN) as c:
-            return await c.request(method, path, headers=headers, content=content)
-
-    return asyncio.run(go())
+    return _dashboard.request(method, path, app=app, headers=headers, content=content)
 
 
 def _get(path="/adapters", **kw):
@@ -191,7 +180,7 @@ class _Restart:
 
 
 def _restart_app(fake):
-    return dashboard.build_app(port=PORT, token=TOKEN, restart=fake)
+    return _dashboard.build(restart=fake)
 
 
 def test_restart_answers_the_restarting_page_then_runs_the_hook_once(state):
