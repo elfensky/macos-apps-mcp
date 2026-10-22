@@ -241,3 +241,146 @@ def test_health_an_exception_in_doctor_never_sticks_the_lock(doc, monkeypatch):
     assert not health._lock.locked()
     monkeypatch.setattr(doctor, "diagnose", doc.diagnose)
     assert "Full doctor report" in get("/health").text
+
+
+# --- Health: what cannot work (D-14) ----------------------------------------------
+
+FDA_DENIED = {"full_disk_access": ("fda", False, "denied")}
+SETTINGS = "x-apple.systempreferences:com.apple.preference.security?"
+EVERYONE = sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
+
+
+def banner(text):
+    m = re.search(
+        r'<div class="banner bad"><span>●</span><div><b>(.*?)</b> (.*?)</div></div>',
+        text,
+        re.S,
+    )
+    return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
+
+
+def row_of(text, title):
+    chunks = text.split('<div class="row')
+    return next(c for c in chunks if f'<div class="title">{title}</div>' in c)
+
+
+def only_active(monkeypatch, names):
+    monkeypatch.setattr(
+        registry, "adapter_status", lambda: {"registered": names, "configured": names}
+    )
+
+
+def needing(service):
+    return sorted(
+        a
+        for a, needs in grants.ADAPTER_GRANTS.items()
+        if any(s == service for s, _ in needs)
+    )
+
+
+def test_banner_names_every_active_adapter_macos_refused(doc):
+    doc.report = make_report(make_ids(fda=False), **FDA_DENIED)
+    names = needing("kTCCServiceSystemPolicyAllFiles")
+    assert len(names) == 4  # mail, messages, photos, reminders
+    head, rest = banner(get("/health").text)
+    assert head == "4 active adapters cannot work:"
+    listed = ", ".join(f"{n.capitalize()} (denied)" for n in names)
+    assert rest == f"{listed}. Grant access, or turn the adapter off."
+
+
+def test_banner_counts_only_the_active_set(doc, monkeypatch):
+    doc.report = make_report(make_ids(fda=False), **FDA_DENIED)
+    only_active(monkeypatch, ["photos"])
+    head, rest = banner(get("/health").text)
+    assert head == "1 active adapter cannot work:"
+    assert rest == "Photos (denied). Grant access, or turn the adapter off."
+
+
+def test_no_banner_when_every_grant_is_granted(doc):
+    doc.report = make_report(make_ids(skip=()))
+    text = get("/health").text
+    assert "banner bad" not in text and "Automation →" not in text
+
+
+def test_an_automation_denial_is_a_row_and_a_banner_entry(doc):
+    doc.report = make_report(make_ids(skip=(), denied=("notes",)))
+    text = get("/health").text
+    assert banner(text)[0] == "1 active adapter cannot work:"
+    assert banner(text)[1].startswith("Notes (denied).")
+    row = row_of(text, "Automation → Notes")
+    assert "dot bad" in row and ">Denied<" in row
+    assert f'href="{SETTINGS}Privacy_Automation">Open Settings</a>' in row
+
+
+def test_automation_row_not_asked_has_an_accent_dot_and_a_settings_link(doc):
+    row = row_of(get("/health").text, "Automation → Music")  # no TCC row for Music
+    assert "dot warn" in row and "not asked" in row.lower()
+    assert f'href="{SETTINGS}Privacy_Automation">Open Settings</a>' in row
+
+
+def test_an_off_adapter_raises_no_banner_and_says_it_does_not_matter(doc, monkeypatch):
+    only_active(monkeypatch, [a for a in EVERYONE if a != "music"])
+    text = get("/health").text
+    row = row_of(text, "Automation → Music")
+    assert not re.search(r"dot (ok|warn|bad)", row)
+    assert "· adapter is off, so this does not matter" in row
+    assert "Open Settings" not in row
+    assert "banner bad" not in text
+
+
+def test_an_unreadable_tcc_database_says_so_and_never_claims_not_asked(
+    doc, monkeypatch
+):
+    doc.report = make_report(
+        None, calendar=("eventkit", False, "denied")
+    )  # TCC unreadable: the EventKit surface is the source
+    doc.reasons = {"user": "absent", "system": "absent"}
+    text = get("/health").text
+    assert banner(text) == (
+        "1 active adapter cannot work:",
+        "Calendar (denied). Grant access, or turn the adapter off.",
+    )
+    assert "could not be read" in text and "user db: absent" in text
+    assert "not asked" not in text.lower() and "Automation → " not in text
+    assert f'href="{SETTINGS}Privacy_Automation">Open Settings</a>' in row_of(
+        text, "Automation"
+    )
+
+
+def test_a_partial_tcc_read_never_claims_not_asked(doc):
+    # this Mac: the user database is absent, the system one answered with the FDA row
+    ids = {"kTCCServiceSystemPolicyAllFiles": [{"client": BUNDLE, "granted": True}]}
+    doc.report = make_report(ids)
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    assert "not asked" not in text.lower() and "banner bad" not in text
+    assert "could not be read" in text and "Automation → " not in text
+
+
+def test_a_grant_with_a_status_is_not_a_denial(doc):
+    ids = make_ids(skip=())
+    ids["kTCCServiceCalendar"][0].update(granted=False, status="limited")
+    doc.report = make_report(ids)
+    assert "banner bad" not in get("/health").text
+
+
+def nav_health(text):
+    m = re.search(r'<a class="nav-item[^"]*" href="/health"[^>]*>(.*?)</a>', text, re.S)
+    return m.group(1)
+
+
+def test_the_sidebar_dot_follows_the_last_health_report(doc, monkeypatch):
+    assert "dot" not in nav_health(get("/usage").text)  # before any report
+    doc.report = make_report(make_ids(fda=False), **FDA_DENIED)
+    get("/health")
+    assert '<span class="dot bad"></span>' in nav_health(get("/usage").text)
+    doc.report = make_report(make_ids(skip=()))
+    get("/health")
+    assert '<span class="dot ok"></span>' in nav_health(get("/usage").text)
+    monkeypatch.setattr(
+        registry,
+        "adapter_status",
+        lambda: {"registered": EVERYONE, "configured": EVERYONE[:-1]},
+    )
+    get("/health")
+    assert '<span class="dot warn"></span>' in nav_health(get("/usage").text)
