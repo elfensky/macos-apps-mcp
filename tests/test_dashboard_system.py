@@ -11,15 +11,17 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import threading
 import time
 
 import pytest
 
-from macos_apps_mcp import deploy, doctor, registry
+from macos_apps_mcp import audit, deploy, doctor, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
-from macos_apps_mcp.dashboard import grants, health
+from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.dashboard import grants, health, recovery
 from tests._dashboard import get
 
 BUNDLE = deploy._BUNDLE_ID
@@ -387,3 +389,169 @@ def test_the_sidebar_dot_follows_the_last_health_report(doc, monkeypatch):
     )
     get("/health")
     assert '<span class="dot warn"></span>' in nav_health(get("/usage").text)
+
+
+# --- Backups (D-13) ---------------------------------------------------------------
+
+RID1 = "20261020-101500-000001-000-move"
+RID2 = "20261021-093100-000002-001-trash"
+RID4 = "20261022-120000-000003-1000-move"  # a counter past 999 (#419)
+LINK = "20261019-080000-000001-000-move"  # a symlink named like a receipt
+KB = 1024
+
+
+def backup_root():
+    return audit.state_dir() / "backup" / "mail"
+
+
+def eml(folder, name, size):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / name).write_bytes(b"x" * size)
+
+
+def put(*records):
+    with (audit.state_dir() / "audit.jsonl").open("a", encoding="utf-8") as f:
+        for r in records:
+            f.write(json.dumps(r) + "\n")
+
+
+def plan_for(rid, ids, *, destination="Archive", op="move"):
+    folder = backup_root() / rid
+    base = {"tool": "mail_recover", "op": op, "receipt": rid}
+    targets = [
+        {
+            "id": i,
+            "folder": "INBOX",
+            "fidelity": "full",
+            "backup": f"{folder}/{n}.eml",
+            "status": "planned",
+        }
+        for n, i in enumerate(ids, 101)
+    ]
+    return [
+        {
+            **base,
+            "ts": "2026-10-20T10:15:00",
+            "phase": "plan",
+            "destination": destination,
+            "backup_dir": str(folder),
+            "targets": targets,
+        },
+        {
+            **base,
+            "ts": "2026-10-20T10:15:02",
+            "phase": "done",
+            "results": {i: "ok" for i in ids},
+        },
+    ]
+
+
+@pytest.fixture
+def tree(tmp_path):
+    """Two receipts on disk (the first with its plan in the log), a stray folder, and a
+    symlink named like a receipt that points outside the backup root."""
+    eml(backup_root() / RID1, "101.eml", 1024 * KB)
+    eml(backup_root() / RID1, "102.eml", 512 * KB)
+    eml(backup_root() / RID2, "201.eml", KB)
+    (backup_root() / "notes").mkdir()
+    outside = tmp_path / "outside"
+    eml(outside, "9.eml", 50 * 1024 * KB)
+    (backup_root() / LINK).symlink_to(outside)
+    put(*plan_for(RID1, ["a1@x.invalid", "b2@x.invalid"]))
+    return tmp_path
+
+
+def rows_in(text):
+    return re.findall(r'<a class="row clickable[^"]*" href="([^"]+)"', text)
+
+
+def test_backups_page_lists_the_receipts_on_disk_newest_first(tree):
+    r = get("/backups")
+    assert r.status_code == 200
+    text = r.text
+    assert "<h1>Backups</h1>" in text
+    assert (
+        "Every batch Mail write copies its messages to disk first. "
+        "Nothing here is ever pruned." in text
+    )
+    assert "1.5 MB in 2 receipts" in text
+    assert "oldest 2026-10-20" in text and "MACOS_APPS_BACKUP_LIMIT" in text
+    limit = mail_recover.backup_limit()
+    assert re.search(rf'<meter[^>]* max="{limit}"[^>]* value="\d+"', text) or (
+        re.search(rf'<meter[^>]* value="\d+"[^>]* max="{limit}"', text)
+    )
+    assert f'data-copy="{backup_root()}"' in text
+    assert rows_in(text) == [f"/backups/{RID2}", f"/backups/{RID1}"]
+    assert "move · 2 messages → Archive" in text and "trash · 1 message<" in text
+    assert "notes" not in " ".join(rows_in(text)) and LINK not in text
+    assert re.search(r'<a class="nav-item active" href="/backups"', text)
+
+
+def test_backups_page_lists_a_receipt_with_a_four_digit_counter(tree):
+    eml(backup_root() / RID4, "301.eml", 2 * KB)
+    text = get("/backups").text
+    assert rows_in(text)[0] == f"/backups/{RID4}"
+    assert "in 3 receipts" in text
+    assert get(f"/backups/{RID4}").status_code == 200
+
+
+def test_backups_escapes_what_the_log_wrote(tree):
+    put(*plan_for(RID2, ["c3@x.invalid"], destination="<script>alert(1)</script>"))
+    text = get("/backups").text
+    assert "<script>alert(1)" not in text and "&lt;script&gt;alert(1)" in text
+
+
+def test_a_receipt_with_its_plan_opens_the_read_only_batch(tree):
+    text = get(f"/backups/{RID1}").text
+    assert "<b>2 of 2</b> moved" in text and "101.eml" in text
+    assert "To undo, ask Claude" in text and f"Undo mail receipt {RID1}" in text
+    assert "<form" not in text and "<input" not in text  # no route writes
+
+
+def test_a_receipt_whose_plan_rotated_out_lists_its_files(tree):
+    eml(backup_root() / RID2, "202.eml", 3 * KB)
+    outside = tree / "outside" / "9.eml"
+    (backup_root() / RID2 / "999.eml").symlink_to(outside)
+    os.mkfifo(backup_root() / RID2 / "fifo.eml")
+    text = get(f"/backups/{RID2}").text
+    assert "rotated out of the audit log" in text and "files remain" in text
+    assert "201.eml" in text and "202.eml" in text
+    assert "999.eml" not in text and "fifo.eml" not in text
+    assert "To undo, ask Claude" not in text and "Undo mail receipt" not in text
+    assert "1 KB" in text
+
+
+def test_bad_receipts_are_404_and_regex_comes_before_the_disk(tree, monkeypatch):
+    def no_disk():
+        raise AssertionError("a malformed receipt reached the filesystem")
+
+    monkeypatch.setattr(recovery, "backup_root", no_disk)
+    for bad in (
+        "..%2f..%2fetc",
+        "notes",
+        "20261021-093100-000002-001-nope",
+        f"{RID1}x",
+        "%2e%2e",
+    ):
+        assert get(f"/backups/{bad}").status_code == 404, bad
+
+
+def test_a_symlinked_receipt_and_an_unknown_one_are_404(tree):
+    assert get(f"/backups/{LINK}").status_code == 404  # real name, symlink folder
+    assert get("/backups/20261030-000000-000009-000-move").status_code == 404
+    assert "outside" not in get("/backups").text
+
+
+def test_without_a_backup_root_the_page_is_empty_and_creates_nothing(tree, monkeypatch):
+    def never(*a, **kw):
+        raise AssertionError("a page must not create, prune or delete a backup")
+
+    for name in ("purge_backup", "_backup_dir"):
+        monkeypatch.setattr(mail_recover, name, never)
+    import shutil
+
+    shutil.rmtree(backup_root().parent)
+    text = get("/backups").text
+    assert "0.0 MB in 0 receipts" in text and rows_in(text) == []
+    assert get(f"/backups/{RID1}").status_code == 404
+    assert not (audit.state_dir() / "backup").exists()
