@@ -1,6 +1,13 @@
+import json
 import plistlib
+import re
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 PKG = ROOT / "packaging"
@@ -13,6 +20,51 @@ def test_bundle_version_tracks_pyproject():
     info = plistlib.loads((PKG / "Info.plist").read_bytes())
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert info["CFBundleShortVersionString"] == project["project"]["version"]
+
+
+def test_only_intel_macs_cap_cryptography():
+    """cryptography 49+ ships no Intel macOS wheel, so a plain uvx on an Intel Mac built
+    it from source and needed Rust (#322). The cap must stay Intel-only: Apple silicon
+    keeps the current release."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    reqs = [Requirement(d) for d in project["project"]["dependencies"]]
+    (crypto,) = [r for r in reqs if r.name == "cryptography"]
+    assert str(crypto.specifier) == "<49"
+    assert not crypto.extras
+    intel = {"sys_platform": "darwin", "platform_machine": "x86_64"}
+    assert crypto.marker.evaluate(intel)
+    assert not crypto.marker.evaluate({**intel, "platform_machine": "arm64"})
+    assert not crypto.marker.evaluate({**intel, "sys_platform": "linux"})
+
+
+def test_osxphotos_is_a_capped_base_dependency():
+    """Photos (D-01) reads the library through osxphotos: a base dependency, capped
+    below 0.78 (0.x, its export must never start a download). D-16: the Python 3.12
+    floor is what lets it lock beside pyobjc 10+, and UniformTypeIdentifiers is a base
+    line with no marker, because the bundle install drops a platform_release marker
+    in silence."""
+    text = (ROOT / "pyproject.toml").read_text()
+    project = tomllib.loads(text)["project"]
+    reqs = [Requirement(d) for d in project["dependencies"]]
+    (photos,) = [r for r in reqs if r.name == "osxphotos"]
+    assert {str(s) for s in photos.specifier} == {">=0.77.2", "<0.78"}
+    assert not any(
+        Requirement(d).name == "osxphotos"
+        for group in project.get("optional-dependencies", {}).values()
+        for d in group
+    )
+    assert "Photos extra deferred" not in text
+    assert project["requires-python"] == ">=3.12"
+    assert not any("3.11" in c for c in project["classifiers"])
+    (uti,) = [r for r in reqs if r.name == "pyobjc-framework-uniformtypeidentifiers"]
+    assert uti.marker is None
+
+
+def test_ruff_targets_the_python_floor():
+    """#384, D-16: the ruff target must track the requires-python floor."""
+    cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    floor = cfg["project"]["requires-python"].removeprefix(">=")
+    assert cfg["tool"]["ruff"]["target-version"] == "py" + floor.replace(".", "")
 
 
 def test_info_plist_contract():
@@ -30,6 +82,30 @@ def test_info_plist_contract():
         "NSAppleEventsUsageDescription",
     ):
         assert info[key]
+
+
+def test_info_plist_names_the_icon():
+    """macOS 26 finds the Liquid Glass icon in Assets.car by CFBundleIconName, and
+    older macOS loads AppIcon.icns by CFBundleIconFile; both must match the build's
+    `--app-icon AppIcon`, or the .app shows the generic icon."""
+    info = plistlib.loads((PKG / "Info.plist").read_bytes())
+    assert info["CFBundleIconFile"] == "AppIcon"
+    assert info["CFBundleIconName"] == "AppIcon"
+
+
+def test_icon_composer_package_is_consistent():
+    """actool fails, or drops a layer, when a name in icon.json has no file; a stray
+    file is an asset no layer uses."""
+    icon = PKG / "AppIcon.icon"
+    doc = json.loads((icon / "icon.json").read_text())
+    named = {
+        layer["image-name"]
+        for group in doc["groups"]
+        for layer in group.get("layers", [])
+    }
+    assert named
+    assert named == {p.name for p in (icon / "Assets").iterdir()}
+    assert "macOS" in doc["supported-platforms"]["squares"]
 
 
 def test_entitlements_minimal():
@@ -68,6 +144,9 @@ def test_build_script_gates_universal2():
     """A missing slice or a too-new binary installs fine and fails only on the user's
     Mac; only the build gate sees it (#205)."""
     src = (ROOT / "scripts" / "build_app.sh").read_text()
+    install = '--target "$WORK/site-$a" -r "$WORK/reqs"'
+    rm_dylibs = 'rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib'
+    guard = 'if grep -q platform_release "$WORK/reqs"; then'
     for needle in (
         "plutil -extract LSMinimumSystemVersion raw",
         'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
@@ -79,8 +158,20 @@ def test_build_script_gates_universal2():
         '/usr/bin/arch "-$a"',
         "smoke_stream.py",
         "universal2 gate ok",
+        install,
+        rm_dylibs,
+        # -s -P: with cwd = the checkout, a bare import would load the repo's package
+        '-E -s -P -c "import macos_apps_mcp, macos_apps_mcp.dashboard, osxphotos, UniformTypeIdentifiers"',  # noqa: E501
+        "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers",
+        guard,
+        "EXPORT HOLDS platform_release MARKERS",
     ):
         assert needle in src, needle
+    # the thin osxphotos CLI dylibs go inside the install loop, before the tree diff
+    assert src.index(install) < src.index(rm_dylibs) < src.index("ARCH TREES DIFFER")
+    # an export that holds a platform_release marker is refused before anything installs
+    assert src.index("uv export") < src.index(guard) < src.index(install)
+    assert "exit 1" in src[src.index(guard) : src.index("\nfi\n", src.index(guard))]
     assert src.index("universal2 gate ok") < src.index('if [[ -n "$SIGN" ]]')
     # the gate names a bad binary before a smoke can trip over it
     assert src.index("universal2 gate ok") < src.index("BUNDLE SMOKE FAILED")
@@ -93,6 +184,86 @@ def test_build_script_gates_universal2():
     assert src.index("-m compileall") < src.index('if [[ -n "$SIGN" ]]')
     # the unsigned smokes cannot see a hardened-runtime fault (x86_64 ctypes hang)
     assert src.index('-s "$SIGN" "$APP"\n') < src.index("signed smoke ok")
+
+
+def test_build_script_builds_the_project_wheel_in_a_hash_locked_environment():
+    """#373: hatchling and its dependencies come from uv.lock under --require-hashes,
+    and the bundle gets the built wheel, never the source directory."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    export = 'uv export --project "$REPO" --frozen --only-group build'
+    start = src.index("uv build")
+    build = src[start : src.index("\n", src.index("--out-dir", start))]
+    for needle in (
+        "--wheel",
+        '--build-constraints "$WORK/build-reqs"',
+        "--require-hashes",
+    ):
+        assert needle in build, needle
+    assert export in src
+    assert not re.search(r'uv pip install[^\n]*"\$REPO"', src)  # no directory install
+    install = src[src.index("uv pip install -q --python", start) :].split("\n", 1)[0]
+    assert "--no-deps" in install and ".whl" in install
+    assert src.index(export) < src.index("uv build") < src.index(install)
+    assert src.index(install) < src.index("universal2 gate ok")
+
+
+def test_the_build_group_pins_the_backend_with_hashes():
+    """The backend named in [build-system].requires is in the `build` group, and the
+    export carries a sha256 for every requirement (so --require-hashes can hold)."""
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv not on PATH")
+    out = subprocess.run(
+        [
+            uv,
+            "export",
+            "--project",
+            str(ROOT),
+            "--frozen",
+            "--only-group",
+            "build",
+            "--no-emit-project",
+            "--no-header",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    reqs = [b for b in re.split(r"\n(?=\S)", out.strip()) if not b.startswith("#")]
+    assert reqs and all("--hash=sha256:" in r for r in reqs)
+    pinned = {r.split("==")[0] for r in reqs}
+    required = {
+        Requirement(r).name
+        for r in tomllib.loads((ROOT / "pyproject.toml").read_text())["build-system"][
+            "requires"
+        ]
+    }
+    assert required <= pinned
+
+
+def test_build_script_compiles_the_icon():
+    """The bundle reset would delete an earlier compile, and codesign seals
+    Contents/Resources, so an icon written after signing breaks the seal."""
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    for needle in (
+        "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun -f actool",
+        "the Command Line Tools have no actool",
+        '"$ACTOOL" "$REPO/packaging/AppIcon.icon"',
+        '--compile "$APP/Contents/Resources"',
+        "--platform macosx",
+        '--minimum-deployment-target "$MACOS_MIN"',
+        "--app-icon AppIcon",
+        '--output-partial-info-plist "$WORK/',
+        "for f in AppIcon.icns Assets.car",
+        "ICON COMPILE FAILED",
+    ):
+        assert needle in src, needle
+    # a Mac without actool fails before any download
+    assert src.index("the Command Line Tools have no actool") < src.index("curl -fsSL")
+    compile_at = src.index('"$ACTOOL" "$REPO/packaging/AppIcon.icon"')
+    assert src.index('rm -rf "$APP"; mkdir -p') < compile_at
+    assert compile_at < src.index('cp "$REPO/packaging/Info.plist"')
+    assert compile_at < src.index('if [[ -n "$SIGN" ]]')
 
 
 def test_build_script_compiles_hash_pyc():

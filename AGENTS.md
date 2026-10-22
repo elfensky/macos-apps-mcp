@@ -106,3 +106,6 @@ Tracked in the life-cockpit vault under `#personal` (tracker: `elfensky/macos-ap
 the control plane (what to work on); this repo is where the work happens. Report progress by
 opening/closing issues and PRs as usual — the cockpit pulls from the tracker on its next `/sync`.
 Nothing to update in the vault; don't mirror cockpit state (milestones, due dates) here.
+
+**Bugs before features** (owner, 2026-10-11): an open bug or error goes on the GSD roadmap in an
+inserted phase ahead of the next feature phase (precedent: Phase 03.1).

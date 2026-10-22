@@ -25,7 +25,7 @@ from pathlib import Path
 
 import EventKit as EK
 
-from . import deploy, registry, runtime
+from . import deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
 from .errors import PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
@@ -34,11 +34,12 @@ from .runtime import app_process_info, run_native
 # Apps reached via osascript/Automation — the adapters that aren't EventKit-native.
 # Part of the add-an-adapter checklist (CLAUDE.md "Architecture"): a new
 # Automation-backed adapter must add its app name here so doctor probes it.
+# Photos is absent on purpose: its reads go through osxphotos under Full Disk Access
+# (Phase 4), so doctor sends Photos no Apple Event.
 _AUTOMATION_APPS = (
     "Mail",
     "Notes",
     "Contacts",
-    "Photos",
     "Safari",
     "Messages",
     "Music",
@@ -54,10 +55,21 @@ _AUTOMATION_APPS = (
 # the Python side died first — this probe launches each quit app in turn, making it
 # the template most likely to strand an orphan. test_applescript_timeout.py sweeps
 # only the adapters package, so this one is pinned by test_doctor.py instead.
+# #317: an app the probe itself launched can come up with no window and answer
+# `count windows` with -1728. The event was delivered and answered, which is all the
+# probe proves, so -1728 counts as ok; every other error, the -1743 denial included,
+# re-raises with its original message and number, so runtime._classify_osascript_failure
+# still types it.
 _PROBE = (
     "on run argv\n"
     "  with timeout of 120 seconds\n"
-    "  tell application (item 1 of argv) to count windows\n"
+    "    tell application (item 1 of argv)\n"
+    "      try\n"
+    "        count windows\n"
+    "      on error errMsg number errNum\n"
+    "        if errNum is not -1728 then error errMsg number errNum\n"
+    "      end try\n"
+    "    end tell\n"
     "  end timeout\n"
     "end run"
 )
@@ -113,14 +125,19 @@ def _try_request_access() -> None:
 
 
 def _eventkit_surfaces(request: bool) -> list[dict]:
-    codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
+    # D-04: an OFF adapter's entity is neither read nor requested.
+    on = [e for e in _EK_ENTITIES if tiers.adapter_enabled(e[0])]
+    codes = {entity: _ek_status(entity) for _, entity, _ in on}
     if request and any(
         code == EK.EKAuthorizationStatusNotDetermined for code in codes.values()
     ):
         _try_request_access()
-        codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
+        codes = {entity: _ek_status(entity) for _, entity, _ in on}
     out = []
     for name, entity, pane in _EK_ENTITIES:
+        if entity not in codes:
+            out.append(_surface(name, "eventkit", None, "adapter_off"))
+            continue
         code = codes[entity]
         status = _EK_STATUS.get(code, f"unknown({code})")
         ok = code == EK.EKAuthorizationStatusFullAccess
@@ -153,6 +170,9 @@ def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
         name = app.lower()
+        if not tiers.adapter_enabled(name):
+            out.append(_surface(name, "automation", None, "adapter_off"))
+            continue  # D-04: no Apple Event, no process line
         if not request:
             out.append(
                 _surface(
@@ -177,6 +197,8 @@ def _automation_surfaces(request: bool) -> list[dict]:
 
 
 def _shortcuts_surface() -> dict:
+    if not tiers.adapter_enabled("shortcuts"):
+        return _surface("shortcuts_cli", "cli", None, "adapter_off")
     present = shutil.which("shortcuts") is not None
     return _surface(
         "shortcuts_cli",
@@ -330,17 +352,19 @@ def diagnose(request: bool = False) -> dict:
         _fda_surface(),
         _mail_index_surface(),
     ]
-    needs = [s["surface"] for s in surfaces if s["ok"] is False]
-    unknown = [s["surface"] for s in surfaces if s["ok"] is None]
+    # An OFF adapter's surface is not probed, so it is neither a need nor unverified.
+    probed = [s for s in surfaces if s["status"] != "adapter_off"]
+    needs = [s["surface"] for s in probed if s["ok"] is False]
+    unknown = [s["surface"] for s in probed if s["ok"] is None]
     if needs:
         summary = (
-            f"{len(needs)} of {len(surfaces)} surfaces need attention: "
+            f"{len(needs)} of {len(probed)} surfaces need attention: "
             + ", ".join(needs)
         )
     elif request:
         # An unprobeable surface (ok=None) must not be counted as OK.
         summary = (
-            f"all {len(surfaces)} surfaces OK"
+            f"all {len(probed)} surfaces OK"
             if not unknown
             else f"no denied surfaces; {len(unknown)} unverified: " + ", ".join(unknown)
         )
@@ -376,7 +400,10 @@ def diagnose(request: bool = False) -> dict:
             if ids is None
             else "grants listed per identity; the daemon identity is "
             "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
-            'granted=False plus status="limited" — not a plain denial.'
+            'granted=False plus status="limited" — not a plain denial. A '
+            'reason="prompt-timeout" entry is a consent prompt nobody answered, which '
+            "macOS keeps as a denial (#318): run its `remediation` command, then "
+            "doctor(request=True) with someone at the screen."
         ),
     }
     # A PARTIAL read (one db answered, the other did not) still has to say so. FDA rows
@@ -392,15 +419,53 @@ def diagnose(request: bool = False) -> dict:
         deployment["note"] += " PARTIAL read — " + ", ".join(
             f"{k} db: {v}" for k, v in failed.items()
         )
+    # Adapter deny-list (PLAT-01, D-03/D-05): `adapters` is what this process serves,
+    # `adapters_off` what it does not. No CLI twin — the note names the file instead.
+    ad = registry.adapter_status()
+    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    deployment["adapters"] = ad["registered"]
+    deployment["adapters_off"] = sorted(known - set(ad["registered"]))
+    deployment["adapters_note"] = (
+        "OFF adapters: a comma list in ~/.local/state/macos-apps-mcp/adapters_off; "
+        "apply: launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp."
+    )
+    off = tiers.adapters_off()
+    if unknown_adapters := off - known - {deploy.ADAPTERS_ALL_OFF}:
+        # operator input, so unbounded: three names keep the report in budget
+        names = sorted(unknown_adapters)
+        deployment["adapters_unknown"] = names[:3] + (
+            [f"+{len(names) - 3} more"] if len(names) > 3 else []
+        )
+    if deploy.ADAPTERS_ALL_OFF in off:
+        deployment["adapters_note"] += (
+            " The adapters_off file exists but cannot be read, so every adapter is off"
+            " until it is readable."
+        )
+    if ad["configured"] != ad["registered"]:
+        deployment["adapters_pending"] = ad["configured"]
+        deployment["adapters_note"] += (
+            " Changed since launch: restart the daemon to apply adapters_pending."
+        )
+    # Daemon role only: only the daemon serves the dashboard (and the stdio budget test
+    # stays as it is). The note never reads the key file.
+    if deploy.is_daemon_role():
+        # D-07: read here, not stored in deploy.py: only the daemon module knows
+        # whether the dashboard bound, and in the daemon role it is already loaded
+        # (the stdio server never reaches this branch, so it never imports it).
+        from . import daemon
+
+        if daemon.dashboard_state:
+            deployment["dashboard"] = daemon.dashboard_state
+        deployment["dashboard_note"] = (
+            "pages need the page key: the USER runs `macos-apps-mcp dashboard`."
+        )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's
     # "no daemon restarted" branch), say so instead of reporting config as live state.
     if ob["configured"] != ob["registered"]:
         deployment["outbound_pending"] = ob["configured"]
         deployment["outbound_note"] += (
-            " Outbound config changed since this process launched (configured: "
-            + (", ".join(ob["configured"]) or "none")
-            + ") — restart the daemon to apply it."
+            " Changed since launch: restart the daemon to apply outbound_pending."
         )
 
     # #163: the recoverable plane keeps every backup forever (no pruning code exists, on

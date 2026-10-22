@@ -121,3 +121,77 @@ def test_audit_op_labels_send_tools_distinctly_from_write():
     # ping is not a write — it carries no audit verb at all.
     assert "ping" not in registry.audit_verbs()
     assert registry.TOOLS["ping"].audit_verb is None
+
+
+def test_audit_read_returns_an_old_record_without_dry_run_or_caller(
+    tmp_path, monkeypatch
+):
+    # #222 / D-03: records written before dry_run/caller existed are not migrated.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    old = {"ts": "2026-07-21T10:00:00", "tool": "delete_note", "op": "delete"}
+    (tmp_path / "audit.jsonl").write_text(json.dumps(old) + "\n", encoding="utf-8")
+    assert au.audit_read() == [old]
+
+
+def test_read_all_returns_both_files_oldest_first(tmp_path, monkeypatch):
+    # D-12: the dashboard reads the rotated twin then the live file, no limit, no cache.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    recs = [{"n": i, "tool": "t"} for i in range(4)]
+    (tmp_path / "audit.jsonl.1").write_text(
+        "".join(json.dumps(r) + "\n" for r in recs[:2]), encoding="utf-8"
+    )
+    (tmp_path / "audit.jsonl").write_text(
+        json.dumps(recs[2]) + "\nNOT JSON\n" + json.dumps(recs[3]) + "\n",
+        encoding="utf-8",
+    )
+    assert au.read_all() == recs
+    assert len(au.audit_read(limit=2)) == 2  # audit_read keeps its bound
+
+
+def test_read_all_missing_files_are_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    assert au.read_all() == []
+
+
+def test_read_all_unreadable_file_is_one_explicit_error_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    (tmp_path / "audit.jsonl").mkdir()  # reading a directory raises OSError
+    out = au.read_all()
+    assert len(out) == 1 and out[0]["error"].startswith("audit log unreadable")
+
+
+def _mw_call(monkeypatch, structured):
+    """One AuditMiddleware call for a move_mail with ``structured`` as its result."""
+    import asyncio
+    from types import SimpleNamespace
+
+    records = []
+    monkeypatch.setattr(au, "audit_write", records.append)
+    monkeypatch.setattr(au, "usage_log", lambda tool: None)
+    mw = au.AuditMiddleware(
+        audit_verbs={"move_mail": "move"}, snapshot_sources={}, dry_run_defaults={}
+    )
+    ctx = SimpleNamespace(
+        message=SimpleNamespace(name="move_mail", arguments={"ids": "a"})
+    )
+
+    async def call_next(_c):
+        return SimpleNamespace(structured_content=structured, is_error=False)
+
+    asyncio.run(mw.on_call_tool(ctx, call_next))
+    return records[0]
+
+
+def test_middleware_record_carries_the_batch_receipt(monkeypatch):
+    # D-12: the exact link from a batch's middleware line to its plan/done pair.
+    rid = "20261021-093100-000001-000-move"
+    rec = _mw_call(monkeypatch, {"result": {"receipt": rid, "count": 2}})
+    assert rec["receipt"] == rid and rec["tool"] == "move_mail"
+    assert _mw_call(monkeypatch, {"receipt": rid})["receipt"] == rid  # unwrapped too
+
+
+def test_middleware_record_without_a_receipt_has_no_receipt_key(monkeypatch):
+    for structured in ({"result": {"count": 2}}, {"id": "X"}, None, {"receipt": 7}):
+        rec = _mw_call(monkeypatch, structured)
+        assert "receipt" not in rec
+        assert {"ts", "tool", "op", "args", "dry_run", "caller"} <= set(rec)

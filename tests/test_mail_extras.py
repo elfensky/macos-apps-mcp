@@ -1,6 +1,6 @@
 """0.9.4 extras — save an attachment (#81) and statistics + export (#85).
 
-The filesystem boundary itself is pinned in ``test_mail_files.py``; these tests are
+The filesystem boundary itself is pinned in ``test_files.py``; these tests are
 about the two features wired onto it — that #81 refuses BEFORE the Apple Event rather
 than after, and that #85 counts DISTINCT messages rather than rows (raw rows overcount
 by up to 3.6x on a real store, the same margin ``mail_overview`` was fixed for).
@@ -12,7 +12,10 @@ import itertools
 import time
 
 import pytest
+from fastmcp.exceptions import ToolError
 
+import macos_apps_mcp.server as srv
+import macos_apps_mcp.tiers as tiers
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import (
     mail,
@@ -21,8 +24,13 @@ from macos_apps_mcp.adapters import (
     mail_index,
     mail_recover,
 )
-from macos_apps_mcp.errors import BatchTooLarge, NativeError
+from macos_apps_mcp.errors import BatchTooLarge, NativeError, WriteRefused
 from macos_apps_mcp.text import RS, US
+
+_write_gate_on_only = pytest.mark.skipif(
+    tiers.read_only(),
+    reason="the Mail write tools are absent under MACOS_APPS_READ_ONLY",
+)
 
 _ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
 _BOX = f"imap://{_ACCT}/INBOX"
@@ -69,7 +77,7 @@ def test_save_passes_the_target_path_and_cap_through_argv(root, resolved, monkey
         "deal.pdf",
         "",
         str(root / "invoices" / "deal.pdf"),
-        str(mail.mail_files.MAX_BYTES),
+        str(mail_attachments.MAIL_MAX_BYTES),
     )
     # saving can make Mail FETCH the message off the server, so this is not a 30s read
     assert seen["kw"] == {"timeout": mail_attachments._SAVE_TIMEOUT}
@@ -108,7 +116,7 @@ def test_save_refuses_an_existing_file_before_any_native_call(
         raise AssertionError("must refuse before touching Mail")
 
     monkeypatch.setattr(runtime, "run_osascript", boom)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         mail.MailAdapter().save_attachment("<a@x>", "", name="deal.pdf")
     assert (root / "deal.pdf").read_bytes() == b"mine"
 
@@ -123,9 +131,28 @@ def test_save_removes_an_empty_file_and_reports_it(root, resolved, monkeypatch):
         return f"0{US}false"
 
     monkeypatch.setattr(runtime, "run_osascript", fake)
-    with pytest.raises(ValueError, match="0 bytes"):
+    with pytest.raises(ValueError, match="0 bytes") as exc:
         mail.MailAdapter().save_attachment("<a@x>", "", name="empty.pdf")
+    assert "not available locally" in str(exc.value)
     assert not (root / "empty.pdf").exists()
+
+
+def test_save_names_a_nameless_attachment_attachment(root, resolved, monkeypatch):
+    """The shared module falls back to `file`; Mail keeps its own word."""
+    seen = {}
+
+    def fake(script, *argv, **kw):
+        seen["dest"] = argv[5]
+        (root / "in" / "attachment").write_bytes(b"x")
+        return f"1{US}true"
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+    mail.MailAdapter().save_attachment("<a@x>", "in", name="..")
+    assert seen["dest"] == str(root / "in" / "attachment")
+
+
+def test_mail_cap_is_25_mib():
+    assert mail_attachments.MAIL_MAX_BYTES == 25 * 1024 * 1024
 
 
 def test_save_needs_a_name_or_an_id(root, resolved):
@@ -226,7 +253,7 @@ def test_save_by_attachment_id_refuses_an_existing_file(root, resolved, monkeypa
     (root / "in" / "invoice.pdf").write_bytes(b"mine")
     calls = []
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, _TWO))
-    with pytest.raises(FileExistsError):
+    with pytest.raises(WriteRefused):
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
     assert [c[0] for c in calls] == [mail_attachments._ATTACHMENTS]
     assert (root / "in" / "invoice.pdf").read_bytes() == b"mine"
@@ -237,7 +264,7 @@ def test_save_by_attachment_id_refuses_an_oversized_attachment(
 ):
     """#296: the listed size lets the cap refuse before the save Apple Event."""
     calls = []
-    big = [("invoice.pdf", mail.mail_files.MAX_BYTES + 1, "2")]
+    big = [("invoice.pdf", mail_attachments.MAIL_MAX_BYTES + 1, "2")]
     monkeypatch.setattr(runtime, "run_osascript", _listing_then_save(root, calls, big))
     with pytest.raises(ValueError, match="cap"):
         mail.MailAdapter().save_attachment("<a@x>", "in", attachment_id="2")
@@ -440,6 +467,42 @@ def test_export_writes_eml_files_and_reports_absent_ids(root, monkeypatch):
     }
     assert out["results"][1] == {"id": "b@x", "status": "absent", "fidelity": "absent"}
     assert (root / "archive" / "a@x.eml").read_bytes() == b"From: x\r\n"
+
+
+def _fake_export_sources(monkeypatch):
+    monkeypatch.setattr(mail_recover, "locate", lambda t: [_located("a@x", 1)])
+    monkeypatch.setattr(mail_recover, "read_payloads", lambda t: {"a@x": b"new"})
+
+
+def test_export_refuses_an_existing_file_before_writing(root, monkeypatch):
+    (root / "archive").mkdir()
+    (root / "archive" / "a@x.eml").write_bytes(b"mine")
+    _fake_export_sources(monkeypatch)
+    with pytest.raises(WriteRefused, match="never overwrites"):
+        mail.MailAdapter().export("<a@x>", "archive")
+    assert (root / "archive" / "a@x.eml").read_bytes() == b"mine"
+
+
+@_write_gate_on_only
+def test_the_mail_write_tools_refuse_an_existing_file_as_a_typed_tool_error(
+    root, resolved, monkeypatch
+):
+    def boom(*a, **k):
+        raise AssertionError("must refuse before touching Mail")
+
+    monkeypatch.setattr(runtime, "run_osascript", boom)
+    (root / "deal.pdf").write_bytes(b"mine")
+    with pytest.raises(ToolError, match="never overwrites") as saved:
+        srv.save_mail_attachment("<a@x>", "", name="deal.pdf")
+    assert isinstance(saved.value.__cause__, WriteRefused)
+    (root / "archive").mkdir()
+    (root / "archive" / "a@x.eml").write_bytes(b"mine")
+    _fake_export_sources(monkeypatch)
+    with pytest.raises(ToolError, match="never overwrites") as exported:
+        srv.export_mail("<a@x>", "archive")
+    assert isinstance(exported.value.__cause__, WriteRefused)
+    assert (root / "deal.pdf").read_bytes() == b"mine"
+    assert (root / "archive" / "a@x.eml").read_bytes() == b"mine"
 
 
 def test_export_reports_partial_fidelity_rather_than_pretending(root, monkeypatch):

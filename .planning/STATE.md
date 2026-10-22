@@ -1,45 +1,44 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 04
-current_phase_name: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
-status: planning
-stopped_at: Phase 03 complete, ready to plan Phase 04
-last_updated: "2026-10-11T01:23:05.573Z"
-last_activity: 2026-10-11
-last_activity_desc: Phase 03 complete, transitioned to Phase 04
-state_head: 4b404ebdd179e48eb7d28a6be33ef452d695f391
+current_phase: 05
+current_phase_name: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+status: executing
+stopped_at: Phase 5 context gathered (assumptions mode)
+last_updated: "2026-10-22T08:26:17.674Z"
+last_activity: 2026-10-22
+last_activity_desc: Phase 05 execution started
+state_head: d053ec151ed176c03cc27c13a27965370b3a5483
 progress:
-  total_phases: 7
-  completed_phases: 4
-  total_plans: 38
-  completed_plans: 38
-  percent: 57
+  total_phases: 9
+  completed_phases: 6
+  total_plans: 64
+  completed_plans: 56
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-05)
+See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 03 — EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks
+**Current focus:** Phase 05 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
 
 ## Current Position
 
-Phase: 04 — Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-11 — Phase 03 complete, transitioned to Phase 04
+Phase: 05 (Operator Control Plane — Adapter Toggles and the Localhost Dashboard) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 05
+Last activity: 2026-10-22 — Phase 05 execution started
 
-Progress: [██████░░░░] 57%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 56
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -51,6 +50,9 @@ Progress: [██████░░░░] 57%
 | 02 | 6 | - | - |
 | 02.1 | 8 | - | - |
 | 03 | 10 | - | - |
+| 03.1 | 7 | - | - |
+| 04 | 6 | - | - |
+| 04.1 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -103,6 +105,12 @@ Recent decisions affecting current work:
 - [Phase 03]: Pre-code probes (03-01) overturned no premise: reminder lists save on the default source; Google refuses a list save with EKErrorDomain 24; reminder BY* parts and UNTIL (day granularity) round-trip; Google alarms unchanged from spike 008. — Measured on device 2026-10-06 before any Phase 3 code (D-23).
 - [Phase 03]: Owner rulings after the 03-01 probes: A3 and A4 confirmed (alarms refuse a negative value on a timed event and a duplicate offset); A5 changed — reminders compare UNTIL at day granularity too (03-03); A9 changed — complete_reminder refuses with WriteRefused, no save, when the Reminders store cannot be read (03-08). — Probe 2 showed reminders keep UNTIL exactly; the owner prefers a refusal to a blind completion of a possible parent.
 
+- [Phase 03.1]: #335 premise overturned on the iMac (2026-10-13): the SQLite plane, Notes.app and `notes_all` all count 1 live note; the 2 titled rows of the device report sit in Recently Deleted. No filter change; #335 closed with the record.
+- [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.
+- [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.
+- [Phase 04.1]: Bugs before any feature: #373 (hash-locked `build` group, the bundled wheel installed `--no-deps`), #383 (an existing target and a failed `mkdir` raise `WriteRefused`; `_guard` untouched), #384 (ruff on py312 with a drift-guard test), #387 (pid-tagged staging, a dead-pid sweep with five guards, a cleanup error never replaces a written result) — PRs #390/#392/#394/#396, close PR #398.
+- [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
+
 ### Pending Todos
 
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
@@ -111,9 +119,11 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
+- [Phase 04.1] Deferred: `export_mail` refuses mid-batch after earlier files were written, and the typed refusal hides that (review WR-02, tracked in #399).
+
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.2 (universal2, build `aa27d32`, notarized, installed with `ditto`; `doctor()` proven over the socket 2026-10-08: version 0.14.2, libs mcp 1.29.0 / fastmcp 3.4.7; code seal intact after the first run; TestPyPI only so far — the PyPI dispatch for 0.14.1/0.14.2 is the operator's). It adds #304 (#296), #305 (#299) and #308 (#205: universal2, macOS 15 floor, no cryptography, Intel-only allow-unsigned-executable-memory) to v0.14.1. Install with `ditto`, not `cp -R` (#297).
+- The installed daemon is release v0.14.3 (universal2, build `85a3baf`, notarized and stapled, installed with `ditto` after moving 0.14.2 to `~/.local/state/macos-apps-mcp/app-backup/`; `doctor()` proven 2026-10-11: version 0.14.3, build `85a3baf 2026-10-11T01:32:20Z`, libs mcp 1.29.0 / fastmcp 3.4.7, daemon mode; code seal intact after the first run, 0 files written in the bundle; TestPyPI from the main merge — the production PyPI dispatch is the operator's). It adds #313 (#307 Local reminders), #316 (#297 hash .pyc), #319 (#302 UDS teardown), #314 (#111), #315 (#113) and the Intel note (#323) to v0.14.2. Release zip sha256 `42c8b46c…f8d8408e`. Open from this cycle: #317, #318, #322.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -143,6 +153,11 @@ Recent decisions affecting current work:
 | 261009-ha3 | Local-list reminders are found: the Reminders store is keyed on ZDACALENDARITEMUNIQUEIDENTIFIER and every per-account store file is read; device-verified on iCloud and on a Local account (Intel iMac) (#307, PR #313) | 2026-10-11 | 39e2a33 | [261009-ha3-fix-307-key-reminders-store-reads-on-zda](./quick/261009-ha3-fix-307-key-reminders-store-reads-on-zda/) |
 | 261011-4iv | The 0.14.2 universal .app verified on an Intel CPU (iMac, macOS 15): daemon, doctor, reads, seal; found #317, #318, #322 (#205, PR #323) | 2026-10-11 | 4b404eb | [261011-4iv-205-item-3-the-0-14-2-universal-app-veri](./quick/261011-4iv-205-item-3-the-0-14-2-universal-app-veri/) |
 | 12 | Release bump 0.14.2 — Universal app (#205, #296, #299) | 2026-10-08 | 36827fe | — |
+| 20 | Release bump 0.14.3 — Local reminders: pyproject, Info.plist, uv.lock root line, CHANGELOG header (PR #325; release PR #326, tag v0.14.3) | 2026-10-11 | c38a32b | — |
+| 261011-imn | doctor counts an answered -1728 probe as ok (#317); grant map names the TCC denial reason, prompt-timeout reset command and AppleEvents target (#318); PR #328. Also: PyPI 0.14.3 published, Gmail test label removed | 2026-10-11 | ff345a5 | [261011-imn-317-318-doctor-counts-an-answered-1728-p](./quick/261011-imn-317-318-doctor-counts-an-answered-1728-p/) |
+| 261011-p90 | uvx on an Intel Mac installs without Rust: cryptography<49 on darwin x86_64 only (48.0.1 is the last Intel wheel); PR #330, closes #322 | 2026-10-11 | 2fa3524 | [261011-p90-322-uvx-on-an-intel-mac-installs-without](./quick/261011-p90-322-uvx-on-an-intel-mac-installs-without/) |
+| 261012-utn | Ship the macOS app icon: packaging/AppIcon.icon (Icon Composer), actool compile step in build_app.sh, Info.plist icon keys, packaging test, DAEMON.md note | 2026-10-12 | 22870dc | [261012-utn-ship-the-macos-app-icon-packaging-appico](./quick/261012-utn-ship-the-macos-app-icon-packaging-appico/) |
+| 261018-1sb | mail_overview re-reads the account map once (per minute) before labelling an unknown id; a failed re-read keeps the known names (#359) | 2026-10-18 | 3fbc3d0 | [261018-1sb-fix-359-one-map-re-read-before-the-label](./quick/261018-1sb-fix-359-one-map-re-read-before-the-label/) |
 
 ### Roadmap Evolution
 
@@ -152,6 +167,8 @@ Recent decisions affecting current work:
 - Phase 3 edited: edited fields: depends_on (Phase 02.1), requirements (+CAL-04, +REM-06), success_criteria (+6: container id in Pointer.folder, #207)
 - Phase 3 edited: edited fields: goal, requirements (+MAIL-05, +MAIL-06), success_criteria (+7: #229 rollback decision, +8: #230 five device runs) — carried over from Phase 02.1
 - Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
+- Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
+- Phase 04.1 inserted after Phase 4: Bug Fixes — Phase 4 Follow-ups Before Any Feature (#373, #383, #384, #387) (URGENT)
 
 ## Deferred Items
 
@@ -163,6 +180,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T17:56:33.702Z
-Stopped at: Phase 03 complete, ready to plan Phase 04
-Resume file: .planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-CONTEXT.md
+Last session: 2026-10-21T12:19:18.187Z
+Stopped at: Phase 5 context gathered (assumptions mode)
+Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md

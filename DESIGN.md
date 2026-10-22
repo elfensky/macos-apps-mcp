@@ -12,7 +12,7 @@ native data-plane adapter, so clean module boundaries are load-bearing.
   carries an *"every note returned in full"* context-bloat bug. We don't resurrect it; we own a lean
   replacement.
 - **The apps don't share one access method:** Calendar/Reminders → EventKit (clean, no app-open);
-  Mail/Notes/Photos → AppleScript; Shortcuts → CLI; **Journal → no API at all** (no AppleScript
+  Mail/Notes → AppleScript; Photos → osxphotos reading the library at rest (Full Disk Access); Shortcuts → CLI; **Journal → no API at all** (no AppleScript
   dictionary, JournalingSuggestions is read-only/iOS-only, entries are E2E-encrypted). So the
   architecture absorbs heterogeneous backends behind a uniform module surface — and **Journal is out**.
 
@@ -64,7 +64,7 @@ macos_apps_mcp/
     mail.py        # AppleScript / osascript (read-only inbox search)
     notes.py       # AppleScript / osascript (title search)
     contacts.py    # AppleScript / osascript (search + create)
-    photos.py      # AppleScript / osascript (Photos search command)
+    photos.py      # osxphotos, library read at rest (search, albums, metadata)
     safari.py      # AppleScript / osascript (list tabs + open url)
     messages.py    # AppleScript / osascript (chat list only)
     shortcuts.py   # `shortcuts` CLI (list + run)
@@ -88,7 +88,8 @@ thin read adapters plus a few actions — each still returning only pointers:
 - **Mail** (AppleScript): inbox subject search. Read-only — no body fetch, no send.
 - **Notes** (AppleScript): title search.
 - **Contacts** (AppleScript): name search → name/org/first phone+email; `create_contact` action.
-- **Photos** (AppleScript `search`): media search — no PhotoKit bundle needed.
+- **Photos** (osxphotos, Full Disk Access): search, albums and bounded metadata by Photos uuid —
+  no AppleScript, no PhotoKit bundle, no image bytes.
 - **Safari** (AppleScript): list open tabs; `safari_open` action (http/https only).
 - **Messages** (AppleScript): conversation list only — content needs the private `chat.db`, sending
   is regressed since macOS 11, so both are out.

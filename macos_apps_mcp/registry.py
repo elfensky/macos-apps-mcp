@@ -16,6 +16,7 @@ through FastMCP).
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -129,6 +130,27 @@ def audit_verbs() -> dict[str, str]:
     }
 
 
+def _dry_run_default(fn) -> bool | None:
+    """The ``dry_run`` default in ``fn``'s signature, or ``None`` when the tool has no
+    ``dry_run`` parameter (or no default for it) — a tool that always acts."""
+    param = inspect.signature(fn).parameters.get("dry_run")
+    if param is None or param.default is inspect.Parameter.empty:
+        return None
+    return bool(param.default)
+
+
+def dry_run_defaults() -> dict[str, bool]:
+    """Every tool with an audit verb -> its signature ``dry_run`` default (#222), the
+    map ``AuditMiddleware`` resolves an omitted ``dry_run`` from. Unlike ``audit_verbs``
+    it does NOT filter on ``registered``: CI's ``MACOS_APPS_READ_ONLY=1`` pass and the
+    send tools (off by default) must see the same map as a fully enabled server."""
+    return {
+        n: d
+        for n, r in TOOLS.items()
+        if r.audit_verb is not None and (d := _dry_run_default(r.fn)) is not None
+    }
+
+
 def no_notice() -> frozenset[str]:
     return frozenset(n for n, r in TOOLS.items() if not r.notice)
 
@@ -163,12 +185,33 @@ def outbound_status() -> dict[str, list[str]]:
     Card 2 (GATE-04, RESEARCH Pitfall 3): this is now the ONE outbound ledger — a view
     over the send records already sitting in ``TOOLS``, not a second hand-maintained
     set. ``tiers.py`` keeps only the pure gate predicates (``read_only``,
-    ``allow_send``); this is the sole caller doctor and the tests read."""
+    ``allow_send``); this is the sole caller doctor and the tests read.
+
+    ``configured`` also requires the adapter to be ON (PLAT-01): allow_send=mail with
+    Mail OFF registers nothing, so reporting it would show a pending delta that no
+    restart clears."""
     send_adapters = {r.adapter for r in TOOLS.values() if r.tier == "send"}
     registered = {
         r.adapter for r in TOOLS.values() if r.tier == "send" and r.registered
     }
     return {
         "registered": sorted(registered),
-        "configured": sorted(a for a in send_adapters if tiers.allow_send(a)),
+        "configured": sorted(
+            a for a in send_adapters if tiers.allow_send(a) and tiers.adapter_enabled(a)
+        ),
+    }
+
+
+def adapter_status() -> dict[str, list[str]]:
+    """The adapter twin of ``outbound_status()`` (PLAT-01, D-03): ``registered`` = the
+    adapters with at least one tool registered at import; ``configured`` = every
+    adapter the deny-list (env/file) leaves ON right now. They diverge when the
+    ``adapters_off`` file changes but the daemon keeps running — doctor reports the
+    delta as ``adapters_pending`` with a restart directive. Every adapter has a read
+    tool, so under ``MACOS_APPS_READ_ONLY`` an enabled adapter still shows up."""
+    names = {r.adapter for r in TOOLS.values() if r.adapter}
+    registered = {r.adapter for r in TOOLS.values() if r.adapter and r.registered}
+    return {
+        "registered": sorted(registered),
+        "configured": sorted(n for n in names if tiers.adapter_enabled(n)),
     }

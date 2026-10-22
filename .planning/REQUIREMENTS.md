@@ -32,6 +32,19 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **MAIL-05**: `rollback()`'s unverified delete of a windowless outgoing message has a decided, device-probed handling (retry, another mitigation, or a documented caller contract); an outbound call that leaves a message behind says so loudly; the #229 xfail is removed or its reason names the decision (#229)
 - [x] **MAIL-06**: Five dedicated device runs, on a message in an account a probe may target, decide the reply quote's read of the original: 5 of 5 passing removes the non-strict xfail; any failure ships a mitigation and a facts entry that separates a transient event-queue stall from the permanent wedge (#230)
 
+### Bugs — bugs and errors come before any feature (owner, 2026-10-11)
+
+- [x] **FIX-01**: Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field; a test covers a write tool called without `dry_run` and its record states `dry_run: true` (#222)
+- [x] **FIX-02**: The cause of the `contacts("an")` 30 s timeout on the Intel iMac is found (narrow-query timing, Script Editor timing, Contacts state) and fixed — by a bulk read that runs the `whose` scan once, a contacts-specific host timeout with the script backstop at or above the host cap, or an error text that names the cause (the SQLite plane of #95 stays v2, CON-04); on the Intel iMac the broad query answers, or fails with an error that names the real cause (#334)
+- [x] **FIX-03**: On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted; if the tool's SQLite filter drops a live note, the filter is fixed (#335)
+- [x] **FIX-04**: On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none; the cause of the raw UUID (removed account, stale name cache, or an account kind `every account` omits) is recorded (#336)
+- [x] **FIX-05**: Through the daemon, `doctor(request=True)` with Photos quit reports the photos surface ok — or Phase 4 removes the Photos Automation probe and the issue closes as moot (#317, #337)
+- [x] **FIX-06**: The Intel iMac device report carries the three corrections: the pass count, the Local-list subtask conclusion, and the machine line without firmware and security details; the same detail leaves every other tracked file (`docs/DAEMON.md`, the quick-task 261011-4iv PLAN and SUMMARY) (#333)
+- [x] **FIX-07**: `scripts/build_app.sh` installs the bundled `macos_apps_mcp` package from a wheel built in a hash-pinned build environment — hatchling and its build dependencies come from a hashed constraints file or lock, never fresh and unhashed from PyPI under build isolation; the `--no-deps` install and the D-16 export guard stay as they are (#373)
+- [x] **FIX-08**: A `FileExistsError` from `files.target_path` and an `OSError` from the `mkdir` in `files.resolve_dest` reach the client as a typed tool error with an error kind and the agent-directed text, for `save_mail_attachment`, `export_mail` and `export_photo`, so a caller can tell the never-overwrite refusal from a crash; the Mail tests that pin the raw exception types follow (#383)
+- [x] **FIX-09**: `[tool.ruff] target-version` is `py312`, matching `requires-python = ">=3.12"` (D-16), and the UP047 rewrites it raises land in the same PR with the suite and ruff green (#384)
+- [x] **FIX-10**: `export_photo` leaves no hidden staging copy behind when the process is killed (SIGTERM, orphan `_exit`, SIGKILL): the staging prefix carries the pid and a later call removes only staging directories whose pid is dead, never a live one; and a staging cleanup error after a successful publish does not replace the written result — the outcome stands, the error is logged and the leftover directory is named (#387)
+
 ### Calendar
 
 - [x] **CAL-01**: User can set alarms (minutes-before list) when creating or updating an event; they land as `EKAlarm`s and are read back by verify-after-write (#89)
@@ -49,15 +62,15 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Notes
 
-- [ ] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code (#93)
-- [ ] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies (#93)
+- [x] **NOTE-01**: Semantic search is evaluated first — a written decision on embedding model, chunking, index build/refresh policy, size cap and the optional-extra boundary before any indexing code (#93)
+- [x] **NOTE-02**: If adopted: `notes_semantic(query)` returns Pointers from a sidecar index in the server's state dir (lazily built, size-capped, same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed; base install gains no ML dependencies (#93)
 
 ### Photos
 
-- [ ] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback (#96)
-- [ ] **PHO-02**: User can list albums as Pointers (#96)
-- [ ] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset) (#96)
-- [ ] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes) (#96)
+- [x] **PHO-01**: The Photos mechanism is settled by running `uv add osxphotos` on the deployment target (the pyproject "deferred: pyobjc conflict" note is likely stale); PhotoKit via PyObjC is the fallback (#96)
+- [x] **PHO-02**: User can list albums as Pointers (#96)
+- [x] **PHO-03**: User can read bounded metadata for a photo by id (dates, location, persons, EXIF subset) (#96)
+- [x] **PHO-04**: User can export a photo by id to a destination directory (write-to-disk discipline; never inline image bytes) (#96)
 
 ### Platform
 
@@ -169,12 +182,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REM-03 | Phase 3 | Complete |
 | REM-04 | Phase 3 | Complete |
 | REM-06 | Phase 3 | Complete |
-| NOTE-01 | Phase 4 | Pending |
-| NOTE-02 | Phase 4 | Pending |
-| PHO-01 | Phase 4 | Pending |
-| PHO-02 | Phase 4 | Pending |
-| PHO-03 | Phase 4 | Pending |
-| PHO-04 | Phase 4 | Pending |
+| FIX-01 | Phase 03.1 | Complete |
+| FIX-02 | Phase 03.1 | Complete |
+| FIX-03 | Phase 03.1 | Complete |
+| FIX-04 | Phase 03.1 | Complete |
+| FIX-05 | Phase 03.1 | Complete |
+| FIX-06 | Phase 03.1 | Complete |
+| FIX-07 | Phase 04.1 | Complete |
+| FIX-08 | Phase 04.1 | Complete |
+| FIX-09 | Phase 04.1 | Complete |
+| FIX-10 | Phase 04.1 | Complete |
+| NOTE-01 | Phase 4 | Complete |
+| NOTE-02 | Phase 4 | Complete |
+| PHO-01 | Phase 4 | Complete |
+| PHO-02 | Phase 4 | Complete |
+| PHO-03 | Phase 4 | Complete |
+| PHO-04 | Phase 4 | Complete |
 | PLAT-01 | Phase 5 | Pending |
 | PLAT-02 | Phase 5 | Pending |
 | DIST-01 | Phase 6 | Pending |
@@ -186,11 +209,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 42 total
-- Mapped to phases: 42
+- v1 requirements: 52 total
+- Mapped to phases: 52
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 4: 6 · Phase 5: 2 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 

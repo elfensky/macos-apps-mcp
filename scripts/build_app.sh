@@ -18,7 +18,9 @@ esac; done
 
 [[ -n "$NOTARIZE" && -z "$SIGN" ]] && { echo "--notarize requires --sign" >&2; exit 2; }
 # Preflight: both slices are smoke-run here (x86_64 under Rosetta), and lipo/vtool
-# come from the Xcode Command Line Tools — fail now, not after the installs.
+# come from the Xcode Command Line Tools — fail now, not after the installs. actool
+# (the icon compiler) ships with full Xcode only; the absolute path from `xcrun -f`
+# runs without DEVELOPER_DIR, so it is never exported.
 /usr/bin/arch -arm64 /usr/bin/true 2>/dev/null \
   || { echo "build needs an Apple-silicon Mac (it runs the arm64 slice)" >&2; exit 2; }
 /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null \
@@ -26,6 +28,11 @@ esac; done
        "--agree-to-license" >&2; exit 2; }
 xcrun -f vtool >/dev/null 2>&1 \
   || { echo "build needs the Xcode Command Line Tools (lipo, vtool)" >&2; exit 2; }
+ACTOOL="$(xcrun -f actool 2>/dev/null \
+  || DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun -f actool 2>/dev/null)" \
+  || { echo "build needs full Xcode to compile packaging/AppIcon.icon;" \
+       "the Command Line Tools have no actool. Install Xcode, or set DEVELOPER_DIR" \
+       "to an Xcode's Contents/Developer" >&2; exit 2; }
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYVER=3.14
@@ -75,21 +82,43 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/lib" \
 cp "$STD/bin/python${PYVER}" "$APP/Contents/MacOS/macos-apps-mcp"   # real file (codesign)
 cp -R "$STD/lib/python${PYVER}" "$APP/Contents/lib/python${PYVER}"  # stdlib for getpath
 SITE="$APP/Contents/lib/python${PYVER}/site-packages"
+# The icon goes into Resources after the bundle reset and before signing: codesign
+# seals Resources, so a file written later breaks the seal.
+"$ACTOOL" "$REPO/packaging/AppIcon.icon" --compile "$APP/Contents/Resources" \
+  --platform macosx --minimum-deployment-target "$MACOS_MIN" --app-icon AppIcon \
+  --output-partial-info-plist "$WORK/icon-partial.plist" \
+  --output-format human-readable-text \
+  || { echo "ICON COMPILE FAILED: actool rejected packaging/AppIcon.icon" >&2; exit 1; }
+for f in AppIcon.icns Assets.car; do
+  [[ -s "$APP/Contents/Resources/$f" ]] \
+    || { echo "ICON COMPILE FAILED: no Contents/Resources/$f" >&2; exit 1; }
+done
 
 # 2. Locked deps (#286), one tree per arch, then lipo the thin .so files.
-# cryptography (+cffi, pycparser) is reached only via mcp's pyjwt[crypto] and
-# fastmcp's auth modules; no auth is configured, so the bundle never imports it,
-# and 49+ has no x86_64 wheel (#205). --prune drops it from the export; --no-deps
-# stops uv re-resolving it unpinned from PyPI. --no-build: a cross-arch sdist
+# cryptography is reached only via mcp's pyjwt[crypto] and fastmcp's auth modules; no
+# auth is configured, so the bundle never imports it, and 49+ has no x86_64 wheel
+# (#205). --prune cryptography still drops it from the export, but cffi and pycparser
+# now ship, because osxphotos -> osxmetadata -> xattr needs cffi. --no-deps
+# stops uv re-resolving cryptography unpinned from PyPI. --no-build: a cross-arch sdist
 # build would compile for the HOST arch. MACOSX_DEPLOYMENT_TARGET applies only
 # with --python-platform (else uv takes the build host's macOS tags).
 uv export --project "$REPO" --frozen --no-dev --no-emit-project \
   --prune cryptography > "$WORK/reqs"
+# D-16: --python-platform drops a requirement that carries a platform_release marker and
+# still exits 0, so a silent hole would reach the bundle; refuse the export instead.
+if grep -q platform_release "$WORK/reqs"; then
+  echo "EXPORT HOLDS platform_release MARKERS (uv drops them under --python-platform)" >&2
+  grep platform_release "$WORK/reqs" >&2
+  exit 1
+fi
 for a in aarch64 x86_64; do
   MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" uv pip install -q \
     --python "$STD/bin/python${PYVER}" --python-platform "$a-apple-darwin" \
     --python-version "$PYVER" --no-build --no-deps --require-hashes \
     --target "$WORK/site-$a" -r "$WORK/reqs"
+  # The two libdisclaim dylibs are thin (one arch each) and only the osxphotos CLI loads them;
+  # the universal2 gate would reject them, and deleting after ditto trips ARCH-SPECIFIC instead.
+  rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib
 done
 diff <(cd "$WORK/site-aarch64" && find . | sort) \
   <(cd "$WORK/site-x86_64" && find . | sort) >&2 \
@@ -100,7 +129,15 @@ ditto "$WORK/site-aarch64" "$SITE"
   if is_macho "$SITE/$f"; then lipo2 "$SITE/$f" "$WORK/site-x86_64/$f"
   elif [[ "$f" != *.dist-info/* ]]; then echo "ARCH-SPECIFIC NON-BINARY: $f"; exit 1; fi
 done
-uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$REPO"
+# #373: the build backend is hash-locked like the runtime deps. The `build` group in uv.lock
+# (hatchling and its dependencies) is the build constraint set, and --require-hashes fails the
+# build on any build requirement that has no hash. The wheel installs --no-deps, so the D-16
+# export above stays the only source of runtime dependencies.
+uv export --project "$REPO" --frozen --only-group build --no-emit-project > "$WORK/build-reqs"
+uv build -q --wheel --python "$STD/bin/python${PYVER}" \
+  --build-constraints "$WORK/build-reqs" --require-hashes \
+  --out-dir "$WORK/wheel" "$REPO"
+uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$WORK"/wheel/*.whl
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.
@@ -127,7 +164,8 @@ echo "universal2 gate ok: every Mach-O is x86_64 arm64, minos <= $MACOS_MIN"
 
 # Smokes on BOTH slices (x86_64 runs under Rosetta: `softwareupdate --install-rosetta`).
 for a in arm64 x86_64; do
-  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -c "import macos_apps_mcp" \
+  env -i /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" \
+    -E -s -P -c "import macos_apps_mcp, macos_apps_mcp.dashboard, osxphotos, UniformTypeIdentifiers" \
     || { echo "BUNDLE SMOKE FAILED ($a): import failed (getpath layout, or a" \
          "slice-specific extension)"; exit 1; }
   # one streamed tool call through the shim's transport, on the bundled libraries (#286)
@@ -239,7 +277,7 @@ if [[ -n "$SIGN" ]]; then
   # -B: no .pyc into the sealed bundle; --verify below proves the seal held.
   for a in arm64 x86_64; do
     /usr/bin/perl -e 'alarm shift; exec @ARGV' 120 /usr/bin/arch "-$a" "$EXE" \
-      -E -s -P -B -c "import ctypes, macos_apps_mcp.server
+      -E -s -P -B -c "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers
 ctypes.CFUNCTYPE(None)(lambda: None)" \
       || { echo "SIGNED SMOKE FAILED ($a): the hardened runtime breaks it"; exit 1; }
     echo "signed smoke ok: $a"

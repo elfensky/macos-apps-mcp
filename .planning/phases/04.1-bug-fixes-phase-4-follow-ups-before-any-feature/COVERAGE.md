@@ -1,0 +1,1 @@
+No external API integration: the phase fixes four local bugs (#373 build script and uv.lock, #383 files-module errors, #384 ruff target, #387 export_photo staging) and adds no call to any external service.

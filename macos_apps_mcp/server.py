@@ -129,10 +129,12 @@ def _tool(
 
     ``tier`` decides the gate (read: always registered; additive/destructive:
     skipped under ``tiers.read_only()``; send: registered only when
-    ``tiers.allow_send(adapter)`` says so) and the MCP annotations
-    (``registry.ToolRecord.annotations``). Everything else the middlewares, doctor and
-    the tests used to keep in hand-maintained name sets is stated here ONCE and read
-    back from ``registry.TOOLS``: ``audit`` (the audit-log verb — derived from the
+    ``tiers.allow_send(adapter)`` says so) — and in EVERY tier an adapter on the
+    ``tiers.adapters_off()`` deny-list registers nothing (PLAT-01) — and the MCP
+    annotations (``registry.ToolRecord.annotations``). Everything else the
+    middlewares, doctor and the tests used to keep in hand-maintained name sets is
+    stated here ONCE and read back from ``registry.TOOLS``: ``audit`` (the audit-log
+    verb — derived from the
     create/update/delete/complete prefix, REQUIRED otherwise, never a silent
     ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — read per
     call by ``notices.UntrustedDataNotice``), ``removes_content`` (GATE-05, D-04 —
@@ -158,11 +160,15 @@ def _tool(
                 # paragraph whether or not the tool registers (tests read it either
                 # way).
                 f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
-            registered = tiers.allow_send(adapter)
+        # PLAT-01 (D-02): the adapter deny-list gates every tier; meta tools
+        # (adapter=None) are never gated.
+        on = adapter is None or tiers.adapter_enabled(adapter)
+        if tier == "send":
+            registered = on and tiers.allow_send(adapter)
         elif tier == "read":
-            registered = True
+            registered = on
         else:
-            registered = not tiers.read_only()
+            registered = on and not tiers.read_only()
         rec = registry.add(
             registry.ToolRecord(
                 name=name,
@@ -262,7 +268,11 @@ def audit(since: str | None = None) -> list[dict]:
     """Recent write audit entries (newest first) — what macos-apps-mcp changed, with
     before/after pointers, enough to reverse a change by hand. `since` optional ISO
     datetime (call now() to ground it) drops older entries; bounded to the last 50.
-    Read-only; no permission (reads a local log at ~/.local/state/macos-apps-mcp)."""
+    Each entry carries `dry_run` (resolved from the tool's default when the caller
+    omitted it, so a preview reads true) and `caller` (the MCP client's name and
+    version, plus `session` for a shim); `caller` is reported by the client, never an
+    identity check. Read-only; no permission (reads a local log at
+    ~/.local/state/macos-apps-mcp)."""
     return audit_read(since)
 
 
@@ -522,7 +532,9 @@ def mail_overview() -> list[dict]:
     counted ONCE even when it is filed in the same mailbox twice.
     Account NAMES are looked up through Mail, so this tool does contact Mail (launching
     it if it isn't running); when Mail is unreachable the account UUID stands in and
-    the counts — which never needed Mail — are still correct. The On My Mac store is
+    the counts — which never needed Mail — are still correct. An account Mail answers
+    but does not list (for example a removed one) shows "(account not in Mail)" as its
+    `account`; `account_id` keeps the uuid. The On My Mac store is
     always shown as "On My Mac": Mail never lists it as an account.
     Fast and read-only. Needs Full Disk Access for the counts and Automation access for
     Mail for the account names."""
@@ -1009,12 +1021,16 @@ def forward_mail(message_id: str, mailbox: str, to: str, dry_run: bool = True) -
 
 
 @_read_tool(adapter="notes", permission="Automation")
-def notes(title: str) -> list[dict[str, str]]:
-    """Search Notes by title/snippet. Returns pointers (id + snippet). Read-only. Fast
-    path reads NoteStore.sqlite (needs Full Disk Access); without it, degrades to
-    Automation (Notes) title search — Automation access is the floor. See notes_all,
-    note_bodies."""
-    return [p.as_dict() for p in _notes.get_pointers(title)]
+def notes(title: str) -> dict:
+    """Search Notes by title, snippet and note body. Returns {results, truncated?,
+    plane?, coverage?}: results are pointers (id + snippet); title/snippet hits come
+    first, body-only hits after. Body words split at spaces and punctuation only, so a
+    word inside unspaced Chinese or Japanese text is found in a title or snippet, never
+    in a body. Read-only. Fast path reads NoteStore.sqlite (needs Full Disk Access) and
+    searches bodies in memory, never on disk, skipping locked notes; without it,
+    degrades to an Automation (Notes) title search, and plane/coverage say so.
+    Automation access is the floor. See notes_all, note_bodies."""
+    return _notes.read(title)
 
 
 @_read_tool(adapter="notes", permission="Automation")
@@ -1056,11 +1072,63 @@ def now_playing() -> dict:
     return _music.now_playing()
 
 
-@_read_tool(adapter="photos", permission="Automation")
-def photos(query: str) -> list[dict[str, str]]:
-    """Search Photos (filename, place, date). Returns pointers (id + filename).
-    Read-only; needs Automation access for Photos."""
-    return [p.as_dict() for p in _photos.get_pointers(query)]
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photos(query: str) -> dict:
+    """Search Photos by one string, matched (case, accent and smart-quote blind)
+    against original filename, filename, title, description, keywords, place name,
+    person names and labels. Returns `{results, truncated?}`: pointers (id = the Photos
+    uuid, summary = `title · filename · date`), newest first, at most 25; `truncated`
+    means the 25 cap was reached and there may be more. Hidden and Recently Deleted
+    photos never match. Pass the id to photo_info or export_photo. Reads the library at
+    rest through osxphotos, so it needs Full Disk Access (not Automation). Read-only;
+    never returns image bytes or thumbnails."""
+    return _photos.read(query)
+
+
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photo_albums() -> dict:
+    """List Photos albums as pointers: id = the album uuid, summary = `title (n
+    photos)`, folder = the album's folder path (` / ` joined) when it sits in a folder.
+    Returns
+    `{results, truncated?}`, at most 100, ordered by folder then title; same-title
+    albums stay separate. Needs Full Disk Access (osxphotos reads the library at rest).
+    Read-only; the albums' photos are not listed — search with photos."""
+    return _photos.albums()
+
+
+@_read_tool(adapter="photos", permission="Full Disk Access")
+def photo_info(id: str) -> dict:
+    """Metadata for one photo by id: id, filename, title, description, kind (photo,
+    video, live photo), edited, taken/added/modified (ISO-8601), latitude, longitude,
+    place, persons, camera_make, camera_model, lens, focal_length, aperture,
+    shutter_speed, iso, width, height. Photo ids come from photos; the old
+    `<UUID>/L0/001` form is accepted too. Reads the Photos library at rest through
+    osxphotos, so it needs Full Disk Access (not Automation). Read-only; never returns
+    image bytes, thumbnails or file paths. An unknown or Recently Deleted id raises; a
+    Hidden one is refused (unhide it in Photos first)."""
+    return _photos.info(id)
+
+
+@_additive_tool(audit="export", adapter="photos", permission="Full Disk Access")
+def export_photo(id: str, dest_dir: str) -> dict:
+    """Write one photo out as a still image file (Full Disk Access).
+
+    Writes the edited still, the image as Photos shows it; the original when there is
+    no edit. `id` is a photo id from photos (the old
+    `<UUID>/L0/001` form is accepted). `dest_dir` must be inside the allowed root
+    (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
+    a path outside it is REFUSED. The filename is derived from the original name plus
+    the first 8 characters of the id, and an existing file is never overwritten.
+    Files over 250 MiB are refused.
+
+    Reads the library at rest, so it never launches Photos and needs no Automation. A
+    photo whose file is only in iCloud comes back `status: "absent"` with a reason:
+    nothing is downloaded. Videos are refused; a Live Photo exports its still only and
+    says `skipped: "live photo motion"`. Hidden and Recently Deleted ids are refused.
+
+    Returns {id, status: "written", path, bytes, edited, dest_dir}.
+    Additive: writes a new file, never modifies the Photos library."""
+    return _photos.export(id, dest_dir)
 
 
 @_read_tool(adapter="messages", permission="Automation")
@@ -1426,7 +1494,9 @@ def set_mode(mode: str, on: bool) -> dict:
 # holds them (it also reads them per call, so ordering is belt-and-suspenders).
 mcp.add_middleware(
     AuditMiddleware(
-        audit_verbs=registry.audit_verbs(), snapshot_sources=registry.snapshot_sources()
+        audit_verbs=registry.audit_verbs(),
+        snapshot_sources=registry.snapshot_sources(),
+        dry_run_defaults=registry.dry_run_defaults(),
     )
 )
 

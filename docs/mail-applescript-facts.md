@@ -158,17 +158,17 @@ is true**. Three of the four things probing found are not in the dictionary at a
 | Fact | Detail |
 |---|---|
 | `save <mail attachment> in (path as POSIX file)` **works**, writing to the exact path given (it is a FILE, not a target directory). The saved bytes are the real thing — a 192,250-byte PDF opened as *"PDF document, version 1.5, 2 pages"*. | It does **not** need the message open, or a window, or Mail in the foreground. |
-| **It OVERWRITES SILENTLY.** A 0-byte placeholder at the destination came back holding the full 192 KB, with no error. | So "never overwrite" cannot be enforced in AppleScript — `mail_files.target_path` refuses in Python, before the Apple Event. |
+| **It OVERWRITES SILENTLY.** A 0-byte placeholder at the destination came back holding the full 192 KB, with no error. | So "never overwrite" cannot be enforced in AppleScript — `files.target_path` refuses in Python, before the Apple Event. |
 | **Saving a NOT-downloaded attachment makes Mail FETCH the whole message**, synchronously. It does not fail and it does not write an empty file. | All seven attachments on one `.partial` message flipped to `downloaded=true` in the same call. So this is a network operation, not a read — hence `_SAVE_TIMEOUT = 300`, not the 30 s default. |
 | **`file size` on a not-yet-downloaded attachment is the ENCODED estimate, not the byte count.** The same attachment reported 14,509 before the fetch and 8,755 after. | A size cap therefore over-refuses by roughly 4/3 on undownloaded attachments. That is the safe direction, and it is why the written file is `stat`ed afterwards rather than trusted. |
-| A missing destination DIRECTORY raises **-10000** and writes nothing. | `mail_files.resolve_dest` creates it first, inside the allowlisted root. |
+| A missing destination DIRECTORY raises **-10000** and writes nothing. | `files.resolve_dest` creates it first, inside the allowlisted root. |
 | `id of <mail attachment>` is a **MIME part path** — `"2"`, `"1.12"`, `"1.14"` — unique within its message and derived from the message's own structure. | The NAME is not unique (`image001.jpg`…`image005.png` on one real message), so the id is what addresses an attachment when a name is ambiguous. |
 
 Not provable on device, so handled defensively regardless: whether Mail's `name` can carry `/`,
 `..`, a NUL or a bidi override. Crafting such an attachment needs hand-rolled MIME, and the
 Python-side sanitiser is correct whatever Mail does — an attachment name arrives from whoever sent
-the mail, so it is treated as hostile unconditionally. See `mail_files` and
-`tests/test_mail_files.py`.
+the mail, so it is treated as hostile unconditionally. See `files` and
+`tests/test_files.py`.
 
 ### 4c. `.partial.emlx` means NO ATTACHMENTS, not "no body" (#119)
 

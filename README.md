@@ -17,7 +17,7 @@ what's landed.
 
 ## Install
 
-Requires macOS, Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
+Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
 
 The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so
 there is no clone and no venv path:
@@ -72,10 +72,11 @@ shares, run the signed `.app` daemon: see [docs/DAEMON.md](docs/DAEMON.md).
 Grant access when macOS prompts — the first call to each app triggers its dialog:
 
 - **EventKit** — Calendar + Reminders (read/write).
-- **Automation** (per app) — Mail, Notes, Contacts, Photos, Safari, Messages actions/reads.
-- **Full Disk Access** — required for **Messages content** (`chat.db`) and the **fast Notes**
-  path (`NoteStore.sqlite`). Notes degrades to Automation without it; Messages content raises a
-  clear, typed error telling you to grant it. Run the `doctor` tool to see what's granted.
+- **Automation** (per app) — Mail, Notes, Contacts, Safari, Messages actions/reads.
+- **Full Disk Access** — required for **Messages content** (`chat.db`), the **fast Notes**
+  path (`NoteStore.sqlite`) and the **Photos library**, which osxphotos reads at rest. Notes
+  degrades to Automation without it; Messages content and Photos raise a clear, typed error
+  telling you to grant it. Run the `doctor` tool to see what's granted.
 
 ## Tools
 
@@ -160,7 +161,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 
 | Tool | Args | Notes |
 |------|------|-------|
-| `notes` | title/snippet substring | matching notes (id + snippet); diacritic- & smart-punctuation-insensitive |
+| `notes` | title, snippet or body words | `{results, truncated?, plane?, coverage?}` — matching notes (id + snippet), title/snippet hits first, then body-only hits; bodies are searched in memory on the Full Disk Access plane (locked notes skipped); body words split at spaces and punctuation only, so a word inside unspaced Chinese or Japanese text is found by title or snippet only; diacritic- & smart-punctuation-insensitive |
 | `notes_all` | — | every live note (id + "Account / Folder" + snippet), Recently Deleted excluded |
 | `note_bodies` | ids (≤ 50) | opt-in plaintext hydration → `[{id, body}]` |
 | `create_note` | title, body, optional `folder` name | returns the **stable x-coredata id**; an unknown/ambiguous folder is refused, not guessed |
@@ -172,7 +173,9 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | Tool | Args | Returns |
 |------|------|---------|
 | `contacts` | name substring | cards (name, org, first phone + email) |
-| `photos` | search string | media (filename); matches the Photos search field |
+| `photos` | search string | `{results, truncated?}` pointers (title · filename · date), newest first, at most 25; matches filename, title, description, keywords, place, people and labels. The id is the Photos uuid; the old `<UUID>/L0/001` id is still accepted |
+| `photo_albums` | — | `{results, truncated?}` album pointers (id, `title (n photos)`, folder path), at most 100 |
+| `photo_info` | photo id | dates, location, place, people, EXIF subset, pixel size, kind; never image bytes or thumbnails |
 | `safari_tabs` | — | every open tab (url + title) |
 | `shortcuts` | name substring (empty = all) | the user's Shortcuts; id = stable UUID, `shortcuts://` deeplink |
 | `ping` / `now` / `doctor` | — (`doctor` takes optional `request=True` to trigger permission prompts) | health check / time / permission diagnostics |
@@ -186,11 +189,24 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `create_contact` | given_name, family_name, organization | |
 | `run_shortcut` | name **or** id, optional `input_text` | runs a Shortcut; returns a bounded output snippet |
 | `safari_open` | url | opens in a new tab; bare host → `https://`; only `http`/`https` allowed |
+| `export_photo` | photo id, `dest_dir` inside the allowed root | writes the edited still (the original when there is no edit) as a new file, name `<original stem>_<id prefix>.<ext>`, never overwritten, capped at 250 MiB; a photo only in iCloud is `absent` (nothing is downloaded); videos refused, a Live Photo exports its still only; additive, audited |
 
 ### Read-only mode
 
 Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
+
+### Turning adapters off
+
+Set `MACOS_APPS_ADAPTERS_OFF=photos,music` (a comma list of adapter names) to register no tools
+for those apps. Under the daemon, the file `~/.local/state/macos-apps-mcp/adapters_off` holds the
+same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
+
+### Dashboard
+
+Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
+usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
+[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard).
 
 ### Cleaning up duplicate mail
 

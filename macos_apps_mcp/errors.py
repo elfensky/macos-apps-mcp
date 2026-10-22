@@ -15,10 +15,6 @@ the native worker in runtime.py.
 
 from __future__ import annotations
 
-from typing import TypeVar
-
-T = TypeVar("T")
-
 # The one Settings pane every TCC remediation points at. Shared by the error
 # directives here and in runtime.py and by doctor's report lines (#48), so the
 # wording can never drift between the raise sites and the diagnosis.
@@ -91,7 +87,8 @@ class SubtasksRequired(NativeError):
 
 class WriteRefused(NativeError):
     """The store refused a save/remove — a read-only or subscribed calendar/list, or
-    the account rejected the change."""
+    the account rejected the change — or the filesystem refused a file write (an
+    existing target, or a directory that cannot be created)."""
 
     kind = "write_refused"
 
@@ -129,7 +126,9 @@ class FullDiskAccessDenied(NativeError):
     kind = "full_disk_access_denied"
 
 
-def resolve_container(items: list[tuple[str, str, T]], target: str, *, noun: str) -> T:
+def resolve_container[T](
+    items: list[tuple[str, str, T]], target: str, *, noun: str
+) -> T:
     """Resolve a write's container target by ``Pointer.id`` (exact) OR exact name.
 
     Disambiguation rule (#55): see contracts.py. ``items`` is ``list[(id, name,

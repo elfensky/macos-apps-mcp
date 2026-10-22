@@ -4,12 +4,19 @@ executable; the pip-side install-agent invokes them (never SMAppService directly
 
 from __future__ import annotations
 
+import errno
 import json
 import os
+import re
+import secrets
 import sqlite3
+import stat
 import subprocess
 import sys
+import tempfile
 import time
+import webbrowser
+from collections.abc import Iterable
 from pathlib import Path
 
 from .errors import NativeError
@@ -77,12 +84,36 @@ def agent_status() -> str:
 # unquoted connect (a `#` in the path truncated at the fragment → "no such table") and
 # `except sqlite3.Error: return None`, which swallowed missing-file and chmod-000 alike
 # (their OperationalErrors are byte-identical — measured). Only the columns the query
-# reads are fingerprinted, same rule as the adapters' stores.
-_TCC_FINGERPRINT = {"access": {"service", "client", "auth_value"}}
+# reads are fingerprinted, same rule as the adapters' stores. auth_reason and
+# indirect_object_identifier exist in `access` since macOS 11 / 10.14; the floor is 14.
+_TCC_FINGERPRINT = {
+    "access": {
+        "service",
+        "client",
+        "auth_value",
+        "auth_reason",
+        "indirect_object_identifier",
+    }
+}
 # TCC auth_value meanings. `granted` stays the auth==2 bool (wire-stable for existing
 # consumers); a non-binary state (limited/prompt/unknown) additionally carries
 # `status`, so limited(3) — partial access — stops masquerading as a plain denial.
 _TCC_AUTH = {0: "denied", 1: "unknown", 2: "granted", 3: "limited"}
+# #318: a consent prompt that nobody answers is stored as a denial with reason 9.
+_TCC_REASON = {
+    1: "error",
+    2: "user-consent",
+    3: "user-set",
+    4: "system-set",
+    5: "service-policy",
+    6: "mdm",
+    7: "override",
+    8: "missing-usage-string",
+    9: "prompt-timeout",
+    10: "preflight-unknown",
+    11: "entitled",
+    12: "app-type-policy",
+}
 
 
 def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
@@ -107,7 +138,8 @@ def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
         marks = ",".join("?" for _ in wanted)
         return (
             conn.execute(
-                f"SELECT service, client, auth_value FROM access "  # noqa: S608
+                "SELECT service, client, auth_value, auth_reason, "  # noqa: S608
+                "indirect_object_identifier FROM access "
                 f"WHERE service IN ({marks})",
                 wanted,
             ).fetchall(),
@@ -123,7 +155,10 @@ def _tcc_rows(db: Path, wanted: list[str]) -> tuple[list | None, str | None]:
 
 def grant_report(services: list[str] | None = None) -> dict:
     """``grant_identities``' mapping PLUS the classified per-db read reason (C7) —
-    doctor prints the reason instead of unconditionally blaming FDA. Never raises."""
+    doctor prints the reason instead of unconditionally blaming FDA. Never raises.
+    #318: an entry also carries ``target`` (AppleEvents' controlled app, when real),
+    ``reason`` (TCC's auth_reason, denied rows only) and, for a prompt that timed out,
+    the ``remediation`` that clears it."""
     wanted = services or _SERVICES
     u_rows, u_reason = _tcc_rows(_TCC_DB, wanted)
     s_rows, s_reason = _tcc_rows(_TCC_SYSTEM_DB, wanted)
@@ -131,10 +166,18 @@ def grant_report(services: list[str] | None = None) -> dict:
     if not (u_rows is None and s_rows is None):
         identities = {}
         for rows in (u_rows, s_rows):
-            for service, client, auth in rows or []:
-                entry = {"client": client, "granted": auth == 2}
+            for service, client, auth, reason, target in rows or []:
+                entry = {"client": client}
+                if target not in (None, "", "UNUSED"):
+                    entry["target"] = target
+                entry["granted"] = auth == 2
                 if auth not in (0, 2):  # limited/prompt/future values: say which
                     entry["status"] = _TCC_AUTH.get(auth, f"unknown({auth})")
+                if auth == 0:
+                    entry["reason"] = _TCC_REASON.get(reason, f"unknown({reason})")
+                    if reason == 9:  # the why is said once, in doctor's grant note
+                        svc = service.removeprefix("kTCCService")
+                        entry["remediation"] = f"tccutil reset {svc} {client}"
                 identities.setdefault(service, []).append(entry)
     return {"identities": identities, "reasons": {"user": u_reason, "system": s_reason}}
 
@@ -263,6 +306,16 @@ def install_agent(argv: list[str]) -> None:
 # gate is closed. Tests isolate this by monkeypatching the constant itself (see
 # tests/conftest.py), never by moving the path.
 _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
+# The adapter deny-list file: same three-process reason as the comment above (home-
+# pinned, never state_dir()); tests patch the constant (tests/conftest.py), never HOME.
+_ADAPTERS_OFF_FILE = Path.home() / ".local/state/macos-apps-mcp/adapters_off"
+# What an adapters_off file that exists but cannot be read means: every adapter OFF
+# (owner, 2026-10-22 — the deny-list fails closed, never open). No adapter has it.
+ADAPTERS_ALL_OFF = "*"
+# The dashboard page key (D-19): home-pinned for the same three-process reason as the
+# constants above (the daemon writes it, the `dashboard` CLI role reads it), in the
+# daemon's 0700 socket folder; tests patch the constant (tests/conftest.py).
+_DASHBOARD_KEY_FILE = Path.home() / ".local/state/macos-apps-mcp/daemon/dashboard_key"
 
 
 def is_daemon_role() -> bool:
@@ -288,12 +341,130 @@ def is_daemon_role() -> bool:
     ]
 
 
-def allow_send_file() -> str:
-    """The persisted outbound opt-in (``""`` when absent) — see tiers.allow_send."""
+def _read_small(path: Path, *, follow: bool = True, limit: int = 4096) -> str:
+    """A small regular state file's text, read without ever blocking: a FIFO, device or
+    directory at ``path`` (or, with ``follow=False``, a symlink) raises ``OSError``
+    instead of hanging or flooding the daemon before it serves (review of #415).
+    Absent raises ``FileNotFoundError``; a stray byte is replaced."""
+    flags = os.O_RDONLY | os.O_NONBLOCK | (0 if follow else os.O_NOFOLLOW)
+    fd = os.open(path, flags)
     try:
-        return _ALLOW_SEND_FILE.read_text()
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        return os.read(fd, limit).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def allow_send_file() -> str:
+    """The persisted outbound opt-in (``""`` when absent or unreadable: closed) — see
+    tiers.allow_send. A stray byte is replaced: it can never name an adapter."""
+    try:
+        return _read_small(_ALLOW_SEND_FILE)
     except OSError:
         return ""
+
+
+def adapters_off_file() -> str:
+    """The persisted adapter deny-list (``""`` when absent) — see tiers.adapters_off.
+    A file that exists but cannot be read is ``ADAPTERS_ALL_OFF``. A stray byte is
+    replaced, so it costs one name (doctor lists it as unknown), never the import."""
+    try:
+        return _read_small(_ADAPTERS_OFF_FILE)
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return ADAPTERS_ALL_OFF
+
+
+def write_adapters_off(names: Iterable[str]) -> None:
+    """Replace the persisted deny-list with ``names`` (sorted, de-duplicated).
+
+    Temp file in the same directory, fsync, then ``os.replace``: a daemon killed
+    mid-write must not leave a truncated file, which would read as "everything on"
+    (RESEARCH "Don't Hand-Roll"). Any failure removes the temp file and re-raises,
+    and the previous file stays as it was."""
+    _atomic_write(_ADAPTERS_OFF_FILE, ",".join(sorted(set(names))))
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` through a temp file in the same folder (mode 0600),
+    fsync, then ``os.replace``; any failure removes the temp file and re-raises."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+# An empty key would match an empty cookie, and a short one is guessable.
+_KEY_RE = re.compile(r"[A-Za-z0-9_-]{32,}")
+
+
+def dashboard_key(*, create: bool = False) -> str | None:
+    """The dashboard page key (D-19), or None when there is none to use.
+
+    The daemon calls it once at start with ``create=True``: the file is written, from
+    ``secrets.token_urlsafe(32)``, only when it is absent. The CLI role calls it
+    without ``create``, so it never writes. Fail closed: a file that exists but cannot
+    be read, or holds anything but a urlsafe token of 32 or more characters, is None
+    and is never rewritten or repaired; any ``OSError`` is None too."""
+    path = _DASHBOARD_KEY_FILE
+    try:
+        if create:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(path.parent, 0o700)  # mkdir's mode skips an existing folder
+        try:
+            # never a symlink: the daemon owns this file, and chmod would follow one
+            key = _read_small(path, follow=False).strip()
+        except FileNotFoundError:  # the only case that leads to a write
+            if not create:
+                return None
+            key = secrets.token_urlsafe(32)
+            _atomic_write(path, key)
+        if not _KEY_RE.fullmatch(key):
+            return None
+        if create:
+            os.chmod(path, 0o600)
+    except OSError:
+        return None
+    return key
+
+
+def dashboard(argv: list[str]) -> None:
+    """`dashboard` — print the dashboard link with its page key and open it (D-19).
+
+    A CLI role, not an MCP tool, for the `allow-send` reason: the key is the operator's.
+    The boundary is the account (the model's shell runs as the same account and could
+    read the file), so the key stays out of `doctor`, logs and pages, where it would
+    reach a transcript by accident. It reads the key file only: it never writes it,
+    binds a socket or starts a server. The opener hands the URL to `osascript` on
+    stdin: other macOS accounts can read every process's arguments (`ps -axo
+    user,args`), and a set `BROWSER` variable would route a plain open through a
+    subprocess with the URL as an argument."""
+    key = dashboard_key()
+    if key is None:
+        print(
+            f"macos-apps-mcp: no usable dashboard key at {_DASHBOARD_KEY_FILE}. The "
+            "daemon writes it when it starts: remove the file if it exists, then "
+            f"restart the daemon (launchctl kickstart -k gui/$(id -u)/{_BUNDLE_ID}), "
+            "or install it (macos-apps-mcp install-agent).",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    from .daemon import DASHBOARD_HOST, DASHBOARD_PORT  # lazy: see uninstall_agent
+
+    # "/key" is the Guard's KEY_PATH, written out: deploy does not import the dashboard.
+    url = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/key?k={key}"
+    print(url)
+    if not webbrowser.MacOSXOSAScript("default").open(url):
+        print("no browser opened: open the link above in your browser", file=sys.stderr)
 
 
 def allow_send(argv: list[str]) -> None:

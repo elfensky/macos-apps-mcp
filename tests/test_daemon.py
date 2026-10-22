@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import shutil
 import socket
 import stat
@@ -7,14 +8,18 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 import uvicorn
 from fastmcp import Client, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.providers.proxy import FastMCPProxy
+from mcp.types import Implementation
 
-from macos_apps_mcp import daemon
+from macos_apps_mcp import audit as au
+from macos_apps_mcp import daemon, deploy, registry
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +36,15 @@ def _no_role_leak():
         os.environ.pop("MACOS_APPS_MCP_ROLE", None)
     else:
         os.environ["MACOS_APPS_MCP_ROLE"] = original
+
+
+@pytest.fixture(autouse=True)
+def _no_real_dashboard_port(monkeypatch):
+    """daemon.serve() binds the dashboard on daemon.DASHBOARD_PORT (47632). The
+    two-session test runs the real serve() in a thread that never exits, so without
+    port 0 a unit test would hold the real port for the whole session and collide
+    with an installed daemon (RESEARCH C6)."""
+    monkeypatch.setattr(daemon, "DASHBOARD_PORT", 0)
 
 
 @pytest.fixture
@@ -95,9 +109,10 @@ def test_bind_socket_stale_file_rebinds(sockdir):
         s.close()
 
 
-def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
+def test_serve_two_concurrent_sessions(sockdir, monkeypatch, capfd):
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(daemon, "dashboard_state", None)
     t = threading.Thread(target=daemon.serve, daemon=True)
     t.start()
     for _ in range(100):  # wait for the socket
@@ -117,6 +132,78 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
             assert "ok" in r1.content[0].text and "ok" in r2.content[0].text
 
     asyncio.run(go())
+
+    # The same Server also answers on loopback TCP: dashboard only, never MCP.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not str(daemon.dashboard_state).startswith(
+        "http://127.0.0.1:"
+    ):
+        time.sleep(0.05)
+    base = daemon.dashboard_state
+    assert str(base).startswith("http://127.0.0.1:"), base
+    # D-19: the daemon wrote the page key (0600 file, 0700 folder) and every request
+    # but the link needs it as a cookie.
+    key_file = deploy._DASHBOARD_KEY_FILE
+    key = key_file.read_text()
+    assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(key_file.parent.stat().st_mode) == 0o700
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
+    cookie = {"cookie": f"macos_apps_mcp_key={key}"}
+    with httpx.Client(trust_env=False, timeout=10) as web:
+        refused = web.get(f"{base}/usage")
+        assert refused.status_code == 403
+        assert "macos-apps-mcp dashboard" in refused.text
+        assert "content-security-policy" in refused.headers
+        link = web.get(f"{base}/key", params={"k": key})
+        assert link.status_code == 303 and link.headers["location"] == "/"
+        set_cookie = link.headers["set-cookie"]
+        assert f"macos_apps_mcp_key={key}" in set_cookie
+        assert "HttpOnly" in set_cookie and "SameSite=strict" in set_cookie
+        assert "Path=/" in set_cookie
+        usage = web.get(f"{base}/usage", headers=cookie)
+        assert usage.status_code == 200
+        assert "Calls per tool since the log started." in usage.text
+        assert "content-security-policy" in usage.headers
+        assert usage.headers["referrer-policy"] == "same-origin"
+        # no Origin: the Guard refuses
+        unsigned = web.post(f"{base}/mcp", json={}, headers=cookie)
+        assert unsigned.status_code == 403
+        assert "Forbidden origin" in unsigned.text
+        get_mcp = web.get(f"{base}/mcp", headers=cookie)
+        assert get_mcp.status_code == 404
+        assert "jsonrpc" not in unsigned.text + get_mcp.text
+    out, err = capfd.readouterr()
+    assert key not in out + err  # access_log=False: the link's query never prints
+
+
+def test_serve_keeps_mcp_up_when_the_dashboard_port_is_in_use(sockdir, monkeypatch):
+    """T-05-13: a taken dashboard port is logged, `dashboard_state` says so, and MCP
+    over the unix socket keeps serving."""
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    monkeypatch.setattr(daemon, "DASHBOARD_PORT", taken.getsockname()[1])
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    threading.Thread(target=daemon.serve, daemon=True).start()
+    for _ in range(100):
+        if p.exists():
+            break
+        time.sleep(0.05)
+
+    async def go():
+        transport = StreamableHttpTransport(
+            "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+        )
+        async with Client(transport) as c:
+            return await c.call_tool("ping")
+
+    try:
+        assert "ok" in asyncio.run(go()).content[0].text
+        assert str(daemon.dashboard_state).startswith("not bound: ")
+    finally:
+        taken.close()
 
 
 def _serve(app, path):
@@ -344,3 +431,106 @@ def test_factory_without_a_running_loop_still_builds_the_client(sockdir):
     """#302: no running loop means nothing to install on; the client is returned."""
     client = daemon._uds_client_factory(sockdir / "s.sock")()
     assert isinstance(client, httpx.AsyncClient)
+
+
+def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch):
+    """#222 tracer: front client -> FastMCPProxy(shim client factory) -> real unix
+    socket -> daemon-side AuditMiddleware. The record names the REAL client (not the
+    daemon's `mcp 0.1.0`), carries the shim id, and states the resolved dry_run."""
+
+    def delete_x(id: str, dry_run: bool = True) -> dict:
+        return {"id": id, "dry_run": dry_run}
+
+    records: list[dict] = []
+    monkeypatch.setattr(au, "audit_write", records.append)
+    monkeypatch.setattr(au, "usage_log", lambda tool: None)
+    app = FastMCP("t")
+    app.add_middleware(
+        au.AuditMiddleware(
+            audit_verbs={"delete_x": "delete"},
+            snapshot_sources={},
+            dry_run_defaults={"delete_x": registry._dry_run_default(delete_x)},
+        )
+    )
+    app.tool(delete_x)
+    p = sockdir / "mcp.sock"
+    s = _serve(app, p)
+    transport = StreamableHttpTransport(
+        "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+    )
+    proxy = FastMCPProxy(
+        client_factory=daemon._shim_client_factory(transport, "abc12345")
+    )
+
+    async def go():
+        async with Client(
+            proxy, client_info=Implementation(name="claude-code", version="2.1.9")
+        ) as c:
+            await asyncio.wait_for(c.call_tool("delete_x", {"id": "A"}), timeout=30)
+            await asyncio.wait_for(
+                c.call_tool("delete_x", {"id": "B", "dry_run": "false"}), timeout=30
+            )
+
+    try:
+        asyncio.run(go())
+    finally:
+        s.close()
+    assert len(records) == 2
+    first, second = records
+    assert first["op"] == "delete" and first["args"] == {"id": "A"}
+    assert first["dry_run"] is True
+    assert first["caller"] == "claude-code 2.1.9" and first["session"] == "abc12345"
+    assert second["args"] == {"id": "B", "dry_run": "false"}
+    assert second["dry_run"] is False
+    assert second["caller"] == "claude-code 2.1.9"
+
+
+def _factory_calls(monkeypatch, get_context, shim_id="abc12345", n=1):
+    """Drive `_shim_client_factory` with `daemon.get_context` and `daemon._Client`
+    patched; returns the `client_info` of each client the factory built."""
+    seen = []
+    monkeypatch.setattr(daemon, "get_context", get_context)
+    monkeypatch.setattr(
+        daemon, "_Client", lambda transport, client_info: seen.append(client_info)
+    )
+    f = daemon._shim_client_factory(object(), shim_id)
+    for _ in range(n):
+        f()
+    return seen
+
+
+def _context_with(client_params):
+    return lambda: SimpleNamespace(session=SimpleNamespace(client_params=client_params))
+
+
+def test_shim_client_factory_copies_the_client_info(monkeypatch):
+    params = SimpleNamespace(
+        clientInfo=Implementation(name="claude-code", version="2.1.9")
+    )
+    (info,) = _factory_calls(monkeypatch, _context_with(params))
+    assert (info.name, info.version) == ("claude-code", "2.1.9")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_initialize_path_uses_the_shim_identity(monkeypatch):
+    # proxy.py:90 — initialize runs before the front session stores client_params
+    (info,) = _factory_calls(monkeypatch, _context_with(None))
+    assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_ping_path_uses_the_shim_identity(monkeypatch):
+    # proxy.py:921 — ping_remote runs outside a request, so get_context() raises
+    def no_context():
+        raise RuntimeError("No active context found.")
+
+    (info,) = _factory_calls(monkeypatch, no_context)
+    assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
+    assert info.session == "abc12345"
+
+
+def test_shim_client_factory_session_is_stable_per_factory(monkeypatch):
+    first, second = _factory_calls(monkeypatch, _context_with(None), n=2)
+    assert first.session == second.session == "abc12345"
+    (other,) = _factory_calls(monkeypatch, _context_with(None), shim_id="def67890")
+    assert other.session == "def67890"

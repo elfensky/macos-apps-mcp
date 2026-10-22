@@ -6,6 +6,145 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-22 — Photos and the dashboard
+
+### Added
+
+- **Adapters can be turned off** (PLAT-01) — `MACOS_APPS_ADAPTERS_OFF`, or under the daemon
+  the file `~/.local/state/macos-apps-mcp/adapters_off`, lists apps whose tools are not
+  registered; `doctor` reports the active set and a restart directive when the file
+  changed.
+- **The `.app` carries an app icon** — a Liquid Glass icon compiled from an Icon Composer
+  file (`packaging/AppIcon.icon`), with a standard icon for macOS before 26. Building the
+  `.app` needs full Xcode for `actool` (see docs/DAEMON.md).
+- **`photo_albums` and `photo_info`** (#96) — `photo_albums` lists albums as pointers (id,
+  `title (n photos)`, folder path), at most 100. `photo_info` returns one photo's bounded
+  metadata by id: dates, location, place, people, an EXIF subset, pixel size. Neither
+  returns image bytes, thumbnails or file paths.
+- **`export_photo`** (#96) — writes one photo by id into the allowed root: the edited still
+  (the image as Photos shows it), the original when there is no edit. It follows the
+  write-to-disk rules `export_mail` uses (allowed root, derived name, no overwrite), and
+  adds the 250 MiB size cap and empty-file check `save_mail_attachment` has at 25 MiB
+  (`export_mail` has neither). A failed export leaves no file behind. It does
+  no network work: a photo whose file is only in iCloud comes back `absent`. Videos are
+  refused; a Live Photo exports its still and says `skipped: "live photo motion"`.
+- **A localhost dashboard** (PLAT-02) — the daemon serves `http://127.0.0.1:47632`
+  (loopback only; a non-loopback bind is refused). Every request checks the Host header,
+  every form post checks Origin and a per-session token, and the MCP endpoint stays on the
+  unix socket. This release adds the Usage page.
+- **Adapter switches on the dashboard** (PLAT-01, PLAT-02) — `/adapters` turns an app on or
+  off, shows what waits for a restart, and restarts the daemon from the page (launchd
+  starts it again); each change is logged in audit.jsonl with caller `dashboard`. The
+  Outbound gate is shown locked and still changes only with `macos-apps-mcp allow-send`.
+- **Dashboard page key** (PLAT-02) — every dashboard page needs a key that only the Mac
+  account running the daemon can read (`~/.local/state/macos-apps-mcp/daemon/dashboard_key`);
+  `macos-apps-mcp dashboard` prints the link and opens it, and the browser keeps the key as
+  a cookie. Other accounts on the Mac and sandboxed apps get a refusal; `doctor` names the
+  command and never the key.
+- **The audit trail and recovery on the dashboard** (PLAT-02) — `/` lists every write
+  newest first, with previews dimmed; one click shows what changed as a word diff, the
+  arguments with `dry_run` resolved, and the raw log lines. A batch Mail write shows each
+  message's backup and a prompt to copy for Claude's `mail_undo`; the page itself never
+  moves or deletes anything. New middleware records carry the batch `receipt`.
+- **Health and Backups on the dashboard** (PLAT-02) — `/health` shows the `doctor` report
+  and warns only for an adapter that is on and whose macOS grant is denied; `/backups`
+  lists every Mail backup receipt on disk and opens each one read-only. `doctor` now
+  reports where the dashboard listens (`deployment.dashboard`).
+
+### Changed
+
+- **Python 3.11 is no longer supported; the floor is 3.12** (D-16) — osxphotos (Photos, #96)
+  cannot be locked beside pyobjc 10+ on 3.11. Release 0.14.3 stays installable on 3.11.
+- **`photos()` reads through osxphotos and returns `{results, truncated?}`** (#96) — a
+  caller that read the list now reads `results`. Ids are now the Photos uuid; ids in the old
+  `<UUID>/L0/001` form still resolve. The tool needs Full Disk Access instead of Automation,
+  and doctor no longer probes Automation for Photos (11 surfaces, not 12). Search matches
+  filename, title, description, keywords, place, people and labels in one pass, newest first,
+  at most 25. osxphotos (MIT) is a new dependency.
+- **The Photos tools leave hidden photos out** (#96, D-17) — `photos()` skips them,
+  `photo_info` refuses a hidden id ("unhide it in Photos"), and album counts count only
+  photos that are not hidden or deleted. A missing Full Disk Access grant now raises the
+  typed Full Disk Access error (`full_disk_access_denied`), not "no Photos library".
+- **`notes()` searches note bodies and returns `{results, truncated?, plane?, coverage?}`**
+  (#93) — a caller that read the list now reads `results`. A word that sits only in a note's
+  body is found: an FTS5 index is built in memory on each call from the bodies the server
+  already decodes, so no second copy of note text reaches disk, and locked notes stay out.
+  Title and snippet hits still come first. Without Full Disk Access the AppleScript fallback
+  searches titles only, and `plane` and `coverage` say so. Spike 004 measured hit@1 0.31 to
+  0.54 with no new dependency. Semantic search is not adopted; see
+  [docs/notes-semantic-search.md](docs/notes-semantic-search.md).
+
+### Fixed
+
+- **`export_photo` publishes atomically and never overwrites or deletes another writer's
+  file** (#96) — osxphotos checks the destination once and then copies over whatever is
+  there, through a symlink too. The export now goes into a private directory beside the
+  destination and is published with a hard link, which fails when anything is already at
+  that name (a file, a symlink, or a name that differs only in case). That is the
+  never-overwrite refusal, and a failed export removes only the private directory. The
+  allowed root must be on a volume with hard links (APFS or HFS+; exFAT and FAT have none).
+- **`export_photo` never deletes a file it did not write, and `notes()` body search skips
+  1-character words** (#96, #93) — when a parallel session's export lands at the same path
+  first, the export is refused with the never-overwrite error and that file stays. A file
+  osxphotos writes under another name is removed, and the error says so. A body query
+  ignores 1-character words: `don't` no longer matches every note with a contraction, and
+  `C++` matches titles and snippets only.
+- **doctor reports an answered -1728 probe as `ok`** (#317) — Photos, launched by the
+  probe, had no window yet and answered `count windows` with "Can't get every window"
+  (-1728), so doctor reported a granted, working surface as `native_error`. The probe now
+  counts that answer for every app. A denial (-1743) and every other error report as before.
+- **doctor's grant map says why a TCC row is denied and which app it targets** (#318) — a
+  consent prompt that nobody answers is stored by macOS as a denial (`auth_reason` 9), and
+  doctor showed it as a plain `granted: false`. A denied entry now carries `reason`
+  (`prompt-timeout`, `user-consent`, …), and a `prompt-timeout` entry also carries the
+  `tccutil reset` command that clears it. AppleEvents entries carry `target`, the controlled
+  app's bundle id.
+- **`uvx macos-apps-mcp` installs on an Intel Mac without a Rust toolchain** (#322) —
+  cryptography 49 and later ship macOS wheels for Apple silicon only, so on an Intel Mac
+  uvx resolved cryptography 50 and built it from source, which needs Rust. The package now
+  requires cryptography below 49 on Intel Macs only, so uvx and `uv sync` take the 48.x
+  wheel; Apple silicon is unchanged. The workaround in the 0.14.3 release notes
+  (`uvx --no-build-package cryptography`) is not needed from the next release.
+
+- **Audit records carry a resolved `dry_run` and name the client** (#222) — a write tool
+  called without `dry_run` records `dry_run: true` (a preview), resolved from the tool's
+  signature default and coerced as the tool coerces it; a preview and a real write used to
+  look the same in the audit trail. Every record now also carries `caller` (the MCP client's
+  name and version) and, through the daemon shim, a `session` id.
+- **Contacts search no longer times out on a broad query** (#334) — on the Intel iMac every
+  `whose` reference re-ran the scan, so the search loop re-scanned per property per person
+  and a broad query ran past the 30 s cap. Each property is now read with one Apple event
+  over the whole match list: `contacts("an")` answers in about 8 s on that Mac, down from a
+  timeout. A length mismatch between the property lists raises instead of mixing two
+  people's fields.
+- **`mail_overview` labels an account that Mail does not list** (#336) — the rows of a
+  removed account stay in the Envelope Index and showed a bare uuid as `account`. An id
+  missing from a non-empty account map now shows `(account not in Mail)`; `account_id`
+  keeps the uuid. An empty map (Mail unreachable) still shows the uuid, so a cold cache
+  never makes every account look removed.
+- **`mail_overview` names an account added while the daemon runs** (#359) — the account
+  map stayed cached for the daemon's whole life, so the rows of an account added to Mail
+  later showed `(account not in Mail)` until a restart. When the map omits an id,
+  `mail_overview` now reads it again, at most once a minute. A removed account keeps the
+  label, and a re-read that fails keeps the names already known.
+- **ruff lints for Python 3.12** (#384) — `[tool.ruff] target-version` now matches the
+  3.12 floor (D-16), and the five generic functions use the PEP 695 form.
+- **An existing file, or a `dest_dir` that cannot be created, is a typed refusal** (#383) —
+  `save_mail_attachment`, `export_mail` and `export_photo` give the agent the directive
+  (kind `write_refused`), no longer an untyped `Error calling tool …` with a traceback
+  in the log.
+- **A killed `export_photo` no longer leaves its hidden copy behind for good** (#387) —
+  the staging directory's name carries the pid, and the next export into the same
+  `dest_dir` removes a directory whose process is gone (never a live one, never a
+  symlink); a `dest_dir` never exported to again keeps it. A cleanup error after the
+  photo was written is logged with the leftover path instead of replacing the `written`
+  result.
+- **The `.app` build no longer takes its build backend fresh from PyPI** (#373) —
+  `scripts/build_app.sh` builds the bundled package as a wheel with hatchling and its
+  dependencies hash-locked in `uv.lock` (a `build` dependency group, enforced with
+  `--require-hashes`), then installs that wheel without dependencies. Refresh the
+  backend with `uv lock --upgrade-package hatchling`.
+
 ## [0.14.3] - 2026-10-11 — Local reminders
 
 ### Added
@@ -50,7 +189,7 @@ surface may still shift between minor versions.
 ### Notes
 
 - **The universal `.app` runs on an Intel CPU** (#205) — the 0.14.2 release, on an iMac
-  (2012, OpenCore Legacy Patcher) with macOS 15: the daemon registered and runs, `doctor()`
+  (2012) with macOS 15: the daemon registered and runs, `doctor()`
   reports 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to the
   bundle, Mail, Calendar and Reminders reads work through the shim, and the code seal holds
   after the first run. The run found #317, #318 and #322.

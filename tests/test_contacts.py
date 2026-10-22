@@ -150,3 +150,64 @@ def test_verify_contact_empty_given_name_does_not_false_fail():
     # not false-fail — given_name must normalize "" ↔ None on BOTH sides.
     data = ContactData(given_name="", organization="Acme")
     _verify_contact(_verify_raw("", "", "Acme"), "C-1", data)  # no raise
+
+
+# --- #334: the contacts search reads each property with ONE Apple event ------------
+
+
+def _frame(n: int) -> str:
+    return "".join(f"id{i}{US}Name {i}{US}{US}{US}{RS}" for i in range(n))
+
+
+def _call_contacts_tool(monkeypatch, fake, name="an"):
+    import asyncio
+
+    from fastmcp import Client
+
+    import macos_apps_mcp.server as srv
+
+    monkeypatch.setattr(runtime, "run_osascript", fake)
+
+    async def go():
+        async with Client(srv.mcp) as c:
+            return await c.call_tool("contacts", {"name": name})
+
+    return asyncio.run(go())
+
+
+def test_contacts_search_end_to_end_bulk_form(monkeypatch):
+    from macos_apps_mcp.adapters import contacts
+
+    seen: dict = {}
+
+    def fake(script, *args, **kw):
+        seen.update(script=script, args=args, kw=kw)
+        return _frame(2)
+
+    result = _call_contacts_tool(monkeypatch, fake)
+    assert [p["id"] for p in result.structured_content["result"]] == ["id0", "id1"]
+    assert seen["args"] == ("an", str(MAX_CONTACTS))
+    assert seen["script"] is contacts._SEARCH
+    # the whose-scan runs once per property, never once per person
+    assert "id of (people whose name contains q)" in contacts._SEARCH
+    assert "repeat with p in (people whose" not in contacts._SEARCH
+
+
+def test_contacts_search_bulk_lists_must_stay_aligned():
+    from macos_apps_mcp.adapters import contacts
+
+    # five lists are paired by index: a length mismatch must fail loudly (T-03.1-14)
+    assert "changed during the read" in contacts._SEARCH
+
+
+@pytest.mark.parametrize(("matches", "expected"), [(50, 50), (51, 50), (1, 1), (0, 0)])
+def test_contacts_search_caps_at_fifty(monkeypatch, matches, expected):
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a, **k: _frame(matches))
+    assert len(ContactsAdapter().get_pointers("an")) == expected
+
+
+def test_contacts_search_empty_query_is_a_value_error(monkeypatch):
+    from fastmcp.exceptions import ToolError
+
+    with pytest.raises(ToolError, match="empty query"):
+        _call_contacts_tool(monkeypatch, lambda *a, **k: "", name="  ")

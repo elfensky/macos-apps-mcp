@@ -5,6 +5,7 @@ EventKit, osascript, or TCC is touched. One @integration test exercises the real
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 
 import pytest
@@ -97,7 +98,6 @@ def test_automation_unprobed_when_request_false(monkeypatch):
         "mail",
         "notes",
         "contacts",
-        "photos",
         "safari",
         "messages",
         "music",
@@ -159,6 +159,71 @@ def test_probe_is_a_real_apple_event_with_consent_budget():
     # for the one-time Automation consent dialog (a human answer).
     assert "count windows" in doc._PROBE
     assert doc._PROBE_TIMEOUT == 120.0
+
+
+def test_probe_template_swallows_only_1728():
+    """#317: the probe wraps `count windows` and re-raises every error but -1728."""
+    lines = [ln.strip() for ln in doc._PROBE.splitlines() if ln.strip()]
+    assert lines == [
+        "on run argv",
+        "with timeout of 120 seconds",
+        "tell application (item 1 of argv)",
+        "try",
+        "count windows",
+        "on error errMsg number errNum",
+        "if errNum is not -1728 then error errMsg number errNum",
+        "end try",
+        "end tell",
+        "end timeout",
+        "end run",
+    ]
+
+
+def test_probe_compiles():
+    """#317: the rewritten probe is valid AppleScript."""
+    if not shutil.which("osacompile"):
+        pytest.skip("osacompile not available")
+    proc = subprocess.run(
+        ["osacompile", "-o", "/dev/null", "-"],
+        input=doc._PROBE,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    ("number", "message", "expected"),
+    [
+        (-1728, "Photos got an error: Can't get every window.", None),
+        (-1743, "Not authorized to send Apple events to Photos.", AutomationDenied),
+        (-609, "Connection is invalid.", AppNotRunning),
+    ],
+)
+def test_probe_error_filter_under_real_osascript(number, message, expected):
+    """#317: -1728 exits 0; -1743 and -609 keep their number and classify."""
+    if not shutil.which("osascript"):
+        pytest.skip("osascript not available")
+    tell, count = "tell application (item 1 of argv)", "count windows"
+    assert doc._PROBE.count(tell) == 1 and doc._PROBE.count(count) == 1
+    # `tell current application` plus `error` sends no Apple event, so no app
+    # launches and no consent prompt can appear.
+    script = doc._PROBE.replace(tell, "tell current application").replace(
+        count, f'error "{message}" number {number}'
+    )
+    proc = subprocess.run(
+        ["osascript", "-", "Photos"],
+        input=script,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if expected is None:
+        assert proc.returncode == 0, proc.stderr
+        return
+    assert proc.returncode != 0
+    assert f"({number})" in proc.stderr
+    assert isinstance(runtime._classify_osascript_failure(proc.stderr), expected)
 
 
 # --- Shortcuts CLI + Full Disk Access ------------------------------------------------
@@ -303,11 +368,11 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "deployment",
     }
     assert set(report["libs"]) == {"mcp", "fastmcp"}
-    # 2 EventKit + 7 Automation + shortcuts + FDA + mail_index
-    assert len(report["surfaces"]) == 12
+    # 2 EventKit + 6 Automation + shortcuts + FDA + mail_index
+    assert len(report["surfaces"]) == 11
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 12 surfaces OK"
+    assert report["summary"] == "all 11 surfaces OK"
 
 
 def test_version_reads_any_distribution():
@@ -322,7 +387,7 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 12 surfaces need attention")
+    assert report["summary"].startswith("2 of 11 surfaces need attention")
 
 
 def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
@@ -340,7 +405,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 12 surfaces OK" not in report["summary"]
+    assert "all 11 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -358,9 +423,22 @@ def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
     assert len(reads) == 2
 
 
-def test_report_stays_under_token_budget(monkeypatch, tmp_path):
+@pytest.mark.parametrize("role", ["stdio", "daemon"])
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
+    if role == "daemon":
+        # The daemon adds the dashboard keys, and the deny-list is operator input:
+        # pending deltas both ways and many unknown names (PM-05, #421 review).
+        from macos_apps_mcp import daemon, registry
+
+        monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+        junk = ",".join(f"no-such-adapter-{i}" for i in range(10))
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", f"photos,{junk}")
+        sending = registry.outbound_status()["registered"]
+        monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "" if sending else "mail")
+        monkeypatch.setattr(daemon, "dashboard_state", "not bound: [Errno 48] in use")
+
     def denied_automation(*a, **k):
         raise AutomationDenied(
             "grant Automation in System Settings, then restart macos-apps-mcp"
@@ -385,8 +463,32 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
         "app_process_info",
         lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
     )
+    # deterministic grant map too: the machine's real TCC.db made this length depend
+    # on the runner (#318). The daemon's own rows, every AppleEvents target denied by a
+    # timed-out prompt — the longest entry the map can carry.
+    from tests.test_deploy import _tcc_db
+
+    me = "ren.lav.macos-apps-mcp"
+    targets = ("mail", "Notes", "AddressBook", "Photos", "Safari", "MobileSMS", "Music")
+    db = tmp_path / "TCC.db"
+    _tcc_db(
+        db,
+        [(s, me, 2, 3, "UNUSED") for s in doc.deploy._SERVICES[:3]]
+        + [("kTCCServiceAppleEvents", me, 0, 9, f"com.apple.{t}") for t in targets]
+        + [("kTCCServiceSystemPolicyAllFiles", me, 2, 3, "UNUSED")],
+    )
+    monkeypatch.setattr(doc.deploy, "_TCC_DB", db)
+    monkeypatch.setattr(doc.deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
     report = doc.diagnose(request=True)
-    assert len(json.dumps(report, ensure_ascii=False)) < 7000
+    assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
+    assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once
+    sizes = {k: len(json.dumps(v, ensure_ascii=False)) for k, v in report.items()}
+    sizes |= {
+        f"deployment.{k}": len(json.dumps(v, ensure_ascii=False))
+        for k, v in report["deployment"].items()
+    }
+    largest = sorted(sizes.items(), key=lambda kv: -kv[1])[:8]
+    assert len(json.dumps(report, ensure_ascii=False)) < 7000, largest
 
 
 def test_probe_carries_applescript_side_timeout():
@@ -405,11 +507,10 @@ def test_probe_carries_applescript_side_timeout():
 @pytest.mark.integration
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
-    # 2 eventkit (calendar, reminders) + 7 automation (mail, notes, contacts,
-    # photos, safari, messages, music) + shortcuts_cli + full_disk_access +
-    # mail_index = 12. Was 11 before mail_index shipped in the Sequoia plane
-    # (#199/#201, released 0.11.0) — the count here was never bumped.
-    assert len(report["surfaces"]) == 12
+    # 2 eventkit (calendar, reminders) + 6 automation (mail, notes, contacts,
+    # safari, messages, music) + shortcuts_cli + full_disk_access + mail_index = 11.
+    # Photos left the Automation list in Phase 4 (osxphotos reads it at rest).
+    assert len(report["surfaces"]) == 11
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:

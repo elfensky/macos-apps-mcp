@@ -61,6 +61,24 @@ the first plan proves what the probe could not (D-03).
   and EXIF subset by id; its edited still exports and opens as an image. If the signed bundle
   cannot import osxphotos (#2175) or the macOS 27 model misreads, the plan stops and returns
   to the owner with the output; it does not fall back on its own.
+- **D-16:** **Python 3.12 is the floor** (owner, 2026-10-18, at the 04-01 gate stop).
+  `uv add 'osxphotos>=0.77.2,<0.78'` fails on uv 0.13.1: every osxphotos release since 0.66.0
+  caps each pyobjc package below 10 for Python < 3.12 on macOS < 13
+  (`platform_release < "22.0"`), the project needs pyobjc >= 10, and uv's universal lock
+  must solve that split. The plan's fallback marker fails the same way: uv cannot prove the
+  `platform_release` arms disjoint. No newer osxphotos exists (0.77.2, 2026-09-27, is the
+  latest). Route, chosen from four verified ones: `requires-python = ">=3.12"` plus the plain
+  line `osxphotos>=0.77.2,<0.78`. The lock loses only five pairs that serve Python 3.11 or the
+  collapsed win32 fork (backports-tarfile 1.2.0, importlib-metadata 9.0.0, tomli 2.4.1, zipp 4.1.0 and cryptography 50.0.0); every other pair stays.
+  Python 3.11 users keep 0.14.3. Not chosen: a Python 3.12+ marker (3.11 installs lose
+  Photos), a `[tool.uv]` override of upstream's caps, Notes only.
+  - **Bundle trap (verified 2026-10-18):** under `--python-platform`, uv 0.13.1 `uv pip
+    install` evaluates every `platform_release` marker as False, even inside an `or` with a
+    true arm, and still exits 0. This route's export carries one such line
+    (`pyobjc-framework-uniformtypeidentifiers`, from utitools: `platform_release >= '20'`),
+    which the bundle would drop in silence. So `pyobjc-framework-UniformTypeIdentifiers>=10.0`
+    becomes a base line, and `scripts/build_app.sh` refuses an export that still holds a
+    `platform_release` marker.
 
 ### Photos read plane (PHO-02, PHO-03)
 - **D-04:** One id for every Photos tool: the osxphotos `uuid`. `photos()` moves from the
@@ -83,6 +101,13 @@ the first plan proves what the probe could not (D-03).
   Automation. Whether `Photos` stays in `doctor._AUTOMATION_APPS` follows from what the
   adapter still sends to Photos.app (after D-04 and D-09: nothing) — the planner checks and
   removes it if nothing uses it.
+
+- **D-17:** **Hidden photos stay locked** (orchestrator default, 2026-10-18, after the #374 review;
+  the owner may reverse it). Photos keeps the Hidden album behind Touch ID or a password, and
+  osxphotos reads hidden photos like any other. So `photos()` skips hidden photos the way it skips
+  trashed ones, `photo_info` and `export_photo` refuse a hidden id with a typed, agent-directed
+  error ("unhide it in Photos to use it here"), and album counts count only live photos (not
+  trashed, not hidden). Reaching hidden photos would need an explicit owner opt-in.
 
 ### Photos export (PHO-04)
 - **D-08:** `export_photo(id, dest_dir)` writes the **edited still** — the image as Photos

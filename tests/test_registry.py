@@ -42,6 +42,7 @@ _DEVELOP_ADDITIVE = frozenset(
         "create_mailbox",
         "save_mail_attachment",
         "export_mail",
+        "export_photo",
         "music_control",
         "play_playlist",
         "set_volume",
@@ -118,7 +119,10 @@ _DEVELOP_PERMISSION = {
     "notes": "Automation",
     "notes_all": "Automation",
     "note_bodies": "Automation",
-    "photos": "Automation",
+    "photos": "Full Disk Access",
+    "photo_albums": "Full Disk Access",
+    "photo_info": "Full Disk Access",
+    "export_photo": "Full Disk Access",
     "messages_chats": "Automation",
     "messages_search": "Full Disk Access",
     "messages_with": "Full Disk Access",
@@ -162,7 +166,8 @@ def _subprocess_registry_snapshot(env_extra: dict[str, str]) -> dict:
         "print(json.dumps({"
         "'tools': asyncio.run(_run()), "
         "'registered': sorted(n for n, r in reg.TOOLS.items() if r.registered), "
-        "'all_recorded': sorted(reg.TOOLS)}))"
+        "'all_recorded': sorted(reg.TOOLS), "
+        "'adapters': {n: r.adapter for n, r in reg.TOOLS.items()}}))"
     )
     env = {"PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"], **env_extra}
     out = subprocess.run(
@@ -205,6 +210,45 @@ def test_fastmcp_lists_exactly_the_registered_records():
     assert "send_mail" in got_ro["all_recorded"]
 
 
+_PHOTOS_TOOLS = {"photos", "photo_albums", "photo_info", "export_photo"}
+_META_TOOLS = {"ping", "now", "doctor", "audit", "usage"}
+
+
+def test_adapters_off_env_unregisters_the_adapter_but_keeps_the_records():
+    # D-02: an OFF adapter's tools are ABSENT (never registered-and-erroring) but still
+    # RECORDED; meta tools (adapter=None) are never gated.
+    got = _subprocess_registry_snapshot({"MACOS_APPS_ADAPTERS_OFF": "photos"})
+    assert got["tools"] == got["registered"]
+    assert not _PHOTOS_TOOLS & set(got["tools"])
+    assert set(got["all_recorded"]) >= _PHOTOS_TOOLS
+    assert set(got["tools"]) >= _META_TOOLS
+
+
+def test_adapters_off_file_is_read_only_in_the_daemon_role(tmp_path):
+    # D-01: the file is the daemon's fallback, the twin of allow_send. HOME is a tmp dir
+    # so the subprocess reads <tmp>/.local/state/macos-apps-mcp/adapters_off.
+    f = tmp_path / ".local/state/macos-apps-mcp/adapters_off"
+    f.parent.mkdir(parents=True)
+    f.write_text("photos\n")
+    daemon = _subprocess_registry_snapshot(
+        {"HOME": str(tmp_path), "MACOS_APPS_MCP_ROLE": "daemon"}
+    )
+    assert not _PHOTOS_TOOLS & set(daemon["tools"])
+    assert set(daemon["all_recorded"]) >= _PHOTOS_TOOLS
+    stdio = _subprocess_registry_snapshot({"HOME": str(tmp_path)})
+    assert set(stdio["tools"]) >= _PHOTOS_TOOLS
+
+
+def test_adapters_off_wins_over_allow_send_for_mail():
+    # T-05-04: allow_send=mail must not re-open Mail's send tools while Mail is OFF.
+    got = _subprocess_registry_snapshot(
+        {"MACOS_APPS_ALLOW_SEND": "mail", "MACOS_APPS_ADAPTERS_OFF": "mail"}
+    )
+    assert got["tools"] == got["registered"]
+    mail = {n for n, a in got["adapters"].items() if a == "mail"}
+    assert mail and not mail & set(got["tools"])
+
+
 def test_duplicate_registration_raises():
     # "ping" is already registered by the real server import above — registering it
     # again must raise, never silently overwrite (GATE-04 adjacency edge).
@@ -240,6 +284,7 @@ def test_gate06_verbs():
     # complete prefix each carry an explicit, non-generic verb.
     want = {
         "export_mail": "export",
+        "export_photo": "export",
         "save_mail_attachment": "save",
         "mail_reply": "reply",
         "move_mail": "move",
@@ -442,3 +487,28 @@ def test_delete_reminder_registration_record():
     assert isinstance(r.snapshot, ReminderDeleteSnapshotter)
     assert inspect.signature(r.fn).parameters["dry_run"].default is True
     assert "delete_reminder" in reg.removes_content_tools()
+
+
+def test_dry_run_defaults_match_d02():
+    # #222 / D-02. Reads registry.TOOLS (every record, registered or not), so it holds
+    # under MACOS_APPS_READ_ONLY=1 and with the send tools off.
+    got = reg.dry_run_defaults()
+    assert {n for n, d in got.items() if d} == {
+        "delete_draft",
+        "move_mail",
+        "trash_mail",
+        "mail_undo",
+        "send_mail",
+        "reply_all",
+        "forward_mail",
+        "delete_reminder",
+        "delete_event",
+        "delete_note",
+        "update_note",
+    }
+    assert got["update_mail_status"] is False
+    assert got["run_shortcut"] is False
+    assert set(got) == {n for n, d in got.items() if d} | {
+        "update_mail_status",
+        "run_shortcut",
+    }

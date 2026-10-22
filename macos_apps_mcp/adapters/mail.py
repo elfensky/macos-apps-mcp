@@ -37,7 +37,7 @@ mutates stored mail; ``mail_outgoing`` (#160) is the OUTBOUND lifecycle — enve
 build → the one ``would_send`` preview shape → construct → send → outbox truth-check —
 which ``send``/``reply_all``/``forward``/``send(draft_id=…)`` are four
 parametrizations of, and which states once (and enforces) the rules a dry run must
-obey; ``mail_files`` (#81) is the filesystem boundary (allowlisted root, derived
+obey; ``files`` (#81) is the filesystem boundary (allowlisted root, derived
 names, never-overwrite); ``mail_triage`` (#178) owns the needs-response /
 awaiting-reply scans and their pure classifiers; ``mail_drafts`` (#178) owns the draft
 lifecycle — create/list/resolve/delete plus the threaded ``reply`` draft;
@@ -71,7 +71,7 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 
-from .. import runtime
+from .. import files, runtime
 from ..contracts import Pointer, read_result
 from ..errors import BatchTooLarge, NativeError, OutputOverflow, WriteRefused
 from ..runtime import log
@@ -93,7 +93,6 @@ from . import (
     mail_addressing,
     mail_attachments,
     mail_drafts,
-    mail_files,
     mail_ids,
     mail_index,
     mail_outgoing,
@@ -105,6 +104,9 @@ from .mail_addressing import bare_id, stored_id
 from .mail_index import _deeplink  # re-export: tests + Pointer builders use it here
 
 MAX_MAILS = 25
+# #336: shown in place of an account uuid that Mail's non-empty account list omits
+# (device: a removed account whose rows stay in the Envelope Index).
+UNNAMED_ACCOUNT = "(account not in Mail)"
 MAX_THREAD = 100  # largest thread seen on a real Mac is 154 rows (~144 distinct)
 # mail_bodies is deliberately smaller than note_bodies' 50: a mail body carries quoted
 # history, signatures and disclaimers, so 50 of them is a context dump, not a read. The
@@ -1436,7 +1438,7 @@ class MailAdapter:
         ``MACOS_APPS_FILE_ROOT``). The saved filename is DERIVED from the attachment's
         name, never concatenated: an attachment name arrives in inbound mail from
         anyone, so ``../../.ssh/authorized_keys`` reduces to ``authorized_keys`` inside
-        ``dest_dir`` — see ``mail_files`` for the whole rule set. An existing file is
+        ``dest_dir`` — see ``files`` for the whole rule set. An existing file is
         never overwritten (Mail's own ``save`` verb overwrites silently; the refusal is
         in Python, before the Apple Event) and the write is size-capped.
 
@@ -2336,7 +2338,13 @@ class MailAdapter:
 
         Counts come from sqlite alone. Account NAMES come from Mail (osascript, which
         LAUNCHES Mail if it isn't running) and are best-effort: when Mail is unreachable
-        the UUID stands in and the counts are returned anyway. The On My Mac store is
+        (an empty map) the UUID stands in and the counts are returned anyway. When Mail
+        answers but does not list an account, its rows show "(account not in Mail)" in
+        `account` (#336: a removed account's rows stay in the Envelope Index) and keep
+        the uuid in `account_id`. Before it labels an id,
+        `overview()` re-reads the map once (#359: an account added after the map was
+        cached), at most once a minute, so a removed account keeps the label and costs
+        at most one osascript run a minute. The On My Mac store is
         the one account Mail never names — AppleScript's `every account` lists only the
         configured mail accounts, device-verified 2026-07-27 — so its `local://` scheme
         is mapped to the literal "On My Mac" instead of showing a raw UUID. That is
@@ -2352,16 +2360,24 @@ class MailAdapter:
         """
         rows = mail_index.query_overview_rows()
         names = mail_addressing.account_map()
+        parsed = [
+            (r, *(mailbox_url.parse(r["mailbox_url"]) or ("", "", ""))) for r in rows
+        ]
+        # #359: an id the cached map omits may be an account added since; ask Mail once.
+        if names and any(
+            scheme != "local" and uuid and uuid not in names
+            for _, scheme, uuid, _ in parsed
+        ):
+            names = mail_addressing.refresh_account_map()
         out = []
-        for r in rows:
+        for r, scheme, uuid, box in parsed:
             url = r["mailbox_url"]
-            scheme, uuid, box = mailbox_url.parse(url) or ("", "", "")
             # local:// is the On My Mac store; Mail never reports it as an account, so
             # its UUID would otherwise be shown raw forever (see the docstring).
             account = (
                 mail_addressing.ON_MY_MAC
                 if scheme == "local"
-                else names.get(uuid, uuid)
+                else names.get(uuid) or (UNNAMED_ACCOUNT if names else uuid)
             )
             out.append(
                 {
@@ -2454,7 +2470,7 @@ class MailAdapter:
 
         Each file is named ``<sanitized-subject-or-id>.eml`` under ``dest_dir`` — inside
         the allowlisted root, derived not concatenated, never overwriting (see
-        ``mail_files``). A message that cannot be located is reported per-id as
+        ``files``). A message that cannot be located is reported per-id as
         ``absent`` rather than failing the batch: 62% of local messages are
         ``.partial``, and a message with no local file has no bytes here to write.
         """
@@ -2476,7 +2492,7 @@ class MailAdapter:
             if payload is None:
                 out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
                 continue
-            path = mail_files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
+            path = files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
             path.write_bytes(payload)
             out.append(
                 {
@@ -2493,7 +2509,7 @@ class MailAdapter:
         return {
             "results": out,
             "written": sum(1 for r in out if r["status"] == "written"),
-            "dest_dir": str(mail_files.resolve_dest(dest_dir)),
+            "dest_dir": str(files.resolve_dest(dest_dir)),
             "plane": "at-rest",
         }
 

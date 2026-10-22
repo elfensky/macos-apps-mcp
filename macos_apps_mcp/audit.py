@@ -4,7 +4,7 @@ Three parts, one seam:
 - **storage** — append-only JSONL under the XDG state dir (rotation, bounded reads;
   never raises: auditing must not fail a user's write);
 - **record schema** — what an audit envelope looks like (op, truncated args,
-  before/after pointers);
+  resolved dry_run, client caller, before/after pointers);
 - **AuditMiddleware** — the central seam: logs an envelope for EVERY tool named in its
   audit-verb map, with before-state captured only for id-addressed update/delete/
   complete tools. Adapters hold no audit logic; before-state comes through the
@@ -31,7 +31,12 @@ from pathlib import Path
 import anyio
 from fastmcp.server.middleware import Middleware
 
+# pydantic arrives through mcp's declared `pydantic>=2.11,<3` (>=2.12 on Python 3.14).
+# pyproject.toml is not edited: version.yml fails a PR that edits it without a bump.
+from pydantic import TypeAdapter, ValidationError
+
 from .contracts import Snapshotter
+from .text import SUMMARY_MAX, sanitize_line
 
 log = logging.getLogger("macos_apps_mcp")
 
@@ -100,6 +105,8 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
             rec = json.loads(line)
         except ValueError:
             continue  # skip a truncated/corrupt line, never fail the read
+        if not isinstance(rec, dict):
+            continue  # a JSON line that is no record (``true``, a list) is corrupt too
         if since:
             ts = rec.get("ts", "")
             rec_i = _instant(ts) if ts else None
@@ -111,6 +118,34 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
         out.append(rec)
     out.reverse()  # newest first
     return out[:limit]
+
+
+def read_all() -> list[dict]:
+    """Every audit record, ``audit.jsonl.1`` then ``audit.jsonl``, oldest to newest:
+    the dashboard's reader (D-12). No cache and no limit: the whole log is two plain
+    file reads. A missing file contributes nothing and a corrupt line is skipped; an
+    unreadable file adds one ``{"error": …}`` entry so the page can say so (never an
+    empty list masquerading as "no writes"). ``audit_read`` and the ``audit`` tool are
+    deliberately unchanged."""
+    live = _audit_path()
+    out: list[dict] = []
+    for path in (live.with_name(live.name + ".1"), live):
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            log.debug("read_all failed: %s", e)
+            out.append({"error": f"audit log unreadable: {e}"})
+            continue
+        for line in text.splitlines():
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue  # a truncated/corrupt line never fails the read
+            if isinstance(rec, dict):
+                out.append(rec)
+    return out
 
 
 # --- per-tool usage tally (#67 addendum) -------------------------------------------
@@ -203,12 +238,63 @@ def _audit_after(result) -> dict | None:
     return None
 
 
+def _audit_receipt(result) -> str | None:
+    """The batch ``receipt`` a recoverable Mail write returned, if any: the exact link
+    from its middleware line to the plan and done records (D-12)."""
+    sc = getattr(result, "structured_content", None)
+    if isinstance(sc, dict):
+        inner = sc.get("result", sc)  # the same unwrap as _audit_after
+        if isinstance(inner, dict) and isinstance(inner.get("receipt"), str):
+            return inner["receipt"]
+    return None
+
+
 def _safe_snapshot(source: Snapshotter, ident: str) -> dict | None:
     try:
         p = source.snapshot(ident)
         return p.as_dict() if p is not None else None
     except Exception:  # noqa: BLE001 — audit must never break a write
         return None
+
+
+_BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to dry_run
+_FALLBACK_CALLER = "unknown-client"
+
+
+def _resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
+    """The ``dry_run`` the tool will act on (#222): the client's value coerced as
+    pydantic coerces it for the tool (``"false"`` is False), else the signature default;
+    a tool with no ``dry_run`` parameter always acts. The middleware runs BEFORE that
+    validation, so a rejected value falls back to the default — the call then fails
+    and no record is written."""
+    default = defaults.get(tool, False)
+    if "dry_run" not in args:
+        return default
+    try:
+        return _BOOL.validate_python(args["dry_run"])
+    except ValidationError:
+        return default
+
+
+def _label(text: object) -> str:
+    """One line, control-free, at most ``SUMMARY_MAX`` characters — a hard cut, since
+    ``clean_summary`` appends a ``[truncated N chars]`` marker past the bound."""
+    return sanitize_line(text)[:SUMMARY_MAX]
+
+
+def _caller(context) -> tuple[str, str | None]:
+    """``("<name> <version>", shim id | None)`` from the MCP client's ``clientInfo``.
+
+    Advisory labels, reported by the client: never an identity check, never a gate.
+    A context without ``fastmcp_context`` (in-process call, test double), without a
+    session, or without ``clientInfo`` gives the fixed fallback."""
+    try:
+        info = context.fastmcp_context.session.client_params.clientInfo
+        caller = _label(f"{info.name} {info.version}")
+        session = _label(getattr(info, "session", None) or "")
+    except (AttributeError, RuntimeError):
+        return _FALLBACK_CALLER, None
+    return caller or _FALLBACK_CALLER, session or None
 
 
 # --- middleware ----------------------------------------------------------------------
@@ -225,18 +311,28 @@ class AuditMiddleware(Middleware):
     A tool is a write IFF it is a key of ``audit_verbs`` — the map both selects what
     gets logged and states under which verb (GATE-06: no separate write-tool set, and
     no generic ``"write"`` fallback for a verb the caller forgot to state).
+
+    Every record carries ``dry_run``, resolved from ``dry_run_defaults`` (a tool name ->
+    its signature default) when the caller omitted it; ``args`` stay as the client sent
+    them. ``caller`` (and ``session``, for a shim) are advisory client labels.
     """
 
     def __init__(
-        self, audit_verbs: Mapping[str, str], snapshot_sources: dict[str, Snapshotter]
+        self,
+        audit_verbs: Mapping[str, str],
+        snapshot_sources: dict[str, Snapshotter],
+        dry_run_defaults: Mapping[str, bool] | None = None,
     ) -> None:
         self._audit_verbs = audit_verbs
         self._snapshot_sources = snapshot_sources
+        self._dry_run_defaults = dry_run_defaults or {}
 
     async def on_call_tool(self, context, call_next):
         tool = context.message.name
         usage_log(tool)  # tally every call (reads included) — swallows its own errors
         args = dict(context.message.arguments or {})
+        dry_run = _resolve_dry_run(tool, args, self._dry_run_defaults)
+        caller, session = _caller(context)
         before = None
         source = self._snapshot_sources.get(tool)
         if source is not None and args.get("id"):
@@ -256,15 +352,20 @@ class AuditMiddleware(Middleware):
         if tool in self._audit_verbs and not result.is_error:
             try:
                 after = _audit_after(result)
+                receipt = _audit_receipt(result)
                 audit_write(
                     {
                         "ts": datetime.now().isoformat(timespec="seconds"),
                         "tool": tool,
                         "op": self._audit_verbs[tool],
                         "args": _audit_args(args),
+                        "dry_run": dry_run,
+                        "caller": caller,
+                        **({"session": session} if session is not None else {}),
                         "target_id": args.get("id") or (after or {}).get("id"),
                         "before": before,
                         "after": after,
+                        **({"receipt": receipt} if receipt else {}),
                     }
                 )
             except Exception:  # noqa: BLE001 — audit must never break a write

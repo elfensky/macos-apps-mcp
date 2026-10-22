@@ -2,7 +2,7 @@
 
 Reads address any mailbox through ``mail_addressing`` (the shared ``MAILBOX_REF``
 resolver / ``resolve`` for a bare id); the filesystem boundary — allowlisted root,
-derived filenames, never-overwrite, size cap — is ``mail_files``', enforced in Python
+derived filenames, never-overwrite, size cap — is ``files``', enforced in Python
 BEFORE the save Apple Event (an id-only save first lists the message to learn the
 attachment's name, #296). Nothing here mutates a message: ``save`` writes a file out,
 and the one side effect it can have (Mail fetching a not-yet-downloaded message) is
@@ -16,7 +16,7 @@ the reverse).
 
 from __future__ import annotations
 
-from .. import runtime
+from .. import files, runtime
 from ..errors import NativeError
 from ..text import (
     STRIP_FRAMING,
@@ -27,7 +27,7 @@ from ..text import (
     int_or_none,
     parse_framed,
 )
-from . import mail_addressing, mail_files
+from . import mail_addressing
 from .mail_index import _deeplink
 
 # list_attachments (#45): attachments of messages in a mailbox matching a subject query.
@@ -124,14 +124,14 @@ end run"""
 #
 # * `save a in <file>` writes to the EXACT path given (it is not a directory), and
 #   OVERWRITES SILENTLY — a 0-byte placeholder came back holding 192 KB. So the
-#   never-overwrite rule cannot live here; `mail_files.target_path` refuses in Python
+#   never-overwrite rule cannot live here; `files.target_path` refuses in Python
 #   before this script is ever reached.
 # * Saving an attachment on a NOT-downloaded message makes Mail FETCH the whole message
 #   synchronously — all seven attachments on a `.partial` message flipped to
 #   downloaded=true and `file size` changed from the base64 estimate (14509) to the real
 #   byte count (8755). So this call is not a read: it can hit the network, and it gets
 #   _SAVE_TIMEOUT rather than the 30s default.
-# * A missing destination DIRECTORY raises -10000 and writes nothing (`mail_files`
+# * A missing destination DIRECTORY raises -10000 and writes nothing (`files`
 #   creates it first, inside the allowlisted root).
 # * The size cap is enforced HERE, before `save`, because `file size` is only knowable
 #   from Mail — checking it in Python would cost a second Apple Event on every call,
@@ -208,6 +208,17 @@ end run"""
 # the other raised host caps in this project for a single-item Apple Event against a
 # possibly-remote IMAP store.
 _SAVE_TIMEOUT = 300.0
+
+# 25 MiB — above every mainstream provider's own attachment ceiling, so a refusal here
+# means something genuinely unusual rather than a normal mail this tool cannot handle.
+# Mail's cap, not the shared module's: `files.check_size` takes it from each caller.
+MAIL_MAX_BYTES = 25 * 1024 * 1024
+
+# Why a saved attachment can come back empty — `files.confirm_written` appends it.
+_NOT_LOCAL_HINT = (
+    "the attachment is not available locally (the account may be offline, or the "
+    "message not downloaded). Open the message in Mail once, then retry."
+)
 
 
 def _parse_attachments(raw: str) -> list[dict]:
@@ -323,9 +334,14 @@ def save_attachment(
     file_name = wanted_name
     if not file_name:
         row = _listed_attachment(target, wanted_id)
-        mail_files.check_size(row["size"], row["name"])
+        files.check_size(
+            row["size"],
+            row["name"],
+            max_bytes=MAIL_MAX_BYTES,
+            hint="Save it from Mail directly.",
+        )
         file_name = row["name"]
-    path = mail_files.target_path(dest_dir, file_name)
+    path = files.target_path(dest_dir, file_name, fallback="attachment")
     raw = runtime.run_osascript(
         _SAVE_ATTACHMENT,
         target.id,
@@ -333,7 +349,7 @@ def save_attachment(
         wanted_name,
         wanted_id,
         str(path),
-        str(mail_files.MAX_BYTES),
+        str(MAIL_MAX_BYTES),
         timeout=_SAVE_TIMEOUT,
     )
     size, _, downloaded = raw.strip().partition(US)
@@ -341,7 +357,7 @@ def save_attachment(
         "saved": str(path),
         "name": path.name,
         "original_name": file_name,
-        "bytes": mail_files.confirm_written(path),
+        "bytes": files.confirm_written(path, hint=_NOT_LOCAL_HINT),
         "reported_size": int_or_none(size),
         "was_downloaded": bool_or_none(downloaded),
         "id": target.id,

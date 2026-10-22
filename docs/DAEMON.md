@@ -36,10 +36,18 @@ see "Hardened-runtime check"; never `codesign --deep`) with
 `--timestamp --options runtime`. Omit `--sign` for an unsigned dev build (no Login Items
 registration will work without a signature, but the bundle still smoke-tests).
 
-The build installs the exact versions in `uv.lock`, except cryptography, cffi and
-pycparser (see below), then runs `scripts/smoke_stream.py` on
+The build compiles `packaging/AppIcon.icon`, an Icon Composer file, with Xcode's `actool`
+into `Contents/Resources` (`Assets.car` for macOS 26 and later, `AppIcon.icns` for older
+macOS). The build needs full Xcode, because the Command Line Tools have no `actool`. When
+`xcode-select` points at the Command Line Tools, the build uses `/Applications/Xcode.app`.
+For an Xcode at a different path, set `DEVELOPER_DIR` to its `Contents/Developer`.
+
+The build installs the exact versions in `uv.lock`, except cryptography (see below), then
+runs `scripts/smoke_stream.py` on
 each slice of the bundled interpreter (one streamed tool call through the shim's transport).
 A failing smoke fails the build; a good build log shows `stream smoke ok` (#286).
+The build drops osxphotos's two thin `libdisclaim` dylibs (CLI only) from both trees, and
+both smokes import osxphotos.
 `doctor().libs` reports the `mcp` and `fastmcp` versions the bundle carries (#285).
 
 **Universal2, macOS 15 floor.** The `.app` carries arm64 and x86_64 slices of the
@@ -55,20 +63,22 @@ The build reads that key and picks wheels for it. Before signing, it fails unles
 Mach-O is `x86_64 arm64` and no slice needs a newer macOS. A good build log shows
 `smokes ok: arm64`, `smokes ok: x86_64` and `universal2 gate ok`. The build smokes both
 slices on an Apple-silicon Mac (x86_64 under Rosetta). The signed 0.14.2 release also runs on
-an Intel CPU: an iMac (2012, OpenCore Legacy Patcher, SIP off) on macOS 15, 2026-10-09..11.
+an Intel CPU: an iMac (2012) on macOS 15, 2026-10-09..11.
 There, the release zip installed and `install-agent` registered the daemon; `doctor()`
 reported 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access granted to
 `ren.lav.macos-apps-mcp`; Mail, Calendar and Reminders reads worked through the shim; and
 `codesign --verify --strict` was valid after the daemon ran.
 
-**No cryptography in the `.app`** (#205). The build leaves out cryptography, cffi and
-pycparser. Only auth code uses them: mcp's `pyjwt[crypto]`, fastmcp's auth modules, authlib
-and joserfc. The daemon configures no auth, so no daemon, shim or tool path imports them.
+**No cryptography in the `.app`** (#205). The build leaves out cryptography only.
+cffi and pycparser ship, because osxphotos → osxmetadata → xattr needs cffi (cffi has per-arch
+cp314 wheels, which the build joins with `lipo`). Only auth code uses cryptography: mcp's
+`pyjwt[crypto]`, fastmcp's auth modules, authlib and joserfc. The daemon configures no auth,
+so no daemon, shim or tool path imports it.
 cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
-the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists them, so the
-dev venv keeps them. On an Intel Mac, the dev venv and a PyPI install (`uvx`) still resolve
-cryptography; `uv sync --no-install-package cryptography` works for the dev venv, and the
-PyPI install is tracked in #322.
+the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists it, so the
+dev venv keeps it. On an Intel Mac, `pyproject.toml` caps cryptography below 49 (#322).
+The dev venv and a PyPI install (`uvx`) get 48.x, the last release with an Intel wheel, so
+nothing is built from source.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
@@ -121,7 +131,9 @@ This will:
 2. Register the LaunchAgent via `SMAppService` and start the daemon.
 3. **Trigger every consent prompt proactively** (Calendar, Reminders, Contacts, per-app
    Automation) — approve each one as it appears. Approving in this context (rather than mid
-   tool-call later) keeps a stray timeout from recording as a denial.
+   tool-call later) keeps a stray timeout from recording as a denial. If a prompt times out anyway, doctor shows
+   that row with `reason: "prompt-timeout"` and the reset command to run before
+   `doctor(request=True)` with someone at the screen.
 4. Print the FDA deep-link and the shim `command:`/`args:` snippet to paste into your MCP
    clients.
 
@@ -190,6 +202,87 @@ Whichever route, `doctor()`'s
 `deployment.outbound` (list of adapters currently send-enabled) and `deployment.outbound_note`
 report the *effective* state as read by the daemon that's actually serving your client — run
 `doctor` after the kickstart to confirm it took.
+
+### 6. Turn adapters off under the daemon
+
+The file `~/.local/state/macos-apps-mcp/adapters_off` holds a comma list of the adapters that
+are OFF. The names are `calendar`, `contacts`, `mail`, `messages`, `music`, `notes`, `photos`,
+`reminders`, `safari` and `shortcuts`; case does not matter. An unknown name is ignored and
+`doctor` lists it as `adapters_unknown`. An absent or empty file means every adapter is on. A
+file that exists but cannot be read (wrong owner or mode) turns every adapter off, and the
+`doctor` note says so: the list fails closed, never open.
+
+```sh
+echo photos > ~/.local/state/macos-apps-mcp/adapters_off
+launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp
+```
+
+The daemon reads the file once, at start, so apply a change with the kickstart above. An OFF
+adapter's tools are absent from the tool list (never registered-and-erroring) and `doctor` gives
+it no Automation probe and no EventKit request. Meta tools (`ping`, `now`, `doctor`, `audit`,
+`usage`) always stay. `doctor()`'s `deployment.adapters`, `deployment.adapters_off` and
+`deployment.adapters_pending` report the state the serving daemon read; `adapters_pending`
+appears when the file changed after the daemon started.
+
+`MACOS_APPS_ADAPTERS_OFF` sets the same list for a stdio server and, when set and non-empty,
+wins over the file. The file is read **only** in the daemon role, and it is home-pinned for the
+same reason as `allow_send` (see section 5). The localhost dashboard (section 7) writes the
+same file.
+
+### 7. The localhost dashboard
+
+The daemon serves a dashboard at `http://127.0.0.1:47632`. It binds the loopback address only: a
+non-loopback bind is refused. The MCP endpoint stays on the unix socket and is not reachable from
+this port. Every request checks the `Host` header, and every form post checks `Origin` and a
+per-session token.
+
+Every page needs the page key. Run `macos-apps-mcp dashboard` in Terminal (bundle form:
+`/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp dashboard`).
+It prints a link and opens it. The browser keeps the key as a cookie, so you run the command
+again only on a new browser or after a key change. The key lives in
+`~/.local/state/macos-apps-mcp/daemon/dashboard_key` (mode 0600, in a 0700 folder) and survives
+restarts. To change the key, remove that file, restart the daemon (the kickstart in section 6)
+and run the command again. Other accounts on this Mac and sandboxed apps can reach
+`127.0.0.1:47632`, but they get a refusal that names the command. An unreadable key file refuses
+every page until you remove it and restart the daemon. Browsers send a cookie to every port of 127.0.0.1, so a page
+that another program serves there could receive the key when this browser opens it; if that may
+have happened, change the key.
+
+The pages:
+
+| Page | What it shows |
+|---|---|
+| Writes (`/`) | every write in `audit.jsonl`, newest first; one click shows the word diff, the arguments and the raw log lines; a batch Mail write shows each message's backup |
+| Health (`/health`) | what `doctor` reports; a danger banner only for an adapter that is on and whose macOS grant is denied; a row says when macOS grants could not be read |
+| Adapters (`/adapters`) | one switch per app, what waits for a restart, the restart button |
+| Usage (`/usage`) | calls per tool |
+| Backups (`/backups`) | every Mail backup receipt on disk, each opened read-only |
+
+Health runs `doctor` in its read-only mode: it never asks for a permission and never sends an
+Apple Event. It runs one `doctor` call at a time. While a native call holds the worker (a bulk
+Mail pass can hold it for hours), Health says `worker busy, a native call is in flight` and
+still shows the Deployment group. Backups never deletes or prunes a backup, and it never creates
+the backup folder.
+
+The dashboard has **two write actions**: the adapter switches (they rewrite the `adapters_off`
+file of section 6) and the restart. Each is logged in `audit.jsonl` with caller `dashboard`.
+Recovery stays read-only: to undo a batch, copy the prompt on its page to Claude, which runs
+`mail_undo` through the gated, audited MCP path.
+
+A restart makes the daemon exit, and launchd starts it again. Open MCP connections drop for a
+moment, and clients reconnect on their next call. A Mail batch that is running stops; its
+receipt and its backups stay.
+
+The Outbound gate is shown locked. It changes only with `macos-apps-mcp allow-send` (section 5),
+because any website can send a request to `127.0.0.1`.
+
+If the dashboard port is taken, the daemon logs it and keeps serving MCP. `doctor()` reports
+`deployment.dashboard` as `not bound: …`; when the dashboard is up, it reports the URL. Without
+the dashboard, change adapters through the `adapters_off` file and the kickstart of section 6:
+
+```sh
+launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp
+```
 
 ## Manual acceptance checklist
 
@@ -282,7 +375,11 @@ build:
     `requires-approval` / `not-found`).
   - `deployment.grant_identities`: per-service, per-client-identity grant map read straight from
     `TCC.db` — `None`/unreadable until Full Disk Access is granted to whichever process is
-    asking (chicken-and-egg: reading `TCC.db` itself needs FDA for the reader).
+    asking (chicken-and-egg: reading `TCC.db` itself needs FDA for the reader). Each entry has
+    `client` and `granted`. An AppleEvents entry also has `target`, the bundle id of the
+    controlled app. A denied entry has `reason` (TCC's `auth_reason`, for example
+    `user-consent` or `prompt-timeout`). A `prompt-timeout` entry also has a `remediation` with
+    the `tccutil reset <Service> ren.lav.macos-apps-mcp` command.
   - `deployment.outbound`: adapters with outbound send currently enabled (derived straight from
     the running process's `MACOS_APPS_ALLOW_SEND` state, `[]` if none) + `deployment.outbound_note`
     with the human-readable explanation — see "Outbound (send) mode under the daemon" above if

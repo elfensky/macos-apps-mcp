@@ -198,6 +198,7 @@ def test_delete_dry_run_title_mismatch_surfaces_native_error(monkeypatch):
 import gzip  # noqa: E402
 import os  # noqa: E402
 import sqlite3  # noqa: E402
+import unicodedata  # noqa: E402
 
 from macos_apps_mcp.adapters import notes as notes_mod  # noqa: E402
 from macos_apps_mcp.adapters.notes import (  # noqa: E402
@@ -938,3 +939,327 @@ def test_update_dry_run_refuses_folder_before_any_native_call(monkeypatch):
 def test_update_dry_run_rejects_empty_id():
     with pytest.raises(ValueError, match="needs a note id"):
         NotesAdapter().update("   ", NoteData(title="T"), dry_run=True)
+
+
+# --- body search (#93, D-13/D-14): in-memory FTS5 over the decoded bodies -------------
+
+_P = "x-coredata://STORE-UUID/ICNote/p"
+_DEFAULT_BODIES = {99: "Milk, eggs, bread — the full note body", 98: "Secret full body"}
+
+
+@pytest.fixture
+def body_notestore(tmp_path, monkeypatch):
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite",
+        bodies={**_DEFAULT_BODIES, 30: "quarterly tax return due"},
+        extra_notes=[(30, "Errands", "list")],
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    return path
+
+
+def test_notes_tool_finds_a_word_only_in_a_body(body_notestore):
+    # tracer: tool -> NotesAdapter.read -> store -> in-memory FTS5 hit, in the envelope
+    from macos_apps_mcp import server as srv
+
+    out = srv.notes("quarterly")
+    assert out == {
+        "results": [
+            {
+                "id": f"{_P}30",
+                "summary": "list",
+                "deeplink": "",
+                "folder": "iCloud / Groceries",
+            }
+        ]
+    }
+
+
+def test_notes_tool_keeps_the_snippet_hit(body_notestore):
+    from macos_apps_mcp import server as srv
+
+    assert [r["id"] for r in srv.notes("eggs")["results"]] == [f"{_P}3"]
+
+
+def test_get_pointers_includes_body_hits(body_notestore):
+    ptrs = NotesAdapter().get_pointers("quarterly")
+    assert [p.id for p in ptrs] == [f"{_P}30"]
+
+
+def _body_store(tmp_path, monkeypatch, rows):
+    """A synthetic NoteStore plus ``rows`` of (pk, title, snippet, body) live notes."""
+    path = _make_notestore(
+        tmp_path / "NoteStore.sqlite",
+        bodies={**_DEFAULT_BODIES, **{pk: body for pk, _t, _s, body in rows}},
+        extra_notes=[(pk, title, snip) for pk, title, snip, _b in rows],
+    )
+    monkeypatch.setattr(notes_mod, "NOTESTORE", path)
+    return path
+
+
+def _ids(out):
+    return [r["id"].rpartition("/p")[2] for r in out["results"]]
+
+
+def test_body_merge_puts_title_snippet_hits_first_without_duplicates(
+    tmp_path, monkeypatch
+):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [
+            (40, "Plan", "budget plan", "budget plan details"),  # snippet hit
+            (41, "Misc", "x", "annual budget review"),  # body-only hit
+            (42, "Budget", "b", "budget budget"),  # hits both ways
+        ],
+    )
+    out = NotesAdapter().read("budget")
+    assert _ids(out) == ["42", "40", "41"]  # substring hits newest first, then body
+    assert "plane" not in out and "coverage" not in out
+
+
+def test_locked_note_body_is_never_indexed(tmp_path, monkeypatch):
+    path = _body_store(
+        tmp_path, monkeypatch, [(31, "Vault", "x", "launch codes zebra")]
+    )
+    assert _ids(NotesAdapter().read("zebra")) == ["31"]  # control: found while unlocked
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "UPDATE ZICCLOUDSYNCINGOBJECT SET ZISPASSWORDPROTECTED = 1 WHERE Z_PK = 31"
+    )
+    conn.commit()
+    conn.close()
+    assert NotesAdapter().read("zebra")["results"] == []
+    # the seeded locked note (p4) keeps its decodable body out, yet its title matches
+    assert "4" not in _ids(NotesAdapter().read("full"))
+    assert _ids(NotesAdapter().read("secret")) == ["4"]
+
+
+def test_short_word_query_reaches_bodies(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
+    assert _ids(NotesAdapter().read("tax")) == ["30"]
+
+
+def test_short_words_are_dropped_when_a_long_word_exists(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [
+            (50, "One", "a", "tax only here"),
+            (51, "Two", "b", "refund issued"),
+        ],
+    )
+    # "tax" (3 chars) is left out of the body expression; "refund" alone decides
+    assert _ids(NotesAdapter().read("tax refund")) == ["51"]
+
+
+@pytest.mark.parametrize(
+    ("query", "expr"),
+    [
+        ("don't", '"don"'),  # a "t" would match every isn't, can't and it's
+        ("C++", None),  # a "C" would match every lone c: titles and snippets only
+        ("tax 2024", '"2024"'),  # the D-13 4-character rule still drops "tax"
+        ("tax", '"tax"'),  # no 4+ word: the short words reach the bodies
+    ],
+)
+def test_body_expression_never_holds_a_one_character_word(query, expr):
+    # WR-01
+    assert notes_mod._fts_expr(query) == expr
+
+
+def test_a_contraction_query_does_not_match_every_contraction(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(70, "One", "a", "it isn't here"), (71, "Two", "b", "don't forget")],
+    )
+    assert _ids(NotesAdapter().read("don't")) == ["71"]
+
+
+def test_body_search_folds_diacritics(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [
+            (60, "One", "a", "morning Café"),
+            (61, "Two", "b", "my résumé"),
+            (62, "Three", "c", "a naive plan"),
+        ],
+    )
+    assert _ids(NotesAdapter().read("cafe")) == ["60"]
+    assert _ids(NotesAdapter().read("resume")) == ["61"]
+    assert _ids(NotesAdapter().read("naïve")) == ["62"]  # accent in the query only
+
+
+# Escaped on purpose: an editor may re-normalise a literal glyph and hollow the test.
+_SCRIPT_WORDS = [
+    "\u0451\u043b\u043a\u0430",  # Cyrillic with yo
+    "\u0447\u0430\u0439\u043d\u0438\u043a",  # Cyrillic with short i
+    "Stra\u00dfe",  # sharp s
+    "\ud68c\uc758",  # Hangul syllables
+    "\u30ac\u30b9\u6599\u91d1",  # katakana with dakuten, then kanji
+    "\uff21\uff22\uff23\uff24",  # full-width Latin
+    "caf\u00e9",  # Latin with a diacritic
+]
+
+
+@pytest.mark.parametrize("query_form", ["NFC", "NFD"])
+@pytest.mark.parametrize("body_form", ["NFC", "NFD"])
+@pytest.mark.parametrize("word", _SCRIPT_WORDS)
+def test_body_search_finds_a_word_in_any_script(
+    tmp_path, monkeypatch, word, body_form, query_form
+):
+    # #367: the query and the index must normalise alike, or a body-only hit is lost
+    # while the envelope still reads as a complete search
+    body = f"buy {unicodedata.normalize(body_form, word)} today"
+    _body_store(tmp_path, monkeypatch, [(80, "Misc", "x", body)])
+    out = NotesAdapter().read(unicodedata.normalize(query_form, word))
+    assert _ids(out) == ["80"]
+    assert "coverage" not in out
+
+
+def test_body_query_is_never_fts_syntax(tmp_path, monkeypatch):
+    # A query that reached MATCH as syntax fails into `coverage` or matches nothing, so
+    # each case asserts both: no coverage, and the ids the quoted words find (#367).
+    body = "quarterly tax due near the end"
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", body)])
+    expected = {
+        'tax" OR "x': ["30"],
+        "NEAR(a b)": ["30"],
+        "tax AND NOT": ["30"],
+        "OR": [],
+        '"': [],
+        "*": [],
+    }
+    for hostile, ids in expected.items():
+        out = NotesAdapter().read(hostile)
+        assert "coverage" not in out, hostile
+        assert _ids(out) == ids, hostile
+
+
+@pytest.mark.parametrize("n", [24, 25, 26])
+def test_body_cap_boundary(tmp_path, monkeypatch, n):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(100 + i, f"Note {i}", "s", "zebra stripes") for i in range(n)],
+    )
+    out = NotesAdapter().read("zebra")
+    assert len(out["results"]) == min(n, MAX_NOTES)
+    assert ("truncated" in out) == (n >= MAX_NOTES)
+
+
+def test_body_tie_goes_to_the_higher_pk(tmp_path, monkeypatch):
+    _body_store(
+        tmp_path,
+        monkeypatch,
+        [(70, "Same", "s", "ocelot"), (71, "Same", "s", "ocelot")],
+    )
+    assert _ids(NotesAdapter().read("ocelot")) == ["71", "70"]
+
+
+def test_coverage_says_body_search_unavailable_on_body_drift(tmp_path, monkeypatch):
+    path = _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "tax due")])
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE ZICNOTEDATA DROP COLUMN ZDATA")
+    conn.commit()
+    conn.close()
+    out = NotesAdapter().read("eggs")  # a snippet hit on p3 still returns
+    assert _ids(out) == ["3"]
+    assert "plane" not in out
+    assert out["coverage"].startswith("body search unavailable")
+
+
+def test_coverage_says_body_search_unavailable_without_fts5(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "tax due")])
+    real = sqlite3.connect
+
+    class _NoFts:
+        def execute(self, *a, **kw):
+            raise sqlite3.OperationalError("no such module: fts5")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        notes_mod.sqlite3,
+        "connect",
+        lambda db, *a, **kw: _NoFts() if db == ":memory:" else real(db, *a, **kw),
+    )
+    out = NotesAdapter().read("eggs")
+    assert _ids(out) == ["3"]
+    assert out["coverage"].startswith("body search unavailable")
+
+
+def test_fallback_searches_titles_only_and_says_so(tmp_path, monkeypatch):
+    bad = tmp_path / "NoteStore.sqlite"
+    conn = sqlite3.connect(bad)
+    conn.execute("CREATE TABLE ZICCLOUDSYNCINGOBJECT (Z_PK INTEGER)")  # drift
+    conn.execute("CREATE TABLE Z_METADATA (Z_UUID TEXT)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(notes_mod, "NOTESTORE", bad)
+    canned = f"x-coredata://S/ICNote/p1{US}iCloud / Notes{US}Shopping{RS}"
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a: canned)
+    out = NotesAdapter().read("shopping")
+    assert _ids(out) == ["1"]
+    assert out["plane"] == "applescript"
+    assert "titles only" in out["coverage"]
+
+
+def test_body_search_touches_no_disk_but_the_store(tmp_path, monkeypatch):
+    _body_store(tmp_path, monkeypatch, [(30, "Errands", "list", "quarterly tax due")])
+    real = sqlite3.connect
+    targets = []
+
+    def spy(db, *a, **kw):
+        targets.append(db)
+        return real(db, *a, **kw)
+
+    monkeypatch.setattr(notes_mod.sqlite3, "connect", spy)
+    assert _ids(NotesAdapter().read("quarterly")) == ["30"]
+    assert len(targets) == 2
+    assert targets[0].startswith("file:") and "mode=ro" in targets[0]
+    assert targets[1] == ":memory:"
+
+
+def test_no_semantic_extra_and_no_ml_dependency():
+    # NOTE-02 does not apply (D-12): semantic search is not adopted, so the install
+    # stays free of any `[semantic]` extra, `notes_semantic` tool or ML package.
+    import tomllib
+    from pathlib import Path
+
+    from macos_apps_mcp import registry
+    from macos_apps_mcp import server as _srv  # noqa: F401  (registers the tools)
+
+    root = Path(__file__).resolve().parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert "semantic" not in project.get("optional-dependencies", {})
+    assert "notes_semantic" not in registry.TOOLS
+    locked = tomllib.loads((root / "uv.lock").read_text())["package"]
+    banned = {
+        "fastembed",
+        "onnxruntime",
+        "sentence-transformers",
+        "torch",
+        "transformers",
+        "tokenizers",
+    }
+    assert banned.isdisjoint(p["name"] for p in locked)
+
+
+def test_the_note01_decision_record_is_kept():
+    # W-01: NOTE-01 closes on this record (D-12); a deleted or emptied doc fails here
+    from pathlib import Path
+
+    doc = Path(__file__).resolve().parent.parent / "docs" / "notes-semantic-search.md"
+    text = doc.read_text()
+    for term in (
+        "is not adopted",
+        "all-MiniLM-L6-v2",  # the model
+        "1,000-character chunks",  # chunking
+        "ZMODIFICATIONDATE1",  # refresh
+        "10,000 notes",  # size cap
+        "`[semantic]` extra",  # the optional-extra boundary
+    ):
+        assert term in text, term

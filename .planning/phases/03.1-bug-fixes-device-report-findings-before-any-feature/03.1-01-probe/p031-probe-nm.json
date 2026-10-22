@@ -1,0 +1,64 @@
+{
+  "notes": {
+    "fp_cols": 11,
+    "fp_uuid": 1,
+    "entity_names_ok": true,
+    "rows": [
+      [
+        0,
+        0,
+        0,
+        0,
+        "ICNote",
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        "ICNote",
+        2
+      ]
+    ],
+    "live_L": 1,
+    "notes_all_len": 1,
+    "notes_all_wall_s": 0.18
+  },
+  "mail": {
+    "first": {
+      "wall_s": 0.4,
+      "ids": 5,
+      "local_ids": 1,
+      "bare": 1,
+      "named_nonlocal": 3
+    },
+    "ids": 5,
+    "local_ids": 1,
+    "bare": 1,
+    "named_nonlocal": 3,
+    "stray": [
+      {
+        "mailboxes": 1,
+        "total": 14,
+        "unread": 0,
+        "v10_dir": false,
+        "v10_entries": 0,
+        "named_after_kickstart": false
+      }
+    ],
+    "bare_after": 1,
+    "named_nonlocal_after": 3,
+    "map_empty_after": false,
+    "kickstart": true
+  },
+  "asks": {
+    "settings_accounts": false,
+    "mail_prompt": false
+  },
+  "triggers_started": {
+    "contacts": true,
+    "mail": false
+  },
+  "reruns": []
+}

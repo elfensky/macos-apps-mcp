@@ -10,7 +10,8 @@ and one registration record — because those cuts reshape the exact files (`ser
 app cannot verify anything that follows. With the gate closed and the read-only suite green, Mail
 fixes come next (Phase 02.1): on 2026-09-24 the owner put email work ahead of every new or
 additional feature. Then the work becomes adapter depth, one native plane at a time: EventKit (Calendar alarms and real
-recurrence, Reminders deletion, lists and subtasks), then the two adapters whose mechanism is still
+recurrence, Reminders deletion, lists and subtasks). On 2026-10-11 the owner put bugs and errors ahead of every
+feature: an open bug goes into an inserted phase before the next feature phase (Phase 03.1). Then the two adapters whose mechanism is still
 open (Notes semantic search, Photos). Those last two open with a probe, and the probe's answer —
 including "the premise was wrong, here is the documented gap" — is the deliverable. Contacts and
 Messages depth were moved to v2 at the 2026-08-28 review (owner's call); their requirements stay
@@ -34,7 +35,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes (completed 2026-10-01)
 - [x] **Phase 02.1: Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account** (INSERTED) - A full 25-message move or trash finishes and always leaves a receipt; a draft starts from the account the caller names (completed 2026-10-05)
 - [x] **Phase 3: EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks** - The shared EventKit plane reaches Mail-level completeness (completed 2026-10-11)
-- [ ] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented
+- [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
+- [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
+- [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
@@ -230,10 +233,40 @@ Plans:
 **Wave 10** *(blocked on Wave 9 completion)*
 - [x] 03-10-PLAN.md — Cascade proof on the fixture; MAIL-05/06 confirmed from the record; issues #89/#90/#91/#92/#207 closed
 
+### Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature (INSERTED)
+
+**Goal**: Every open bug is fixed or settled on device before the next feature phase: the findings of the Intel iMac device report (PR #332), the #317 fix that is not yet proven through the daemon, and the audit record that cannot tell a preview from a write (#222). Bugs and errors come before any feature (owner, 2026-10-11).
+**Depends on**: Phase 3
+**Requirements**: FIX-01, FIX-02, FIX-03, FIX-04, FIX-05, FIX-06
+**Success Criteria** (what must be TRUE):
+
+  1. Every audit record carries `dry_run: true|false`, resolved from the tool's signature default when the caller omits it, and a `caller` field. A test calls a write tool without `dry_run` and its record states `dry_run: true` (#222).
+  2. On the Intel iMac, `contacts("an")` answers, or fails with an error that names the real cause. The cause is found first: narrow-query timing, the same `whose` scan in Script Editor, and the state of Contacts. The fix follows the measured cause: a bulk read that runs the `whose` scan once, a contacts-specific host timeout whose script backstop stays at or above the host cap, or an error text that names the cause. The SQLite plane of #95 stays v2 (#334).
+  3. On the Intel iMac, `notes_all` returns the count Notes.app shows outside Recently Deleted. A count with the tool's own SQLite filter settles it; if the filter drops a live note, the filter is fixed (#335).
+  4. On the Intel iMac, every account in `mail_overview` has a name, or a label that says why it has none. The cause of the raw UUID is recorded (#336).
+  5. A `.app` built from `develop` at the end of the phase runs as the daemon on the Intel iMac (`doctor().build` names that commit). Through it, `doctor(request=True)` with Photos quit reports the photos surface ok (#317, #337), and criteria 2–4 hold.
+  6. The Intel iMac device report carries its three corrections, landed by a records PR, and the iMac's firmware and security detail is gone from every tracked file (#333).
+
+**Plans**: 7/7 plans complete
+
+Plans:
+**Wave 1**
+- [x] 03.1-01-PLAN.md — iMac probe first: Contacts, Notes and Mail measured through the 0.14.3 daemon and outside it; every issue gets a mechanical route (D-07..D-11)
+- [x] 03.1-02-PLAN.md — Every audit record carries `dry_run` and `caller`; the shim forwards the real client identity (D-01..D-06, #222)
+- [x] 03.1-03-PLAN.md — Device-report corrections and the firmware-detail scrub: one records PR, one docs PR (D-15, D-16, #333)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 03.1-04-PLAN.md — Contacts fix by the measured route: bulk read, contacts host cap, or an error that names the cause (D-09, #334)
+- [x] 03.1-05-PLAN.md — Notes count settled on device; the filter changes only if it drops a live note (D-10, #335)
+- [x] 03.1-06-PLAN.md — `mail_overview` labels an account Mail does not list; one bounded map re-read for a stale map (D-11, #336)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 03.1-07-PLAN.md — Build from `develop`, draft-release courier, iMac install, device proofs; closes #317, #337, #334, #335, #336 (D-12..D-14)
+
 ### Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane
 
 **Goal**: The two adapters whose mechanism is still open are settled on device before any feature code; what survives the probe ships as a bounded read plane, what does not ships as a documented gap.
-**Depends on**: Phase 3
+**Depends on**: Phase 03.1
 **Requirements**: NOTE-01, NOTE-02, PHO-01, PHO-02, PHO-03, PHO-04
 **Success Criteria** (what must be TRUE):
 
@@ -243,7 +276,55 @@ Plans:
   4. A written decision on Notes semantic search lands before any indexing code exists — embedding model, chunking, index build and refresh policy, size cap, and the optional-extra boundary — and "not adopted, here is why" closes the requirement legitimately.
   5. If adopted, `notes_semantic(query)` returns Pointers from a lazily built, size-capped sidecar in the server's state dir (same shape as the Mail FTS sidecar), available only when the `[semantic]` extra is installed, and a plain `uv sync` pulls no ML dependency.
 
-**Plans**: TBD
+**Plans**: 6/6 plans complete
+
+Plans:
+**Wave 1**
+- [x] 04-01-PLAN.md — Photos mechanism gate on device: `uv add osxphotos`, the thin-dylib build fix, a signed build; inside the bundle `PhotosDB()` opens and a throwaway photo reads back by id and exports (D-01..D-03, D-15, PHO-01, #96)
+- [x] 04-02-PLAN.md — `adapters/mail_files.py` becomes the shared `macos_apps_mcp/files.py`: per-caller size cap, Mail keeps its wording and 25 MiB cap, one device save and export with the watchdog (D-11)
+- [x] 04-03-PLAN.md — NOTE-01 closes as "not adopted" in a decision doc committed first; `notes()` gains in-memory FTS5 body search and the `read_result` envelope; NOTE-02 guard test; closes #93 (D-12..D-14)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 04-04-PLAN.md — Photos read plane on osxphotos: `runtime.photos_db()` fail-closed seam, `photo_info` whitelist, `photos()` rewired to the uuid id with the old id form as alias, `photo_albums`; Photos leaves the Automation probe (D-04..D-07, PHO-02, PHO-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 04-05-PLAN.md — `export_photo`: the edited still into an allowlisted directory, `absent` for iCloud-only files, video refused, Live Photo motion skipped, download options pinned off by test (D-08..D-11, PHO-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 04-06-PLAN.md — Device proof through the installed daemon after an owner install decision: search, albums, info and export verified; one owner sitting removes the throwaway photos; closes #96 (PHO-01..PHO-04)
+
+### Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature (INSERTED)
+
+**Goal**: Every bug the Phase 4 reviews left open is fixed before the next feature phase: the build installs the project with an unpinned, unhashed hatchling (#373); `_guard` lets `FileExistsError` and `mkdir` `OSError` from the files module through untyped (#383); ruff still targets py311 after the D-16 floor (#384); a killed `export_photo` leaves a hidden photo copy, and a cleanup error after publish replaces the written result (#387). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: FIX-07, FIX-08, FIX-09, FIX-10
+**Depends on:** Phase 4
+**Success Criteria** (what must be TRUE):
+
+  1. `scripts/build_app.sh` installs the bundled `macos_apps_mcp` package from a wheel built in a hash-pinned build environment; hatchling and its build dependencies never come fresh and unhashed from PyPI, and the `--no-deps` install and the D-16 export guard stay (#373).
+  2. A `FileExistsError` from `files.target_path` and an `OSError` from the `mkdir` in `files.resolve_dest` reach the client as a typed tool error with an error kind and the agent-directed text, for `save_mail_attachment`, `export_mail` and `export_photo` (#383).
+  3. `[tool.ruff] target-version` is `py312` and the UP047 rewrites land with the suite and ruff green (#384).
+  4. A killed `export_photo` (SIGTERM, orphan `_exit`, SIGKILL) leaves no hidden staging copy that a later call does not remove, only dead-pid staging directories are ever removed, and a cleanup error after a successful publish does not replace the written result (#387).
+
+**Plans:** 5/5 plans complete
+
+Plans:
+**Wave 1**
+- [x] 04.1-01-PLAN.md — ruff targets py312 (D-16): the five generics move to PEP 695 form, a drift-guard test ties the ruff target to `requires-python` (FIX-09, #384)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 04.1-02-PLAN.md — `exists_refusal` and the `resolve_dest` mkdir failure raise `WriteRefused`, `_guard` unchanged; client-level and tool-level tests for `export_photo`, `save_mail_attachment` and `export_mail` (FIX-08, #383)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 04.1-03-PLAN.md — the staging name carries the pid, a dead-pid sweep runs on entry, a cleanup error is logged and never raised (FIX-10, #387)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 04.1-04-PLAN.md — a hash-locked `build` group in `uv.lock`; `build_app.sh` builds the wheel with `uv build --require-hashes` and installs it with `--no-deps`; two negative probes and one unsigned build prove it (FIX-07, #373)
+
+**Gap closure** *(UAT gap G-04.1-3)*
+- [x] 04.1-05-PLAN.md — the Photos device-test fixture builds its `POSIX file` list outside the Photos tell block, so the import path runs and the FIX-08 `WriteRefused` assertion is proven on device; the owner removes the test photo (FIX-08, #383)
+
+**Cross-cutting constraints:**
+- The change is on origin/develop: the PR merged with the required `check` job green
 
 ### Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
 
@@ -257,7 +338,35 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: TBD
+**Plans**: 7/9 plans executed
+
+Plans:
+**Wave 1**
+- [x] 05-01-PLAN.md — Adapter deny-list gate read at daemon start, doctor adapter keys, no probe or prompt for an OFF adapter (PLAT-01)
+- [x] 05-02-PLAN.md — Loopback dashboard transport, request Guard and the Usage page; merges after 05-08 (PLAT-02)
+- [x] 05-08-PLAN.md — Declare starlette and bump to 0.15.0, in wave 1 beside 05-02 (PLAT-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 05-03-PLAN.md — Adapter switches, restart and Discard on the dashboard (PLAT-01, PLAT-02)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 05-09-PLAN.md — Page key: every dashboard request needs the key; `macos-apps-mcp dashboard` opens the link (PLAT-02, D-19)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 05-04-PLAN.md — Write list, write detail and read-only recovery with the undo prompt (PLAT-02)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 05-05-PLAN.md — Health, Backups and the dashboard docs (PLAT-02)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 05-06-PLAN.md — Release 0.15.0: owner-approved one-way cut, notarized build, install, doctor proof (D-18)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
+
+**Cross-cutting constraints:**
+- The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #126` with no closing keyword
+
 **UI hint**: yes
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
@@ -279,7 +388,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -287,6 +396,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 4 → 5 → 6
 | 2. Gate Close — Fail-Closed Suite and Device Sweep | 6/6 | Complete    | 2026-10-01 |
 | 02.1. Mail Fixes (INSERTED) | 8/8 | Complete    | 2026-10-05 |
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
-| 4. Notes & Photos | 0/TBD | Not started | - |
-| 5. Operator Control Plane | 0/TBD | Not started | - |
+| 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
+| 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
+| 5. Operator Control Plane | 7/9 | In Progress | - |
 | 6. Distribution | 0/TBD | Not started | - |

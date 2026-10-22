@@ -24,9 +24,14 @@
       "status": "complete"
     },
     {
+      "number": "03.1",
+      "name": "Bug Fixes (INSERTED)",
+      "status": "complete"
+    },
+    {
       "number": "4",
       "name": "Notes & Photos",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "5",
@@ -41,8 +46,8 @@
   ],
   "next": {
     "command": "/gsd:progress --next",
-    "label": "Advance to the next step (plan phase 04)",
-    "reason": "Phase 04 of 7 — needs a plan"
+    "label": "Advance to the next step",
+    "reason": "Phase 05 of 9 · executing"
   },
-  "updated_at": "2026-10-11T01:23:05.584Z"
+  "updated_at": "2026-10-22T08:26:17.689Z"
 }

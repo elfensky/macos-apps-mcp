@@ -1,15 +1,20 @@
 """Deployment plane (#71): the launchd daemon serves the existing FastMCP server over a
 unix domain socket (streamable-http), and the shim bridges a client's stdio to it via
 a FastMCP proxy. The daemon OWNS the socket bind (perms + single-instance); uvicorn is
-handed the fd, never the path (uvicorn's own bind would create the socket 0666)."""
+handed the sockets, never a path (uvicorn's own bind would create the socket 0666)."""
 
 from __future__ import annotations
 
 import asyncio
 import errno
+import ipaddress
+import logging
 import os
+import secrets
 import socket
 import sys
+import threading
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,9 +22,24 @@ import httpx
 import uvicorn
 from fastmcp import Client as _Client
 from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
-from fastmcp.server import create_proxy
+from fastmcp.server.dependencies import get_context
+from fastmcp.server.providers.proxy import FastMCPProxy
 from mcp.shared.message import SessionMessage
-from mcp.types import ErrorData, JSONRPCError, JSONRPCMessage, JSONRPCResponse
+from mcp.types import (
+    ErrorData,
+    Implementation,
+    JSONRPCError,
+    JSONRPCMessage,
+    JSONRPCResponse,
+)
+
+log = logging.getLogger(__name__)
+
+DASHBOARD_HOST = "127.0.0.1"
+# Tests set this to 0 (an ephemeral port); no override exists for the daemon itself.
+DASHBOARD_PORT = 47632
+# `http://127.0.0.1:<port>` or `not bound: <reason>`, set by serve() and read by doctor.
+dashboard_state: str | None = None
 
 
 class AlreadyRunning(Exception):
@@ -70,6 +90,69 @@ def bind_socket(path: Path) -> socket.socket:
     os.chmod(path, 0o600)
     s.listen()
     return s
+
+
+def assert_loopback(host: str) -> str:
+    """Return ``host`` when it is a literal loopback IP; raise ``ValueError`` otherwise.
+    A name such as ``localhost`` is refused too: a name can be re-pointed, a literal
+    cannot (PLAT-02 criterion 4)."""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        raise ValueError(f"dashboard refuses to bind {host!r}: not a loopback address")
+    return host
+
+
+def bind_dashboard(host: str, port: int) -> socket.socket:
+    """Bind+listen the dashboard TCP socket on a loopback address (the `bind_socket`
+    shape). SO_REUSEADDR lets a relaunch after a hard exit meet TIME_WAIT."""
+    assert_loopback(host)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, port))
+        s.listen()
+    except OSError:
+        s.close()
+        raise
+    return s
+
+
+def _not_found_app():
+    async def app(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"Not Found"})
+
+    return app
+
+
+def make_dispatcher(mcp_app, dash_app):
+    """One ASGI entry for the one uvicorn Server that listens on both sockets.
+    MCP is reachable only on the UDS: lifespan and scopes whose ``server`` is
+    ``(path, None)``. Everything else HTTP goes to the dashboard, or 404 when there is
+    none. Fail closed (RESEARCH C4): uvicorn can report ``client`` as None on a racing
+    TCP reset, so ``client`` is not the discriminator; ``server[1]`` is."""
+    dash_app = dash_app or _not_found_app()
+
+    async def dispatcher(scope, receive, send):
+        if scope["type"] == "lifespan":
+            return await mcp_app(scope, receive, send)  # one startup, one shutdown
+        if scope["type"] != "http":
+            return  # ws="none"; nothing else is served
+        server = scope.get("server")
+        if isinstance(server, tuple | list) and len(server) == 2 and server[1] is None:
+            return await mcp_app(scope, receive, send)
+        return await dash_app(scope, receive, send)
+
+    return dispatcher
 
 
 # #170: httpx defaults to Timeout(5.0) on ALL four phases, so the shim gave up reading
@@ -191,6 +274,34 @@ def fail_loud_on_dead_stream() -> None:
     streamable_http.StreamableHTTPTransport._handle_sse_response = _handle_sse_response
 
 
+_restart_armed = (
+    False  # one watchdog per process: a second restart only repeats the first
+)
+
+
+def restart(server, *, timer=threading.Timer, delay: float = 3.0) -> bool:
+    """Make this daemon exit so launchd starts it again (D-16): the dashboard's restart.
+
+    Sets uvicorn's ``should_exit`` and ``force_exit`` (the Server skips the wait for
+    open connections and tasks) and arms a watchdog that calls ``os._exit(0)`` after
+    ``delay`` seconds. The watchdog exists because a sync tool thread, or the native
+    worker (a non-daemon thread ``concurrent.futures`` joins at exit), keeps the process
+    alive forever otherwise (RESEARCH C2). ``os._exit`` skips ``serve()``'s ``finally``;
+    ``bind_socket`` removes the stale socket file on the next start. launchd's
+    ``KeepAlive`` relaunches the exited daemon: nothing here runs ``launchctl``.
+    Returns False when a restart is already under way."""
+    global _restart_armed
+    if _restart_armed:
+        return False
+    _restart_armed = True
+    server.should_exit = True
+    server.force_exit = True
+    watchdog = timer(delay, os._exit, (0,))
+    watchdog.daemon = True
+    watchdog.start()
+    return True
+
+
 def serve() -> None:
     """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
     One MCP session per client connection (fork resolution, spec)."""
@@ -202,17 +313,46 @@ def serve() -> None:
     )
     from .server import mcp  # late: importing server pulls the adapter tree
 
+    global dashboard_state
     path = socket_path()
     s = bind_socket(path)
+    tcp = None
     try:
+        try:
+            tcp = bind_dashboard(DASHBOARD_HOST, DASHBOARD_PORT)  # read at call time
+        except OSError as e:  # a taken port must not take MCP down (T-05-13)
+            log.warning("dashboard not bound: %s", e)
+            dashboard_state = f"not bound: {e}"
+        dash_app = None
+        if tcp is not None:
+            port = tcp.getsockname()[1]
+            dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
+            from . import dashboard, deploy  # late: the stdio server never imports it
+
+            dash_app = dashboard.build_app(
+                port=port,
+                token=secrets.token_urlsafe(32),
+                key=deploy.dashboard_key(create=True),
+                restart=lambda: restart(server),  # `server` is assigned below
+            )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
+        # One Server for both sockets: two Servers on one loop overwrite each other's
+        # SIGTERM handler. Proxy headers stay off: none may rewrite client or server.
         config = uvicorn.Config(
-            mcp.http_app(), fd=s.fileno(), log_level="warning", ws="none"
+            make_dispatcher(mcp.http_app(), dash_app),
+            log_level="warning",
+            ws="none",
+            proxy_headers=False,
+            # the link's query string carries the page key, and an access line prints it
+            access_log=False,
         )
-        uvicorn.Server(config).run()
+        server = uvicorn.Server(config)
+        server.run(sockets=[s] + ([tcp] if tcp else []))
     finally:
         s.close()
+        if tcp is not None:
+            tcp.close()
         path.unlink(missing_ok=True)
 
 
@@ -233,17 +373,43 @@ def shim_check(path: Path) -> None:
         probe.close()
 
 
+_SHIM_NAME = "macos-apps-mcp-shim"
+_SHIM_VERSION = "0"
+
+
+def _shim_client_factory(transport, shim_id: str):
+    """The proxy's per-request client factory (#222): each upstream client carries the
+    REAL client's ``clientInfo`` (name, version) plus ``shim_id`` as an extra field, so
+    the daemon's audit record names who called and which shim carried it. Without it
+    the daemon saw ``mcp 0.1.0`` and a new session on every call.
+
+    Two paths have no client params and use the fixed shim identity: ``initialize``
+    (``proxy.py:90`` — the front client's params are not stored yet) and ``ping``
+    (``proxy.py:921`` — ``get_context()`` raises outside a request)."""
+
+    def f():
+        try:
+            info = get_context().session.client_params.clientInfo
+            name, version = info.name, info.version
+        except Exception:  # noqa: BLE001 — either fallback path above
+            name, version = _SHIM_NAME, _SHIM_VERSION
+        return _Client(
+            transport,
+            client_info=Implementation(name=name, version=version, session=shim_id),
+        )
+
+    return f
+
+
 def run_shim() -> None:
     """Bridge the client's stdio to the daemon over the UDS (FastMCP proxy — the
     fork-resolved ~15-line shim). No TCC surface: this process only moves bytes."""
     path = socket_path()
     shim_check(path)
     fail_loud_on_dead_stream()
-    proxy = create_proxy(
-        _Client(
-            _HttpTransport(
-                "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
-            )
-        )
+    transport = _HttpTransport(
+        "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
     )
+    shim_id = uuid.uuid4().hex[:8]  # once per shim process
+    proxy = FastMCPProxy(client_factory=_shim_client_factory(transport, shim_id))
     proxy.run()  # stdio transport

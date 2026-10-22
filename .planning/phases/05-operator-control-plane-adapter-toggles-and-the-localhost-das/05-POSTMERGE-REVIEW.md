@@ -1,0 +1,135 @@
+---
+phase: "05"
+scope: wave 1 (PRs #406, #407, #408)
+reviewed: 2026-10-22
+---
+
+# Phase 05 — Wave 1 Post-Merge Review
+
+Independent reviews of each merged wave-1 PR: an orchestrator read of every source diff, a
+mutation-and-probe review of #407, and a running-server security probe of #408 (raw HTTP on an
+ephemeral loopback port, scratch `HOME`). The phase-close code review keeps these ids.
+
+## #406 — starlette declared, 0.15.0 (05-08)
+
+No finding. Three files, +6/−3; the `uv.lock` diff is the four named lines.
+
+## #407 — adapter deny-list (05-01)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-01 | should-fix | An `adapters_off` file that exists but cannot be read read as empty: every adapter registered, `doctor` silent (fail open) | fixed by #410 (D-20: fail closed, `doctor` says so) |
+| PM-02 | should-fix | A non-UTF-8 byte in the file raised `UnicodeDecodeError` at server import: daemon crash loop under launchd; `allow_send` file had the same gap | fixed by #410 (bytes replaced) |
+| PM-03 | advisory | `doctor` gates its probes on the live config while tools register at import, so a file change without a restart can skip a live adapter's probe | accepted: `adapters_pending` and the restart note report the delta |
+| PM-04 | advisory | No test checks `deployment.adapters_off` while an adapter is off at registration | open, test gap |
+| PM-05 | advisory | The token-budget test does not cover the new keys in their worst case (6997 of 7000 with pending deltas and 10 unknown names); `adapters_unknown` has no length cap | open |
+| PM-06 | advisory | D-17's daemon role is set by env var in `test_registry.py`, not argv; "meta tools stay when every adapter is off" is tested with `photos` only | accepted: the argv branch is shared with `allow_send` and tested there |
+| PM-07 | advisory | `request_access_each` creates the `EKEventStore` even when calendar and reminders are both off (no request, no prompt) | accepted |
+| PM-08 | advisory | A newline-separated file reads as one unknown name (nothing turned off; `doctor` lists it) | accepted: the file is a comma list (docs/DAEMON.md § 6) |
+
+Mutation result: 14 of 15 mutants failed the suite; the survivor is PM-04. No test reads the
+developer's real `adapters_off` file (audit hook on `open()`: 0 opens; 11 without the conftest patch).
+
+## #408 — loopback transport, Guard, Usage page (05-02)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-09 | should-fix | `Guard._read_body` read `http.disconnect` as the end of the body and replayed a cut-short form to the handler as complete | fixed by #409 |
+| PM-10 | advisory | A duplicate `Origin` header resolves to the last value | accepted: browsers send one Origin; a non-browser local client is D-19's concern |
+| PM-11 | advisory | uvicorn's own 400 responses (malformed request line, duplicate Host) carry none of the five security headers | accepted: constant text, never reaches the Guard |
+| PM-12 | should-fix | Loopback TCP is reachable by other macOS accounts and sandboxed apps; from 05-03/05-04 pages carry the token and the audit trail | D-19: page key, plan 05-09 |
+
+Held under probe: no request reached MCP over TCP (121 TCP scopes, all to the dashboard); the
+Host, Origin, token and 8 KiB checks; static traversal; escaping of hostile tool names; all five
+headers on Guard responses; MCP over the UDS with the port taken. Mutations of the dispatcher,
+Origin, body-cap and Host checks each failed the suite.
+
+Not covered: real-browser headers (Safari, Firefox; RESEARCH A1, A2) — 05-07's device proof.
+
+## #412 — Adapters page, toggle, Discard, restart (05-03, wave 2)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-13 | should-fix | The sidebar badge divided by `registered \| configured`, so an adapter OFF at start and in the file read `9/9` | fixed by #413 |
+| PM-14 | advisory | The D-20 lock was checked outside the write lock; a file that turned unreadable in between was replaced by a guess | fixed by #413 (re-read under the lock, 409) |
+| PM-15 | advisory | A second Restart while one was armed logged a second restart for one exit | fixed by #413 |
+| PM-16 | advisory | `force_exit` skips the lifespan shutdown, so every restart writes a `CancelledError` traceback to the daemon log | accepted: log noise only |
+| PM-17 | advisory | A TCC row with a `status` (`limited`, `unknown`) showed the red `denied` chip | fixed by #413 (no chip) |
+| PM-18 | advisory | The row counted tool records, not registered tools (an OFF adapter showed its full count) | fixed by #413 |
+| PM-19 | advisory (test gap) | No test pins the restart hook after the body, the write lock, or write-before-log | write-before-log tested by #413; the other two accepted (concurrency, ASGI ordering) |
+| PM-20 | open item | This Mac's user TCC database reads as absent from the sessions' shells, so grant chips and the AppleEvents target ids in `grants.py` are not confirmed against live rows | 05-05 Health and 05-07 device proof confirm the target ids |
+
+Held under probe: every refusal (method, token, Origin, bad action or value, lock states) left the
+file and the audit log unchanged; 10 concurrent toggles kept all 10 names with no temp file; known
+names kept, unknown dropped (D-01); a real restart exits 0 in 0.3 s idle and 3.06 s with the native
+worker blocked; a cut-short restart body logs nothing; no test arms a real timer or exits.
+
+## T-05-44 — the page-key cookie reaches every 127.0.0.1 port (05-09 planning)
+
+Raised by the 05-09 planner and widened at review: an app that listens on loopback and opens a URL
+in the browser (sandboxed apps included) can obtain the key, visibly. Accepted and documented with
+the key rotation (owner, 2026-10-22; D-19).
+
+## #415 — the page key (05-09, wave 3)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-21 | advisory | A FIFO at the key path blocked `read_bytes()` in `serve()` after the socket bind, so MCP never served (a `/dev/zero` symlink would grow memory); `adapters_off` and `allow_send` were read the same way | fixed by #416 (`_read_small`: non-blocking, regular file only, 4 KiB) |
+| PM-22 | advisory | A symlink at the key path was followed: accepted, `chmod` changed its target, a dangling one was replaced with a new key | fixed by #416 (`O_NOFOLLOW` on the key file; config files still follow) |
+| PM-23 | advisory | Key creation is check-then-replace, not exclusive (8 racing threads disagree) | accepted: unreachable after the single-instance socket bind and the exclusive TCP bind |
+| PM-24 | advisory (test gap) | No test pinned the 0644 → 0600 tightening; `access_log=False` is invisible behind `log_level="warning"` | tightening tested by #416; the log flag accepted as a second guard |
+
+Held under probe (real `daemon.serve()`, raw HTTP): every method on every route without the cookie
+answered 403, including `/key/`, `/KEY`, `//key`, `/./key`, `%00` and absolute-form; every cookie
+variant (wrong, empty, prefix, suffix, quoted, padded, case, encoded, `Cookie2`, folded) answered
+403; Host before key and link; 503 with an empty file or a directory while MCP kept serving; MCP
+unreachable over TCP; the key in no log, response, usage record or `doctor` report; the CLI opener
+used `osascript` on stdin even with `BROWSER` set; the cookie attributes exact. Mutations of the
+cookie check, the order, the format check, HttpOnly and the no-rewrite rule each failed the suite.
+
+## #418 — the write list and recovery (05-04, wave 4)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-25 | should-fix | `RECEIPT_RE` took exactly 3 counter digits; `mail_recover` pads to a minimum of 3, so from the 1001st batch of one run recovery read "no file" | fixed by #419 (`\d{3,}`) |
+| PM-26 | should-fix | One corrupt record gave a 500 on every page via the sidebar counts (out-of-range `ts`, non-list `targets`, a lone surrogate) | fixed by #419 |
+| PM-27 | advisory | `audit_read` returned non-dict JSON lines, so `find_receipt` and `mail_undo` crashed on one (older than the dashboard); an undone target without `folder` raised `KeyError` | fixed by #419 |
+| PM-28 | advisory | A corrupt middleware line naming a receipt hides its whole batch | accepted: corruption only |
+| PM-29 | advisory | The adjacency fallback can mislink after a timed-out batch | accepted: the plan names the limit |
+| PM-30 | advisory | Page rendering reads the log on the event loop shared with MCP (+0.3–0.7 s MCP latency during page loads on a 25k-record log); no pagination | accepted: the real log parses in about 40 ms (D-12) |
+| PM-31 | advisory | `shortcuts://` was an allowed deeplink, and following `run-shortcut` runs it; http(s) links come from model-chosen Safari URLs | `shortcuts` removed by #419; http(s) accepted |
+| PM-32 | advisory (test gap) | 9 of 20 mutants survived (the reflected search value, the word diff's unchanged run, folder, `backup_dir`, outcome, error banner, `RECEIPT_RE` before the disk, symlinked files) | tests added by #419; two mutants re-applied and caught |
+| PM-33 | advisory | A GET can create the state folder through `audit.state_dir`'s `mkdir` | accepted: older than the dashboard; the folder exists on a deployed Mac |
+
+Held under probe: no unescaped markup in the list or six details for hostile values in every field
+family and in `q`, `filter`, `previews` and the path; `safe_href` refused every scheme trick
+(case, whitespace, NUL, entities, `data:`, `vbscript:`, `file:`, `//`, NBSP, homoglyphs); bad
+detail addresses answered 404; no GET changed a file; the middleware `receipt` appears only for a
+non-empty string and never breaks a call; interleaved batches with an undo grouped correctly.
+
+## #421 — Health, Backups and the docs (05-05, wave 5)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-34 | should-fix (test gap) | No test held the in-thread single-flight refusal; with it removed a 50-request burst started 6 hung `doctor` calls | test added by #422; the mutant fails |
+| PM-35 | should-fix | An absent user TCC database (macOS 27, #261) showed a permanent "did not answer" warning | fixed by #422 (a note). The review's proposal to count it as a complete read was rejected on device evidence: the installed daemon's `doctor` (FDA) sees only FDA rows, so it would make every Automation and EventKit row claim "not asked" |
+| PM-36 | should-fix | `docs/DAEMON.md` § 7: removing an unreadable key file was said to be enough; the daemon must also restart | fixed by #422 |
+| PM-37 | advisory | `doctor`'s daemon-role report passed its 7000-char budget (7302 with long deny-list input) | fixed by #422 (unknown names capped, shorter notes, a daemon-role budget test); closes PM-05 |
+| PM-38 | advisory | Backups says "no files" for a chmod-000 receipt folder and "rotated out" when the log is unreadable | accepted: corruption only |
+| PM-39 | advisory | A symlinked backup root is followed (names and sizes only) | accepted: the daemon's own folder |
+| PM-40 | advisory | `RECEIPT_RE` matched Arabic-Indic and fullwidth digits | fixed by #422 (`re.ASCII`) |
+| PM-41 | advisory | `_last` is unused; a `doctor` run over 10 s never shows a report; `grant_report` runs twice per load | accepted |
+
+**PM-20 resolved.** On this Mac (macOS 27) the user TCC database is absent by design (#261),
+not hidden by a sandbox. The installed daemon's read-only `doctor` (Full Disk Access) lists only
+`kTCCServiceSystemPolicyAllFiles` rows; no AppleEvents, Calendar or Reminders rows exist in any
+readable database, although Calendar and Reminders read `full_access` and Mail Automation works.
+The dashboard therefore shows no grant state for them. The `grants.ADAPTER_GRANTS` AppleEvents
+target ids can be confirmed only on a macOS with a user TCC database (the iMac, macOS 15).
+
+Held under probe: 50 concurrent `/health` requests against a hung `doctor` made one call and kept
+MCP `ping` at 5–19 ms; the lock was free after a late return or raise; no path from any page to
+`request=True`, `request_access`, osascript or a TCC open (static and audit-hook); hostile
+`doctor`, grant and backup strings escaped; the Open Settings URLs are fixed constants; OFF
+adapters never in the banner; Backups roots that are a FIFO or a file, and folders deleted
+mid-render, answered without error.
