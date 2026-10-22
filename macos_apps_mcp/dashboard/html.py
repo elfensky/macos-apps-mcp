@@ -68,20 +68,35 @@ def _sidebar(active: str) -> Safe:
     return h('<aside class="sidebar">{}{}</aside>', join(parts), foot)
 
 
-def page(request, *, title: str, active: str, body: Safe, mode: str = "page"):
+def page(
+    request,
+    *,
+    title: str,
+    active: str,
+    body: Safe,
+    mode: str = "page",
+    refresh: tuple[int, str] | None = None,
+):
     """The Console frame of sketch 001 (variant D): sidebar plus content.
 
     ``mode="page"`` puts ``body`` in a full-width ``<main>`` (the System pages).
-    ``mode="console"`` expects ``body`` to be the list and detail columns itself."""
+    ``mode="console"`` expects ``body`` to be the list and detail columns itself.
+    ``refresh=(seconds, path)`` adds a meta refresh to a page dashboard code builds."""
+    meta = (
+        h('<meta http-equiv="refresh" content="{};url={}">\n', refresh[0], refresh[1])
+        if refresh
+        else Safe("")
+    )
     content = h('<main class="b-page">{}</main>', body) if mode == "page" else body
     return HTMLResponse(
         h(
             '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-            "<title>{} · macos-apps-mcp</title>\n"
+            "{}<title>{} · macos-apps-mcp</title>\n"
             '<link rel="stylesheet" href="/static/dashboard.css">\n'
             '<script src="/static/dashboard.js" defer></script>\n</head>\n<body>\n'
             '<div class="b-shell">{}{}</div>\n</body>\n</html>\n',
+            meta,
             title,
             _sidebar(active),
             content,

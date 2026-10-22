@@ -38,16 +38,20 @@ async def _static(request):
     return Response(hit[0], media_type=hit[1])
 
 
-def build_app(*, port: int, token: str) -> Guard:
-    """The dashboard ASGI app: every route sits behind the Guard."""
+def build_app(*, port: int, token: str, restart=None) -> Guard:
+    """The dashboard ASGI app: every route sits behind the Guard.
+
+    ``restart`` is the daemon's hook for ``POST /restart``; a test app has none."""
     app = Starlette(
         routes=[
             Route("/", _home),
             Route("/usage", usage.page),
             Route("/adapters", adapters.page, methods=["GET"]),
             Route("/adapters", adapters.toggle, methods=["POST"]),
+            Route("/restart", adapters.restart, methods=["POST"]),
             Route("/static/{name}", _static),
         ]
     )
     app.state.port, app.state.token = port, token  # later pages render the token
+    app.state.restart = restart
     return Guard(app, port=port, token=token)
