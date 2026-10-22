@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import shutil
 import socket
 import stat
@@ -18,7 +19,7 @@ from fastmcp.server.providers.proxy import FastMCPProxy
 from mcp.types import Implementation
 
 from macos_apps_mcp import audit as au
-from macos_apps_mcp import daemon, registry
+from macos_apps_mcp import daemon, deploy, registry
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +109,7 @@ def test_bind_socket_stale_file_rebinds(sockdir):
         s.close()
 
 
-def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
+def test_serve_two_concurrent_sessions(sockdir, monkeypatch, capfd):
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
     monkeypatch.setattr(daemon, "dashboard_state", None)
@@ -140,18 +141,39 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
         time.sleep(0.05)
     base = daemon.dashboard_state
     assert str(base).startswith("http://127.0.0.1:"), base
+    # D-19: the daemon wrote the page key (0600 file, 0700 folder) and every request
+    # but the link needs it as a cookie.
+    key_file = deploy._DASHBOARD_KEY_FILE
+    key = key_file.read_text()
+    assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(key_file.parent.stat().st_mode) == 0o700
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", key)
+    cookie = {"cookie": f"macos_apps_mcp_key={key}"}
     with httpx.Client(trust_env=False, timeout=10) as web:
-        usage = web.get(f"{base}/usage")
+        refused = web.get(f"{base}/usage")
+        assert refused.status_code == 403
+        assert "macos-apps-mcp dashboard" in refused.text
+        assert "content-security-policy" in refused.headers
+        link = web.get(f"{base}/key", params={"k": key})
+        assert link.status_code == 303 and link.headers["location"] == "/"
+        set_cookie = link.headers["set-cookie"]
+        assert f"macos_apps_mcp_key={key}" in set_cookie
+        assert "HttpOnly" in set_cookie and "SameSite=strict" in set_cookie
+        assert "Path=/" in set_cookie
+        usage = web.get(f"{base}/usage", headers=cookie)
         assert usage.status_code == 200
         assert "Calls per tool since the log started." in usage.text
         assert "content-security-policy" in usage.headers
         assert usage.headers["referrer-policy"] == "same-origin"
-        unsigned = web.post(f"{base}/mcp", json={})  # no Origin: the Guard refuses
+        # no Origin: the Guard refuses
+        unsigned = web.post(f"{base}/mcp", json={}, headers=cookie)
         assert unsigned.status_code == 403
         assert "Forbidden origin" in unsigned.text
-        get_mcp = web.get(f"{base}/mcp")
+        get_mcp = web.get(f"{base}/mcp", headers=cookie)
         assert get_mcp.status_code == 404
         assert "jsonrpc" not in unsigned.text + get_mcp.text
+    out, err = capfd.readouterr()
+    assert key not in out + err  # access_log=False: the link's query never prints
 
 
 def test_serve_keeps_mcp_up_when_the_dashboard_port_is_in_use(sockdir, monkeypatch):
