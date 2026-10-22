@@ -106,3 +106,30 @@ family and in `q`, `filter`, `previews` and the path; `safe_href` refused every 
 (case, whitespace, NUL, entities, `data:`, `vbscript:`, `file:`, `//`, NBSP, homoglyphs); bad
 detail addresses answered 404; no GET changed a file; the middleware `receipt` appears only for a
 non-empty string and never breaks a call; interleaved batches with an undo grouped correctly.
+
+## #421 — Health, Backups and the docs (05-05, wave 5)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-34 | should-fix (test gap) | No test held the in-thread single-flight refusal; with it removed a 50-request burst started 6 hung `doctor` calls | test added by #422; the mutant fails |
+| PM-35 | should-fix | An absent user TCC database (macOS 27, #261) showed a permanent "did not answer" warning | fixed by #422 (a note). The review's proposal to count it as a complete read was rejected on device evidence: the installed daemon's `doctor` (FDA) sees only FDA rows, so it would make every Automation and EventKit row claim "not asked" |
+| PM-36 | should-fix | `docs/DAEMON.md` § 7: removing an unreadable key file was said to be enough; the daemon must also restart | fixed by #422 |
+| PM-37 | advisory | `doctor`'s daemon-role report passed its 7000-char budget (7302 with long deny-list input) | fixed by #422 (unknown names capped, shorter notes, a daemon-role budget test); closes PM-05 |
+| PM-38 | advisory | Backups says "no files" for a chmod-000 receipt folder and "rotated out" when the log is unreadable | accepted: corruption only |
+| PM-39 | advisory | A symlinked backup root is followed (names and sizes only) | accepted: the daemon's own folder |
+| PM-40 | advisory | `RECEIPT_RE` matched Arabic-Indic and fullwidth digits | fixed by #422 (`re.ASCII`) |
+| PM-41 | advisory | `_last` is unused; a `doctor` run over 10 s never shows a report; `grant_report` runs twice per load | accepted |
+
+**PM-20 resolved.** On this Mac (macOS 27) the user TCC database is absent by design (#261),
+not hidden by a sandbox. The installed daemon's read-only `doctor` (Full Disk Access) lists only
+`kTCCServiceSystemPolicyAllFiles` rows; no AppleEvents, Calendar or Reminders rows exist in any
+readable database, although Calendar and Reminders read `full_access` and Mail Automation works.
+The dashboard therefore shows no grant state for them. The `grants.ADAPTER_GRANTS` AppleEvents
+target ids can be confirmed only on a macOS with a user TCC database (the iMac, macOS 15).
+
+Held under probe: 50 concurrent `/health` requests against a hung `doctor` made one call and kept
+MCP `ping` at 5–19 ms; the lock was free after a late return or raise; no path from any page to
+`request=True`, `request_access`, osascript or a TCC open (static and audit-hook); hostile
+`doctor`, grant and backup strings escaped; the Open Settings URLs are fixed constants; OFF
+adapters never in the banner; Backups roots that are a FIFO or a file, and folders deleted
+mid-render, answered without error.
