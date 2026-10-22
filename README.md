@@ -196,6 +196,12 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 Set `MACOS_APPS_READ_ONLY=1` (or `true` / `yes`) to register reads only — every write and action
 tool is skipped, a safe-deploy guard. (Reads may still open apps / read local stores.)
 
+### Turning adapters off
+
+Set `MACOS_APPS_ADAPTERS_OFF=photos,music` (a comma list of adapter names) to register no tools
+for those apps. Under the daemon, the file `~/.local/state/macos-apps-mcp/adapters_off` holds the
+same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
+
 ### Cleaning up duplicate mail
 
 Mail accumulates redundant copies of the same message — a UI drag copies rather than moves, Gmail

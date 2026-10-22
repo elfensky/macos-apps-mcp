@@ -8,6 +8,10 @@ surface may still shift between minor versions.
 
 ### Added
 
+- **Adapters can be turned off** (PLAT-01) — `MACOS_APPS_ADAPTERS_OFF`, or under the daemon
+  the file `~/.local/state/macos-apps-mcp/adapters_off`, lists apps whose tools are not
+  registered; `doctor` reports the active set and a restart directive when the file
+  changed.
 - **The `.app` carries an app icon** — a Liquid Glass icon compiled from an Icon Composer
   file (`packaging/AppIcon.icon`), with a standard icon for macOS before 26. Building the
   `.app` needs full Xcode for `actool` (see docs/DAEMON.md).
