@@ -368,3 +368,13 @@ table.targets tr.left-out td { opacity: .5; }
 .prompt .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 code.call { font: 12px var(--font-mono); background: var(--color-neutral-bg); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
 .legend { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
+
+/* ---------- list states and the phone layout (sketch 001) ---------- */
+.list-empty { height: 200px; }
+.b-list .banner { margin: var(--space-2); }
+@media (max-width: 700px) {
+  .b-shell.detail-open .b-list { display: none; }
+  .b-shell:not(.detail-open) .b-detail { display: none; }
+  .b-back { display: inline-flex; margin-bottom: var(--space-2); }
+  .b-list, .b-detail { overflow: visible; }
+}
