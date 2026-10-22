@@ -6,7 +6,8 @@ page read loopback responses. So every request passes this pure-ASGI wrapper fir
 
 * ``Host`` must be ``127.0.0.1:<port>`` or ``localhost:<port>`` on EVERY request, reads
   included (DNS rebinding).
-* A POST needs ``Origin`` equal to one of those origins; with no ``Origin`` it needs
+* A POST (any method but GET and HEAD, so a later PUT or DELETE route is born
+  guarded) needs ``Origin`` equal to one of those origins; with no ``Origin`` it needs
   ``Sec-Fetch-Site: same-origin``. ``Origin: null`` is foreign (RESEARCH C1: Chrome
   sends it on a same-origin form POST under ``Referrer-Policy: no-referrer``, so the
   headers below use ``same-origin``).
@@ -57,7 +58,7 @@ class Guard:
         deny = None
         if headers.get("host") not in self.hosts:
             deny = PlainTextResponse("Invalid host header", 400)
-        elif scope["method"] == "POST":
+        elif scope["method"] not in ("GET", "HEAD"):  # POST today; PUT/DELETE too
             origin = headers.get("origin")
             same = (
                 origin in self.origins

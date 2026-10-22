@@ -220,3 +220,10 @@ def test_usage_escapes_tool_names(tmp_path, monkeypatch):
 )
 def test_static_allow_list_has_two_entries_and_no_traversal(path):
     assert _get(path).status_code == 404
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH"])
+def test_every_unsafe_method_needs_origin_and_token(method):
+    """The Guard checks by method class, so a future non-POST route is born guarded."""
+    r = _request(method, "/usage", headers={"origin": "https://evil.example"})
+    assert r.status_code == 403
