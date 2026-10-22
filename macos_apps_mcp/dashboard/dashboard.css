@@ -384,3 +384,8 @@ code.call { font: 12px var(--font-mono); background: var(--color-neutral-bg); pa
 .health .row > .muted { margin-left: auto; text-align: right; font-size: var(--text-sm); overflow-wrap: anywhere; max-width: 60%; }
 .health .row > .btn { flex: none; }
 .nav-item .count .dot { vertical-align: middle; }
+
+/* ---------- Backups (sketch 003): the summary meter and the receipt rows ---------- */
+.group .row .usage-meter { margin-top: 6px; }
+a.row.clickable .sub.mono { font-size: var(--text-xs); }
+a.row.clickable .muted { flex: none; font-variant-numeric: tabular-nums; }

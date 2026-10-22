@@ -82,6 +82,7 @@ SIDEBAR: list[tuple[str, str, str, str]] = [
     ("System", "Adapters", "/adapters", "adapters"),
     ("System", "Health", "/health", "health"),
     ("System", "Usage", "/usage", "usage"),
+    ("System", "Backups", "/backups", "backups"),
 ]
 
 
