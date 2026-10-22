@@ -69,3 +69,20 @@ worker blocked; a cut-short restart body logs nothing; no test arms a real timer
 Raised by the 05-09 planner and widened at review: an app that listens on loopback and opens a URL
 in the browser (sandboxed apps included) can obtain the key, visibly. Accepted and documented with
 the key rotation (owner, 2026-10-22; D-19).
+
+## #415 — the page key (05-09, wave 3)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-21 | advisory | A FIFO at the key path blocked `read_bytes()` in `serve()` after the socket bind, so MCP never served (a `/dev/zero` symlink would grow memory); `adapters_off` and `allow_send` were read the same way | fixed by #416 (`_read_small`: non-blocking, regular file only, 4 KiB) |
+| PM-22 | advisory | A symlink at the key path was followed: accepted, `chmod` changed its target, a dangling one was replaced with a new key | fixed by #416 (`O_NOFOLLOW` on the key file; config files still follow) |
+| PM-23 | advisory | Key creation is check-then-replace, not exclusive (8 racing threads disagree) | accepted: unreachable after the single-instance socket bind and the exclusive TCP bind |
+| PM-24 | advisory (test gap) | No test pinned the 0644 → 0600 tightening; `access_log=False` is invisible behind `log_level="warning"` | tightening tested by #416; the log flag accepted as a second guard |
+
+Held under probe (real `daemon.serve()`, raw HTTP): every method on every route without the cookie
+answered 403, including `/key/`, `/KEY`, `//key`, `/./key`, `%00` and absolute-form; every cookie
+variant (wrong, empty, prefix, suffix, quoted, padded, case, encoded, `Cookie2`, folded) answered
+403; Host before key and link; 503 with an empty file or a directory while MCP kept serving; MCP
+unreachable over TCP; the key in no log, response, usage record or `doctor` report; the CLI opener
+used `osascript` on stdin even with `BROWSER` set; the cookie attributes exact. Mutations of the
+cookie check, the order, the format check, HttpOnly and the no-rewrite rule each failed the suite.
