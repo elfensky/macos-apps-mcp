@@ -34,6 +34,11 @@ surface may still shift between minor versions.
   off, shows what waits for a restart, and restarts the daemon from the page (launchd
   starts it again); each change is logged in audit.jsonl with caller `dashboard`. The
   Outbound gate is shown locked and still changes only with `macos-apps-mcp allow-send`.
+- **Dashboard page key** (PLAT-02) — every dashboard page needs a key that only the Mac
+  account running the daemon can read (`~/.local/state/macos-apps-mcp/daemon/dashboard_key`);
+  `macos-apps-mcp dashboard` prints the link and opens it, and the browser keeps the key as
+  a cookie. Other accounts on the Mac and sandboxed apps get a refusal; `doctor` names the
+  command and never the key.
 
 ### Changed
 
