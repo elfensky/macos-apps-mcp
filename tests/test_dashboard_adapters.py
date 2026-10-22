@@ -175,3 +175,106 @@ def test_get_is_side_effect_free(state):
     _get()
     _get()
     assert (_file().read_bytes(), audit._audit_path().read_bytes()) == before
+
+
+# --- restart, Discard, the env override and an unreadable file (Task 2) ---------------
+
+
+class _Restart:
+    """Records calls of the ``restart`` hook ``build_app`` is given."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+
+
+def _restart_app(fake):
+    return dashboard.build_app(port=PORT, token=TOKEN, restart=fake)
+
+
+def test_restart_answers_the_restarting_page_then_runs_the_hook_once(state):
+    fake = _Restart()
+    r = _post("/restart", app=_restart_app(fake))
+    assert r.status_code == 200
+    assert "Restarting the daemon…" in r.text
+    assert '<meta http-equiv="refresh" content="12;url=/adapters">' in r.text
+    assert '<a href="/adapters">Reload</a>' in r.text
+    assert 'class="spin"' in r.text and "restarting" in r.text
+    assert fake.calls == 1
+    (rec,) = _records()
+    assert rec.pop("ts")
+    assert rec["tool"] == "dashboard" and rec["op"] == "restart"
+    assert rec["args"] == {} and rec["caller"] == "dashboard"
+    assert rec["dry_run"] is False and rec["target_id"] is None
+
+
+def test_restart_needs_the_token_and_refuses_get(state):
+    fake = _Restart()
+    app = _restart_app(fake)
+    no_token = _call("POST", "/restart", content="", headers=FORM, app=app)
+    assert no_token.status_code == 403 and fake.calls == 0 and _records() == []
+    assert _call("GET", "/restart", app=app).status_code == 405
+    assert fake.calls == 0
+
+
+def test_restart_without_a_hook_is_503_and_logs_nothing(state):
+    r = _post("/restart")  # a test app, never the daemon
+    assert r.status_code == 503 and "only in the daemon" in r.text
+    assert _records() == []
+
+
+def test_discard_writes_the_running_set_back_and_logs_it(state):
+    _toggle("music", "0")
+    _toggle("photos", "0")
+    assert "<b>2 changes wait for a restart.</b>" in _get().text
+    r = _post(action="discard")
+    assert r.status_code == 303 and _file().read_text() == ""
+    rec = _records()[-1]
+    assert rec["op"] == "discard" and rec["caller"] == "dashboard"
+    assert rec["args"] == {"adapters_off": []} and rec["target_id"] is None
+    assert 'class="restart-bar"' not in _get().text
+
+
+def test_discard_keeps_an_adapter_that_did_not_register_off(state, monkeypatch):
+    running = [a for a in ADAPTERS if a != "photos"]
+    monkeypatch.setattr(
+        registry,
+        "adapter_status",
+        lambda: {"registered": running, "configured": ADAPTERS},
+    )
+    assert _post(action="discard").status_code == 303
+    assert _file().read_text() == "photos"
+    assert _records()[-1]["args"] == {"adapters_off": ["photos"]}
+
+
+def test_env_override_disables_the_switches_and_refuses_writes(state, monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos")
+    page = _get().text
+    assert page.count("disabled") >= 10
+    assert (
+        "MACOS_APPS_ADAPTERS_OFF is set for this daemon and wins over the file. "
+        "Unset it to use these switches." in page
+    )
+    assert _toggle("music", "0").status_code == 409
+    assert _post(action="discard").status_code == 409
+    assert not _file().exists() and _records() == []
+
+
+def test_unreadable_file_reads_every_switch_off_and_refuses_writes(state):
+    _file().parent.mkdir(parents=True)
+    _file().write_text("music")
+    _file().chmod(0)
+    try:
+        page = _get().text
+        assert page.count('aria-pressed="false"') == 10
+        assert 'aria-pressed="true"' not in page
+        assert "cannot be read" in page
+        assert ">*<" not in page and 'aria-label="*"' not in page
+        for r in (_toggle("photos", "0"), _post(action="discard")):
+            assert r.status_code == 409 and "permissions" in r.text
+        assert _records() == []
+    finally:
+        _file().chmod(0o600)
+    assert _file().read_text() == "music"  # the unreadable file's intent survived
