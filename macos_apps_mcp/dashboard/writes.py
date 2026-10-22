@@ -26,6 +26,7 @@ from starlette.responses import PlainTextResponse
 from .. import audit, registry
 from ..adapters import mail_recover
 from ..errors import NativeError
+from ..text import fold_text
 from . import recovery
 from .html import Safe, appico, esc, h, join, page, safe_href
 
@@ -284,6 +285,7 @@ def build_rows(records: list[dict]) -> list[Row]:
     }
     rows = [replace(r, undone=True) if r.receipt in undone else r for r in rows]
     rows.reverse()
+    rows.sort(key=lambda r: r.when, reverse=True)  # stable: ties stay newest-first
     return rows
 
 
@@ -666,23 +668,117 @@ def _detail(row: Row, in_order: list[Row], qs: str, facts: tuple) -> Safe:
     )
 
 
+# --- search and filters -----------------------------------------------------------
+
+
+def _haystack(row: Row) -> str:
+    """What ``q`` is matched against: the title, the tool, the argument values, the
+    target ids, and for a batch its receipt, destination, folders and Message-IDs."""
+    rec = row.record
+    parts = [
+        row.title,
+        row.tool,
+        str(rec.get("target_id") or ""),
+        _summary(rec.get("before")),
+        _summary(rec.get("after")),
+        *map(str, _d(rec.get("args")).values()),
+    ]
+    if row.kind == "batch":
+        parts += [row.receipt or "", str((row.plan or {}).get("destination") or "")]
+        for t in recovery.targets(row.plan, row.done):
+            parts += [str(t.get("id", "")), str(t.get("folder", ""))]
+    return fold_text(" ".join(parts))
+
+
+def _view(request) -> tuple[str, bool, str]:
+    """``(q, previews, filter)`` from the query string. Previews are on unless the last
+    ``previews`` value is not ``1`` (the hidden ``0`` plus the checked box send both);
+    an unknown ``filter`` is ``all``."""
+    params = request.query_params
+    flag = params.getlist("previews")
+    filt = params.get("filter", "all")
+    adapters = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    app = filt.startswith("app:") and filt[4:] in adapters
+    if filt not in ("all", "receipt", "outbound") and not app:
+        filt = "all"
+    return params.get("q", ""), not flag or flag[-1] == "1", filt
+
+
+def _visible(rows: list[Row], q: str, previews: bool, filt: str) -> list[Row]:
+    terms = fold_text(q).split()
+    out = []
+    for r in rows:
+        if r.preview and not previews:
+            continue
+        if filt == "receipt" and r.kind != "batch":
+            continue
+        if filt == "outbound" and r.tier != "send":
+            continue
+        if filt.startswith("app:") and r.adapter != filt[4:]:
+            continue
+        if terms:
+            hay = _haystack(r)
+            if not all(t in hay for t in terms):
+                continue
+        out.append(r)
+    return out
+
+
+def _search(q: str, previews: bool, filt: str) -> Safe:
+    return h(
+        '<form class="search" method="get" action="/">'
+        '<input name="q" value="{}" placeholder="Filter" aria-label="Filter writes">'
+        '<input type="hidden" name="previews" value="0">'
+        '<label><input type="checkbox" name="previews" value="1"{}>Previews</label>'
+        '<input type="hidden" name="filter" value="{}">'
+        '<button class="btn" type="submit">Filter</button></form>',
+        q,
+        Safe(" checked") if previews else Safe(""),
+        filt,
+    )
+
+
 # --- routes -----------------------------------------------------------------------
 
 
-def _render(request, rows: list[Row], selected: Row | None, facts: tuple = ()):
+def _render(
+    request,
+    rows: list[Row],
+    selected: Row | None,
+    errors: list[str],
+    facts: tuple = (),
+):
     qs = _qs(request)
+    q, previews, filt = _view(request)
+    shown = _visible(rows, q, previews, filt)
     body = (
         _detail(selected, rows[::-1], qs, facts)
         if selected
         else Safe('<div class="b-empty">Select a write</div>')
     )
+    banners = join(
+        h(
+            '<div class="banner bad"><span>⚠</span><div><b>The audit log could not '
+            "be read.</b> {} What follows may be incomplete.</div></div>",
+            e,
+        )
+        for e in errors
+    )
+    if shown:
+        listing = _listing(shown, selected, qs)
+    elif rows:
+        listing = Safe('<div class="b-empty list-empty">No writes match</div>')
+    elif errors:
+        listing = Safe("")
+    else:
+        listing = Safe('<div class="b-empty list-empty">No writes recorded yet</div>')
     return page(
         request,
         title=selected.title if selected else "Writes",
-        active="writes:all",
+        active=f"writes:{filt}",
         body=body,
         mode="list",
-        listing=_listing(rows, selected, qs),
+        listing=join([_search(q, previews, filt), banners, listing]),
         selected=selected is not None,
         counts=_counts(rows),
     )
@@ -699,18 +795,23 @@ def _recovery_facts(receipt: str) -> tuple[dict[str, int], bool]:
     return recovery.backup_files(receipt), resolves
 
 
+def _errors(records: list[dict]) -> list[str]:
+    return [str(r["error"]) for r in records if "error" in r and "tool" not in r]
+
+
 async def index(request):
-    rows = build_rows(await run_in_threadpool(audit.read_all))
-    return _render(request, rows, None)
+    records = await run_in_threadpool(audit.read_all)
+    return _render(request, build_rows(records), None, _errors(records))
 
 
 async def detail(request):
     ts, n = request.path_params["ts"], request.path_params["n"]
-    rows = build_rows(await run_in_threadpool(audit.read_all))
+    records = await run_in_threadpool(audit.read_all)
+    rows = build_rows(records)
     row = next((r for r in rows if r.ts == ts and r.n == n), None)
     if row is None:
         return PlainTextResponse("Not Found", 404)
     facts = ()
     if row.kind == "batch":
         facts = await run_in_threadpool(_recovery_facts, row.receipt)
-    return _render(request, rows, row, facts)
+    return _render(request, rows, row, _errors(records), facts)

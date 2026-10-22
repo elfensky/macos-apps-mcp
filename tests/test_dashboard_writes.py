@@ -456,7 +456,7 @@ def test_search_matches_words_ids_and_folds_case_and_diacritics():
     assert titles(page("/?q=CAFE")) == ["Created Pick up the café order"]  # fold_text
     assert titles(page("/?q=b2@x")) == ["Moved 2 messages to Trash"]  # a target id
     assert titles(page("/?q=094010-123456")) == ["Moved 2 messages to Trash"]  # receipt
-    assert titles(page("/?q=claude-code+dentist"))[0].startswith("Updated Dentist")
+    assert titles(page("/?q=dentist+tue"))[0].startswith("Updated Dentist")
     assert titles(page("/?q=nothing-like-this")) == []
 
 
