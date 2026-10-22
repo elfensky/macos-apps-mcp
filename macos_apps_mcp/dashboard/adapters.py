@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse, RedirectResponse
 
 from .. import audit, deploy, registry, tiers
+from . import grants
 from .html import Safe, h, join
 from .html import page as render_page
 
@@ -49,11 +50,36 @@ def known_adapters() -> list[str]:
     return sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
 
 
-def _permissions(adapter: str) -> str:
-    perms = {
-        p for r in registry.TOOLS.values() if r.adapter == adapter for p in r.permission
-    }
-    return " · ".join(sorted(perms)) or "No permission"
+def _sub(adapter: str, calls: dict[str, dict]) -> str:
+    """``Automation · Full Disk Access · 27 tools · 3 calls`` (no calls: left out)."""
+    tools = [n for n, r in registry.TOOLS.items() if r.adapter == adapter]
+    perms = {p for n in tools for p in registry.TOOLS[n].permission}
+    used = sum(calls.get(n, {}).get("count", 0) for n in tools)
+    parts = [*sorted(perms), f"{len(tools)} tool{'' if len(tools) == 1 else 's'}"]
+    if used:
+        parts.append(f"{used} call{'' if used == 1 else 's'}")
+    return " · ".join(parts)
+
+
+def _chips(grant: str | None, after_restart: bool | None) -> Safe:
+    """The grant chip (denied / not asked) and the pending chip, when they apply."""
+    out = []
+    if grant in ("denied", "not asked"):
+        out.append(
+            h(
+                '<span class="chip{}">{}</span>',
+                " danger" if grant == "denied" else "",
+                grant,
+            )
+        )
+    if after_restart is not None:
+        out.append(
+            h(
+                '<span class="chip pending">{} after restart</span>',
+                "on" if after_restart else "off",
+            )
+        )
+    return join(out)
 
 
 def _hidden(token: str, **fields) -> Safe:
@@ -100,17 +126,9 @@ def _bar(token: str, pending: list[tuple[str, bool]], locked: bool) -> Safe:
 
 
 def _row(
-    token: str, name: str, on: bool, pending: dict[str, bool], disabled: bool
+    token: str, name: str, on: bool, sub: str, chips: Safe, disabled: bool
 ) -> Safe:
     label = name.capitalize()
-    chip = (
-        h(
-            '<span class="chip pending">{} after restart</span>',
-            "on" if pending[name] else "off",
-        )
-        if name in pending
-        else Safe("")
-    )
     return h(
         '<div class="row"><span class="appico {}">{}</span>'
         '<div class="grow"><div class="title">{}</div><div class="sub">{}</div></div>'
@@ -120,12 +138,32 @@ def _row(
         label,
         label[0],
         label,
-        _permissions(name),
-        chip,
+        sub,
+        chips,
         _hidden(token, action="toggle", adapter=name, on="0" if on else "1"),
         "true" if on else "false",
         label,
         Safe(" disabled") if disabled else Safe(""),
+    )
+
+
+def _outbound() -> Safe:
+    """The locked Outbound group (D-14, sketch rule 5): text and a command, never a
+    form or an input. Any website can POST to 127.0.0.1, so the gate that lets the
+    model send mail stays a Terminal command."""
+    sending = registry.outbound_status()["registered"]
+    command = "macos-apps-mcp allow-send " + ("off" if sending else "mail")
+    return h(
+        '<div class="group-title">Sending off this Mac</div>\n'
+        '<div class="group"><div class="row locked"><div class="grow">'
+        '<div class="title">Outbound: {}</div><div class="sub">'
+        "Never changed from this page — any website could send a request to "
+        '127.0.0.1. Change it in Terminal:</div><div class="cmd"><code>{}</code>'
+        '<button class="btn" type="button" data-copy="{}">Copy</button></div>'
+        "</div></div></div>\n",
+        ", ".join(sending) or "off",
+        command,
+        command,
     )
 
 
@@ -142,9 +180,23 @@ async def _render(request, *, restarting: bool = False):
     known = known_adapters()
     configured = set(registry.adapter_status()["configured"])
     pending = _pending(known)
+    after = dict(pending)
     why = _lock_reason()
+    report = await run_in_threadpool(deploy.grant_report)
+    calls = await run_in_threadpool(audit.usage_read)
+    complete = all(v is None for v in report["reasons"].values())
     rows = join(
-        _row(token, n, n in configured, dict(pending), restarting or why is not None)
+        _row(
+            token,
+            n,
+            n in configured,
+            _sub(n, calls),
+            _chips(
+                grants.grant_state(report["identities"], n, complete=complete),
+                after.get(n),
+            ),
+            restarting or why is not None,
+        )
         for n in known
     )
     if restarting:
@@ -157,11 +209,15 @@ async def _render(request, *, restarting: bool = False):
         "{}<h1>Adapters</h1>\n"
         '<p class="lede">Turn an app off and its tools disappear after the daemon '
         "restarts.</p>\n{}"
-        '<div class="group{}">{}</div>\n',
+        '<div class="group{}">{}</div>\n{}'
+        '<p class="muted note">Toggles write '
+        "~/.local/state/macos-apps-mcp/adapters_off. Each change is logged in "
+        "audit.jsonl with caller <b>dashboard</b>.</p>\n",
         top,
         h('<div class="banner warn"><div>{}</div></div>\n', why) if why else Safe(""),
         " restarting" if restarting else "",
         rows,
+        _outbound(),
     )
     return render_page(
         request,
