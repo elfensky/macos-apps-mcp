@@ -299,6 +299,9 @@ def install_agent(argv: list[str]) -> None:
 # gate is closed. Tests isolate this by monkeypatching the constant itself (see
 # tests/conftest.py), never by moving the path.
 _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
+# The adapter deny-list file: same three-process reason as the comment above; tests
+# patch the constant (tests/conftest.py), never HOME.
+_ADAPTERS_OFF_FILE = Path.home() / ".local/state/macos-apps-mcp/adapters_off"
 
 
 def is_daemon_role() -> bool:
