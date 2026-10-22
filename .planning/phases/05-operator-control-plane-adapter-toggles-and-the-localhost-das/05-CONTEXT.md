@@ -193,6 +193,23 @@ v2), any grant-trigger endpoint, any clean-up or dedupe runner, an undo button, 
   the page reconnects; `doctor` through a shim client reports `adapters` without photos and the
   four photos tools are absent from the tool list; turn Photos back on and restart. — **Reversibility:**
   one-way; a pushed tag and a GitHub release publish the version.
+- **D-19:** **Every dashboard request needs a page key** (owner, 2026-10-22; replaces the RESEARCH
+  A5 / T-05-31 acceptance). The post-merge security review of #408 confirmed that
+  `127.0.0.1:47632` is reachable by other macOS accounts and by sandboxed apps with network
+  access, and from 05-03/05-04 the pages carry the form token and show the audit trail. The daemon
+  keeps a key in a 0600 file in its 0700 state folder, stable across restarts. Every request,
+  reads included, needs that key as an HttpOnly, `SameSite=Strict` cookie, set once by a link that
+  only the operator's account can produce: a CLI role prints and opens it. `doctor` says that the
+  dashboard needs the key and names the CLI command, but never shows the key; the key never
+  reaches a log or the audit trail. A request without the key gets a refusal that names the
+  command. One plan, 05-09, after 05-03 and before 05-04; 05-05's docs describe the key instead of
+  the single-user assumption, and 05-07's device proof opens the dashboard through the link.
+  — **Reversibility:** reversible; a code change before the 0.15.0 release.
+- **D-20:** **An `adapters_off` file that exists but cannot be read turns every adapter off**
+  (owner, 2026-10-22, from the post-merge review of #407), and the `doctor` note says so.
+  Undecodable bytes are replaced, so a stray byte costs one name (listed as `adapters_unknown`)
+  and never the server import; `allow_send` gets the same decoding and stays closed when
+  unreadable. Landed by PR #410.
 
 ### Claude's Discretion
 - Exact names (`adapter_enabled`, `adapter_status`, the audit reader, the guard), the Host check
