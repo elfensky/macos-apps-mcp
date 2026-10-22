@@ -203,6 +203,30 @@ Whichever route, `doctor()`'s
 report the *effective* state as read by the daemon that's actually serving your client — run
 `doctor` after the kickstart to confirm it took.
 
+### 6. Turn adapters off under the daemon
+
+The file `~/.local/state/macos-apps-mcp/adapters_off` holds a comma list of the adapters that
+are OFF. The names are `calendar`, `contacts`, `mail`, `messages`, `music`, `notes`, `photos`,
+`reminders`, `safari` and `shortcuts`; case does not matter. An unknown name is ignored and
+`doctor` lists it as `adapters_unknown`. An absent or empty file means every adapter is on.
+
+```sh
+echo photos > ~/.local/state/macos-apps-mcp/adapters_off
+launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp
+```
+
+The daemon reads the file once, at start, so apply a change with the kickstart above. An OFF
+adapter's tools are absent from the tool list (never registered-and-erroring) and `doctor` gives
+it no Automation probe and no EventKit request. Meta tools (`ping`, `now`, `doctor`, `audit`,
+`usage`) always stay. `doctor()`'s `deployment.adapters`, `deployment.adapters_off` and
+`deployment.adapters_pending` report the state the serving daemon read; `adapters_pending`
+appears when the file changed after the daemon started.
+
+`MACOS_APPS_ADAPTERS_OFF` sets the same list for a stdio server and, when set and non-empty,
+wins over the file. The file is read **only** in the daemon role, and it is home-pinned for the
+same reason as `allow_send` (see section 5). The localhost dashboard (later in this phase of
+the project) writes the same file.
+
 ## Manual acceptance checklist
 
 This is the part automation can't reach (it needs human grant clicks) — the on-device gate for
