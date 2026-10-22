@@ -5,51 +5,51 @@ titles: json
 findings:
   - id: CR-01
     severity: critical
-    disposition: open
+    disposition: fixed
     title: "The audit reader splits on `str.splitlines()`, so a write whose text holds U+2028, U+2029 or U+0085 vanishes from the dashboard"
   - id: WR-01
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "38 tests open the developer's real TCC databases"
   - id: WR-02
     severity: warning
-    disposition: open
+    disposition: accepted
     title: "The CLI sends the page key to whatever listens on port 47632, and the restart flow hands the cookie to a port squatter"
   - id: WR-03
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "Dashboard toggles and restarts are shown as \"What the model asked for\", with an invented `dry_run` row and a `changes` chip"
   - id: WR-04
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "PM-37's cap bounds the count of unknown adapter names, not their length: one long name still blows the `doctor` budget"
   - id: WR-05
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "A failure while building the dashboard takes MCP down; only a failed port bind is isolated"
   - id: WR-06
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "A toggle returns 303 even when its audit record was not written"
   - id: IN-01
     severity: info
-    disposition: open
+    disposition: skipped
     title: "The 0.15.0 changelog still says \"This release adds the Usage page\""
   - id: IN-02
     severity: info
-    disposition: open
+    disposition: deferred
     title: "The adapter-name set and the version lookup are written five times"
   - id: IN-03
     severity: info
-    disposition: open
+    disposition: deferred
     title: "Private cross-module reach and a shadowed parameter"
   - id: IN-04
     severity: info
-    disposition: open
+    disposition: deferred
     title: "`doctor` reports the dashboard URL even when every page answers 503"
   - id: IN-05
     severity: info
-    disposition: open
+    disposition: deferred
     title: "The adapter gate re-reads the deny-list for every tool during import"
 open: 12
 total: 12
@@ -60,18 +60,18 @@ recorded: 2026-10-22T20:58:32.964Z
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| CR-01 | critical | open | - |
-| WR-01 | warning | open | - |
-| WR-02 | warning | open | - |
-| WR-03 | warning | open | - |
-| WR-04 | warning | open | - |
-| WR-05 | warning | open | - |
-| WR-06 | warning | open | - |
-| IN-01 | info | open | - |
-| IN-02 | info | open | - |
-| IN-03 | info | open | - |
-| IN-04 | info | open | - |
-| IN-05 | info | open | - |
+| CR-01 | critical | fixed | #431 |
+| WR-01 | warning | deferred | #430 |
+| WR-02 | warning | accepted | AR-05-08 in 05-SECURITY.md (a T-05-44 variant) |
+| WR-03 | warning | deferred | #430 |
+| WR-04 | warning | fixed | #431 |
+| WR-05 | warning | deferred | #430 |
+| WR-06 | warning | deferred | #430 |
+| IN-01 | info | skipped | a line in the released 0.15.0 CHANGELOG section; not rewritten |
+| IN-02 | info | deferred | #430 |
+| IN-03 | info | deferred | #430 |
+| IN-04 | info | deferred | #430 |
+| IN-05 | info | deferred | #430 |
 
 Dispositions: `open` (recorded, not yet triaged), `fixed`, `skipped`, `deferred`.
 Set `deferred` by hand and put the reason in the Source cell; both are preserved. A `|` in the reason is kept as prose and escaped on the next run.

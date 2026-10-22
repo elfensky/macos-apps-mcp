@@ -181,6 +181,7 @@ None: every should-fix finding of the post-merge reviews maps to a fix PR or an 
 | AR-05-05 | T-05-44 (05-09): the cookie sent to another program's 127.0.0.1 port (RFC 6265 section 8.5) | medium | `SameSite=Strict` keeps the cookie off cross-site requests, so the attack needs the operator's browser to open a page served by the other program's own loopback listener; plain-http loopback has no port-bound cookie; HttpOnly keeps it from scripts; 05-05 documents the risk and the rotation; accepted by the owner, 2026-10-22 | a later ASVS level, or a multi-user Mac |
 | AR-05-06 | T-05-48 (05-09): guessing the key through `/key` | low | 256 random bits (`secrets.token_urlsafe(32)`), constant-time comparison; no rate limit at ASVS L1 | a later ASVS level, or a multi-user Mac |
 | AR-05-07 | T-05-49 (05-09): the model's shell, running as the same account, reads the key file or runs the CLI | low | the boundary is the account (05-07 T-05-39): the key stays out of `doctor`, logs, pages and SUMMARYs so it never reaches a transcript by accident; the CLI is the operator's | a later ASVS level, or a multi-user Mac |
+| AR-05-08 | WR-02 (phase-close review): the `dashboard` CLI link and the restart page's auto-refresh send the key to whatever listens on 47632 if another process took the port while the daemon was down | medium | a variant of T-05-44 (owner, 2026-10-22): plain-http loopback has no port-bound credential; the key rotates by removing the file and restarting; visible when it happens (a foreign page opens) | with T-05-44: a later ASVS level, or a port-bound credential |
 
 Review-time acceptances: PM-03, PM-06, PM-07, PM-08, PM-10, PM-11, PM-16, PM-19 (two of three),
 PM-23, PM-28, PM-29, PM-30, PM-33, PM-38, PM-39, PM-41 (each `advisory`; the reason is in the
@@ -198,6 +199,7 @@ table above).
 | 2026-10-22 | #421 | hung/raising doctor under 50 concurrent requests, prompt-path grep, backups edge cases | PM-34..PM-41 → #422 |
 | 2026-10-22 | installed 0.15.0 | 05-07 device proof: refusals over HTTP, page-key refusal, Photos off/on through the dashboard | PASS (05-07-SUMMARY.md) |
 | 2026-10-22 | dashboard CSS and templates | static UI audit (gsd-ui-auditor, no browser) | 05-UI-REVIEW.md 16/24; accessibility items → #428 |
+| 2026-10-22 | the whole phase diff (41 files) | phase-close code review (gsd-code-reviewer) | 05-REVIEW.md: CR-01 (audit readers split a record on U+2028/U+2029/U+0085) and WR-04 fixed at the close; WR-02 accepted (AR-05-08); WR-01, WR-03, WR-05, WR-06, IN-02..05 → #430 |
 
 ## Sign-Off
 
