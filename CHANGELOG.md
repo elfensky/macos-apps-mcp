@@ -30,6 +30,10 @@ surface may still shift between minor versions.
   (loopback only; a non-loopback bind is refused). Every request checks the Host header,
   every form post checks Origin and a per-session token, and the MCP endpoint stays on the
   unix socket. This release adds the Usage page.
+- **Adapter switches on the dashboard** (PLAT-01, PLAT-02) — `/adapters` turns an app on or
+  off, shows what waits for a restart, and restarts the daemon from the page (launchd
+  starts it again); each change is logged in audit.jsonl with caller `dashboard`. The
+  Outbound gate is shown locked and still changes only with `macos-apps-mcp allow-send`.
 
 ### Changed
 
