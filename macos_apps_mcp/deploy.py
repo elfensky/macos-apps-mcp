@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sqlite3
 import subprocess
@@ -384,25 +385,36 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
+# An empty key would match an empty cookie, and a short one is guessable.
+_KEY_RE = re.compile(r"[A-Za-z0-9_-]{32,}")
+
+
 def dashboard_key(*, create: bool = False) -> str | None:
     """The dashboard page key (D-19), or None when there is none to use.
 
     The daemon calls it once at start with ``create=True``: the file is written, from
     ``secrets.token_urlsafe(32)``, only when it is absent. The CLI role calls it
-    without ``create``, so it never writes."""
+    without ``create``, so it never writes. Fail closed: a file that exists but cannot
+    be read, or holds anything but a urlsafe token of 32 or more characters, is None
+    and is never rewritten or repaired; any ``OSError`` is None too."""
     path = _DASHBOARD_KEY_FILE
-    if create:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(path.parent, 0o700)  # mkdir's mode does not apply to an existing dir
     try:
-        key = path.read_bytes().decode("utf-8", "replace").strip()
-    except FileNotFoundError:
-        if not create:
+        if create:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(path.parent, 0o700)  # mkdir's mode skips an existing folder
+        try:
+            key = path.read_bytes().decode("utf-8", "replace").strip()
+        except FileNotFoundError:  # the only case that leads to a write
+            if not create:
+                return None
+            key = secrets.token_urlsafe(32)
+            _atomic_write(path, key)
+        if not _KEY_RE.fullmatch(key):
             return None
-        key = secrets.token_urlsafe(32)
-        _atomic_write(path, key)
-    if create:
-        os.chmod(path, 0o600)
+        if create:
+            os.chmod(path, 0o600)
+    except OSError:
+        return None
     return key
 
 
