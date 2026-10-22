@@ -9,12 +9,13 @@ subprocess cases in ``tests/test_registry.py``.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 
 import pytest
 
 import macos_apps_mcp.server  # noqa: F401  (populates registry.TOOLS)
-from macos_apps_mcp import deploy, doctor, registry, runtime, tiers
+from macos_apps_mcp import deploy, doctor, eventkit, registry, runtime, tiers
 from tests.test_doctor_deploy import _gate_off_only, _mock_grants
 
 
@@ -129,3 +130,102 @@ def test_doctor_reports_pending_and_unknown_adapters(monkeypatch):
     assert d["adapters_pending"] == [a for a in _adapters() if a != "photos"]
     assert "restart the daemon" in d["adapters_note"]
     assert d["adapters_unknown"] == ["nosuch"]
+
+
+# --- D-04: an OFF adapter is neither probed nor prompted -----------------------------
+
+
+def test_off_adapter_gets_no_apple_event(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    apps = []
+    monkeypatch.setattr(
+        runtime, "run_osascript", lambda _src, app, **kw: apps.append(app) or "ok"
+    )
+    monkeypatch.setattr(doctor, "app_process_info", lambda app: None)
+    by_name = {s["surface"]: s for s in doctor._automation_surfaces(request=True)}
+    assert by_name["mail"] == {
+        "surface": "mail",
+        "kind": "automation",
+        "ok": None,
+        "status": "adapter_off",
+    }
+    assert "Mail" not in apps
+    assert sorted(apps) == ["Contacts", "Messages", "Music", "Notes", "Safari"]
+
+
+def test_off_eventkit_entity_is_not_read_or_requested(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "reminders")
+    reads, requests = [], []
+
+    def fake_run_native(fn):
+        if fn is doctor.request_access_each:
+            requests.append(fn)
+            return None
+        reads.append(fn)
+        return 0  # not_determined: a request pass is due
+
+    monkeypatch.setattr(doctor, "run_native", fake_run_native)
+    monkeypatch.setattr(doctor, "_ek_status", lambda entity: reads.append(entity) or 0)
+    surfaces = {s["surface"]: s for s in doctor._eventkit_surfaces(request=True)}
+    assert surfaces["reminders"]["status"] == "adapter_off"
+    assert surfaces["reminders"]["ok"] is None
+    assert surfaces["calendar"]["status"] == "not_determined"
+    assert set(reads) == {doctor.EK.EKEntityTypeEvent}
+    assert len(requests) == 1
+
+
+def test_off_shortcuts_cli_reads_adapter_off(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "shortcuts")
+    monkeypatch.setattr(
+        shutil, "which", lambda _: pytest.fail("the CLI must not be looked up")
+    )
+    s = doctor._shortcuts_surface()
+    assert (s["surface"], s["status"], s["ok"]) == (
+        "shortcuts_cli",
+        "adapter_off",
+        None,
+    )
+
+
+def test_summary_counts_only_probed_surfaces(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    monkeypatch.setattr(doctor, "run_native", lambda fn: 3)
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a, **k: "ok")
+    monkeypatch.setattr(doctor, "app_process_info", lambda app: None)
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/shortcuts")
+    ok = doctor._surface
+    monkeypatch.setattr(
+        runtime,
+        "tracked_run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", ""),
+    )
+    monkeypatch.setattr(
+        doctor, "_fda_surface", lambda: ok("full_disk_access", "fda", True, "ok")
+    )
+    monkeypatch.setattr(
+        doctor, "_mail_index_surface", lambda: ok("mail_index", "fda", True, "ok")
+    )
+    _mock_grants(monkeypatch, None)
+    monkeypatch.setattr(
+        deploy, "agent_status", lambda: (_ for _ in ()).throw(Exception("no bundle"))
+    )
+    report = doctor.diagnose(request=True)
+    names = [s["surface"] for s in report["surfaces"]]
+    assert "mail" in names  # listed, as adapter_off
+    assert report["summary"] == f"all {len(names) - 1} surfaces OK"
+
+
+def test_request_access_each_skips_an_off_entity(monkeypatch):
+    requested = []
+    monkeypatch.setattr(eventkit, "store", lambda: object())
+    monkeypatch.setattr(eventkit, "_request_one", lambda _s, e: requested.append(e))
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "calendar")
+    eventkit.request_access_each()
+    assert requested == [eventkit.EK.EKEntityTypeReminder]
+    requested.clear()
+    monkeypatch.delenv("MACOS_APPS_ADAPTERS_OFF")
+    eventkit.request_access_each()
+    assert requested == [
+        eventkit.EK.EKEntityTypeEvent,
+        eventkit.EK.EKEntityTypeReminder,
+    ]
