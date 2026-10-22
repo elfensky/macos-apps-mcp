@@ -378,3 +378,9 @@ code.call { font: 12px var(--font-mono); background: var(--color-neutral-bg); pa
   .b-back { display: inline-flex; margin-bottom: var(--space-2); }
   .b-list, .b-detail { overflow: visible; }
 }
+
+/* ---------- Health (sketch 004): dots, wrapped detail text, the Deployment group ---------- */
+.health .row .title, .health .row .sub { white-space: normal; overflow: visible; }
+.health .row > .muted { margin-left: auto; text-align: right; font-size: var(--text-sm); overflow-wrap: anywhere; max-width: 60%; }
+.health .row > .btn { flex: none; }
+.nav-item .count .dot { vertical-align: middle; }

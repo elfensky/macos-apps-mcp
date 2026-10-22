@@ -93,7 +93,17 @@ def _version() -> str:
 
 
 def _badge(key: str) -> Safe:
-    """The Adapters entry shows ``registered/known``, or a chip while changes wait."""
+    """The Adapters entry shows ``registered/known``, or a chip while changes wait; the
+    Health entry shows the dot of the last report, once there is one."""
+    if key == "health":
+        from . import health  # lazy: health imports this module
+
+        dot = health.last_dot()
+        return (
+            h('<span class="count"><span class="dot {}"></span></span>', dot)
+            if dot
+            else Safe("")
+        )
     if key != "adapters":
         return Safe("")
     st = registry.adapter_status()
