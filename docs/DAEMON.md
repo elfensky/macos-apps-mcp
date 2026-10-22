@@ -244,7 +244,7 @@ again only on a new browser or after a key change. The key lives in
 restarts. To change the key, remove that file, restart the daemon (the kickstart in section 6)
 and run the command again. Other accounts on this Mac and sandboxed apps can reach
 `127.0.0.1:47632`, but they get a refusal that names the command. An unreadable key file refuses
-every page until you remove it. Browsers send a cookie to every port of 127.0.0.1, so a page
+every page until you remove it and restart the daemon. Browsers send a cookie to every port of 127.0.0.1, so a page
 that another program serves there could receive the key when this browser opens it; if that may
 have happened, change the key.
 
