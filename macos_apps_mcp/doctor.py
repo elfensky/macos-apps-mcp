@@ -430,8 +430,14 @@ def diagnose(request: bool = False) -> dict:
         "(the dashboard writes it too); apply: "
         "launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp."
     )
-    if unknown_adapters := tiers.adapters_off() - known:
+    off = tiers.adapters_off()
+    if unknown_adapters := off - known - {deploy.ADAPTERS_ALL_OFF}:
         deployment["adapters_unknown"] = sorted(unknown_adapters)
+    if deploy.ADAPTERS_ALL_OFF in off:
+        deployment["adapters_note"] += (
+            " The adapters_off file exists but cannot be read, so every adapter is off"
+            " until it is readable."
+        )
     if ad["configured"] != ad["registered"]:
         deployment["adapters_pending"] = ad["configured"]
         deployment["adapters_note"] += (

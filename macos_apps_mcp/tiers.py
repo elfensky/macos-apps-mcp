@@ -89,5 +89,7 @@ def adapters_off() -> set[str]:
 
 
 def adapter_enabled(name: str) -> bool:
-    """True unless ``name`` is on the deny-list (D-02). Meta tools never ask."""
-    return name not in adapters_off()
+    """True unless ``name`` is on the deny-list (D-02), or the deny-list file exists
+    but cannot be read (every adapter off). Meta tools never ask."""
+    off = adapters_off()
+    return deploy.ADAPTERS_ALL_OFF not in off and name not in off

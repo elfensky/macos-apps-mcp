@@ -213,5 +213,5 @@ def adapter_status() -> dict[str, list[str]]:
     registered = {r.adapter for r in TOOLS.values() if r.adapter and r.registered}
     return {
         "registered": sorted(registered),
-        "configured": sorted(names - tiers.adapters_off()),
+        "configured": sorted(n for n in names if tiers.adapter_enabled(n)),
     }

@@ -302,6 +302,9 @@ _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
 # The adapter deny-list file: same three-process reason as the comment above (home-
 # pinned, never state_dir()); tests patch the constant (tests/conftest.py), never HOME.
 _ADAPTERS_OFF_FILE = Path.home() / ".local/state/macos-apps-mcp/adapters_off"
+# What an adapters_off file that exists but cannot be read means: every adapter OFF
+# (owner, 2026-10-22 — the deny-list fails closed, never open). No adapter has it.
+ADAPTERS_ALL_OFF = "*"
 
 
 def is_daemon_role() -> bool:
@@ -328,19 +331,24 @@ def is_daemon_role() -> bool:
 
 
 def allow_send_file() -> str:
-    """The persisted outbound opt-in (``""`` when absent) — see tiers.allow_send."""
+    """The persisted outbound opt-in (``""`` when absent or unreadable: closed) — see
+    tiers.allow_send. A stray byte is replaced: it can never name an adapter."""
     try:
-        return _ALLOW_SEND_FILE.read_text()
+        return _ALLOW_SEND_FILE.read_bytes().decode("utf-8", "replace")
     except OSError:
         return ""
 
 
 def adapters_off_file() -> str:
-    """The persisted adapter deny-list (``""`` when absent) — see tiers.adapters_off."""
+    """The persisted adapter deny-list (``""`` when absent) — see tiers.adapters_off.
+    A file that exists but cannot be read is ``ADAPTERS_ALL_OFF``. A stray byte is
+    replaced, so it costs one name (doctor lists it as unknown), never the import."""
     try:
-        return _ADAPTERS_OFF_FILE.read_text()
-    except OSError:
+        return _ADAPTERS_OFF_FILE.read_bytes().decode("utf-8", "replace")
+    except FileNotFoundError:
         return ""
+    except OSError:
+        return ADAPTERS_ALL_OFF
 
 
 def allow_send(argv: list[str]) -> None:

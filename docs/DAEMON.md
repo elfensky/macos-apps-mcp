@@ -208,7 +208,9 @@ report the *effective* state as read by the daemon that's actually serving your 
 The file `~/.local/state/macos-apps-mcp/adapters_off` holds a comma list of the adapters that
 are OFF. The names are `calendar`, `contacts`, `mail`, `messages`, `music`, `notes`, `photos`,
 `reminders`, `safari` and `shortcuts`; case does not matter. An unknown name is ignored and
-`doctor` lists it as `adapters_unknown`. An absent or empty file means every adapter is on.
+`doctor` lists it as `adapters_unknown`. An absent or empty file means every adapter is on. A
+file that exists but cannot be read (wrong owner or mode) turns every adapter off, and the
+`doctor` note says so: the list fails closed, never open.
 
 ```sh
 echo photos > ~/.local/state/macos-apps-mcp/adapters_off

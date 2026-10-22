@@ -65,6 +65,40 @@ def test_whitespace_only_file_means_every_adapter_on(monkeypatch, tmp_path):
     assert tiers.adapters_off() == set()
 
 
+def _unreadable_file(monkeypatch, tmp_path):
+    # A directory exists but cannot be read as a file — as root too, unlike mode 000.
+    f = tmp_path / "adapters_off"
+    f.mkdir()
+    monkeypatch.setattr(deploy, "_ADAPTERS_OFF_FILE", f)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+
+
+def test_unreadable_file_turns_every_adapter_off(monkeypatch, tmp_path):
+    # Owner, 2026-10-22: a deny-list the daemon cannot read fails closed, never open.
+    _unreadable_file(monkeypatch, tmp_path)
+    assert not any(tiers.adapter_enabled(a) for a in _adapters())
+    assert registry.adapter_status()["configured"] == []
+
+
+def test_non_utf8_byte_costs_one_name_not_the_daemon(monkeypatch, tmp_path):
+    f = tmp_path / "adapters_off"
+    f.write_bytes(b"photos,mail\xff")
+    monkeypatch.setattr(deploy, "_ADAPTERS_OFF_FILE", f)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert tiers.adapter_enabled("photos") is False
+    assert tiers.adapter_enabled("calendar") is True
+
+
+def test_non_utf8_allow_send_file_stays_closed(monkeypatch, tmp_path):
+    f = tmp_path / "allow_send"
+    f.write_bytes(b"mail\xff")
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", f)
+    monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert tiers.allow_send("mail") is False
+
+
 def test_conftest_isolates_the_adapters_off_file(tmp_path_factory):
     # D-17: a developer's real file never reaches a test.
     assert deploy._ADAPTERS_OFF_FILE.name == "adapters_off"
@@ -130,6 +164,15 @@ def test_doctor_reports_pending_and_unknown_adapters(monkeypatch):
     assert d["adapters_pending"] == [a for a in _adapters() if a != "photos"]
     assert "restart the daemon" in d["adapters_note"]
     assert d["adapters_unknown"] == ["nosuch"]
+
+
+@_gate_off_only
+def test_doctor_says_an_unreadable_file_turned_every_adapter_off(monkeypatch, tmp_path):
+    _unreadable_file(monkeypatch, tmp_path)
+    d = _quiet_diagnose(monkeypatch)
+    assert d["adapters_pending"] == []
+    assert "cannot be read" in d["adapters_note"]
+    assert "adapters_unknown" not in d
 
 
 # --- D-04: an OFF adapter is neither probed nor prompted -----------------------------
