@@ -10,15 +10,16 @@ register_authored_at_plan_time: true
 threats_total: 58
 threats_closed: 58
 created: "2026-10-22"
-audited_at: "3cab97e"
+audited_at: "4ceb433"
 ---
 
 # Phase 05 — Security
 
 > Per-phase security contract: threat register, accepted risks, and audit trail.
 > Requirements: PLAT-01, PLAT-02.
-> Audited source: `git diff d053ec1 3cab97e -- . ':!.planning'` (43 files; plan PRs #406, #407,
-> #408, #412, #415, #418, #421, #424, #425; review-fix PRs #409, #410, #413, #416, #419, #422).
+> Audited source: `git diff d053ec1 4ceb433 -- . ':!.planning'` (43 files; plan PRs #406, #407,
+> #408, #412, #415, #418, #421, #424, #425; review-fix PRs #409, #410, #413, #416, #419, #422,
+> and #431 from the phase-close review).
 > ASVS Level 1, block on high. Evidence is a plan SUMMARY (each plan landed by PR with the full
 > suite green: at the code head f84897d, 2460 passed; read-only 2445 passed, 15 skipped; send
 > 2454 passed, 6 skipped), the per-PR independent probe review in `05-POSTMERGE-REVIEW.md`
@@ -208,4 +209,4 @@ table above).
 - [x] Accepted risks are logged with a reason and a revisit condition
 - [x] The audit trail names the method and result per PR
 
-**Approval:** closed 2026-10-22 at develop 3cab97e (orchestrator; the owner decided D-19, D-20 and T-05-44).
+**Approval:** closed 2026-10-22 at develop 4ceb433 (orchestrator; the owner decided D-19, D-20 and T-05-44).
