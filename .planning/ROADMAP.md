@@ -338,7 +338,7 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: 4/9 plans executed
+**Plans**: 5/9 plans executed
 
 Plans:
 **Wave 1**
@@ -350,7 +350,7 @@ Plans:
 - [x] 05-03-PLAN.md — Adapter switches, restart and Discard on the dashboard (PLAT-01, PLAT-02)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 05-09-PLAN.md — Page key: every dashboard request needs the key; `macos-apps-mcp dashboard` opens the link (PLAT-02, D-19)
+- [x] 05-09-PLAN.md — Page key: every dashboard request needs the key; `macos-apps-mcp dashboard` opens the link (PLAT-02, D-19)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 05-04-PLAN.md — Write list, write detail and read-only recovery with the undo prompt (PLAT-02)
@@ -398,5 +398,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
-| 5. Operator Control Plane | 4/9 | In Progress | - |
+| 5. Operator Control Plane | 5/9 | In Progress | - |
 | 6. Distribution | 0/TBD | Not started | - |
