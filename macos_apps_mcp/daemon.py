@@ -13,6 +13,7 @@ import os
 import secrets
 import socket
 import sys
+import threading
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -273,6 +274,34 @@ def fail_loud_on_dead_stream() -> None:
     streamable_http.StreamableHTTPTransport._handle_sse_response = _handle_sse_response
 
 
+_restart_armed = (
+    False  # one watchdog per process: a second restart only repeats the first
+)
+
+
+def restart(server, *, timer=threading.Timer, delay: float = 3.0) -> bool:
+    """Make this daemon exit so launchd starts it again (D-16): the dashboard's restart.
+
+    Sets uvicorn's ``should_exit`` and ``force_exit`` (the Server skips the wait for
+    open connections and tasks) and arms a watchdog that calls ``os._exit(0)`` after
+    ``delay`` seconds. The watchdog exists because a sync tool thread, or the native
+    worker (a non-daemon thread ``concurrent.futures`` joins at exit), keeps the process
+    alive forever otherwise (RESEARCH C2). ``os._exit`` skips ``serve()``'s ``finally``;
+    ``bind_socket`` removes the stale socket file on the next start. launchd's
+    ``KeepAlive`` relaunches the exited daemon: nothing here runs ``launchctl``.
+    Returns False when a restart is already under way."""
+    global _restart_armed
+    if _restart_armed:
+        return False
+    _restart_armed = True
+    server.should_exit = True
+    server.force_exit = True
+    watchdog = timer(delay, os._exit, (0,))
+    watchdog.daemon = True
+    watchdog.start()
+    return True
+
+
 def serve() -> None:
     """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
     One MCP session per client connection (fork resolution, spec)."""
@@ -300,7 +329,11 @@ def serve() -> None:
             dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
             from . import dashboard  # late: the stdio server never imports it
 
-            dash_app = dashboard.build_app(port=port, token=secrets.token_urlsafe(32))
+            dash_app = dashboard.build_app(
+                port=port,
+                token=secrets.token_urlsafe(32),
+                restart=lambda: restart(server),  # `server` is assigned below
+            )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
         # One Server for both sockets: two Servers on one loop overwrite each other's
@@ -311,7 +344,8 @@ def serve() -> None:
             ws="none",
             proxy_headers=False,
         )
-        uvicorn.Server(config).run(sockets=[s] + ([tcp] if tcp else []))
+        server = uvicorn.Server(config)
+        server.run(sockets=[s] + ([tcp] if tcp else []))
     finally:
         s.close()
         if tcp is not None:

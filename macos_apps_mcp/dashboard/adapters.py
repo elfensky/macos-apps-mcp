@@ -9,10 +9,12 @@ and never counts as a tool call in the usage tally (D-15).
 
 from __future__ import annotations
 
+import os
 import threading
 from datetime import datetime
 from urllib.parse import parse_qs
 
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse, RedirectResponse
 
@@ -21,6 +23,25 @@ from .html import Safe, h, join
 from .html import page as render_page
 
 _write_lock = threading.Lock()  # one read-modify-write of the file at a time
+_ENV_NOTE = (
+    "MACOS_APPS_ADAPTERS_OFF is set for this daemon and wins over the file. "
+    "Unset it to use these switches."
+)
+# D-20: a file that exists but cannot be read turns every adapter off (tiers.py). A
+# write would replace what the operator meant with a guess, so the switches lock.
+_UNREADABLE_NOTE = (
+    "The adapters_off file cannot be read, so every adapter is off after a restart. "
+    "Fix the file's permissions, then reload this page."
+)
+
+
+def _lock_reason() -> str | None:
+    """Why the switches are locked, or None when they work."""
+    if os.environ.get("MACOS_APPS_ADAPTERS_OFF", "").strip():
+        return _ENV_NOTE
+    if deploy.ADAPTERS_ALL_OFF in tiers.adapters_off():
+        return _UNREADABLE_NOTE
+    return None
 
 
 def known_adapters() -> list[str]:
@@ -52,15 +73,14 @@ def _pending(known: list[str]) -> list[tuple[str, bool]]:
     ]
 
 
-def _bar(token: str, pending: list[tuple[str, bool]]) -> Safe:
+def _bar(token: str, pending: list[tuple[str, bool]], locked: bool) -> Safe:
     n = len(pending)
     what = ", ".join(f"{a.capitalize()} {'on' if on else 'off'}" for a, on in pending)
     return h(
         '<div class="restart-bar"><div class="grow"><b>{}</b> <span class="muted">'
         "{}. A restart drops open MCP connections for a moment and stops a Mail batch "
         "that is running; its receipt and backups stay.</span></div>"
-        '<form method="post" action="/adapters">{}'
-        '<button class="btn" type="submit">Discard</button></form>'
+        "{}"
         '<form method="post" action="/restart">{}'
         '<button class="btn primary" type="submit">Restart daemon</button>'
         "</form></div>",
@@ -68,12 +88,20 @@ def _bar(token: str, pending: list[tuple[str, bool]]) -> Safe:
         if n == 1
         else f"{n} changes wait for a restart.",
         what,
-        _hidden(token, action="discard"),
+        Safe("")
+        if locked
+        else h(
+            '<form method="post" action="/adapters">{}'
+            '<button class="btn" type="submit">Discard</button></form>',
+            _hidden(token, action="discard"),
+        ),
         _hidden(token),
     )
 
 
-def _row(token: str, name: str, on: bool, pending: dict[str, bool]) -> Safe:
+def _row(
+    token: str, name: str, on: bool, pending: dict[str, bool], disabled: bool
+) -> Safe:
     label = name.capitalize()
     chip = (
         h(
@@ -87,7 +115,7 @@ def _row(token: str, name: str, on: bool, pending: dict[str, bool]) -> Safe:
         '<div class="row"><span class="appico {}">{}</span>'
         '<div class="grow"><div class="title">{}</div><div class="sub">{}</div></div>'
         '{}<form method="post" action="/adapters" class="switch-form">{}'
-        '<button type="submit" class="switch" aria-pressed="{}" aria-label="{}">'
+        '<button type="submit" class="switch" aria-pressed="{}" aria-label="{}"{}>'
         "<span></span></button></form></div>",
         label,
         label[0],
@@ -97,24 +125,55 @@ def _row(token: str, name: str, on: bool, pending: dict[str, bool]) -> Safe:
         _hidden(token, action="toggle", adapter=name, on="0" if on else "1"),
         "true" if on else "false",
         label,
+        Safe(" disabled") if disabled else Safe(""),
     )
 
 
-async def page(request):
+_RESTARTING_BAR = Safe(
+    '<div class="restart-bar"><span class="spin"></span><div class="grow">'
+    "<b>Restarting the daemon…</b> "
+    '<span class="muted">This page reconnects by itself. MCP clients reconnect on '
+    'their next call.</span> <a href="/adapters">Reload</a></div></div>'
+)
+
+
+async def _render(request, *, restarting: bool = False):
     token = request.app.state.token
     known = known_adapters()
     configured = set(registry.adapter_status()["configured"])
     pending = _pending(known)
-    rows = join(_row(token, n, n in configured, dict(pending)) for n in known)
+    why = _lock_reason()
+    rows = join(
+        _row(token, n, n in configured, dict(pending), restarting or why is not None)
+        for n in known
+    )
+    if restarting:
+        top = _RESTARTING_BAR
+    elif pending:
+        top = _bar(token, pending, why is not None)
+    else:
+        top = Safe("")
     body = h(
         "{}<h1>Adapters</h1>\n"
         '<p class="lede">Turn an app off and its tools disappear after the daemon '
-        "restarts.</p>\n"
-        '<div class="group">{}</div>\n',
-        _bar(token, pending) if pending else Safe(""),
+        "restarts.</p>\n{}"
+        '<div class="group{}">{}</div>\n',
+        top,
+        h('<div class="banner warn"><div>{}</div></div>\n', why) if why else Safe(""),
+        " restarting" if restarting else "",
         rows,
     )
-    return render_page(request, title="Adapters", active="adapters", body=body)
+    return render_page(
+        request,
+        title="Adapters",
+        active="adapters",
+        body=body,
+        refresh=(12, "/adapters") if restarting else None,
+    )
+
+
+async def page(request):
+    return await _render(request)
 
 
 def _log(op: str, args: dict, target_id: str | None) -> None:
@@ -141,10 +200,38 @@ def _apply_toggle(adapter: str, on: bool) -> None:
         _log("toggle", {"adapter": adapter, "on": on}, adapter)
 
 
+def _apply_discard() -> None:
+    """Write the running set back: every known adapter that did not register is OFF."""
+    with _write_lock:
+        off = sorted(
+            set(known_adapters()) - set(registry.adapter_status()["registered"])
+        )
+        deploy.write_adapters_off(off)
+        _log("discard", {"adapters_off": off}, None)
+
+
 async def toggle(request):
+    """``POST /adapters``: ``action=toggle`` (adapter, on) or ``action=discard``."""
+    why = _lock_reason()
+    if why is not None:
+        return PlainTextResponse(why, 409)
     form = parse_qs((await request.body()).decode("utf-8", "replace"))
-    adapter, on = form.get("adapter", [""])[0], form.get("on", [""])[0]
-    if adapter not in known_adapters() or on not in ("0", "1"):
-        return PlainTextResponse("Unknown adapter or value.", 400)
-    await run_in_threadpool(_apply_toggle, adapter, on == "1")
+    action, adapter, on = (form.get(k, [""])[0] for k in ("action", "adapter", "on"))
+    if action == "discard":
+        await run_in_threadpool(_apply_discard)
+    elif action == "toggle" and adapter in known_adapters() and on in ("0", "1"):
+        await run_in_threadpool(_apply_toggle, adapter, on == "1")
+    else:
+        return PlainTextResponse("Unknown action, adapter or value.", 400)
     return RedirectResponse("/adapters", 303)
+
+
+async def restart(request):
+    """``POST /restart``: log it, answer first, then ask the daemon to exit (D-16)."""
+    hook = request.app.state.restart
+    if hook is None:
+        return PlainTextResponse("restart is available only in the daemon", 503)
+    _log("restart", {}, None)
+    response = await _render(request, restarting=True)
+    response.background = BackgroundTask(hook)  # runs after the body is sent
+    return response
