@@ -426,13 +426,16 @@ def diagnose(request: bool = False) -> dict:
     deployment["adapters"] = ad["registered"]
     deployment["adapters_off"] = sorted(known - set(ad["registered"]))
     deployment["adapters_note"] = (
-        "OFF adapters: a comma list in ~/.local/state/macos-apps-mcp/adapters_off "
-        "(the dashboard writes it too); apply: "
-        "launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp."
+        "OFF adapters: a comma list in ~/.local/state/macos-apps-mcp/adapters_off; "
+        "apply: launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp."
     )
     off = tiers.adapters_off()
     if unknown_adapters := off - known - {deploy.ADAPTERS_ALL_OFF}:
-        deployment["adapters_unknown"] = sorted(unknown_adapters)
+        # operator input, so unbounded: three names keep the report in budget
+        names = sorted(unknown_adapters)
+        deployment["adapters_unknown"] = names[:3] + (
+            [f"+{len(names) - 3} more"] if len(names) > 3 else []
+        )
     if deploy.ADAPTERS_ALL_OFF in off:
         deployment["adapters_note"] += (
             " The adapters_off file exists but cannot be read, so every adapter is off"
@@ -441,9 +444,7 @@ def diagnose(request: bool = False) -> dict:
     if ad["configured"] != ad["registered"]:
         deployment["adapters_pending"] = ad["configured"]
         deployment["adapters_note"] += (
-            " Adapter config changed since this process launched (configured: "
-            + (", ".join(ad["configured"]) or "none")
-            + ") — restart the daemon to apply it."
+            " Changed since launch: restart the daemon to apply adapters_pending."
         )
     # Daemon role only: only the daemon serves the dashboard (and the stdio budget test
     # stays as it is). The note never reads the key file.
@@ -456,8 +457,7 @@ def diagnose(request: bool = False) -> dict:
         if daemon.dashboard_state:
             deployment["dashboard"] = daemon.dashboard_state
         deployment["dashboard_note"] = (
-            "every dashboard page needs the page key: the USER (not the model) opens "
-            "it by running `macos-apps-mcp dashboard` in Terminal."
+            "pages need the page key: the USER runs `macos-apps-mcp dashboard`."
         )
     # Registration is fixed at import; the toggle/env is re-read per call. When they
     # differ (allow-send flipped the toggle but the daemon kept running — deploy's
@@ -465,9 +465,7 @@ def diagnose(request: bool = False) -> dict:
     if ob["configured"] != ob["registered"]:
         deployment["outbound_pending"] = ob["configured"]
         deployment["outbound_note"] += (
-            " Outbound config changed since this process launched (configured: "
-            + (", ".join(ob["configured"]) or "none")
-            + ") — restart the daemon to apply it."
+            " Changed since launch: restart the daemon to apply outbound_pending."
         )
 
     # #163: the recoverable plane keeps every backup forever (no pruning code exists, on

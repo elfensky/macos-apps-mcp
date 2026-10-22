@@ -423,9 +423,22 @@ def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
     assert len(reads) == 2
 
 
-def test_report_stays_under_token_budget(monkeypatch, tmp_path):
+@pytest.mark.parametrize("role", ["stdio", "daemon"])
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
+    if role == "daemon":
+        # The daemon adds the dashboard keys, and the deny-list is operator input:
+        # pending deltas both ways and many unknown names (PM-05, #421 review).
+        from macos_apps_mcp import daemon, registry
+
+        monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+        junk = ",".join(f"no-such-adapter-{i}" for i in range(10))
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", f"photos,{junk}")
+        sending = registry.outbound_status()["registered"]
+        monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "" if sending else "mail")
+        monkeypatch.setattr(daemon, "dashboard_state", "not bound: [Errno 48] in use")
+
     def denied_automation(*a, **k):
         raise AutomationDenied(
             "grant Automation in System Settings, then restart macos-apps-mcp"
@@ -469,7 +482,13 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
     assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once
-    assert len(json.dumps(report, ensure_ascii=False)) < 7000
+    sizes = {k: len(json.dumps(v, ensure_ascii=False)) for k, v in report.items()}
+    sizes |= {
+        f"deployment.{k}": len(json.dumps(v, ensure_ascii=False))
+        for k, v in report["deployment"].items()
+    }
+    largest = sorted(sizes.items(), key=lambda kv: -kv[1])[:8]
+    assert len(json.dumps(report, ensure_ascii=False)) < 7000, largest
 
 
 def test_probe_carries_applescript_side_timeout():

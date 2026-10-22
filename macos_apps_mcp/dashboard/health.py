@@ -253,7 +253,14 @@ def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
 def _unreadable_banner(got: dict) -> Safe:
     if _complete(got):
         return _NONE
-    why = ", ".join(f"{k} db: {v}" for k, v in got["reasons"].items() if v)
+    failed = {k: v for k, v in got["reasons"].items() if v}
+    if failed == {"user": "absent"}:  # #261: macOS 27 keeps no per-user TCC.db
+        return Safe(
+            '<p class="muted note">This macOS keeps no per-user grant database, so '
+            "Automation, Calendar and Reminders grants cannot be read here: those rows "
+            "show no grant state. The EventKit rows come from live checks.</p>\n"
+        )
+    why = ", ".join(f"{k} db: {v}" for k, v in failed.items())
     return h(
         '<div class="banner warn"><span>●</span><div><b>Some grants could not be '
         "read.</b> The macOS grant database did not answer ({}), so rows that depend "

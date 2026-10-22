@@ -24,7 +24,8 @@ from .html import Safe, h, join
 
 RECEIPT_RE = re.compile(
     # the counter is padded to a MINIMUM of 3 digits (mail_recover._receipt_id)
-    r"^\d{8}-\d{6}-\d{6}-\d{3,}-(" + "|".join(sorted(mail_recover.OPS)) + r")$"
+    r"^\d{8}-\d{6}-\d{6}-\d{3,}-(" + "|".join(sorted(mail_recover.OPS)) + r")$",
+    re.ASCII,  # \d is ASCII digits only: no Arabic-Indic or fullwidth look-alikes
 )
 _EML = re.compile(r"\d+\.eml")
 

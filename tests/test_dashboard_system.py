@@ -359,7 +359,7 @@ def test_a_partial_tcc_read_never_claims_not_asked(doc):
     doc.reasons = {"user": "absent", "system": None}
     text = get("/health").text
     assert "not asked" not in text.lower() and "banner bad" not in text
-    assert "could not be read" in text and "Automation → " not in text
+    assert "cannot be read here" in text and "Automation → " not in text
 
 
 def test_a_grant_with_a_status_is_not_a_denial(doc):
@@ -555,3 +555,40 @@ def test_without_a_backup_root_the_page_is_empty_and_creates_nothing(tree, monke
     assert "0.0 MB in 0 receipts" in text and rows_in(text) == []
     assert get(f"/backups/{RID1}").status_code == 404
     assert not (audit.state_dir() / "backup").exists()
+
+
+# --- post-merge review of #421 --------------------------------------------------
+
+
+def test_the_worker_refuses_a_second_doctor_run_while_one_is_in_flight(doc):
+    # The page's locked() check is a fast path that two requests can both pass: only
+    # the acquire inside the worker thread keeps doctor to one call at a time.
+    doc.gate = threading.Event()
+    first = threading.Thread(target=health._run)
+    first.start()
+    try:
+        for _ in range(500):
+            if doc.calls:
+                break
+            time.sleep(0.01)
+        assert health._run() is None
+    finally:
+        doc.gate.set()
+        first.join(10)
+    assert doc.calls == [False]
+
+
+def test_an_absent_user_grant_db_is_a_note_not_a_warning(doc):
+    # #261: macOS 27 keeps no per-user TCC.db, so Automation, Calendar and Reminders
+    # grants cannot be read; the rows stay without a chip, never "not asked".
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    assert "did not answer" not in text and 'class="banner warn"' not in text
+    assert "keeps no per-user grant database" in text
+    assert "not asked" not in text
+
+
+def test_receipt_ids_take_ascii_digits_only():
+    assert recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-001-move")
+    assert not recovery.RECEIPT_RE.fullmatch("٢" * 8 + "-094010-123456-001-move")
+    assert not recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-１２３-move")
