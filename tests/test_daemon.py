@@ -154,6 +154,36 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
         assert "jsonrpc" not in unsigned.text + get_mcp.text
 
 
+def test_serve_keeps_mcp_up_when_the_dashboard_port_is_in_use(sockdir, monkeypatch):
+    """T-05-13: a taken dashboard port is logged, `dashboard_state` says so, and MCP
+    over the unix socket keeps serving."""
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    monkeypatch.setattr(daemon, "DASHBOARD_PORT", taken.getsockname()[1])
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    threading.Thread(target=daemon.serve, daemon=True).start()
+    for _ in range(100):
+        if p.exists():
+            break
+        time.sleep(0.05)
+
+    async def go():
+        transport = StreamableHttpTransport(
+            "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+        )
+        async with Client(transport) as c:
+            return await c.call_tool("ping")
+
+    try:
+        assert "ok" in asyncio.run(go()).content[0].text
+        assert str(daemon.dashboard_state).startswith("not bound: ")
+    finally:
+        taken.close()
+
+
 def _serve(app, path):
     """Serve `app` over a UDS the way daemon.serve() does; returns the listener."""
     s = daemon.bind_socket(path)
