@@ -434,6 +434,9 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
 
         monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
         junk = ",".join(f"no-such-adapter-{i}" for i in range(10))
+        junk += (
+            "," + "a" * 4000
+        )  # WR-04: one long unknown name must not break the budget
         monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", f"photos,{junk}")
         sending = registry.outbound_status()["registered"]
         monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "" if sending else "mail")
