@@ -100,6 +100,12 @@ def _d(v) -> dict:
     return v if isinstance(v, dict) else {}
 
 
+def _op(rec: dict) -> str | None:
+    """The record's ``op`` when it is a string; a corrupt line must not crash a page."""
+    op = rec.get("op")
+    return op if isinstance(op, str) else None
+
+
 def _summary(pointer) -> str:
     s = _d(pointer).get("summary")
     return "" if s is None else str(s)
@@ -125,7 +131,7 @@ def _day(d: date) -> str:
 
 def _title(rec: dict, preview: bool) -> str:
     if rec.get("tool") == "dashboard":
-        op, args = rec.get("op"), _d(rec.get("args"))
+        op, args = _op(rec), _d(rec.get("args"))
         if op == "toggle" and isinstance(args.get("adapter"), str):
             return f"Turned {args['adapter'].capitalize()} " + (
                 "on" if args.get("on") else "off"
@@ -134,8 +140,8 @@ def _title(rec: dict, preview: bool) -> str:
             "discard": "Discarded pending adapter changes",
             "restart": "Restarted the daemon",
         }.get(op, f"Dashboard {op}")
-    op = rec.get("op")
-    past, base = _VERBS.get(op) or (str(op).capitalize(), str(op))
+    op = _op(rec)
+    past, base = _VERBS.get(op) or ((op or "write").capitalize(), op or "write")
     verb = f"Would {base}" if preview else past
     text = _summary(rec.get("after")) or _summary(rec.get("before"))
     return f"{verb} {text}" if text else f"{verb} ({rec['tool']})"
@@ -203,7 +209,7 @@ def _batches(records: list[dict], defaults: dict[str, bool]):
             continue
         nxt = records[i + 1]
         g = groups[rid]
-        op = (g.get("plan") or g["done"]).get("op")
+        op = _op(g.get("plan") or g["done"])
         if (
             isinstance(nxt.get("tool"), str)
             and _BATCH_TOOLS.get(nxt["tool"]) == op
@@ -220,14 +226,14 @@ def _batch_row(g: dict, rid: str, primary: dict, ts: str, n: int) -> Row | None:
         return None
     head = g.get("plan") or g["done"]
     mw = g.get("mw")
-    op, dest = head.get("op"), head.get("destination")
+    op, dest = _op(head), head.get("destination")
     tool = mw["tool"] if mw else _BATCH_LABEL.get(op, "mail_recover")
     k = len(recovery.targets(g.get("plan"), g.get("done")))
     noun = f"{k} message{'' if k == 1 else 's'}"
     if tool == "mail_undo":
         title = f"Undid a batch: moved {noun} back" + (f" to {dest}" if dest else "")
     else:
-        title = f"{_BATCH_VERBS.get(op, str(op).capitalize())} {noun}" + (
+        title = f"{_BATCH_VERBS.get(op, (op or 'Wrote').capitalize())} {noun}" + (
             f" to {dest}" if dest else ""
         )
     reg = registry.TOOLS.get(tool)
