@@ -1,7 +1,7 @@
 """Which macOS grant each adapter needs, and whether the daemon holds it (D-11).
 
 The TCC rows come from ``deploy.grant_report()``: a read-only sqlite read, no Apple
-Event and no prompt. 05-05's Health page reuses this mapping for its danger banner.
+Event and no prompt. The Health page reuses this mapping for its danger banner.
 The AppleEvents target ids are the apps' bundle identifiers, confirmed from the
 installed apps' Info.plist (TCC stores the controlled app's id as the row's target).
 """
@@ -34,14 +34,16 @@ def grant_state(
     client: str = deploy._BUNDLE_ID,
     *,
     complete: bool = True,
+    service: str | None = None,
 ) -> str | None:
     """``"denied"``, ``"not asked"`` or ``"granted"`` for ``client``'s grants to
     ``adapter``; None when it cannot be told (no TCC data, or no grant needed).
 
     ``complete`` says both TCC databases were read: without it a missing row proves
     nothing, so it stays unknown instead of claiming "not asked". Precedence: denied,
-    then not asked, then unknown, then granted."""
-    needs = ADAPTER_GRANTS.get(adapter, ())
+    then not asked, then unknown, then granted. ``service`` narrows the answer to one
+    TCC service (Health's ``Automation → Mail`` row is about AppleEvents only)."""
+    needs = [n for n in ADAPTER_GRANTS.get(adapter, ()) if service in (None, n[0])]
     if identities is None or not needs:
         return None
     states = set()

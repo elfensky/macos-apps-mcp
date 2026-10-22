@@ -22,7 +22,7 @@ import time
 import anyio
 
 from .. import deploy, doctor, registry
-from . import adapters
+from . import adapters, grants
 from .html import Safe, h, join
 from .html import page as render_page
 
@@ -87,6 +87,20 @@ def _kv(title, value) -> Safe:
     )
 
 
+_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?"
+# One constant link per pane: no endpoint opens anything (D-14).
+_PANES = {
+    "automation": "Privacy_Automation",
+    "fda": "Privacy_AllFiles",
+    "calendar": "Privacy_Calendars",
+    "reminders": "Privacy_Reminders",
+}
+
+
+def _settings(pane: str) -> Safe:
+    return h('<a class="btn" href="{}{}">Open Settings</a>', _SETTINGS, _PANES[pane])
+
+
 def _daemon_row() -> Safe:
     if deploy.is_daemon_role():
         sub = f"Running as {deploy._BUNDLE_ID}, pid {os.getpid()}, {_up()}"
@@ -127,7 +141,12 @@ def _fda_row(report: dict) -> Safe:
     if s.get("ok") is True:
         return _row("ok", "Full Disk Access", "Granted")
     sub = s.get("remediation") or s.get("status") or "unknown"
-    return _row("bad" if s.get("ok") is False else "", "Full Disk Access", sub)
+    return _row(
+        "bad" if s.get("ok") is False else "",
+        "Full Disk Access",
+        sub,
+        action=_settings("fda"),
+    )
 
 
 def _eventkit_row(report: dict) -> Safe:
@@ -148,7 +167,106 @@ def _eventkit_row(report: dict) -> Safe:
         dot = "warn"
     else:
         dot = "ok" if live else ""
-    return _row(dot, "EventKit", sub)
+    pane = "reminders" if states[0][1] in ("full_access", "adapter_off") else "calendar"
+    return _row(
+        dot,
+        "EventKit",
+        sub,
+        action=_settings(pane) if dot in ("bad", "warn") else _NONE,
+    )
+
+
+def _complete(got: dict) -> bool:
+    """Both TCC databases answered: only then does a missing row mean "not asked"."""
+    return all(v is None for v in got["reasons"].values())
+
+
+def _state(got: dict, adapter: str, service: str | None = None) -> str | None:
+    ids = got["report"]["deployment"].get("grant_identities")
+    return grants.grant_state(ids, adapter, complete=_complete(got), service=service)
+
+
+def _refused_by_probe(report: dict) -> set[str]:
+    """Adapters whose own live probe was refused: an EventKit surface with status
+    ``denied`` and every adapter that needs Full Disk Access when that probe is denied.
+    The probes run in the daemon, so they answer even when TCC cannot be read."""
+    surfaces = _surfaces(report)
+    out = {
+        n
+        for n in ("calendar", "reminders")
+        if surfaces.get(n, {}).get("status") == "denied"
+    }
+    if surfaces.get("full_disk_access", {}).get("ok") is False:
+        out |= {
+            a
+            for a, needs in grants.ADAPTER_GRANTS.items()
+            if any(svc == grants._FDA for svc, _ in needs)
+        }
+    return out
+
+
+def _denied(got: dict, active: list[str]) -> list[str]:
+    """The active adapters macOS refused (D-14): a denied TCC row or a refused probe."""
+    probed = _refused_by_probe(got["report"])
+    return [a for a in active if _state(got, a) == "denied" or a in probed]
+
+
+def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
+    """One ``Automation → App`` row per AppleEvents grant that is not granted. An OFF
+    adapter's row says it does not matter; when TCC cannot say, one row says that
+    instead of guessing "not asked" (PM-20)."""
+    rows, unreadable = [], []
+    for adapter, needs in grants.ADAPTER_GRANTS.items():
+        if not any(svc == grants._EVENTS for svc, _ in needs):
+            continue
+        state = _state(got, adapter, grants._EVENTS)
+        on = adapter in active
+        if state is None:
+            if on:
+                unreadable.append(adapter.capitalize())
+        elif state != "granted":
+            dot = ("bad" if state == "denied" else "warn") if on else ""
+            sub = "Denied" if state == "denied" else "Not asked yet"
+            if not on:
+                sub += " · adapter is off, so this does not matter"
+            rows.append(
+                _row(
+                    dot,
+                    f"Automation → {adapter.capitalize()}",
+                    sub,
+                    action=_settings("automation") if on else _NONE,
+                )
+            )
+    if unreadable:
+        rows.append(
+            _row(
+                "",
+                "Automation",
+                "Could not be read for " + ", ".join(unreadable) + ": check them in "
+                "System Settings → Privacy & Security → Automation.",
+                action=_settings("automation"),
+            )
+        )
+    return rows
+
+
+def _unreadable_banner(got: dict) -> Safe:
+    if _complete(got):
+        return _NONE
+    why = ", ".join(f"{k} db: {v}" for k, v in got["reasons"].items() if v)
+    return h(
+        '<div class="banner warn"><span>●</span><div><b>Some grants could not be '
+        "read.</b> The macOS grant database did not answer ({}), so rows that depend "
+        "on it say that instead of guessing.</div></div>\n",
+        why,
+    )
+
+
+def last_dot() -> str | None:
+    """The sidebar dot of the last full Health report: ``bad`` when an active adapter
+    is refused, ``warn`` while a restart is pending, else ``ok``; None before the first
+    report (the sidebar never runs doctor, D-14)."""
+    return _dot
 
 
 def _deployment(request, report: dict | None) -> Safe:
@@ -166,17 +284,39 @@ def _deployment(request, report: dict | None) -> Safe:
 
 
 def _render(request, got: dict | None, failure: str | None):
+    global _dot
     report = got["report"] if got else None
     if report:
+        st, ob = registry.adapter_status(), registry.outbound_status()
+        active = st["registered"]
+        denied = _denied(got, active)
+        pending = st["configured"] != active or ob["configured"] != ob["registered"]
+        _dot = "bad" if denied else "warn" if pending else "ok"
         rows = [
             _daemon_row(),
             _adapters_row(),
             _fda_row(report),
             _eventkit_row(report),
+            *_automation_rows(got, active),
             _outbound_row(),
             _row("ok", "Mail backups", report["deployment"].get("mail_backups", "")),
         ]
-        banner = Safe("")
+        n = len(denied)
+        banner = join(
+            [
+                h(
+                    '<div class="banner bad"><span>●</span><div><b>{} active adapter'
+                    "{} cannot work:</b> {}. "
+                    "Grant access, or turn the adapter off.</div></div>\n",
+                    n,
+                    "" if n == 1 else "s",
+                    ", ".join(f"{a.capitalize()} (denied)" for a in denied),
+                )
+                if denied
+                else _NONE,
+                _unreadable_banner(got),
+            ]
+        )
         tail = h(
             '<details class="raw"><summary>Full doctor report</summary>'
             '<pre class="json">{}</pre></details>',

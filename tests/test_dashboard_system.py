@@ -282,8 +282,11 @@ def test_banner_names_every_active_adapter_macos_refused(doc):
     doc.report = make_report(make_ids(fda=False), **FDA_DENIED)
     names = needing("kTCCServiceSystemPolicyAllFiles")
     assert len(names) == 4  # mail, messages, photos, reminders
-    head, rest = banner(get("/health").text)
+    text = get("/health").text
+    head, rest = banner(text)
     assert head == "4 active adapters cannot work:"
+    # Mail's FDA denial is not an Automation denial: its Automation row stays away
+    assert "Automation → Mail" not in text
     listed = ", ".join(f"{n.capitalize()} (denied)" for n in names)
     assert rest == f"{listed}. Grant access, or turn the adapter off."
 
