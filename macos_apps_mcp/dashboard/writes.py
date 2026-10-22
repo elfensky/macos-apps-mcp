@@ -16,7 +16,7 @@ import difflib
 import json
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from urllib.parse import quote, urlencode
 
@@ -24,6 +24,9 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit, registry
+from ..adapters import mail_recover
+from ..errors import NativeError
+from . import recovery
 from .html import Safe, appico, esc, h, join, page, safe_href
 
 _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -75,12 +78,17 @@ class Row:
     tool: str
     adapter: str | None
     tier: str | None
-    kind: str  # "write" | "dashboard"
+    kind: str  # "write" | "dashboard" | "batch"
     title: str
     chip: str  # adds | changes | sends | preview
     preview: bool
     record: dict  # the record the row is about (the middleware or dashboard line)
     records: tuple[dict, ...]  # every raw audit line behind the row, in file order
+    # A batch Mail write (D-12): the receipt and its plan and done records.
+    receipt: str | None = None
+    plan: dict | None = None
+    done: dict | None = None
+    undone: bool = False  # a later, real mail_undo named this batch's receipt
 
 
 def _today() -> date:
@@ -139,46 +147,172 @@ def _is_preview(rec: dict, defaults: dict[str, bool]) -> bool:
     return audit._resolve_dry_run(rec["tool"], _d(rec.get("args")), defaults)
 
 
+# The tools whose adapter methods call ``mail_recover.recoverable``, with the plan op
+# each writes. ``mail_undo`` replays a move, so its plan op is "move".
+_BATCH_TOOLS = {"move_mail": "move", "trash_mail": "trash", "mail_undo": "move"}
+# What a batch is called when no middleware line names it (the dedupe-mail CLI writes
+# only plan and done records).
+_BATCH_LABEL = {"move": "move_mail", "trash": "trash_mail", "dedupe": "dedupe-mail"}
+_BATCH_VERBS = {"move": "Moved", "trash": "Trashed", "dedupe": "Deduplicated"}
+
+
+def _in(groups: dict, rid) -> bool:
+    return isinstance(rid, str) and rid in groups
+
+
+def _batches(records: list[dict], defaults: dict[str, bool]):
+    """Group ``mail_recover`` plan and done records by receipt and link each batch to
+    its middleware line: exactly, by the line's ``receipt`` key, else by adjacency (the
+    first record after the done record, when it is a real call of a batch tool).
+    Returns ``(groups, linked)``: receipt -> {plan, done, mw, lines}, and the index of
+    every record that belongs to a batch -> its receipt."""
+    groups: dict[str, dict] = {}
+    for i, rec in enumerate(records):
+        rid, phase = rec.get("receipt"), rec.get("phase")
+        if (
+            rec.get("tool") == "mail_recover"
+            and isinstance(rid, str)
+            and phase in ("plan", "done")
+            and phase not in groups.setdefault(rid, {})
+        ):
+            groups[rid][phase] = rec
+            groups[rid].setdefault("lines", []).append((i, rec))
+    groups = {rid: g for rid, g in groups.items() if "lines" in g}
+    linked: dict[int, str] = {}
+
+    def link(i: int, rec: dict, rid: str) -> None:
+        groups[rid]["mw"] = rec
+        groups[rid]["lines"].append((i, rec))
+        linked[i] = rid
+
+    for i, rec in enumerate(records):
+        rid = rec.get("receipt")
+        # the first line naming a receipt wins
+        if (
+            rec.get("tool") != "mail_recover"
+            and _in(groups, rid)
+            and "mw" not in groups[rid]
+        ):
+            link(i, rec, rid)
+    for i, rec in enumerate(records[:-1]):
+        rid = rec.get("receipt")
+        if rec.get("phase") != "done" or rec.get("tool") != "mail_recover":
+            continue
+        if not _in(groups, rid) or "mw" in groups[rid]:
+            continue
+        nxt = records[i + 1]
+        g = groups[rid]
+        op = (g.get("plan") or g["done"]).get("op")
+        if (
+            isinstance(nxt.get("tool"), str)
+            and _BATCH_TOOLS.get(nxt["tool"]) == op
+            and "receipt" not in nxt
+            and not _is_preview(nxt, defaults)
+        ):
+            link(i + 1, nxt, rid)
+    return groups, linked
+
+
+def _batch_row(g: dict, rid: str, primary: dict, ts: str, n: int) -> Row | None:
+    when = _when(primary.get("ts"))
+    if when is None:
+        return None
+    head = g.get("plan") or g["done"]
+    mw = g.get("mw")
+    op, dest = head.get("op"), head.get("destination")
+    tool = mw["tool"] if mw else _BATCH_LABEL.get(op, "mail_recover")
+    k = len(recovery.targets(g.get("plan"), g.get("done")))
+    noun = f"{k} message{'' if k == 1 else 's'}"
+    if tool == "mail_undo":
+        title = f"Undid a batch: moved {noun} back" + (f" to {dest}" if dest else "")
+    else:
+        title = f"{_BATCH_VERBS.get(op, str(op).capitalize())} {noun}" + (
+            f" to {dest}" if dest else ""
+        )
+    reg = registry.TOOLS.get(tool)
+    return Row(
+        ts=ts,
+        n=n,
+        when=when,
+        tool=tool,
+        adapter="mail",
+        tier=reg.tier if reg else "destructive",
+        kind="batch",
+        title=title,
+        chip=_TIER_CHIP.get(reg.tier, "changes") if reg else "changes",
+        preview=False,
+        record=primary,
+        records=tuple(rec for _, rec in sorted(g["lines"], key=lambda x: x[0])),
+        receipt=rid,
+        plan=g.get("plan"),
+        done=g.get("done"),
+    )
+
+
 def build_rows(records: list[dict]) -> list[Row]:
     """The rows of the list, newest first. A line that is not a write record (an
-    ``error`` entry, no ``tool``, no readable ``ts``) is not a row."""
+    ``error`` entry, no ``tool``, no readable ``ts``) is not a row; a batch's plan,
+    done and middleware lines are one row."""
     defaults = registry.dry_run_defaults()
+    groups, linked = _batches(records, defaults)
     seen: Counter[str] = Counter()
     rows: list[Row] = []
-    for rec in records:
+    for i, rec in enumerate(records):
         tool, ts = rec.get("tool"), rec.get("ts")
-        when = _when(ts)
-        if not isinstance(tool, str) or when is None or tool == "mail_recover":
+        if not isinstance(tool, str) or _when(ts) is None:
             continue
-        preview = _is_preview(rec, defaults)
-        reg = registry.TOOLS.get(tool)
-        tier = reg.tier if reg else None
-        rows.append(
-            Row(
-                ts=ts,
-                n=seen[ts],
-                when=when,
-                tool=tool,
-                adapter=reg.adapter if reg else None,
-                tier=tier,
-                kind="dashboard" if tool == "dashboard" else "write",
-                title=_title(rec, preview),
-                chip="preview" if preview else _TIER_CHIP.get(tier, "changes"),
-                preview=preview,
-                record=rec,
-                records=(rec,),
-            )
-        )
-        seen[ts] += 1
+        row: Row | None
+        if tool == "mail_recover":
+            rid = rec.get("receipt")
+            g = groups.get(rid) if isinstance(rid, str) else None
+            # one row per batch, at the middleware line when there is one
+            if g is None or "mw" in g or rec is not (g.get("plan") or g["done"]):
+                continue
+            row = _batch_row(g, rec["receipt"], rec, ts, seen[ts])
+        elif i in linked:
+            row = _batch_row(groups[linked[i]], linked[i], rec, ts, seen[ts])
+        else:
+            row = _write_row(rec, ts, seen[ts], defaults)
+        if row is not None:
+            rows.append(row)
+            seen[ts] += 1
+    undone = {
+        a
+        for r in rows
+        if r.tool == "mail_undo" and not r.preview
+        if isinstance(a := _d(r.record.get("args")).get("receipt"), str)
+    }
+    rows = [replace(r, undone=True) if r.receipt in undone else r for r in rows]
     rows.reverse()
     return rows
+
+
+def _write_row(rec: dict, ts: str, n: int, defaults: dict[str, bool]) -> Row:
+    tool = rec["tool"]
+    preview = _is_preview(rec, defaults)
+    reg = registry.TOOLS.get(tool)
+    tier = reg.tier if reg else None
+    return Row(
+        ts=ts,
+        n=n,
+        when=_when(ts),
+        tool=tool,
+        adapter=reg.adapter if reg else None,
+        tier=tier,
+        kind="dashboard" if tool == "dashboard" else "write",
+        title=_title(rec, preview),
+        chip="preview" if preview else _TIER_CHIP.get(tier, "changes"),
+        preview=preview,
+        record=rec,
+        records=(rec,),
+    )
 
 
 def _counts(rows: list[Row]) -> dict:
     real = [r for r in rows if not r.preview]
     return {
         "all": len(real),
-        "receipt": 0,
+        "receipt": sum(r.kind == "batch" for r in real),
         "outbound": sum(r.tier == "send" for r in real),
         "apps": dict(Counter(r.adapter for r in real if r.adapter)),
     }
@@ -208,7 +342,7 @@ def _row_html(row: Row, qs: str, selected: bool) -> Safe:
     return h(
         '<a class="{}" href="/write/{}/{}{}"><span class="time">{}</span>{}'
         '<div class="grow"><div class="title">{}</div>'
-        '<div class="sub"><span class="mono">{}</span></div></div>{}</a>',
+        '<div class="sub"><span class="mono">{}</span>{}</div></div>{}</a>',
         cls,
         Safe(quote(row.ts, safe=":")),
         row.n,
@@ -217,6 +351,8 @@ def _row_html(row: Row, qs: str, selected: bool) -> Safe:
         appico(row.adapter),
         row.title,
         row.tool,
+        (" · receipt" if row.kind == "batch" else "")
+        + (" · undone" if row.undone else ""),
         _chip(row.chip),
     )
 
@@ -408,7 +544,7 @@ def _actions(row: Row) -> Safe:
 
 
 def _no_backup(row: Row) -> Safe:
-    if row.preview or row.kind != "write":
+    if row.preview or row.kind != "write" or row.tool == "mail_undo":
         return Safe("")
     return h(
         '<div class="banner"><span>ⓘ</span><div><b>No backup for this write.</b> '
@@ -418,7 +554,72 @@ def _no_backup(row: Row) -> Safe:
     )
 
 
-def _detail(row: Row, in_order: list[Row], qs: str) -> Safe:
+def _url(row: Row, qs: str = "") -> str:
+    return f"/write/{quote(row.ts, safe=':')}/{row.n}{qs}"
+
+
+def _undo_row(row: Row, in_order: list[Row]) -> Row | None:
+    """The real ``mail_undo`` that named this batch's receipt, if any."""
+    return next(
+        (
+            r
+            for r in in_order
+            if r.tool == "mail_undo"
+            and not r.preview
+            and _d(r.record.get("args")).get("receipt") == row.receipt
+        ),
+        None,
+    )
+
+
+def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
+    undo = _undo_row(row, in_order)
+    if undo is None:
+        return Safe("")
+    day = _day(undo.when.date())
+    caller = undo.record.get("caller")
+    moved = recovery.outcomes(undo.plan, undo.done) if undo.kind == "batch" else []
+    back = Safe("")
+    if moved and all(o == "ok" for _, o in moved):
+        folders = [str(t["folder"]) for t, _ in recovery.outcomes(row.plan, row.done)]
+        back = h(
+            " The messages are back in {}.",
+            ", ".join(dict.fromkeys(f for f in folders if f)),
+        )
+    elif moved:
+        back = Safe(" Not every message moved back; open the undo to see which.")
+    return h(
+        '<div class="banner ok"><span>✓</span><div><b>Undone {} at {}{}.</b>{} '
+        '<a class="btn link" href="{}">Show the undo</a></div></div>',
+        day.lower() if day in ("Today", "Yesterday") else day,
+        undo.when.strftime("%H:%M"),
+        h(" by {}", caller) if caller else "",
+        back,
+        _url(undo, qs),
+    )
+
+
+def _undo_record_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
+    receipt = _d(row.record.get("args")).get("receipt")
+    original = next(
+        (r for r in in_order if r.kind == "batch" and r.receipt == receipt), None
+    )
+    caller = row.record.get("caller")
+    return h(
+        '<div class="banner ok"><span>↺</span><div>This undo moved the messages of an '
+        "earlier batch back to where they came from.{}</div></div>{}",
+        h(" Run by <b>{}</b>.", caller) if caller else "",
+        h(
+            '<div class="actions"><a class="btn" href="{}">Show the original batch</a>'
+            "</div>",
+            _url(original, qs),
+        )
+        if original
+        else "",
+    )
+
+
+def _detail(row: Row, in_order: list[Row], qs: str, facts: tuple) -> Safe:
     head = h(
         '<a class="btn link b-back" href="/{}">‹ Back</a>'
         '<div class="head">{}{}<span class="muted">{} {}</span></div><h2>{}</h2>',
@@ -429,9 +630,32 @@ def _detail(row: Row, in_order: list[Row], qs: str) -> Safe:
         row.when.strftime("%H:%M"),
         row.title,
     )
+    undo_record = (
+        _undo_record_banner(row, in_order, qs)
+        if row.tool == "mail_undo" and not row.preview
+        else Safe("")
+    )
+    if row.kind == "batch":
+        files, resolves = facts
+        return join(
+            [
+                head,
+                undo_record,
+                _undone_banner(row, in_order, qs) if row.undone else Safe(""),
+                recovery.render_batch(
+                    row,
+                    files=files,
+                    undo_resolves=resolves,
+                    undone=row.undone,
+                    reload=_url(row, qs),
+                ),
+                _raw(row.records),
+            ]
+        )
     return join(
         [
             head,
+            undo_record,
             _preview_banner(row, in_order) if row.preview else Safe(""),
             _changed(row),
             _no_backup(row),
@@ -445,10 +669,10 @@ def _detail(row: Row, in_order: list[Row], qs: str) -> Safe:
 # --- routes -----------------------------------------------------------------------
 
 
-def _render(request, rows: list[Row], selected: Row | None, counts: dict):
+def _render(request, rows: list[Row], selected: Row | None, facts: tuple = ()):
     qs = _qs(request)
     body = (
-        _detail(selected, rows[::-1], qs)
+        _detail(selected, rows[::-1], qs, facts)
         if selected
         else Safe('<div class="b-empty">Select a write</div>')
     )
@@ -460,13 +684,24 @@ def _render(request, rows: list[Row], selected: Row | None, counts: dict):
         mode="list",
         listing=_listing(rows, selected, qs),
         selected=selected is not None,
-        counts=counts,
+        counts=_counts(rows),
     )
+
+
+def _recovery_facts(receipt: str) -> tuple[dict[str, int], bool]:
+    """The backup files on disk and whether ``mail_undo`` could still replay the
+    receipt (``find_receipt`` resolves its plan). Both are reads."""
+    try:
+        mail_recover.find_receipt(receipt)
+        resolves = True
+    except NativeError:
+        resolves = False
+    return recovery.backup_files(receipt), resolves
 
 
 async def index(request):
     rows = build_rows(await run_in_threadpool(audit.read_all))
-    return _render(request, rows, None, _counts(rows))
+    return _render(request, rows, None)
 
 
 async def detail(request):
@@ -475,4 +710,7 @@ async def detail(request):
     row = next((r for r in rows if r.ts == ts and r.n == n), None)
     if row is None:
         return PlainTextResponse("Not Found", 404)
-    return _render(request, rows, row, _counts(rows))
+    facts = ()
+    if row.kind == "batch":
+        facts = await run_in_threadpool(_recovery_facts, row.receipt)
+    return _render(request, rows, row, facts)

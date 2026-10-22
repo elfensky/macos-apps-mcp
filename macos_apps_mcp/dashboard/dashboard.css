@@ -353,3 +353,18 @@ pre.json .k { color: var(--color-primary); } pre.json .s { color: #b3541e; } pre
 details.raw { margin-top: var(--space-6); }
 details.raw > summary { cursor: pointer; color: var(--color-text-muted); font-size: var(--text-sm); padding: var(--space-2) 0; }
 details.raw > summary:hover { color: var(--color-text); }
+
+/* ---------- recovery (sketch 003, variant D; read-only) ---------- */
+.banner.ok { background: var(--color-success-bg); }
+.fid { cursor: help; }
+.fid.partial { background: var(--color-accent-bg); color: #c77700; }
+.fid.absent { background: var(--color-danger-bg); color: var(--color-danger); }
+table.targets { width: 100%; border-collapse: collapse; font-size: var(--text-sm); margin-top: var(--space-2); }
+table.targets td { padding: 7px 4px; border-top: 0.5px solid var(--color-separator); vertical-align: middle; }
+table.targets tr:first-child td { border-top: 0; }
+table.targets td.main { width: 100%; overflow-wrap: anywhere; }
+table.targets tr.left-out td { opacity: .5; }
+.prompt { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-2); box-shadow: inset 0 0 0 0.5px var(--color-border); font-size: var(--text-base); }
+.prompt .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+code.call { font: 12px var(--font-mono); background: var(--color-neutral-bg); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); margin-top: var(--space-3); }
