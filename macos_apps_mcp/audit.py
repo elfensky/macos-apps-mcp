@@ -236,6 +236,17 @@ def _audit_after(result) -> dict | None:
     return None
 
 
+def _audit_receipt(result) -> str | None:
+    """The batch ``receipt`` a recoverable Mail write returned, if any: the exact link
+    from its middleware line to the plan and done records (D-12)."""
+    sc = getattr(result, "structured_content", None)
+    if isinstance(sc, dict):
+        inner = sc.get("result", sc)  # the same unwrap as _audit_after
+        if isinstance(inner, dict) and isinstance(inner.get("receipt"), str):
+            return inner["receipt"]
+    return None
+
+
 def _safe_snapshot(source: Snapshotter, ident: str) -> dict | None:
     try:
         p = source.snapshot(ident)
@@ -339,6 +350,7 @@ class AuditMiddleware(Middleware):
         if tool in self._audit_verbs and not result.is_error:
             try:
                 after = _audit_after(result)
+                receipt = _audit_receipt(result)
                 audit_write(
                     {
                         "ts": datetime.now().isoformat(timespec="seconds"),
@@ -351,6 +363,7 @@ class AuditMiddleware(Middleware):
                         "target_id": args.get("id") or (after or {}).get("id"),
                         "before": before,
                         "after": after,
+                        **({"receipt": receipt} if receipt else {}),
                     }
                 )
             except Exception:  # noqa: BLE001 — audit must never break a write
