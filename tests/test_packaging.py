@@ -161,7 +161,7 @@ def test_build_script_gates_universal2():
         install,
         rm_dylibs,
         # -s -P: with cwd = the checkout, a bare import would load the repo's package
-        '-E -s -P -c "import macos_apps_mcp, osxphotos, UniformTypeIdentifiers"',
+        '-E -s -P -c "import macos_apps_mcp, macos_apps_mcp.dashboard, osxphotos, UniformTypeIdentifiers"',  # noqa: E501
         "import ctypes, macos_apps_mcp.server, osxphotos, UniformTypeIdentifiers",
         guard,
         "EXPORT HOLDS platform_release MARKERS",
