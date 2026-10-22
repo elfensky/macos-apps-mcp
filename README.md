@@ -202,6 +202,12 @@ Set `MACOS_APPS_ADAPTERS_OFF=photos,music` (a comma list of adapter names) to re
 for those apps. Under the daemon, the file `~/.local/state/macos-apps-mcp/adapters_off` holds the
 same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
 
+### Dashboard
+
+Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
+usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
+[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard).
+
 ### Cleaning up duplicate mail
 
 Mail accumulates redundant copies of the same message — a UI drag copies rather than moves, Gmail

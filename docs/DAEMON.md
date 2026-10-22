@@ -226,8 +226,63 @@ appears when the file changed after the daemon started.
 
 `MACOS_APPS_ADAPTERS_OFF` sets the same list for a stdio server and, when set and non-empty,
 wins over the file. The file is read **only** in the daemon role, and it is home-pinned for the
-same reason as `allow_send` (see section 5). The localhost dashboard (later in this phase of
-the project) writes the same file.
+same reason as `allow_send` (see section 5). The localhost dashboard (section 7) writes the
+same file.
+
+### 7. The localhost dashboard
+
+The daemon serves a dashboard at `http://127.0.0.1:47632`. It binds the loopback address only: a
+non-loopback bind is refused. The MCP endpoint stays on the unix socket and is not reachable from
+this port. Every request checks the `Host` header, and every form post checks `Origin` and a
+per-session token.
+
+Every page needs the page key. Run `macos-apps-mcp dashboard` in Terminal (bundle form:
+`/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp dashboard`).
+It prints a link and opens it. The browser keeps the key as a cookie, so you run the command
+again only on a new browser or after a key change. The key lives in
+`~/.local/state/macos-apps-mcp/daemon/dashboard_key` (mode 0600, in a 0700 folder) and survives
+restarts. To change the key, remove that file, restart the daemon (the kickstart in section 6)
+and run the command again. Other accounts on this Mac and sandboxed apps can reach
+`127.0.0.1:47632`, but they get a refusal that names the command. An unreadable key file refuses
+every page until you remove it. Browsers send a cookie to every port of 127.0.0.1, so a page
+that another program serves there could receive the key when this browser opens it; if that may
+have happened, change the key.
+
+The pages:
+
+| Page | What it shows |
+|---|---|
+| Writes (`/`) | every write in `audit.jsonl`, newest first; one click shows the word diff, the arguments and the raw log lines; a batch Mail write shows each message's backup |
+| Health (`/health`) | what `doctor` reports; a danger banner only for an adapter that is on and whose macOS grant is denied; a row says when macOS grants could not be read |
+| Adapters (`/adapters`) | one switch per app, what waits for a restart, the restart button |
+| Usage (`/usage`) | calls per tool |
+| Backups (`/backups`) | every Mail backup receipt on disk, each opened read-only |
+
+Health runs `doctor` in its read-only mode: it never asks for a permission and never sends an
+Apple Event. It runs one `doctor` call at a time. While a native call holds the worker (a bulk
+Mail pass can hold it for hours), Health says `worker busy, a native call is in flight` and
+still shows the Deployment group. Backups never deletes or prunes a backup, and it never creates
+the backup folder.
+
+The dashboard has **two write actions**: the adapter switches (they rewrite the `adapters_off`
+file of section 6) and the restart. Each is logged in `audit.jsonl` with caller `dashboard`.
+Recovery stays read-only: to undo a batch, copy the prompt on its page to Claude, which runs
+`mail_undo` through the gated, audited MCP path.
+
+A restart makes the daemon exit, and launchd starts it again. Open MCP connections drop for a
+moment, and clients reconnect on their next call. A Mail batch that is running stops; its
+receipt and its backups stay.
+
+The Outbound gate is shown locked. It changes only with `macos-apps-mcp allow-send` (section 5),
+because any website can send a request to `127.0.0.1`.
+
+If the dashboard port is taken, the daemon logs it and keeps serving MCP. `doctor()` reports
+`deployment.dashboard` as `not bound: …`; when the dashboard is up, it reports the URL. Without
+the dashboard, change adapters through the `adapters_off` file and the kickstart of section 6:
+
+```sh
+launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp
+```
 
 ## Manual acceptance checklist
 
