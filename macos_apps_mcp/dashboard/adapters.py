@@ -55,7 +55,8 @@ def _sub(adapter: str, calls: dict[str, dict]) -> str:
     tools = [n for n, r in registry.TOOLS.items() if r.adapter == adapter]
     perms = {p for n in tools for p in registry.TOOLS[n].permission}
     used = sum(calls.get(n, {}).get("count", 0) for n in tools)
-    parts = [*sorted(perms), f"{len(tools)} tool{'' if len(tools) == 1 else 's'}"]
+    live = sum(registry.TOOLS[n].registered for n in tools)  # what this process serves
+    parts = [*sorted(perms), f"{live} tool{'' if live == 1 else 's'}"]
     if used:
         parts.append(f"{used} call{'' if used == 1 else 's'}")
     return " · ".join(parts)
@@ -248,22 +249,30 @@ def _log(op: str, args: dict, target_id: str | None) -> None:
     )
 
 
-def _apply_toggle(adapter: str, on: bool) -> None:
+def _apply_toggle(adapter: str, on: bool) -> str | None:
+    """The write, or the lock reason when the switches locked since the early check
+    (re-read under the lock: an unreadable file must never be replaced by a guess)."""
     with _write_lock:
+        if (why := _lock_reason()) is not None:
+            return why
         off = tiers.adapters_off() & set(known_adapters())  # known names only (D-01)
         off = off - {adapter} if on else off | {adapter}
         deploy.write_adapters_off(off)
         _log("toggle", {"adapter": adapter, "on": on}, adapter)
+    return None
 
 
-def _apply_discard() -> None:
+def _apply_discard() -> str | None:
     """Write the running set back: every known adapter that did not register is OFF."""
     with _write_lock:
+        if (why := _lock_reason()) is not None:
+            return why
         off = sorted(
             set(known_adapters()) - set(registry.adapter_status()["registered"])
         )
         deploy.write_adapters_off(off)
         _log("discard", {"adapters_off": off}, None)
+    return None
 
 
 async def toggle(request):
@@ -274,20 +283,27 @@ async def toggle(request):
     form = parse_qs((await request.body()).decode("utf-8", "replace"))
     action, adapter, on = (form.get(k, [""])[0] for k in ("action", "adapter", "on"))
     if action == "discard":
-        await run_in_threadpool(_apply_discard)
+        why = await run_in_threadpool(_apply_discard)
     elif action == "toggle" and adapter in known_adapters() and on in ("0", "1"):
-        await run_in_threadpool(_apply_toggle, adapter, on == "1")
+        why = await run_in_threadpool(_apply_toggle, adapter, on == "1")
     else:
         return PlainTextResponse("Unknown action, adapter or value.", 400)
+    if why is not None:
+        return PlainTextResponse(why, 409)
     return RedirectResponse("/adapters", 303)
 
 
 async def restart(request):
-    """``POST /restart``: log it, answer first, then ask the daemon to exit (D-16)."""
+    """``POST /restart``: answer first, then ask the daemon to exit and log the restart
+    it armed (D-16)."""
     hook = request.app.state.restart
     if hook is None:
         return PlainTextResponse("restart is available only in the daemon", 503)
-    _log("restart", {}, None)
+
+    def go() -> None:
+        if hook():  # False while a restart is already under way: one exit, one record
+            _log("restart", {}, None)
+
     response = await _render(request, restarting=True)
-    response.background = BackgroundTask(hook)  # runs after the body is sent
+    response.background = BackgroundTask(go)  # runs after the body is sent
     return response
