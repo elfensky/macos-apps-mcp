@@ -39,6 +39,11 @@ surface may still shift between minor versions.
   `macos-apps-mcp dashboard` prints the link and opens it, and the browser keeps the key as
   a cookie. Other accounts on the Mac and sandboxed apps get a refusal; `doctor` names the
   command and never the key.
+- **The audit trail and recovery on the dashboard** (PLAT-02) — `/` lists every write
+  newest first, with previews dimmed; one click shows what changed as a word diff, the
+  arguments with `dry_run` resolved, and the raw log lines. A batch Mail write shows each
+  message's backup and a prompt to copy for Claude's `mail_undo`; the page itself never
+  moves or deletes anything. New middleware records carry the batch `receipt`.
 
 ### Changed
 
