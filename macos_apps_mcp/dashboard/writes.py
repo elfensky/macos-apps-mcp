@@ -114,9 +114,9 @@ def _summary(pointer) -> str:
 def _when(ts) -> datetime | None:
     try:
         dt = datetime.fromisoformat(ts)
-    except (ValueError, TypeError):
+        return dt.astimezone().replace(tzinfo=None) if dt.tzinfo else dt
+    except (ValueError, TypeError, OverflowError):  # year 1 or 9999 with an offset
         return None
-    return dt.astimezone().replace(tzinfo=None) if dt.tzinfo else dt
 
 
 def _day(d: date) -> str:
@@ -589,7 +589,9 @@ def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     moved = recovery.outcomes(undo.plan, undo.done) if undo.kind == "batch" else []
     back = Safe("")
     if moved and all(o == "ok" for _, o in moved):
-        folders = [str(t["folder"]) for t, _ in recovery.outcomes(row.plan, row.done)]
+        folders = [
+            str(t.get("folder") or "") for t, _ in recovery.outcomes(row.plan, row.done)
+        ]
         back = h(
             " The messages are back in {}.",
             ", ".join(dict.fromkeys(f for f in folders if f)),

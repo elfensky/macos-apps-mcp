@@ -23,7 +23,8 @@ from ..adapters import mail_recover
 from .html import Safe, h, join
 
 RECEIPT_RE = re.compile(
-    r"^\d{8}-\d{6}-\d{6}-\d{3}-(" + "|".join(sorted(mail_recover.OPS)) + r")$"
+    # the counter is padded to a MINIMUM of 3 digits (mail_recover._receipt_id)
+    r"^\d{8}-\d{6}-\d{6}-\d{3,}-(" + "|".join(sorted(mail_recover.OPS)) + r")$"
 )
 _EML = re.compile(r"\d+\.eml")
 
@@ -80,7 +81,8 @@ def backup_files(receipt) -> dict[str, int]:
 def targets(plan: dict | None, done: dict | None) -> list[dict]:
     """A batch's targets: the plan's, else (a done record alone) one per result."""
     if plan is not None:
-        return [t for t in plan.get("targets") or [] if isinstance(t, dict)]
+        ts = plan.get("targets")
+        return [t for t in ts if isinstance(t, dict)] if isinstance(ts, list) else []
     results = (done or {}).get("results")
     return [{"id": i} for i in results] if isinstance(results, dict) else []
 

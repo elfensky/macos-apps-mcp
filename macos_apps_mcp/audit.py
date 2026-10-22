@@ -105,6 +105,8 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
             rec = json.loads(line)
         except ValueError:
             continue  # skip a truncated/corrupt line, never fail the read
+        if not isinstance(rec, dict):
+            continue  # a JSON line that is no record (``true``, a list) is corrupt too
         if since:
             ts = rec.get("ts", "")
             rec_i = _instant(ts) if ts else None

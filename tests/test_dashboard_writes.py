@@ -605,3 +605,95 @@ def test_corrupt_records_never_crash_a_page():
     put({"tool": "mail_recover", "phase": "done", "receipt": ["r"], "ts": TS})
     assert len(rows_in(page("/"))) == 2  # the odd write and the batch
     assert "Write" in page("/write/2026-09-28T07:00:00/0")
+
+
+# --- post-merge review of #418 --------------------------------------------------
+
+
+def raw_line(rec_or_text):
+    """Append a raw line (default ``json.dumps`` escaping keeps a lone surrogate)."""
+    line = rec_or_text if isinstance(rec_or_text, str) else json.dumps(rec_or_text)
+    with (audit.state_dir() / "audit.jsonl").open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def test_a_receipt_counter_past_999_still_finds_its_backups():
+    # mail_recover pads the counter to a minimum of 3 digits: the 1001st batch has 4
+    batch(rid="20260928-094010-123456-1000-move")
+    assert "101.eml · 3 KB" in page("/write/2026-09-28T09:40:12/0")
+
+
+def test_one_corrupt_record_never_breaks_a_page():
+    put(update())
+    batch(plan={"targets": 5})
+    for ts in ("0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00"):
+        raw_line(update(ts=ts))
+    raw_line(update(ts="2026-09-28T09:33:00", after={"id": "E-2", "summary": "\ud800"}))
+    for path in ("/", "/usage", f"/write/{TS}/0", "/write/2026-09-28T09:40:12/0"):
+        assert get(path).status_code == 200, path
+
+
+def test_a_non_dict_line_never_breaks_the_audit_read_or_a_batch_detail():
+    batch()
+    raw_line("true")
+    raw_line("[1, 2]")
+    assert all(isinstance(r, dict) for r in audit.audit_read())
+    assert all(isinstance(r, dict) for r in audit.audit_read(since="2026-01-01"))
+    assert mail_recover.find_receipt(RID)[0]["phase"] == "plan"
+    assert get("/write/2026-09-28T09:40:12/0").status_code == 200
+
+
+def test_a_shortcuts_deeplink_is_no_link():
+    # shortcuts://run-shortcut runs the shortcut when clicked
+    link = "shortcuts://run-shortcut?id=X"
+    put(update(after={"id": "S-1", "summary": "ran", "deeplink": link}))
+    assert "Open in" not in page(f"/write/{TS}/0")
+
+
+def test_escape_the_fields_the_review_found_unguarded():
+    hostile = '"><script>alert(1)</script>'
+    put(
+        update(
+            before={"id": "E-1", "summary": f"{hostile} 14:00", "deeplink": ""},
+            after={"id": "E-1", "summary": f"{hostile} 15:00", "deeplink": ""},
+        )
+    )
+    raw_line({"error": hostile})
+    target = {"id": IDS[0], "folder": hostile, "fidelity": "full", "status": "planned"}
+    batch(
+        plan={"backup_dir": hostile, "targets": [target]},
+        done={"results": {IDS[0]: hostile}},
+    )
+    texts = [
+        page(f"/?q={hostile.replace('<', '%3C').replace('>', '%3E')}"),
+        page(f"/write/{TS}/0"),
+        page("/write/2026-09-28T09:40:12/0"),
+    ]
+    for text in texts:
+        assert "<script>alert" not in text, text[:200]
+    assert all("&lt;script&gt;" in t for t in texts)
+
+
+def test_a_bad_receipt_id_reaches_no_path(monkeypatch):
+    from pathlib import Path
+
+    from macos_apps_mcp.dashboard import recovery
+
+    for name in ("is_symlink", "is_dir", "resolve", "iterdir"):
+        monkeypatch.setattr(
+            Path, name, lambda *a, **k: pytest.fail("a bad receipt reached the disk")
+        )
+    for rid in ("../../etc", RID + "/..", "x", ""):
+        assert recovery.receipt_dir(rid) is None
+
+
+def test_a_symlinked_backup_file_is_not_listed(tmp_path):
+    from macos_apps_mcp.dashboard import recovery
+
+    batch(files=False)
+    folder = backup_root() / RID
+    folder.mkdir(parents=True)
+    outside = tmp_path / "big.eml"
+    outside.write_bytes(b"z" * 5000)
+    (folder / "101.eml").symlink_to(outside)
+    assert recovery.backup_files(RID) == {}
