@@ -204,6 +204,41 @@ def test_deployment_section_daemon_mode(monkeypatch):
     assert d["grant_identities"]["kTCCServiceCalendar"][0]["granted"] is True
 
 
+def _daemon_report(monkeypatch, state):
+    from macos_apps_mcp import daemon
+
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    monkeypatch.setattr(daemon, "dashboard_state", state)
+    _mock_grants(monkeypatch, None, reasons={"user": "absent", "system": "absent"})
+    monkeypatch.setattr("macos_apps_mcp.deploy.agent_status", lambda: "enabled")
+    return doctor.diagnose()["deployment"]
+
+
+def test_deployment_names_where_the_dashboard_listens(monkeypatch):
+    # D-07: the daemon role reports daemon.dashboard_state, so a taken port is visible.
+    d = _daemon_report(monkeypatch, "http://127.0.0.1:47632")
+    assert d["dashboard"] == "http://127.0.0.1:47632"
+
+
+def test_deployment_reports_a_dashboard_that_could_not_bind(monkeypatch):
+    state = "not bound: [Errno 48] Address already in use"
+    assert _daemon_report(monkeypatch, state)["dashboard"] == state
+
+
+def test_deployment_has_no_dashboard_key_before_the_daemon_decided(monkeypatch):
+    assert "dashboard" not in _daemon_report(monkeypatch, None)
+
+
+def test_deployment_has_no_dashboard_key_in_stdio_mode(monkeypatch):
+    from macos_apps_mcp import daemon
+
+    monkeypatch.delenv("MACOS_APPS_MCP_ROLE", raising=False)
+    monkeypatch.setattr(daemon, "dashboard_state", "http://127.0.0.1:47632")
+    _mock_grants(monkeypatch, None, reasons={"user": "absent", "system": "absent"})
+    monkeypatch.setattr("macos_apps_mcp.deploy.agent_status", lambda: "enabled")
+    assert "dashboard" not in doctor.diagnose()["deployment"]
+
+
 def test_report_carries_the_serving_version(monkeypatch):
     """Which code is answering — the daemon is a different process from the repo, and
     nothing else in the report reveals when it has gone stale."""
