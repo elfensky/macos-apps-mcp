@@ -125,14 +125,19 @@ def _try_request_access() -> None:
 
 
 def _eventkit_surfaces(request: bool) -> list[dict]:
-    codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
+    # D-04: an OFF adapter's entity is neither read nor requested.
+    on = [e for e in _EK_ENTITIES if tiers.adapter_enabled(e[0])]
+    codes = {entity: _ek_status(entity) for _, entity, _ in on}
     if request and any(
         code == EK.EKAuthorizationStatusNotDetermined for code in codes.values()
     ):
         _try_request_access()
-        codes = {entity: _ek_status(entity) for _, entity, _ in _EK_ENTITIES}
+        codes = {entity: _ek_status(entity) for _, entity, _ in on}
     out = []
     for name, entity, pane in _EK_ENTITIES:
+        if entity not in codes:
+            out.append(_surface(name, "eventkit", None, "adapter_off"))
+            continue
         code = codes[entity]
         status = _EK_STATUS.get(code, f"unknown({code})")
         ok = code == EK.EKAuthorizationStatusFullAccess
@@ -165,6 +170,9 @@ def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
         name = app.lower()
+        if not tiers.adapter_enabled(name):
+            out.append(_surface(name, "automation", None, "adapter_off"))
+            continue  # D-04: no Apple Event, no process line
         if not request:
             out.append(
                 _surface(
@@ -189,6 +197,8 @@ def _automation_surfaces(request: bool) -> list[dict]:
 
 
 def _shortcuts_surface() -> dict:
+    if not tiers.adapter_enabled("shortcuts"):
+        return _surface("shortcuts_cli", "cli", None, "adapter_off")
     present = shutil.which("shortcuts") is not None
     return _surface(
         "shortcuts_cli",
@@ -342,17 +352,19 @@ def diagnose(request: bool = False) -> dict:
         _fda_surface(),
         _mail_index_surface(),
     ]
-    needs = [s["surface"] for s in surfaces if s["ok"] is False]
-    unknown = [s["surface"] for s in surfaces if s["ok"] is None]
+    # An OFF adapter's surface is not probed, so it is neither a need nor unverified.
+    probed = [s for s in surfaces if s["status"] != "adapter_off"]
+    needs = [s["surface"] for s in probed if s["ok"] is False]
+    unknown = [s["surface"] for s in probed if s["ok"] is None]
     if needs:
         summary = (
-            f"{len(needs)} of {len(surfaces)} surfaces need attention: "
+            f"{len(needs)} of {len(probed)} surfaces need attention: "
             + ", ".join(needs)
         )
     elif request:
         # An unprobeable surface (ok=None) must not be counted as OK.
         summary = (
-            f"all {len(surfaces)} surfaces OK"
+            f"all {len(probed)} surfaces OK"
             if not unknown
             else f"no denied surfaces; {len(unknown)} unverified: " + ", ".join(unknown)
         )

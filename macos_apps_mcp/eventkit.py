@@ -15,6 +15,7 @@ from datetime import datetime
 import EventKit as EK
 import Foundation as F
 
+from . import tiers
 from .contracts import CLEAR_RECURRENCE, Recurrence
 from .errors import PRIVACY_PANE, AccessDenied, NativeTimeout
 from .runtime import log, on_worker, run_native
@@ -95,6 +96,11 @@ def _request_one(s: EK.EKEventStore, entity: int) -> None:
 # EventKit TCC surfaces requested at startup. Adapters with their own permission
 # (Contacts, Photos) add a separate non-fatal bootstrap step following this pattern.
 _ENTITIES = (EK.EKEntityTypeEvent, EK.EKEntityTypeReminder)
+# The adapter each entity belongs to (PLAT-01, D-04): an OFF adapter is not requested.
+_ENTITY_ADAPTERS = (
+    ("calendar", EK.EKEntityTypeEvent),
+    ("reminders", EK.EKEntityTypeReminder),
+)
 
 
 def request_access() -> None:
@@ -108,7 +114,9 @@ def request_access_each() -> None:
     """Request each EventKit surface independently — one denied surface must never
     block the other's consent prompt (doctor #48 and bootstrap share this)."""
     s = store()
-    for entity in _ENTITIES:
+    for name, entity in _ENTITY_ADAPTERS:
+        if not tiers.adapter_enabled(name):
+            continue
         try:
             _request_one(s, entity)
         except AccessDenied as e:
