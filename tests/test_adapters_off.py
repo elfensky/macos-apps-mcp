@@ -9,10 +9,13 @@ subprocess cases in ``tests/test_registry.py``.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 import macos_apps_mcp.server  # noqa: F401  (populates registry.TOOLS)
-from macos_apps_mcp import deploy, registry, tiers
+from macos_apps_mcp import deploy, doctor, registry, runtime, tiers
+from tests.test_doctor_deploy import _gate_off_only, _mock_grants
 
 
 @pytest.fixture(autouse=True)
@@ -83,3 +86,46 @@ def test_every_adapter_has_a_read_tool():
         assert any(
             r.tier == "read" for r in registry.TOOLS.values() if r.adapter == adapter
         ), adapter
+
+
+def _quiet_diagnose(monkeypatch):
+    """doctor.diagnose() with no live pgrep/ps, no TCC read and no bundle."""
+    monkeypatch.setattr(
+        runtime,
+        "tracked_run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", ""),
+    )
+    _mock_grants(monkeypatch, None)
+    monkeypatch.setattr(
+        deploy, "agent_status", lambda: (_ for _ in ()).throw(Exception("no bundle"))
+    )
+    return doctor.diagnose()["deployment"]
+
+
+def test_allow_send_does_not_reopen_an_off_adapter(monkeypatch):
+    # T-05-04: allow_send=mail with Mail OFF leaves no outbound delta a restart
+    # cannot clear.
+    monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "mail")
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    assert registry.outbound_status()["configured"] == []
+
+
+def test_doctor_reports_the_active_adapters(monkeypatch):
+    d = _quiet_diagnose(monkeypatch)
+    assert d["adapters"] == _adapters()
+    assert d["adapters_off"] == []
+    assert "adapters_pending" not in d
+    assert "adapters_unknown" not in d
+    assert "adapters_off" in d["adapters_note"]
+    assert "kickstart" in d["adapters_note"]
+
+
+@_gate_off_only
+def test_doctor_reports_pending_and_unknown_adapters(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos,nosuch,Photos")
+    d = _quiet_diagnose(monkeypatch)
+    # registration ran with everything on, so this process still serves all ten
+    assert d["adapters"] == _adapters()
+    assert d["adapters_pending"] == [a for a in _adapters() if a != "photos"]
+    assert "restart the daemon" in d["adapters_note"]
+    assert d["adapters_unknown"] == ["nosuch"]
