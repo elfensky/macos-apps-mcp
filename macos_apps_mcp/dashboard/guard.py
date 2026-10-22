@@ -6,7 +6,8 @@ page read loopback responses. So every request passes this pure-ASGI wrapper fir
 
 * ``Host`` must be ``127.0.0.1:<port>`` or ``localhost:<port>`` on EVERY request, reads
   included (DNS rebinding).
-* After the Host check, every request but the ``/key`` link needs the page key as the
+* With no usable key every request answers 503 after the Host check (fail closed).
+  Otherwise, every request but the ``/key`` link needs the page key as the
   ``macos_apps_mcp_key`` cookie (PM-12, D-19): other macOS accounts and sandboxed apps
   reach 127.0.0.1 too. Cookies do not isolate by port (RFC 6265 section 8.5), so ANY
   cookie of that name that equals the key passes; a planted duplicate cannot shadow
@@ -45,6 +46,11 @@ MAX_BODY = 8 * 1024
 KEY_COOKIE = "macos_apps_mcp_key"
 KEY_PATH = "/key"
 KEY_MAX_AGE = 400 * 24 * 3600  # the link sets it once; 400 days is Chrome's cap
+KEY_UNUSABLE = (
+    "The dashboard key file ~/.local/state/macos-apps-mcp/daemon/dashboard_key cannot "
+    "be read, so every page is refused. Remove the file and restart the daemon "
+    "(launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp); it writes a new key."
+)
 NEEDS_KEY = (
     "This dashboard needs its page key. "
     "Open it with `macos-apps-mcp dashboard` in Terminal."
@@ -71,6 +77,8 @@ class Guard:
         deny = None
         if headers.get("host") not in self.hosts:
             deny = PlainTextResponse("Invalid host header", 400)
+        elif self.key is None:  # the 503 is the server's own file, not the request
+            deny = PlainTextResponse(KEY_UNUSABLE, 503)
         elif scope["method"] == "GET" and scope["path"] == KEY_PATH:
             deny = self._link(scope)
         elif not self._has_key(scope):
