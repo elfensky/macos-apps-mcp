@@ -86,3 +86,23 @@ variant (wrong, empty, prefix, suffix, quoted, padded, case, encoded, `Cookie2`,
 unreachable over TCP; the key in no log, response, usage record or `doctor` report; the CLI opener
 used `osascript` on stdin even with `BROWSER` set; the cookie attributes exact. Mutations of the
 cookie check, the order, the format check, HttpOnly and the no-rewrite rule each failed the suite.
+
+## #418 — the write list and recovery (05-04, wave 4)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-25 | should-fix | `RECEIPT_RE` took exactly 3 counter digits; `mail_recover` pads to a minimum of 3, so from the 1001st batch of one run recovery read "no file" | fixed by #419 (`\d{3,}`) |
+| PM-26 | should-fix | One corrupt record gave a 500 on every page via the sidebar counts (out-of-range `ts`, non-list `targets`, a lone surrogate) | fixed by #419 |
+| PM-27 | advisory | `audit_read` returned non-dict JSON lines, so `find_receipt` and `mail_undo` crashed on one (older than the dashboard); an undone target without `folder` raised `KeyError` | fixed by #419 |
+| PM-28 | advisory | A corrupt middleware line naming a receipt hides its whole batch | accepted: corruption only |
+| PM-29 | advisory | The adjacency fallback can mislink after a timed-out batch | accepted: the plan names the limit |
+| PM-30 | advisory | Page rendering reads the log on the event loop shared with MCP (+0.3–0.7 s MCP latency during page loads on a 25k-record log); no pagination | accepted: the real log parses in about 40 ms (D-12) |
+| PM-31 | advisory | `shortcuts://` was an allowed deeplink, and following `run-shortcut` runs it; http(s) links come from model-chosen Safari URLs | `shortcuts` removed by #419; http(s) accepted |
+| PM-32 | advisory (test gap) | 9 of 20 mutants survived (the reflected search value, the word diff's unchanged run, folder, `backup_dir`, outcome, error banner, `RECEIPT_RE` before the disk, symlinked files) | tests added by #419; two mutants re-applied and caught |
+| PM-33 | advisory | A GET can create the state folder through `audit.state_dir`'s `mkdir` | accepted: older than the dashboard; the folder exists on a deployed Mac |
+
+Held under probe: no unescaped markup in the list or six details for hostile values in every field
+family and in `q`, `filter`, `previews` and the path; `safe_href` refused every scheme trick
+(case, whitespace, NUL, entities, `data:`, `vbscript:`, `file:`, `//`, NBSP, homoglyphs); bad
+detail addresses answered 404; no GET changed a file; the middleware `receipt` appears only for a
+non-empty string and never breaks a call; interleaved batches with an undo grouped correctly.
