@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-22 — Photos and the dashboard
+
 ### Added
 
 - **Adapters can be turned off** (PLAT-01) — `MACOS_APPS_ADAPTERS_OFF`, or under the daemon
