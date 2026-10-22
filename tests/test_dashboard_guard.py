@@ -5,21 +5,16 @@ import json
 import re
 from urllib.parse import parse_qs
 
-import httpx
 import pytest
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 
-from macos_apps_mcp import audit, dashboard
+from macos_apps_mcp import audit
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 from macos_apps_mcp.dashboard.guard import Guard
+from tests._dashboard import COOKIE, FORM, HOST, KEY, ORIGIN, PORT, TOKEN, get, request
 
-PORT = 47632
-TOKEN = "tok"
-HOST = f"127.0.0.1:{PORT}"
-ORIGIN = f"http://{HOST}"
-FORM = {"content-type": "application/x-www-form-urlencoded"}
 SECURITY_HEADERS = {
     "content-security-policy": (
         "default-src 'self'; frame-ancestors 'none'; form-action 'self'"
@@ -29,25 +24,6 @@ SECURITY_HEADERS = {
     "referrer-policy": "same-origin",
     "cache-control": "no-store",
 }
-
-
-def _request(method, path, *, app=None, host=HOST, headers=None, content=None):
-    """One request through the ASGI app (no socket); returns the httpx response."""
-
-    async def go():
-        transport = httpx.ASGITransport(
-            app=app or dashboard.build_app(port=PORT, token=TOKEN)
-        )
-        async with httpx.AsyncClient(
-            transport=transport, base_url=f"http://{host}"
-        ) as c:
-            return await c.request(method, path, headers=headers, content=content)
-
-    return asyncio.run(go())
-
-
-def _get(path, **kw):
-    return _request("GET", path, **kw)
 
 
 async def _echo(request):
@@ -61,17 +37,18 @@ def _echo_app():
         Starlette(routes=[Route("/echo", _echo, methods=["POST"])]),
         port=PORT,
         token=TOKEN,
+        key=KEY,
     )
 
 
 def test_static_assets_and_the_console_frame():
-    css = _get("/static/dashboard.css")
+    css = get("/static/dashboard.css")
     assert css.status_code == 200 and css.headers["content-type"].startswith("text/css")
-    js = _get("/static/dashboard.js")
+    js = get("/static/dashboard.js")
     assert js.status_code == 200
     assert js.headers["content-type"].startswith("text/javascript")
 
-    page = _get("/usage")
+    page = get("/usage")
     assert page.status_code == 200
     text = page.text
     assert '<link rel="stylesheet" href="/static/dashboard.css">' in text
@@ -90,13 +67,13 @@ def test_foreign_host_is_refused_on_every_route_and_method(host):
         ("POST", "/usage"),
     ):
         headers = {"origin": ORIGIN, **FORM} if method == "POST" else None
-        r = _request(method, path, host=host, headers=headers, content="token=tok")
+        r = request(method, path, host=host, headers=headers, content="token=tok")
         assert r.status_code == 400, (method, path, host)
 
 
 @pytest.mark.parametrize("host", [HOST, f"localhost:{PORT}"])
 def test_loopback_host_with_the_port_is_served(host):
-    assert _get("/usage", host=host).status_code == 200
+    assert get("/usage", host=host).status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -113,7 +90,7 @@ def test_loopback_host_with_the_port_is_served(host):
     ],
 )
 def test_post_origin_matrix(extra, want):
-    r = _request(
+    r = request(
         "POST",
         "/echo",
         app=_echo_app(),
@@ -129,7 +106,7 @@ def test_post_origin_null_refused():
     """RESEARCH C1: `Origin: null` is what Chrome sends for a same-origin form POST
     under `Referrer-Policy: no-referrer`; it is foreign here, and the page sends
     `same-origin` so a real post carries the real Origin."""
-    r = _request(
+    r = request(
         "POST",
         "/echo",
         app=_echo_app(),
@@ -149,7 +126,7 @@ def test_post_origin_null_refused():
     ],
 )
 def test_post_token_and_body_cap(content):
-    r = _request(
+    r = request(
         "POST",
         "/echo",
         app=_echo_app(),
@@ -160,7 +137,7 @@ def test_post_token_and_body_cap(content):
 
 
 def test_stale_token_says_to_reload():
-    r = _request(
+    r = request(
         "POST",
         "/echo",
         app=_echo_app(),
@@ -195,34 +172,34 @@ def test_client_gone_mid_body_never_reaches_the_handler():
     async def send(msg):
         pass
 
-    headers = {"host": HOST, "origin": ORIGIN, **FORM}
+    headers = {"host": HOST, "origin": ORIGIN, "cookie": COOKIE, **FORM}
     scope = {
         "type": "http",
         "method": "POST",
         "path": "/echo",
         "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
     }
-    asyncio.run(Guard(inner, port=PORT, token=TOKEN)(scope, receive, send))
+    asyncio.run(Guard(inner, port=PORT, token=TOKEN, key=KEY)(scope, receive, send))
     assert ran == []
 
 
 def test_mcp_is_not_a_dashboard_route():
-    assert _get("/mcp").status_code == 404
-    guarded = _request(
+    assert get("/mcp").status_code == 404
+    guarded = request(
         "POST", "/mcp", headers={**FORM, "origin": ORIGIN}, content=f"token={TOKEN}"
     )
     assert guarded.status_code == 404
-    unsigned = _request("POST", "/mcp", content="{}")
+    unsigned = request("POST", "/mcp", content="{}")
     assert unsigned.status_code == 403
     assert "Forbidden origin" in unsigned.text
 
 
 def test_security_headers_on_200_400_403_404():
     responses = [
-        _get("/usage"),  # 200
-        _get("/usage", host="evil.example"),  # 400
-        _request("POST", "/usage", content="{}"),  # 403
-        _get("/nope"),  # 404
+        get("/usage"),  # 200
+        get("/usage", host="evil.example"),  # 400
+        request("POST", "/usage", content="{}"),  # 403
+        get("/nope"),  # 404
     ]
     assert [r.status_code for r in responses] == [200, 400, 403, 404]
     for r in responses:
@@ -237,7 +214,7 @@ def test_usage_escapes_tool_names(tmp_path, monkeypatch):
         {"ts": "2026-01-01T00:00:01", "tool": '" onmouseover="x'},
     ]
     audit._usage_path().write_text("\n".join(json.dumps(r) for r in lines) + "\n")
-    text = _get("/usage").text
+    text = get("/usage").text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in text
     assert "&quot; onmouseover=&quot;x" in text
     assert "<script>alert(1)" not in text
@@ -255,11 +232,11 @@ def test_usage_escapes_tool_names(tmp_path, monkeypatch):
     ],
 )
 def test_static_allow_list_has_two_entries_and_no_traversal(path):
-    assert _get(path).status_code == 404
+    assert get(path).status_code == 404
 
 
 @pytest.mark.parametrize("method", ["PUT", "DELETE", "PATCH"])
 def test_every_unsafe_method_needs_origin_and_token(method):
     """The Guard checks by method class, so a future non-POST route is born guarded."""
-    r = _request(method, "/usage", headers={"origin": "https://evil.example"})
+    r = request(method, "/usage", headers={"origin": "https://evil.example"})
     assert r.status_code == 403

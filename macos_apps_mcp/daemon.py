@@ -327,11 +327,12 @@ def serve() -> None:
         if tcp is not None:
             port = tcp.getsockname()[1]
             dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
-            from . import dashboard  # late: the stdio server never imports it
+            from . import dashboard, deploy  # late: the stdio server never imports it
 
             dash_app = dashboard.build_app(
                 port=port,
                 token=secrets.token_urlsafe(32),
+                key=deploy.dashboard_key(create=True),
                 restart=lambda: restart(server),  # `server` is assigned below
             )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
@@ -343,6 +344,8 @@ def serve() -> None:
             log_level="warning",
             ws="none",
             proxy_headers=False,
+            # the link's query string carries the page key, and an access line prints it
+            access_log=False,
         )
         server = uvicorn.Server(config)
         server.run(sockets=[s] + ([tcp] if tcp else []))
