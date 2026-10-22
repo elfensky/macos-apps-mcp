@@ -38,7 +38,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
-- [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
+- [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -338,7 +338,7 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: 9/9 plans executed
+**Plans**: 9/9 plans complete
 
 Plans:
 **Wave 1**
@@ -398,5 +398,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
-| 5. Operator Control Plane | 9/9 | In Progress | - |
+| 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 6. Distribution | 0/TBD | Not started | - |
