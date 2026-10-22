@@ -13,7 +13,7 @@ from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from . import usage
+from . import adapters, usage
 from .guard import Guard
 
 # The only files /static serves, read once at import: a bundle that lacks one fails
@@ -44,6 +44,8 @@ def build_app(*, port: int, token: str) -> Guard:
         routes=[
             Route("/", _home),
             Route("/usage", usage.page),
+            Route("/adapters", adapters.page, methods=["GET"]),
+            Route("/adapters", adapters.toggle, methods=["POST"]),
             Route("/static/{name}", _static),
         ]
     )
