@@ -117,6 +117,36 @@ def test_failed_write_leaves_no_key_and_no_temp_file(keyfile, monkeypatch):
     assert list(keyfile.parent.iterdir()) == []
 
 
+def test_an_existing_0644_key_file_is_tightened_to_0600(keyfile):
+    keyfile.parent.mkdir()
+    keyfile.write_text(KEY)
+    keyfile.chmod(0o644)
+    assert deploy.dashboard_key(create=True) == KEY
+    assert _mode(keyfile) == 0o600
+
+
+def test_a_fifo_at_the_key_path_is_none_and_never_blocks(keyfile):
+    # A blocking read of a FIFO stopped serve() before uvicorn ran: MCP went down too.
+    keyfile.parent.mkdir()
+    os.mkfifo(keyfile)
+    assert deploy.dashboard_key(create=True) is None
+    assert stat.S_ISFIFO(keyfile.lstat().st_mode)
+
+
+def test_a_symlink_at_the_key_path_is_refused_and_left_alone(keyfile, tmp_path):
+    keyfile.parent.mkdir()
+    target = tmp_path / "elsewhere"
+    target.write_text(KEY)
+    target.chmod(0o644)
+    keyfile.symlink_to(target)
+    assert deploy.dashboard_key(create=True) is None
+    assert _mode(target) == 0o644  # chmod never followed the link
+    keyfile.unlink()
+    keyfile.symlink_to(tmp_path / "nowhere")  # dangling is not "absent"
+    assert deploy.dashboard_key(create=True) is None
+    assert keyfile.is_symlink() and not (tmp_path / "nowhere").exists()
+
+
 # --- an unusable key refuses everything (503) ---------------------------------------
 
 

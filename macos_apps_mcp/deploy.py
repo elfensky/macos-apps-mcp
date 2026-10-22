@@ -4,11 +4,13 @@ executable; the pip-side install-agent invokes them (never SMAppService directly
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import secrets
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -339,11 +341,26 @@ def is_daemon_role() -> bool:
     ]
 
 
+def _read_small(path: Path, *, follow: bool = True, limit: int = 4096) -> str:
+    """A small regular state file's text, read without ever blocking: a FIFO, device or
+    directory at ``path`` (or, with ``follow=False``, a symlink) raises ``OSError``
+    instead of hanging or flooding the daemon before it serves (review of #415).
+    Absent raises ``FileNotFoundError``; a stray byte is replaced."""
+    flags = os.O_RDONLY | os.O_NONBLOCK | (0 if follow else os.O_NOFOLLOW)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+        return os.read(fd, limit).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
 def allow_send_file() -> str:
     """The persisted outbound opt-in (``""`` when absent or unreadable: closed) — see
     tiers.allow_send. A stray byte is replaced: it can never name an adapter."""
     try:
-        return _ALLOW_SEND_FILE.read_bytes().decode("utf-8", "replace")
+        return _read_small(_ALLOW_SEND_FILE)
     except OSError:
         return ""
 
@@ -353,7 +370,7 @@ def adapters_off_file() -> str:
     A file that exists but cannot be read is ``ADAPTERS_ALL_OFF``. A stray byte is
     replaced, so it costs one name (doctor lists it as unknown), never the import."""
     try:
-        return _ADAPTERS_OFF_FILE.read_bytes().decode("utf-8", "replace")
+        return _read_small(_ADAPTERS_OFF_FILE)
     except FileNotFoundError:
         return ""
     except OSError:
@@ -404,7 +421,8 @@ def dashboard_key(*, create: bool = False) -> str | None:
             path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.chmod(path.parent, 0o700)  # mkdir's mode skips an existing folder
         try:
-            key = path.read_bytes().decode("utf-8", "replace").strip()
+            # never a symlink: the daemon owns this file, and chmod would follow one
+            key = _read_small(path, follow=False).strip()
         except FileNotFoundError:  # the only case that leads to a write
             if not create:
                 return None

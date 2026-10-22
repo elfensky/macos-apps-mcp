@@ -9,6 +9,7 @@ subprocess cases in ``tests/test_registry.py``.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 
@@ -97,6 +98,35 @@ def test_non_utf8_allow_send_file_stays_closed(monkeypatch, tmp_path):
     monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
     monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
     assert tiers.allow_send("mail") is False
+
+
+def test_a_fifo_adapters_off_file_fails_closed_without_blocking(monkeypatch, tmp_path):
+    f = tmp_path / "adapters_off"
+    os.mkfifo(f)
+    monkeypatch.setattr(deploy, "_ADAPTERS_OFF_FILE", f)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert not any(tiers.adapter_enabled(a) for a in _adapters())
+
+
+def test_a_fifo_allow_send_file_stays_closed_without_blocking(monkeypatch, tmp_path):
+    f = tmp_path / "allow_send"
+    os.mkfifo(f)
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", f)
+    monkeypatch.delenv("MACOS_APPS_ALLOW_SEND", raising=False)
+    monkeypatch.delenv("MACOS_APPS_READ_ONLY", raising=False)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert tiers.allow_send("mail") is False
+
+
+def test_a_symlinked_adapters_off_file_is_followed(monkeypatch, tmp_path):
+    # Operators keep config in dotfiles: a link to a regular file still counts.
+    real = tmp_path / "dotfiles_adapters_off"
+    real.write_text("photos")
+    f = tmp_path / "adapters_off"
+    f.symlink_to(real)
+    monkeypatch.setattr(deploy, "_ADAPTERS_OFF_FILE", f)
+    monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
+    assert tiers.adapters_off() == {"photos"}
 
 
 def test_conftest_isolates_the_adapters_off_file(tmp_path_factory):
