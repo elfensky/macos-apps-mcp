@@ -338,7 +338,7 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: 8/9 plans executed
+**Plans**: 9/9 plans executed
 
 Plans:
 **Wave 1**
@@ -362,7 +362,7 @@ Plans:
 - [x] 05-06-PLAN.md — Release 0.15.0: owner-approved one-way cut, notarized build, install, doctor proof (D-18)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
+- [x] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
 
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #126` with no closing keyword
@@ -398,5 +398,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
-| 5. Operator Control Plane | 8/9 | In Progress | - |
+| 5. Operator Control Plane | 9/9 | In Progress | - |
 | 6. Distribution | 0/TBD | Not started | - |
