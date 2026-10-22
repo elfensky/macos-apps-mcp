@@ -194,3 +194,18 @@ def outbound_status() -> dict[str, list[str]]:
         "registered": sorted(registered),
         "configured": sorted(a for a in send_adapters if tiers.allow_send(a)),
     }
+
+
+def adapter_status() -> dict[str, list[str]]:
+    """The adapter twin of ``outbound_status()`` (PLAT-01, D-03): ``registered`` = the
+    adapters with at least one tool registered at import; ``configured`` = every
+    adapter the deny-list (env/file) leaves ON right now. They diverge when the
+    ``adapters_off`` file changes but the daemon keeps running — doctor reports the
+    delta as ``adapters_pending`` with a restart directive. Every adapter has a read
+    tool, so under ``MACOS_APPS_READ_ONLY`` an enabled adapter still shows up."""
+    names = {r.adapter for r in TOOLS.values() if r.adapter}
+    registered = {r.adapter for r in TOOLS.values() if r.adapter and r.registered}
+    return {
+        "registered": sorted(registered),
+        "configured": sorted(names - tiers.adapters_off()),
+    }
