@@ -22,8 +22,12 @@ class Safe(str):
 
 
 def esc(v) -> str:
-    """HTML-escape ``v``, quotes too (safe in an attribute), unless it is Safe."""
-    return v if isinstance(v, Safe) else html.escape(str(v), quote=True)
+    """HTML-escape ``v``, quotes too (safe in an attribute), unless it is Safe. A lone
+    surrogate from a corrupt record becomes ``?``: it could not be encoded as UTF-8."""
+    if isinstance(v, Safe):
+        return v
+    s = html.escape(str(v), quote=True)
+    return s.encode("utf-8", "replace").decode("utf-8")
 
 
 def h(tpl: str, *vals, **kw) -> Safe:
@@ -38,9 +42,10 @@ def join(parts) -> Safe:
 
 # The URL schemes the adapters' Pointer deeplinks use (calendar ``calshow:``, contacts
 # ``addressbook://``, mail ``message://``, messages ``imessage://``, reminders
-# ``x-apple-reminderkit://``, shortcuts ``shortcuts://``, Safari's own page URLs). A
-# stored deeplink with any other scheme (``javascript:``, ``data:``, ``vbscript:``,
-# ``file:``) is text on the page, never a link (D-09, sketch rule 8).
+# ``x-apple-reminderkit://``, Safari's own page URLs). A stored deeplink with any other
+# scheme (``javascript:``, ``data:``, ``vbscript:``, ``file:``) is text on the page,
+# never a link (D-09, sketch rule 8). ``shortcuts://run-shortcut`` is left out on
+# purpose: following it RUNS the shortcut.
 _DEEPLINK_SCHEMES = frozenset(
     {
         "addressbook",
@@ -49,7 +54,6 @@ _DEEPLINK_SCHEMES = frozenset(
         "https",
         "imessage",
         "message",
-        "shortcuts",
         "x-apple-reminderkit",
     }
 )
