@@ -43,7 +43,7 @@ def _no_real_dashboard_port(monkeypatch):
     two-session test runs the real serve() in a thread that never exits, so without
     port 0 a unit test would hold the real port for the whole session and collide
     with an installed daemon (RESEARCH C6)."""
-    monkeypatch.setattr(daemon, "DASHBOARD_PORT", 0, raising=False)
+    monkeypatch.setattr(daemon, "DASHBOARD_PORT", 0)
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def test_bind_socket_stale_file_rebinds(sockdir):
 def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
-    monkeypatch.setattr(daemon, "dashboard_state", None, raising=False)
+    monkeypatch.setattr(daemon, "dashboard_state", None)
     t = threading.Thread(target=daemon.serve, daemon=True)
     t.start()
     for _ in range(100):  # wait for the socket

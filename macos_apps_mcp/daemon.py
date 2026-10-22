@@ -1,13 +1,16 @@
 """Deployment plane (#71): the launchd daemon serves the existing FastMCP server over a
 unix domain socket (streamable-http), and the shim bridges a client's stdio to it via
 a FastMCP proxy. The daemon OWNS the socket bind (perms + single-instance); uvicorn is
-handed the fd, never the path (uvicorn's own bind would create the socket 0666)."""
+handed the sockets, never a path (uvicorn's own bind would create the socket 0666)."""
 
 from __future__ import annotations
 
 import asyncio
 import errno
+import ipaddress
+import logging
 import os
+import secrets
 import socket
 import sys
 import uuid
@@ -28,6 +31,14 @@ from mcp.types import (
     JSONRPCMessage,
     JSONRPCResponse,
 )
+
+log = logging.getLogger(__name__)
+
+DASHBOARD_HOST = "127.0.0.1"
+# Tests set this to 0 (an ephemeral port); no override exists for the daemon itself.
+DASHBOARD_PORT = 47632
+# `http://127.0.0.1:<port>` or `not bound: <reason>`, set by serve() and read by doctor.
+dashboard_state: str | None = None
 
 
 class AlreadyRunning(Exception):
@@ -78,6 +89,69 @@ def bind_socket(path: Path) -> socket.socket:
     os.chmod(path, 0o600)
     s.listen()
     return s
+
+
+def assert_loopback(host: str) -> str:
+    """Return ``host`` when it is a literal loopback IP; raise ``ValueError`` otherwise.
+    A name such as ``localhost`` is refused too: a name can be re-pointed, a literal
+    cannot (PLAT-02 criterion 4)."""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        raise ValueError(f"dashboard refuses to bind {host!r}: not a loopback address")
+    return host
+
+
+def bind_dashboard(host: str, port: int) -> socket.socket:
+    """Bind+listen the dashboard TCP socket on a loopback address (the `bind_socket`
+    shape). SO_REUSEADDR lets a relaunch after a hard exit meet TIME_WAIT."""
+    assert_loopback(host)
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, port))
+        s.listen()
+    except OSError:
+        s.close()
+        raise
+    return s
+
+
+def _not_found_app():
+    async def app(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"Not Found"})
+
+    return app
+
+
+def make_dispatcher(mcp_app, dash_app):
+    """One ASGI entry for the one uvicorn Server that listens on both sockets.
+    MCP is reachable only on the UDS: lifespan and scopes whose ``server`` is
+    ``(path, None)``. Everything else HTTP goes to the dashboard, or 404 when there is
+    none. Fail closed (RESEARCH C4): uvicorn can report ``client`` as None on a racing
+    TCP reset, so ``client`` is not the discriminator; ``server[1]`` is."""
+    dash_app = dash_app or _not_found_app()
+
+    async def dispatcher(scope, receive, send):
+        if scope["type"] == "lifespan":
+            return await mcp_app(scope, receive, send)  # one startup, one shutdown
+        if scope["type"] != "http":
+            return  # ws="none"; nothing else is served
+        server = scope.get("server")
+        if isinstance(server, tuple | list) and len(server) == 2 and server[1] is None:
+            return await mcp_app(scope, receive, send)
+        return await dash_app(scope, receive, send)
+
+    return dispatcher
 
 
 # #170: httpx defaults to Timeout(5.0) on ALL four phases, so the shim gave up reading
@@ -210,17 +284,38 @@ def serve() -> None:
     )
     from .server import mcp  # late: importing server pulls the adapter tree
 
+    global dashboard_state
     path = socket_path()
     s = bind_socket(path)
+    tcp = None
     try:
+        try:
+            tcp = bind_dashboard(DASHBOARD_HOST, DASHBOARD_PORT)  # read at call time
+        except OSError as e:  # a taken port must not take MCP down (T-05-13)
+            log.warning("dashboard not bound: %s", e)
+            dashboard_state = f"not bound: {e}"
+        dash_app = None
+        if tcp is not None:
+            port = tcp.getsockname()[1]
+            dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
+            from . import dashboard  # late: the stdio server never imports it
+
+            dash_app = dashboard.build_app(port=port, token=secrets.token_urlsafe(32))
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
+        # One Server for both sockets: two Servers on one loop overwrite each other's
+        # SIGTERM handler. Proxy headers stay off: none may rewrite client or server.
         config = uvicorn.Config(
-            mcp.http_app(), fd=s.fileno(), log_level="warning", ws="none"
+            make_dispatcher(mcp.http_app(), dash_app),
+            log_level="warning",
+            ws="none",
+            proxy_headers=False,
         )
-        uvicorn.Server(config).run()
+        uvicorn.Server(config).run(sockets=[s] + ([tcp] if tcp else []))
     finally:
         s.close()
+        if tcp is not None:
+            tcp.close()
         path.unlink(missing_ok=True)
 
 
