@@ -16,6 +16,8 @@ import pytest
 
 from macos_apps_mcp import audit, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
+from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.errors import NativeError
 from tests._dashboard import get
 
 TS = "2026-09-28T09:31:55"
@@ -157,3 +159,243 @@ def test_escape_every_audit_string_and_the_deeplink_scheme():
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in detail
     assert "&quot; onmouseover=&quot;x" in detail
     assert "Open in" not in detail  # the unsafe deeplink gives no link at all
+
+
+# --- batches (D-12, D-13) -------------------------------------------------------
+
+RID = "20260928-094010-123456-001-move"
+IDS = ("a1@x.invalid", "b2@x.invalid")
+
+
+def backup_root():
+    return audit.state_dir() / "backup" / "mail"
+
+
+def batch(*, rid=RID, op="move", ids=IDS, mw=True, mw_receipt=False, files=True, **kw):
+    """A plan + done pair (+ the middleware line), written like ``recoverable`` does.
+    Target 1 has its ``.eml`` on disk (3 KB); target 2 was never written."""
+    folder = backup_root() / rid
+    if files:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "101.eml").write_bytes(b"x" * 3072)
+    plan = {
+        "ts": "2026-09-28T09:40:10",
+        "tool": "mail_recover",
+        "op": op,
+        "phase": "plan",
+        "receipt": rid,
+        "destination": "Trash",
+        "backup_dir": str(folder),
+        "targets": [
+            {
+                "id": ids[0],
+                "folder": "INBOX",
+                "fidelity": "full",
+                "rowid": 101,
+                "backup": f"{folder}/101.eml",
+                "status": "planned",
+            },
+            {
+                "id": ids[1],
+                "folder": "INBOX",
+                "fidelity": "partial",
+                "rowid": 102,
+                "backup": f"{folder}/102.eml",
+                "status": "planned",
+            },
+        ],
+    }
+    done = {
+        "ts": "2026-09-28T09:40:12",
+        "tool": "mail_recover",
+        "op": op,
+        "phase": "done",
+        "receipt": rid,
+        "results": {ids[0]: "ok", ids[1]: "not-in-source"},
+    }
+    records = [{**plan, **kw.get("plan", {})}, {**done, **kw.get("done", {})}]
+    if mw:
+        records.append(
+            {
+                "ts": "2026-09-28T09:40:12",
+                "tool": "move_mail",
+                "op": "move",
+                "args": {"ids": ",".join(ids), "to_mailbox": "Trash"},
+                "dry_run": False,
+                "caller": "claude-code 2.1",
+                "target_id": None,
+                "before": None,
+                "after": None,
+                **({"receipt": rid} if mw_receipt else {}),
+            }
+        )
+    put(*records)
+    return records
+
+
+def rows_in(text):
+    return re.findall(r'<a class="row clickable[^"]*" href="([^"]+)"', text)
+
+
+def test_batch_plan_done_and_move_read_as_one_row():
+    batch()
+    listing = page("/")
+    assert rows_in(listing) == ["/write/2026-09-28T09:40:12/0"]
+    assert ">Moved 2 messages to Trash<" in listing
+    assert '<span class="mono">move_mail</span> · receipt' in listing
+
+
+def test_batch_detail_shows_each_message_its_backup_and_outcome():
+    batch()
+    text = page("/write/2026-09-28T09:40:12/0")
+    assert "<b>1 of 2</b>" in text
+    assert "101.eml · 3 KB" in text and "no file" in text
+    assert 'class="chip fid full"' in text and 'class="chip fid partial"' in text
+    assert text.count('class="left-out"') == 1  # only the message that did not move
+    assert "missing when the batch ran, so it never moved" in text
+    assert f'data-copy="{backup_root() / RID}"' in text
+    assert "3 lines in audit.jsonl" in text
+    assert IDS[0] in text and IDS[1] in text
+
+
+def move_line(ts, **kw):
+    return {
+        "ts": ts,
+        "tool": "move_mail",
+        "op": "move",
+        "args": {"ids": "a"},
+        "dry_run": False,
+        "target_id": None,
+        "before": None,
+        "after": None,
+        **kw,
+    }
+
+
+def test_the_receipt_key_links_exactly_and_beats_adjacency():
+    batch(mw=False)
+    # an unrelated write sits between the done record and the middleware line
+    put(update(ts="2026-09-28T09:40:12", args={"id": "E-2"}))
+    put(move_line("2026-09-28T09:40:13", receipt=RID))
+    assert len(rows_in(page("/"))) == 2  # the batch and the stray write
+    put(move_line("2026-09-28T09:40:14"))  # no receipt key and not adjacent
+    assert len(rows_in(page("/"))) == 3
+
+
+def test_a_plan_without_a_done_record_leaves_every_outcome_unknown():
+    batch(mw=False)
+    log = audit.state_dir() / "audit.jsonl"
+    log.write_text(log.read_text().splitlines()[0] + "\n")  # the plan alone
+    text = page("/write/2026-09-28T09:40:10/0")
+    assert "<b>0 of 2</b>" in text and "may or may not have moved" in text
+
+
+def test_undo_prompt_only_when_the_plan_resolves(monkeypatch):
+    batch()
+    path = "/write/2026-09-28T09:40:12/0"
+    text = page(path)
+    assert "To undo, ask Claude" in text
+    assert f'data-copy="Undo mail receipt {RID}"' in text
+    assert f'mail_undo(receipt="{RID}", dry_run=false)' in plain(text)
+    assert "<details" in text and "Exact tool call" in text
+
+    def rotated(rid):
+        raise NativeError(f"no recoverable-mail receipt {rid!r}")
+
+    monkeypatch.setattr(mail_recover, "find_receipt", rotated)
+    text = page(path)
+    assert "To undo, ask Claude" not in text and "Undo mail receipt" not in text
+    assert "rotated out of the recent audit log" in text
+    assert "The backup files remain." in text
+
+
+def test_dedupe_cli_batch_without_a_middleware_line_is_a_batch_row():
+    batch(rid="20260928-094010-123456-002-dedupe", op="dedupe", mw=False)
+    listing = page("/")
+    assert len(rows_in(listing)) == 1
+    assert '<span class="mono">dedupe-mail</span> · receipt' in listing
+    assert "Deduplicated" in page("/write/2026-09-28T09:40:10/0")
+
+
+def undo_line(**kw):
+    return {
+        "ts": "2026-09-28T10:25:40",
+        "tool": "mail_undo",
+        "op": "undo",
+        "args": {"receipt": RID, "dry_run": False},
+        "dry_run": False,
+        "caller": "claude-code 2.1",
+        "target_id": None,
+        "before": None,
+        "after": None,
+        **kw,
+    }
+
+
+def test_a_later_undo_marks_the_batch_undone_and_the_undo_links_back():
+    batch()
+    put(undo_line())
+    text = page("/write/2026-09-28T09:40:12/0")
+    assert "Undone" in text and "by claude-code 2.1" in text
+    assert "To undo, ask Claude" not in text
+    mine = page("/write/2026-09-28T10:25:40/0")
+    assert (
+        "This undo moved the messages of an earlier batch back to where they "
+        "came from." in mine
+    )
+    assert 'href="/write/2026-09-28T09:40:12/0"' in mine
+
+
+def test_an_undo_without_a_caller_names_none():
+    batch()
+    put(undo_line(caller=None))
+    text = page("/write/2026-09-28T09:40:12/0")
+    assert "Undone" in text and " by " not in text.split("Undone", 1)[1][:60]
+
+
+def test_a_preview_undo_does_not_mark_the_batch_undone():
+    batch()
+    put(undo_line(dry_run=True))
+    text = page("/write/2026-09-28T09:40:12/0")
+    assert "Undone" not in text and "To undo, ask Claude" in text
+
+
+def test_a_plain_write_says_it_has_no_backup():
+    put(update())
+    assert "No backup for this write." in page(f"/write/{TS}/0")
+
+
+def test_receipt_path_tricks_never_reach_the_filesystem(monkeypatch, tmp_path):
+    decoy = audit.state_dir() / "etc"  # backup/mail/../../etc is this folder
+    decoy.mkdir(parents=True)
+    (decoy / "101.eml").write_bytes(b"secret")
+    batch(rid="../../etc", files=False, plan={"backup_dir": "../../etc"}, mw=False)
+    # a well-formed receipt whose folder is a symlink out of the backup root
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "101.eml").write_bytes(b"y" * 100)
+    backup_root().mkdir(parents=True)
+    (backup_root() / RID).symlink_to(outside)
+    batch(files=False, mw=False)
+    for name in ("_backup_dir", "purge_backup", "backup_usage"):
+        monkeypatch.setattr(
+            mail_recover, name, lambda *a, **k: pytest.fail("a write helper ran")
+        )
+    text = page("/write/2026-09-28T09:40:10/0") + page("/write/2026-09-28T09:40:10/1")
+    assert "101.eml ·" not in text and text.count("no file") >= 4
+
+
+def test_rendering_never_creates_the_backup_tree():
+    batch(files=False)
+    assert not (audit.state_dir() / "backup").exists()
+    page("/")
+    page("/write/2026-09-28T09:40:12/0")
+    assert not (audit.state_dir() / "backup").exists()
+
+
+def test_escape_batch_fields():
+    hostile = '"><script>alert(1)</script>'
+    batch(ids=(hostile, "b@x.invalid"), plan={"destination": hostile})
+    for path in ("/", "/write/2026-09-28T09:40:12/0"):
+        assert "<script>alert" not in page(path)
+    assert "&lt;script&gt;" in page("/write/2026-09-28T09:40:12/0")

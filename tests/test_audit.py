@@ -158,3 +158,40 @@ def test_read_all_unreadable_file_is_one_explicit_error_entry(tmp_path, monkeypa
     (tmp_path / "audit.jsonl").mkdir()  # reading a directory raises OSError
     out = au.read_all()
     assert len(out) == 1 and out[0]["error"].startswith("audit log unreadable")
+
+
+def _mw_call(monkeypatch, structured):
+    """One AuditMiddleware call for a move_mail with ``structured`` as its result."""
+    import asyncio
+    from types import SimpleNamespace
+
+    records = []
+    monkeypatch.setattr(au, "audit_write", records.append)
+    monkeypatch.setattr(au, "usage_log", lambda tool: None)
+    mw = au.AuditMiddleware(
+        audit_verbs={"move_mail": "move"}, snapshot_sources={}, dry_run_defaults={}
+    )
+    ctx = SimpleNamespace(
+        message=SimpleNamespace(name="move_mail", arguments={"ids": "a"})
+    )
+
+    async def call_next(_c):
+        return SimpleNamespace(structured_content=structured, is_error=False)
+
+    asyncio.run(mw.on_call_tool(ctx, call_next))
+    return records[0]
+
+
+def test_middleware_record_carries_the_batch_receipt(monkeypatch):
+    # D-12: the exact link from a batch's middleware line to its plan/done pair.
+    rid = "20261021-093100-000001-000-move"
+    rec = _mw_call(monkeypatch, {"result": {"receipt": rid, "count": 2}})
+    assert rec["receipt"] == rid and rec["tool"] == "move_mail"
+    assert _mw_call(monkeypatch, {"receipt": rid})["receipt"] == rid  # unwrapped too
+
+
+def test_middleware_record_without_a_receipt_has_no_receipt_key(monkeypatch):
+    for structured in ({"result": {"count": 2}}, {"id": "X"}, None, {"receipt": 7}):
+        rec = _mw_call(monkeypatch, structured)
+        assert "receipt" not in rec
+        assert {"ts", "tool", "op", "args", "dry_run", "caller"} <= set(rec)
