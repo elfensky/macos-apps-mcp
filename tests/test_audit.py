@@ -131,3 +131,30 @@ def test_audit_read_returns_an_old_record_without_dry_run_or_caller(
     old = {"ts": "2026-07-21T10:00:00", "tool": "delete_note", "op": "delete"}
     (tmp_path / "audit.jsonl").write_text(json.dumps(old) + "\n", encoding="utf-8")
     assert au.audit_read() == [old]
+
+
+def test_read_all_returns_both_files_oldest_first(tmp_path, monkeypatch):
+    # D-12: the dashboard reads the rotated twin then the live file, no limit, no cache.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    recs = [{"n": i, "tool": "t"} for i in range(4)]
+    (tmp_path / "audit.jsonl.1").write_text(
+        "".join(json.dumps(r) + "\n" for r in recs[:2]), encoding="utf-8"
+    )
+    (tmp_path / "audit.jsonl").write_text(
+        json.dumps(recs[2]) + "\nNOT JSON\n" + json.dumps(recs[3]) + "\n",
+        encoding="utf-8",
+    )
+    assert au.read_all() == recs
+    assert len(au.audit_read(limit=2)) == 2  # audit_read keeps its bound
+
+
+def test_read_all_missing_files_are_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    assert au.read_all() == []
+
+
+def test_read_all_unreadable_file_is_one_explicit_error_entry(tmp_path, monkeypatch):
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    (tmp_path / "audit.jsonl").mkdir()  # reading a directory raises OSError
+    out = au.read_all()
+    assert len(out) == 1 and out[0]["error"].startswith("audit log unreadable")
