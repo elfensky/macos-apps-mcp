@@ -37,6 +37,15 @@ def _no_role_leak():
         os.environ["MACOS_APPS_MCP_ROLE"] = original
 
 
+@pytest.fixture(autouse=True)
+def _no_real_dashboard_port(monkeypatch):
+    """daemon.serve() binds the dashboard on daemon.DASHBOARD_PORT (47632). The
+    two-session test runs the real serve() in a thread that never exits, so without
+    port 0 a unit test would hold the real port for the whole session and collide
+    with an installed daemon (RESEARCH C6)."""
+    monkeypatch.setattr(daemon, "DASHBOARD_PORT", 0, raising=False)
+
+
 @pytest.fixture
 def sockdir():
     # AF_UNIX sun_path is ~104 bytes on macOS; pytest's default tmp_path nesting
@@ -102,6 +111,7 @@ def test_bind_socket_stale_file_rebinds(sockdir):
 def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(daemon, "dashboard_state", None, raising=False)
     t = threading.Thread(target=daemon.serve, daemon=True)
     t.start()
     for _ in range(100):  # wait for the socket
@@ -121,6 +131,27 @@ def test_serve_two_concurrent_sessions(sockdir, monkeypatch):
             assert "ok" in r1.content[0].text and "ok" in r2.content[0].text
 
     asyncio.run(go())
+
+    # The same Server also answers on loopback TCP: dashboard only, never MCP.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not str(daemon.dashboard_state).startswith(
+        "http://127.0.0.1:"
+    ):
+        time.sleep(0.05)
+    base = daemon.dashboard_state
+    assert str(base).startswith("http://127.0.0.1:"), base
+    with httpx.Client(trust_env=False, timeout=10) as web:
+        usage = web.get(f"{base}/usage")
+        assert usage.status_code == 200
+        assert "Calls per tool since the log started." in usage.text
+        assert "content-security-policy" in usage.headers
+        assert usage.headers["referrer-policy"] == "same-origin"
+        unsigned = web.post(f"{base}/mcp", json={})  # no Origin: the Guard refuses
+        assert unsigned.status_code == 403
+        assert "Forbidden origin" in unsigned.text
+        get_mcp = web.get(f"{base}/mcp")
+        assert get_mcp.status_code == 404
+        assert "jsonrpc" not in unsigned.text + get_mcp.text
 
 
 def _serve(app, path):
