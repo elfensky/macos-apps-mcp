@@ -299,8 +299,8 @@ def install_agent(argv: list[str]) -> None:
 # gate is closed. Tests isolate this by monkeypatching the constant itself (see
 # tests/conftest.py), never by moving the path.
 _ALLOW_SEND_FILE = Path.home() / ".local/state/macos-apps-mcp/allow_send"
-# The adapter deny-list file: same three-process reason as the comment above; tests
-# patch the constant (tests/conftest.py), never HOME.
+# The adapter deny-list file: same three-process reason as the comment above (home-
+# pinned, never state_dir()); tests patch the constant (tests/conftest.py), never HOME.
 _ADAPTERS_OFF_FILE = Path.home() / ".local/state/macos-apps-mcp/adapters_off"
 
 
@@ -331,6 +331,14 @@ def allow_send_file() -> str:
     """The persisted outbound opt-in (``""`` when absent) — see tiers.allow_send."""
     try:
         return _ALLOW_SEND_FILE.read_text()
+    except OSError:
+        return ""
+
+
+def adapters_off_file() -> str:
+    """The persisted adapter deny-list (``""`` when absent) — see tiers.adapters_off."""
+    try:
+        return _ADAPTERS_OFF_FILE.read_text()
     except OSError:
         return ""
 

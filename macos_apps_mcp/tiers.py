@@ -67,3 +67,27 @@ def allow_send(adapter: str) -> bool:
     if val in ("1", "true", "yes", "all"):
         return True
     return adapter in {p.strip() for p in val.split(",") if p.strip()}
+
+
+def adapters_off() -> set[str]:
+    """The adapters the operator turned OFF (PLAT-01, D-01): a lower-cased name set.
+
+    ``MACOS_APPS_ADAPTERS_OFF`` (a comma list) wins when set and non-empty. Under the
+    DAEMON only, an empty env var falls back to the persisted file
+    (``~/.local/state/macos-apps-mcp/adapters_off``) — the exact twin of
+    ``allow_send``: no env var reaches a launchd-run daemon from a client config
+    (#130), and in stdio mode the env var is the whole story, which also keeps the test
+    suite hermetic. "Am I the daemon?" is ``deploy.is_daemon_role()`` (argv), for the
+    reason given in ``allow_send``. Read per call, but a process-start fact in effect:
+    registration happens at import. Unknown names stay in the set; ``doctor`` reports
+    them as ``adapters_unknown``.
+    """
+    val = os.environ.get("MACOS_APPS_ADAPTERS_OFF", "").strip()
+    if not val and deploy.is_daemon_role():
+        val = deploy.adapters_off_file()
+    return {p.strip().lower() for p in val.split(",") if p.strip()}
+
+
+def adapter_enabled(name: str) -> bool:
+    """True unless ``name`` is on the deny-list (D-02). Meta tools never ask."""
+    return name not in adapters_off()

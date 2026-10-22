@@ -129,10 +129,12 @@ def _tool(
 
     ``tier`` decides the gate (read: always registered; additive/destructive:
     skipped under ``tiers.read_only()``; send: registered only when
-    ``tiers.allow_send(adapter)`` says so) and the MCP annotations
-    (``registry.ToolRecord.annotations``). Everything else the middlewares, doctor and
-    the tests used to keep in hand-maintained name sets is stated here ONCE and read
-    back from ``registry.TOOLS``: ``audit`` (the audit-log verb — derived from the
+    ``tiers.allow_send(adapter)`` says so) — and in EVERY tier an adapter on the
+    ``tiers.adapters_off()`` deny-list registers nothing (PLAT-01) — and the MCP
+    annotations (``registry.ToolRecord.annotations``). Everything else the
+    middlewares, doctor and the tests used to keep in hand-maintained name sets is
+    stated here ONCE and read back from ``registry.TOOLS``: ``audit`` (the audit-log
+    verb — derived from the
     create/update/delete/complete prefix, REQUIRED otherwise, never a silent
     ``"write"`` default, GATE-06), ``notice``/``backup_notice`` (#53/#163 — read per
     call by ``notices.UntrustedDataNotice``), ``removes_content`` (GATE-05, D-04 —
@@ -158,11 +160,15 @@ def _tool(
                 # paragraph whether or not the tool registers (tests read it either
                 # way).
                 f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
-            registered = tiers.allow_send(adapter)
+        # PLAT-01 (D-02): the adapter deny-list gates every tier; meta tools
+        # (adapter=None) are never gated.
+        on = adapter is None or tiers.adapter_enabled(adapter)
+        if tier == "send":
+            registered = on and tiers.allow_send(adapter)
         elif tier == "read":
-            registered = True
+            registered = on
         else:
-            registered = not tiers.read_only()
+            registered = on and not tiers.read_only()
         rec = registry.add(
             registry.ToolRecord(
                 name=name,
