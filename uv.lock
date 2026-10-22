@@ -1006,7 +1006,7 @@ wheels = [
 
 [[package]]
 name = "macos-apps-mcp"
-version = "0.14.3"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
@@ -1019,6 +1019,7 @@ dependencies = [
     { name = "pyobjc-framework-eventkit" },
     { name = "pyobjc-framework-servicemanagement" },
     { name = "pyobjc-framework-uniformtypeidentifiers" },
+    { name = "starlette" },
     { name = "uvicorn" },
 ]
 
@@ -1045,6 +1046,7 @@ requires-dist = [
     { name = "pyobjc-framework-eventkit", specifier = ">=10.0" },
     { name = "pyobjc-framework-servicemanagement", specifier = ">=10.0" },
     { name = "pyobjc-framework-uniformtypeidentifiers", specifier = ">=10.0" },
+    { name = "starlette", specifier = ">=0.48" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
