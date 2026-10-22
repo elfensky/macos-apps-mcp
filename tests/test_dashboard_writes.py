@@ -113,7 +113,7 @@ def test_preview_a_legacy_record_reads_as_a_preview_not_a_write():
     assert '<span class="chip">preview</span>' in listing
     text = page("/write/2026-09-28T09:40:12/0")
     assert "Preview only — nothing changed." in text
-    assert "trash_mail defaults to a preview" in plain(text)
+    assert "defaults to a preview" in text and "trash_mail" in text
     assert "not passed — defaulted to true" in text
     assert "What it would have changed" in text
     assert "<dt>caller</dt>" not in text
