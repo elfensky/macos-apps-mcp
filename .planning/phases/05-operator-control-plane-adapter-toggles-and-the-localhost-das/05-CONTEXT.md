@@ -203,7 +203,10 @@ v2), any grant-trigger endpoint, any clean-up or dedupe runner, an undo button, 
   dashboard needs the key and names the CLI command, but never shows the key; the key never
   reaches a log or the audit trail. A request without the key gets a refusal that names the
   command. One plan, 05-09, after 05-03 and before 05-04; 05-05's docs describe the key instead of
-  the single-user assumption, and 05-07's device proof opens the dashboard through the link.
+  the single-user assumption, and 05-07's device proof opens the dashboard through the link. The cookie reaches every
+  127.0.0.1 port (no port-bound cookie on plain http), so an app that listens on loopback and
+  opens a URL in the browser can obtain the key, visibly: accepted and documented with the key
+  rotation (owner, 2026-10-22; T-05-44).
   — **Reversibility:** reversible; a code change before the 0.15.0 release.
 - **D-20:** **An `adapters_off` file that exists but cannot be read turns every adapter off**
   (owner, 2026-10-22, from the post-merge review of #407), and the `doctor` note says so.

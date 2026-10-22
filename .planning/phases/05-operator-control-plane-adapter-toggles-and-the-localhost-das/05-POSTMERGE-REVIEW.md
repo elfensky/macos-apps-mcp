@@ -45,3 +45,27 @@ headers on Guard responses; MCP over the UDS with the port taken. Mutations of t
 Origin, body-cap and Host checks each failed the suite.
 
 Not covered: real-browser headers (Safari, Firefox; RESEARCH A1, A2) — 05-07's device proof.
+
+## #412 — Adapters page, toggle, Discard, restart (05-03, wave 2)
+
+| Id | Severity | Finding | Disposition |
+|----|----------|---------|-------------|
+| PM-13 | should-fix | The sidebar badge divided by `registered \| configured`, so an adapter OFF at start and in the file read `9/9` | fixed by #413 |
+| PM-14 | advisory | The D-20 lock was checked outside the write lock; a file that turned unreadable in between was replaced by a guess | fixed by #413 (re-read under the lock, 409) |
+| PM-15 | advisory | A second Restart while one was armed logged a second restart for one exit | fixed by #413 |
+| PM-16 | advisory | `force_exit` skips the lifespan shutdown, so every restart writes a `CancelledError` traceback to the daemon log | accepted: log noise only |
+| PM-17 | advisory | A TCC row with a `status` (`limited`, `unknown`) showed the red `denied` chip | fixed by #413 (no chip) |
+| PM-18 | advisory | The row counted tool records, not registered tools (an OFF adapter showed its full count) | fixed by #413 |
+| PM-19 | advisory (test gap) | No test pins the restart hook after the body, the write lock, or write-before-log | write-before-log tested by #413; the other two accepted (concurrency, ASGI ordering) |
+| PM-20 | open item | This Mac's user TCC database reads as absent from the sessions' shells, so grant chips and the AppleEvents target ids in `grants.py` are not confirmed against live rows | 05-05 Health and 05-07 device proof confirm the target ids |
+
+Held under probe: every refusal (method, token, Origin, bad action or value, lock states) left the
+file and the audit log unchanged; 10 concurrent toggles kept all 10 names with no temp file; known
+names kept, unknown dropped (D-01); a real restart exits 0 in 0.3 s idle and 3.06 s with the native
+worker blocked; a cut-short restart body logs nothing; no test arms a real timer or exits.
+
+## T-05-44 — the page-key cookie reaches every 127.0.0.1 port (05-09 planning)
+
+Raised by the 05-09 planner and widened at review: an app that listens on loopback and opens a URL
+in the browser (sandboxed apps included) can obtain the key, visibly. Accepted and documented with
+the key rotation (owner, 2026-10-22; D-19).
