@@ -170,6 +170,42 @@ def test_stale_token_says_to_reload():
     assert r.status_code == 403 and "Reload" in r.text
 
 
+def test_client_gone_mid_body_never_reaches_the_handler():
+    """A form cut short by a disconnect must not run as if it were complete: the
+    valid token and the first field arrive, then the client goes away."""
+    ran = []
+
+    async def inner(scope, receive, send):
+        ran.append(scope["path"])
+
+    msgs = iter(
+        [
+            {
+                "type": "http.request",
+                "body": b"token=tok&adapter=photos",
+                "more_body": True,
+            },
+            {"type": "http.disconnect"},
+        ]
+    )
+
+    async def receive():
+        return next(msgs)
+
+    async def send(msg):
+        pass
+
+    headers = {"host": HOST, "origin": ORIGIN, **FORM}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/echo",
+        "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+    }
+    asyncio.run(Guard(inner, port=PORT, token=TOKEN)(scope, receive, send))
+    assert ran == []
+
+
 def test_mcp_is_not_a_dashboard_route():
     assert _get("/mcp").status_code == 404
     guarded = _request(
