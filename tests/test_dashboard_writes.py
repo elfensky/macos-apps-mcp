@@ -11,12 +11,15 @@ from __future__ import annotations
 import html
 import json
 import re
+import time
+from datetime import date
 
 import pytest
 
 from macos_apps_mcp import audit, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.dashboard import writes
 from macos_apps_mcp.errors import NativeError
 from tests._dashboard import get
 
@@ -399,3 +402,188 @@ def test_escape_batch_fields():
     for path in ("/", "/write/2026-09-28T09:40:12/0"):
         assert "<script>alert" not in page(path)
     assert "&lt;script&gt;" in page("/write/2026-09-28T09:40:12/0")
+
+
+# --- finding a write (D-11) -----------------------------------------------------
+
+
+def reminder(ts="2026-09-28T11:00:00", summary="Pick up the café order"):
+    return {
+        "ts": ts,
+        "tool": "create_reminder",
+        "op": "create",
+        "args": {"title": summary},
+        "dry_run": False,
+        "caller": "claude-code 2.1",
+        "target_id": "R-1",
+        "before": None,
+        "after": {"id": "R-1", "summary": summary, "deeplink": ""},
+    }
+
+
+def sent(ts="2026-09-28T12:00:00"):
+    return {
+        "ts": ts,
+        "tool": "send_mail",
+        "op": "send",
+        "args": {"to": "someone@x.invalid", "dry_run": False},
+        "dry_run": False,
+        "caller": "claude-code 2.1",
+        "target_id": None,
+        "before": None,
+        "after": {"id": "M-1", "summary": "Sent: hello", "deeplink": ""},
+    }
+
+
+def titles(text):
+    return re.findall(r'<div class="title">([^<]*)</div>', text)
+
+
+def test_the_search_form_carries_its_state():
+    put(update())
+    text = page("/?q=dent&filter=receipt&previews=0")
+    assert '<form class="search" method="get" action="/">' in text
+    assert 'name="q"' in text and 'placeholder="Filter"' in text
+    assert '<input type="hidden" name="previews" value="0">' in text
+    assert '<input type="hidden" name="filter" value="receipt">' in text
+    assert 'value="dent"' in text and 'value="1" checked' not in text
+
+
+def test_search_matches_words_ids_and_folds_case_and_diacritics():
+    put(update(), reminder())
+    batch()
+    assert titles(page("/?q=dentist")) == ["Updated Dentist — Tue 30 Sep 15:00–15:30"]
+    assert titles(page("/?q=CAFE")) == ["Created Pick up the café order"]  # fold_text
+    assert titles(page("/?q=b2@x")) == ["Moved 2 messages to Trash"]  # a target id
+    assert titles(page("/?q=094010-123456")) == ["Moved 2 messages to Trash"]  # receipt
+    assert titles(page("/?q=claude-code+dentist"))[0].startswith("Updated Dentist")
+    assert titles(page("/?q=nothing-like-this")) == []
+
+
+def test_previews_are_shown_by_default_and_the_switch_hides_them():
+    put(update(), legacy_trash())
+    assert len(rows_in(page("/"))) == 2
+    assert len(rows_in(page("/?previews=0"))) == 1
+    assert len(rows_in(page("/?previews=0&previews=1"))) == 2  # hidden + checked box
+    assert 'value="1" checked' in page("/")
+    assert 'value="1" checked' not in page("/?previews=0")
+
+
+def test_filter_narrows_to_batches_outbound_or_one_app():
+    put(update(), sent())
+    batch()
+    assert len(rows_in(page("/?filter=receipt"))) == 1
+    assert titles(page("/?filter=outbound")) == ["Sent Sent: hello"]
+    mail = titles(page("/?filter=app:mail"))
+    assert sorted(mail) == ["Moved 2 messages to Trash", "Sent Sent: hello"]
+    assert len(rows_in(page("/?filter=app:calendar"))) == 1
+    assert len(rows_in(page("/?filter=app:nonesuch"))) == 3  # unknown acts as all
+    assert len(rows_in(page("/?filter=bogus"))) == 3
+
+
+def test_sidebar_counts_leave_out_previews_and_list_apps_alphabetically():
+    put(update(), legacy_trash(), sent())
+    batch()
+    text = page("/")
+    assert 'All writes<span class="count">3</span>' in text
+    assert 'Batches with receipts<span class="count">1</span>' in text
+    assert 'Sent off this Mac<span class="count">1</span>' in text
+    assert 'href="/?filter=app:calendar"' in text and 'href="/?filter=app:mail"' in text
+    assert text.index("app:calendar") < text.index("app:mail")
+    assert 'Mail<span class="count">2</span>' in text
+    assert '<a class="nav-item active" href="/?filter=receipt"' in page(
+        "/?filter=receipt"
+    )
+
+
+def test_day_headers_read_today_yesterday_then_a_dated_header(monkeypatch):
+    monkeypatch.setattr(writes, "_today", lambda: date(2026, 9, 28))
+    put(
+        update(ts="2026-09-28T09:00:00"),
+        update(ts="2026-09-27T09:00:00"),
+        update(ts="2026-09-22T09:00:00"),
+    )
+    headers = re.findall(r'<div class="day">([^<]*)</div>', page("/"))
+    # 22 Sep 2026 is a Tuesday (the plan's "Mon 22 Sep" example was a 2025 date)
+    assert headers == ["Today", "Yesterday", "Tue 22 Sep"]
+
+
+def test_empty_states():
+    text = page("/")
+    assert "Select a write" in text and "No writes recorded yet" in text
+    put(update())
+    text = page("/?q=zzz")
+    assert "No writes match" in text and rows_in(text) == []
+    assert "Select a write" in text
+
+
+def test_an_unreadable_log_is_a_banner_never_an_empty_list():
+    (audit.state_dir() / "audit.jsonl").mkdir()  # reading a directory fails
+    text = page("/")
+    assert '<div class="banner bad">' in text and "audit log unreadable" in text
+    assert rows_in(text) == [] and "No writes recorded yet" not in text
+
+
+def test_links_keep_the_query_and_the_open_row_is_selected_with_a_back_link():
+    put(update(), reminder())
+    text = page(f"/write/{TS}/0?q=dentist&previews=0")
+    assert f'href="/write/{TS}/0?q=dentist&amp;previews=0"' in text
+    assert 'class="row clickable selected"' in text
+    assert re.search(
+        r'<a class="btn link b-back" href="/\?q=dentist&amp;previews=0">', text
+    )
+    assert "‹ Back" in text
+
+
+def test_a_large_log_renders_fast():
+    lines = [
+        update(ts=f"2026-09-{1 + i % 27:02d}T{i % 24:02d}:{i % 60:02d}:00")
+        for i in range(3000)
+    ]
+    put(*lines)
+    started = time.perf_counter()
+    text = page("/")
+    assert time.perf_counter() - started < 3
+    assert len(rows_in(text)) == 3000
+
+
+def test_dashboard_records_render_truthfully():
+    base = {
+        "tool": "dashboard",
+        "dry_run": False,
+        "caller": "dashboard",
+        "before": None,
+        "after": None,
+    }
+    put(
+        {**base, "ts": "2026-09-28T08:00:00", "op": "toggle", "target_id": "mail",
+         "args": {"adapter": "mail", "on": False}},
+        {**base, "ts": "2026-09-28T08:01:00", "op": "discard", "target_id": None,
+         "args": {"adapters_off": ["photos"]}},
+        {**base, "ts": "2026-09-28T08:02:00", "op": "restart", "target_id": None,
+         "args": {}},
+        {**base, "ts": "2026-09-28T08:03:00", "op": "toggle", "target_id": "<b>x</b>",
+         "args": {"adapter": "<b>x</b>", "on": True}},
+    )  # fmt: skip
+    listing = page("/")
+    assert {
+        "Turned Mail off",
+        "Discarded pending adapter changes",
+        "Restarted the daemon",
+        "Turned &lt;b&gt;x&lt;/b&gt; on",
+    } <= set(titles(listing))
+    assert "<b>x</b>" not in listing and "<b>X</b>" not in listing
+    for ts in ("08:00:00", "08:01:00", "08:02:00", "08:03:00"):
+        text = page(f"/write/2026-09-28T{ts}/0")
+        assert "<dd>dashboard</dd>" in text  # the caller
+        for absent in (
+            "To undo, ask Claude",
+            "No backup for this write.",
+            "Preview only",
+            "<del",
+            "<ins",
+            "Open in",
+        ):
+            assert absent not in text
+        assert "<b>x</b>" not in text and "<b>X</b>" not in text
+    assert "Turned Mail off" in page("/write/2026-09-28T08:00:00/0")
