@@ -24,8 +24,6 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit, registry
-from ..adapters import mail_recover
-from ..errors import NativeError
 from ..text import fold_text
 from . import recovery
 from .html import Safe, appico, esc, h, join, page, safe_href
@@ -151,7 +149,7 @@ def _is_preview(rec: dict, defaults: dict[str, bool]) -> bool:
     if "dry_run" in rec:
         return bool(rec["dry_run"])
     # A record from before #222: the tool's own default decides (D-12).
-    return audit._resolve_dry_run(rec["tool"], _d(rec.get("args")), defaults)
+    return audit.resolve_dry_run(rec["tool"], _d(rec.get("args")), defaults)
 
 
 # The tools whose adapter methods call ``mail_recover.recoverable``, with the plan op
@@ -791,17 +789,6 @@ def _render(
     )
 
 
-def _recovery_facts(receipt: str) -> tuple[dict[str, int], bool]:
-    """The backup files on disk and whether ``mail_undo`` could still replay the
-    receipt (``find_receipt`` resolves its plan). Both are reads."""
-    try:
-        mail_recover.find_receipt(receipt)
-        resolves = True
-    except NativeError:
-        resolves = False
-    return recovery.backup_files(receipt), resolves
-
-
 def _errors(records: list[dict]) -> list[str]:
     return [str(r["error"]) for r in records if "error" in r and "tool" not in r]
 
@@ -820,5 +807,5 @@ async def detail(request):
         return PlainTextResponse("Not Found", 404)
     facts = ()
     if row.kind == "batch":
-        facts = await run_in_threadpool(_recovery_facts, row.receipt)
+        facts = await run_in_threadpool(recovery.facts, row.receipt)
     return _render(request, rows, row, _errors(records), facts)
