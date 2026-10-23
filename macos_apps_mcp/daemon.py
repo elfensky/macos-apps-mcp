@@ -38,7 +38,8 @@ log = logging.getLogger(__name__)
 DASHBOARD_HOST = "127.0.0.1"
 # Tests set this to 0 (an ephemeral port); no override exists for the daemon itself.
 DASHBOARD_PORT = 47632
-# `http://127.0.0.1:<port>` or `not bound: <reason>`, set by serve() and read by doctor.
+# `http://127.0.0.1:<port>`, `not bound: <reason>`, `not built: <reason>` or the
+# unusable-key text, set by serve() and read by doctor.
 dashboard_state: str | None = None
 
 
@@ -326,15 +327,30 @@ def serve() -> None:
         dash_app = None
         if tcp is not None:
             port = tcp.getsockname()[1]
-            dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
-            from . import dashboard, deploy  # late: the stdio server never imports it
+            try:
+                # late: the stdio server never imports it
+                from . import dashboard, deploy
 
-            dash_app = dashboard.build_app(
-                port=port,
-                token=secrets.token_urlsafe(32),
-                key=deploy.dashboard_key(create=True),
-                restart=lambda: restart(server),  # `server` is assigned below
-            )
+                key = deploy.dashboard_key(create=True)
+                dash_app = dashboard.build_app(
+                    port=port,
+                    token=secrets.token_urlsafe(32),
+                    key=key,
+                    restart=lambda: restart(server),  # `server` is assigned below
+                )
+            except Exception as e:  # noqa: BLE001 — a dashboard fault must not take MCP down (WR-05)
+                log.warning("dashboard not built: %s", e, exc_info=True)
+                dashboard_state = f"not built: {(str(e) or type(e).__name__)[:120]}"
+                tcp.close()
+                tcp = None
+            else:
+                # IN-04: with no usable key every page answers 503, so name no URL.
+                dashboard_state = (
+                    f"http://{DASHBOARD_HOST}:{port}"
+                    if key is not None
+                    else "key unusable: every page answers 503; "
+                    "remove the dashboard_key file and restart the daemon"
+                )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
         # One Server for both sockets: two Servers on one loop overwrite each other's
