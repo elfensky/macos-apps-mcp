@@ -331,7 +331,7 @@ def serve() -> None:
             tcp = bind_dashboard(DASHBOARD_HOST, DASHBOARD_PORT)  # read at call time
         except OSError as e:  # a taken port must not take MCP down (T-05-13)
             log.warning("dashboard not bound: %s", e)
-            dashboard_state = f"not bound: {e}"
+            dashboard_state = f"not bound: {sanitize_line(str(e))}"
         dash_app = None
         if tcp is not None:
             port = tcp.getsockname()[1]
@@ -348,7 +348,7 @@ def serve() -> None:
                 )
             except Exception as e:  # noqa: BLE001 — a dashboard fault must not take MCP down (WR-05)
                 log.warning("dashboard not built: %s", e, exc_info=True)
-                msg = sanitize_line(str(e) or type(e).__name__)[:NOT_BUILT_MAX]
+                msg = (sanitize_line(str(e)) or type(e).__name__)[:NOT_BUILT_MAX]
                 dashboard_state = f"not built: {msg}"
                 tcp.close()
                 tcp = None
