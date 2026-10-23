@@ -15,10 +15,11 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import audit, deploy, doctor, registry
+from macos_apps_mcp import audit, dashboard, deploy, doctor, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 from macos_apps_mcp.adapters import mail_addressing, mail_recover
 from macos_apps_mcp.dashboard import grants, health, recovery
@@ -254,11 +255,22 @@ EVERYONE = sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
 
 def banner(text):
     m = re.search(
-        r'<div class="banner bad"><span>●</span><div><b>(.*?)</b> (.*?)</div></div>',
+        r'<div class="banner bad"><span aria-hidden="true">●</span>'
+        r"<div><b>(.*?)</b> (.*?)</div></div>",
         text,
         re.S,
     )
     return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
+
+
+def test_every_banner_glyph_is_hidden_from_screen_readers(doc):
+    sources = "".join(
+        p.read_text() for p in Path(dashboard.__file__).parent.glob("*.py")
+    )
+    assert not re.search(r'class="banner[^"]*"><span>', sources)
+    assert sources.count('<span aria-hidden="true">') >= 9
+    doc.report = make_report(make_ids(fda=False), **FDA_DENIED)  # the ● banner
+    assert '<span aria-hidden="true">●</span>' in get("/health").text
 
 
 def row_of(text, title):
