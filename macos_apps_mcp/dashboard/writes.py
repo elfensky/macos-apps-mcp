@@ -24,6 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit, registry
+from ..adapters import mail_addressing
 from ..text import fold_text
 from . import recovery
 from .html import Safe, appico, esc, h, join, page, safe_href
@@ -225,6 +226,8 @@ def _batch_row(g: dict, rid: str, primary: dict, ts: str, n: int) -> Row | None:
     head = g.get("plan") or g["done"]
     mw = g.get("mw")
     op, dest = _op(head), head.get("destination")
+    if isinstance(dest, str):
+        dest = mail_addressing.mailbox_label(dest)
     tool = mw["tool"] if mw else _BATCH_LABEL.get(op, "mail_recover")
     k = len(recovery.targets(g.get("plan"), g.get("done")))
     noun = f"{k} message{'' if k == 1 else 's'}"
