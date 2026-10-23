@@ -1,16 +1,16 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 6
-current_phase_name: Distribution — uvx, Bundles, Cask, and the Companion Plugin
+current_phase: "05.1"
+current_phase_name: Bug fixes — dashboard follow-ups (#427, #428, #430)
 status: planning
-stopped_at: Phase 05 complete, ready to plan Phase 6
-last_updated: "2026-10-22T20:49:20.163Z"
-last_activity: 2026-10-22
-last_activity_desc: Phase 05 complete, transitioned to Phase 6
-state_head: 3feeb4f3f14866170d67ff6b85430897138beae3
+stopped_at: "Phase 05 complete; Phase 05.1 (dashboard follow-ups #427, #428, #430) inserted, ready to plan"
+last_updated: "2026-10-23T08:20:10.262Z"
+last_activity: 2026-10-23
+last_activity_desc: Phase 05 complete; Phase 05.1 inserted for the dashboard follow-ups
+state_head: 8c8f605fda760e04d2d2fa37222273e943aa1533
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 7
   total_plans: 65
   completed_plans: 65
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 
 ## Current Position
 
-Phase: 6 — Distribution — uvx, Bundles, Cask, and the Companion Plugin
+Phase: 05.1 — Bug fixes — dashboard follow-ups (#427, #428, #430) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-22 — Phase 05 complete, transitioned to Phase 6
+Last activity: 2026-10-23 — Phase 05 complete; Phase 05.1 inserted for the dashboard follow-ups
 
 Progress: [█████████░] 88%
 
@@ -171,6 +171,7 @@ Recent decisions affecting current work:
 - Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
 - Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
 - Phase 04.1 inserted after Phase 4: Bug Fixes — Phase 4 Follow-ups Before Any Feature (#373, #383, #384, #387) (URGENT)
+- Phase 05.1 inserted after Phase 5: Bug fixes — dashboard follow-ups (#427, #428, #430) (URGENT)
 
 ## Deferred Items
 
@@ -183,5 +184,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-21T12:19:18.187Z
-Stopped at: Phase 05 complete, ready to plan Phase 6
+Stopped at: Phase 05 complete; Phase 05.1 (dashboard follow-ups #427, #428, #430) inserted, ready to plan
 Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md

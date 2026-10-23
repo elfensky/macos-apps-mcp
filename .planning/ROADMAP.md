@@ -39,6 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
+- [ ] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -368,6 +369,16 @@ Plans:
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #126` with no closing keyword
 
 **UI hint**: yes
+
+### Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430) (INSERTED)
+
+**Goal**: Every bug the Phase 5 reviews left open is fixed before the next feature phase: the write-detail and recovery pages show raw `imap://` account UUIDs instead of the account name (#427); the UI review's accessibility and state findings — focus ring, contrast, bare refusals — are open (#428); the close review's deferred findings — test TCC isolation, dashboard-record rendering, `serve()` resilience to a dashboard build failure, duplicated adapter-name sets — are open (#430). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: TBD (planned from #427, #428, #430)
+**Depends on:** Phase 5
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.1 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
