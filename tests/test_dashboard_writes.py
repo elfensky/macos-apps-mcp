@@ -420,6 +420,127 @@ def test_an_undo_batch_title_names_the_account_and_folder(monkeypatch):
     ]
 
 
+ACCOUNTS = {"UUID-1": "Personal", "UUID-2": "Work"}
+TRASH = "imap://UUID-1/%5BGmail%5D/Trash"
+
+
+def labelled(monkeypatch, accounts=ACCOUNTS):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", accounts)
+
+
+def in_folders(*folders, destination=TRASH, **kw):
+    """A batch whose targets sit in the given folders (one target per folder)."""
+    ids = tuple(f"m{n}@x.invalid" for n, _ in enumerate(folders))
+    targets = [
+        {
+            "id": i,
+            "folder": f,
+            "fidelity": "full",
+            "rowid": 101 + n,
+            "status": "planned",
+        }
+        for n, (i, f) in enumerate(zip(ids, folders, strict=True))
+    ]
+    done = {"results": {i: "ok" for i in ids}}
+    return batch(
+        ids=ids + ("pad@x.invalid",) * (2 - len(ids)),
+        files=False,
+        plan={"destination": destination, "targets": targets},
+        done=done,
+        **kw,
+    )
+
+
+def without_raw(text):
+    return re.sub(r'<details class="raw">.*?</details>', "", text, flags=re.S)
+
+
+DETAIL = "/write/2026-09-28T09:40:12/0"
+
+
+def test_batch_detail_names_accounts_and_folders(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/Archiv%C3%A9")
+    text = page(DETAIL)
+    shown = without_raw(text)
+    assert "from Personal › INBOX, Work › Archivé" in shown
+    assert " to <b>Personal › [Gmail]/Trash</b>" in shown
+    assert '<div class="faint">from Personal › INBOX</div>' in shown
+    assert "imap://" not in shown
+    assert "imap://UUID-1/INBOX" in text and "imap://UUID-2/Archiv%C3%A9" in text
+    assert mail_addressing._ACCOUNT_MAP_CACHE == ACCOUNTS
+
+
+def test_one_label_for_two_accounts_with_one_name(monkeypatch):
+    labelled(monkeypatch, {"UUID-1": "Personal", "UUID-2": "Personal"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/INBOX")
+    shown = without_raw(page(DETAIL))
+    assert "from Personal › INBOX" in shown
+    assert "Personal › INBOX, Personal" not in shown
+    assert "imap://UUID-1/INBOX" in page(DETAIL) and "imap://UUID-2/INBOX" in page(
+        DETAIL
+    )
+
+
+def test_the_from_list_keeps_target_order_and_skips_an_empty_folder(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-2/Boxes", "", "imap://UUID-1/INBOX")
+    shown = without_raw(page(DETAIL))
+    assert "from Work › Boxes, Personal › INBOX" in shown
+
+
+def test_undone_banner_names_the_folders_the_messages_are_back_in(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    undo_rid = "20260928-102538-123456-002-move"
+    batch(
+        rid=undo_rid,
+        files=False,
+        mw=False,
+        plan={"ts": "2026-09-28T10:25:38"},
+        done={"ts": "2026-09-28T10:25:40", "results": dict.fromkeys(IDS, "ok")},
+    )
+    put(
+        move_line(
+            "2026-09-28T10:25:40",
+            tool="mail_undo",
+            args={"receipt": RID, "dry_run": False},
+            receipt=undo_rid,
+        )
+    )
+    assert "The messages are back in Personal › INBOX." in page(DETAIL)
+
+
+def test_an_unknown_or_uncached_account_shows_the_raw_url(monkeypatch):
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    assert mail_addressing._ACCOUNT_MAP_CACHE is None
+    assert "to Personal" not in page("/")
+    assert titles(page("/")) == [f"Moved 2 messages to {TRASH}"]
+    assert f" to <b>{TRASH}</b>" in page(DETAIL)
+    assert "from imap://UUID-1/INBOX" in page(DETAIL)
+    assert mail_addressing._ACCOUNT_MAP_CACHE is None
+    labelled(monkeypatch, {"OTHER": "x"})
+    assert titles(page("/")) == [f"Moved 2 messages to {TRASH}"]
+    assert f" to <b>{TRASH}</b>" in page(DETAIL)
+
+
+def test_an_account_name_with_markup_is_escaped(monkeypatch):
+    labelled(monkeypatch, {"UUID-1": "<script>alert(1)</script>"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    for path in ("/", DETAIL):
+        text = page(path)
+        assert "<script>alert" not in text
+        assert "&lt;script&gt;alert(1)&lt;/script&gt; › [Gmail]/Trash" in text
+
+
+def test_search_finds_a_batch_by_its_account_name(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    for q in ("Personal", "UUID-1"):
+        assert len(rows_in(page(f"/?q={q}"))) == 1, q
+    assert rows_in(page("/?q=Nowhere")) == []
+
+
 # --- finding a write (D-11) -----------------------------------------------------
 
 
