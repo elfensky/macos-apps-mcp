@@ -710,9 +710,19 @@ def test_dashboard_records_render_truthfully():
         "Turned &lt;b&gt;x&lt;/b&gt; on",
     } <= set(titles(listing))
     assert "<b>x</b>" not in listing and "<b>X</b>" not in listing
+    # WR-03: the operator did these, not the model
+    assert listing.count('<span class="chip">operator</span>') == 4
+    assert "chip destructive" not in listing
     for ts in ("08:00:00", "08:01:00", "08:02:00", "08:03:00"):
         text = page(f"/write/2026-09-28T{ts}/0")
         assert "<dd>dashboard</dd>" in text  # the caller
+        assert "What the operator did" in text and "<dt>action</dt>" in text
+        for model_only in (
+            "What the model asked for",
+            "<dt>tool</dt>",
+            "<dt>dry_run</dt>",
+        ):
+            assert model_only not in text
         for absent in (
             "To undo, ask Claude",
             "No backup for this write.",
@@ -724,6 +734,7 @@ def test_dashboard_records_render_truthfully():
             assert absent not in text
         assert "<b>x</b>" not in text and "<b>X</b>" not in text
     assert "Turned Mail off" in page("/write/2026-09-28T08:00:00/0")
+    assert "<dd>restart</dd>" in page("/write/2026-09-28T08:02:00/0")
 
 
 def test_corrupt_records_never_crash_a_page():
