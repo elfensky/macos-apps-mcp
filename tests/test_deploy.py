@@ -221,7 +221,7 @@ def test_agent_service_foreign_bundle_raises(monkeypatch):
 def test_agent_service_our_bundle_proceeds(monkeypatch):
     # our exact bundle id passes the gate: _agent_service goes on to call SMAppService.
     # Stub the framework seam so the positive path is asserted without a real bundle.
-    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: deploy._BUNDLE_ID)
+    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: deploy.BUNDLE_ID)
     import sys
     import types
 
