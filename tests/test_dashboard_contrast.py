@@ -115,3 +115,101 @@ def test_the_focus_ring_is_a_solid_primary_outline(css, light):
             assert "--color-selection" not in decl, sel.strip()
     for background in LIGHT_BACKGROUNDS:
         assert ratio(light["--color-primary"], light[background]) >= GLYPH, background
+
+
+TEXT_ON_TINT = {
+    "--color-success-text": "--color-success-bg",
+    "--color-outbound-text": "--color-outbound-bg",
+    "--color-danger-text": "--color-danger-bg",
+    "--color-accent-text": "--color-accent-bg",
+}
+
+
+@pytest.mark.parametrize("background", LIGHT_BACKGROUNDS)
+def test_muted_text_reaches_4_5_to_1(light, background):
+    got = ratio(light["--color-text-muted"], light[background])
+    assert got >= TEXT, f"{got:.2f}:1 on {background}"
+
+
+@pytest.mark.parametrize("background", LIGHT_BACKGROUNDS)
+@pytest.mark.parametrize("token", TEXT_ON_TINT)
+def test_every_light_text_token_reaches_4_5_to_1(light, token, background):
+    got = _on_tint(light, token, TEXT_ON_TINT[token], background)
+    assert got >= TEXT, f"{token}: {got:.2f}:1 on its tint over {background}"
+
+
+@pytest.mark.parametrize("background", LIGHT_BACKGROUNDS)
+@pytest.mark.parametrize(
+    "token",
+    [
+        "--color-text-faint",
+        "--color-success-text",
+        "--color-accent-text",
+        "--color-danger-text",
+        "--color-primary",
+    ],
+)
+def test_every_light_glyph_token_reaches_3_to_1(light, token, background):
+    got = ratio(light[token], light[background])
+    assert got >= GLYPH, f"{token}: {got:.2f}:1 on {background}"
+
+
+def test_text_rules_use_the_text_tokens(css):
+    def uses(selector: str, prop: str, token: str) -> bool:
+        return any(f"{prop}: var({token})" in b for b in _bodies(css, selector))
+
+    for sel, token in (
+        (".chip.outbound", "--color-outbound-text"),
+        ("pre.json .n", "--color-outbound-text"),
+        (".chip.danger", "--color-danger-text"),
+        ("del.w", "--color-danger-text"),
+        (".fid.absent", "--color-danger-text"),
+        (".chip.destructive", "--color-accent-text"),
+        (".chip.pending", "--color-accent-text"),
+        (".fid.partial", "--color-accent-text"),
+        (".faint", "--color-text-muted"),
+        (".sidebar h6", "--color-text-muted"),
+        (".b-empty", "--color-text-muted"),
+    ):
+        assert uses(sel, "color", token), f"{sel} should use {token}"
+    assert uses(".dot.warn", "background", "--color-accent-text")
+    assert uses(".dot.bad", "background", "--color-danger-text")
+    # no hard-coded text colour on a chip, fid, ins or del rule
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        if re.search(r"\.chip|\.fid|\bins\.w|\bdel\.w", sel):
+            assert not re.search(r"(?<![-\w])color:\s*#", body), sel.strip()
+
+
+@pytest.mark.parametrize("token", TEXT_ON_TINT)
+def test_dark_mode_declares_every_text_token(css, token):
+    for opener in (":root {", *DARK_OPENERS):
+        assert token in _tokens(css, opener), f"{token} missing from {opener}"
+
+
+def test_no_raw_pixel_font_size_outside_the_token_block(css):
+    start = css.index(":root {")
+    rest = css[:start] + css[css.index("}", start) + 1 :]
+    assert not re.findall(r"(?<![-\w])font(?:-size)?:\s*[\d.]+px", rest)
+
+
+def test_a_preview_is_dimmed_without_opacity_on_its_text(css):
+    for sel in (".b-list .row.preview", ".dim"):
+        assert not any("opacity" in b for b in _bodies(css, sel)), sel
+    assert any(
+        "color: var(--color-text-muted)" in b
+        for b in _bodies(css, ".b-list .row.preview .title")
+    )
+    assert any("opacity" in b for b in _bodies(css, ".b-list .row.preview .appico"))
+    assert any("dashed" in b for b in _bodies(css, ".dim .card"))
+
+
+def test_reduced_motion_stops_the_animations(css):
+    m = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{(.*?)\n\}", css, re.S)
+    assert m, "no prefers-reduced-motion block"
+    assert any(
+        "animation: none" in b for b in _bodies(m.group(1), ".spin, .restart-bar")
+    )
+
+
+def test_the_lock_glyph_has_empty_alt_text(css):
+    assert any('/ ""' in b for b in _bodies(css, ".row.locked .title::after"))
