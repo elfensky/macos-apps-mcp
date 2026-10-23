@@ -5,16 +5,15 @@ current_phase: "05.1"
 current_phase_name: "Bug fixes — dashboard follow-ups (#427, #428, #430)"
 status: executing
 stopped_at: "Phase 05.1 planned: 7 plans in 5 waves (PR docs/phase-05.1-records); ready to execute"
-last_updated: "2026-10-23T09:58:02.366Z"
+last_updated: "2026-10-23T13:08:39.856Z"
 last_activity: 2026-10-23
-last_activity_desc: Phase 05.1 planned — 7 plans in 5 waves for #427, #428, #430
-state_head: 1ce82eef90094dd90d75c5027068c731f070f80f
+last_activity_desc: Phase 05.1 execution started
+state_head: 184b2e6e16c03487e4f528a633690b04b83ed3dd
 progress:
   total_phases: 10
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 72
   completed_plans: 65
-  percent: 88
 ---
 
 # Project State
@@ -24,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-21)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 05 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+**Current focus:** Phase 05.1 — Bug fixes — dashboard follow-ups (#427, #428, #430)
 
 ## Current Position
 
-Phase: 05.1 (Bug fixes — dashboard follow-ups (#427, #428, #430)) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-23 — Phase 05.1 planned: 7 plans in 5 waves for #427, #428, #430
+Phase: 05.1 (Bug fixes — dashboard follow-ups (#427, #428, #430)) — EXECUTING
+Plan: 1 of 7
+Status: Executing Phase 05.1
+Last activity: 2026-10-23 — Phase 05.1 execution started
 
 Progress: [█████████░] 88%
 

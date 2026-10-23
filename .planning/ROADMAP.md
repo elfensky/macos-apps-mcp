@@ -381,13 +381,13 @@ Plans:
   2. The dashboard passes the Phase 5 UI review's actionable findings: a visible `--color-primary` focus ring; measured contrast of at least 4.5:1 for text and 3:1 for UI glyphs on the faint, success, outbound and orange tokens in light mode; refused toggles rendered in the page frame with a banner and a way back, the Restart form locked with the switches; `aria-hidden` banner glyphs, a switch label that names adapter and state, a `<nav>` landmark with a skip link, token font sizes, 44px targets and reachable System pages on phone — inside the CSP, the sketch copy and escaping (#428).
   3. The Phase 5 close review's deferred findings are closed: no unit test opens the developer's TCC databases; a dashboard toggle or restart record renders as an operator action without a `dry_run` row or model chip; a dashboard build failure leaves MCP serving with `dashboard_state` saying why; a failed audit write of a dashboard action is visible to the operator on the next page; the adapter-name set and `_version` have one home, no cross-module underscore imports in `dashboard/`, `doctor` names the dashboard URL only when a page can answer, and the deny-list is read once (#430).
 
-**Plans:** 0/7 plans complete
+**Plans:** 3/7 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 05.1-01-PLAN.md — `serve()` keeps MCP up when the dashboard cannot be built and `doctor` names no URL a page cannot answer; the suite never opens the real TCC databases; the deny-list is read once (FIX-13: WR-05, IN-04, WR-01, IN-05, #430)
-- [ ] 05.1-02-PLAN.md — one home each for `doctor.version` and `registry.adapter_names()` (FIX-13: IN-02, #430)
-- [ ] 05.1-03-PLAN.md — measured contrast tokens, a solid primary focus ring, type tokens, a preview that dims without opacity, reduced motion (FIX-12 part 1, #428)
+- [x] 05.1-01-PLAN.md — `serve()` keeps MCP up when the dashboard cannot be built and `doctor` names no URL a page cannot answer; the suite never opens the real TCC databases; the deny-list is read once (FIX-13: WR-05, IN-04, WR-01, IN-05, #430)
+- [x] 05.1-02-PLAN.md — one home each for `doctor.version` and `registry.adapter_names()` (FIX-13: IN-02, #430)
+- [x] 05.1-03-PLAN.md — measured contrast tokens, a solid primary focus ring, type tokens, a preview that dims without opacity, reduced motion (FIX-12 part 1, #428)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 05.1-04-PLAN.md — `dashboard/` modules use only public names of other modules, held by an AST test (FIX-13: IN-03, #430)
@@ -435,5 +435,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
-| 05.1. Dashboard Follow-ups (INSERTED) | 0/7 | Not started | - |
+| 05.1. Dashboard Follow-ups (INSERTED) | 3/7 | In Progress | - |
 | 6. Distribution | 0/TBD | Not started | - |
