@@ -263,7 +263,7 @@ def test_serve_keeps_mcp_up_when_the_dashboard_cannot_be_built(
     state = daemon.dashboard_state
     assert state.startswith("not built: "), state
     assert "http://" not in state
-    assert len(state) <= len("not built: ") + 120
+    assert len(state) <= len("not built: ") + daemon.NOT_BUILT_MAX
     assert len(bound) == 1 and bound[0].fileno() == -1
 
 
@@ -278,6 +278,17 @@ def test_dashboard_not_built_names_the_exception_type_when_its_message_is_empty(
     assert daemon.dashboard_state == "not built: RuntimeError"
 
 
+def test_dashboard_not_built_state_is_one_sanitized_line(sockdir, monkeypatch):
+    _break_build(monkeypatch, RuntimeError('first\nsecond "q" \\ café'))
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    state = daemon.dashboard_state
+    assert "\n" not in state and "\r" not in state, state
+    assert state.startswith("not built: first second"), state
+
+
 def test_serve_reports_no_url_when_the_page_key_is_unusable(sockdir, monkeypatch):
     """IN-04: every page answers 503, so doctor must not name a URL."""
     monkeypatch.setattr(deploy, "dashboard_key", lambda create=False: None)
@@ -286,7 +297,7 @@ def test_serve_reports_no_url_when_the_page_key_is_unusable(sockdir, monkeypatch
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
     assert "ok" in _serve_and_ping(p)
     state = daemon.dashboard_state
-    assert state.startswith("key unusable: "), state
+    assert state == daemon.KEY_UNUSABLE_STATE
     assert "http://" not in state
 
 
