@@ -472,7 +472,8 @@ def _preview_banner(row: Row, in_order: list[Row]) -> Safe:
         else Safe("")
     )
     return h(
-        '<div class="banner"><span>ⓘ</span><div><b>Preview only — nothing '
+        '<div class="banner"><span aria-hidden="true">ⓘ</span>'
+        "<div><b>Preview only — nothing "
         "changed.</b> {}{}</div></div>",
         why,
         later,
@@ -556,7 +557,8 @@ def _no_backup(row: Row) -> Safe:
     if row.preview or row.kind != "write" or row.tool == "mail_undo":
         return Safe("")
     return h(
-        '<div class="banner"><span>ⓘ</span><div><b>No backup for this write.</b> '
+        '<div class="banner"><span aria-hidden="true">ⓘ</span>'
+        "<div><b>No backup for this write.</b> "
         "Recovery covers batch Mail writes — move, trash and dedupe. To reverse this, "
         "open it in {}, or ask Claude to change it back.</div></div>",
         row.adapter.capitalize() if row.adapter else "the app",
@@ -601,7 +603,8 @@ def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     elif moved:
         back = Safe(" Not every message moved back; open the undo to see which.")
     return h(
-        '<div class="banner ok"><span>✓</span><div><b>Undone {} at {}{}.</b>{} '
+        '<div class="banner ok"><span aria-hidden="true">✓</span>'
+        "<div><b>Undone {} at {}{}.</b>{} "
         '<a class="btn link" href="{}">Show the undo</a></div></div>',
         day.lower() if day in ("Today", "Yesterday") else day,
         undo.when.strftime("%H:%M"),
@@ -618,7 +621,8 @@ def _undo_record_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     )
     caller = row.record.get("caller")
     return h(
-        '<div class="banner ok"><span>↺</span><div>This undo moved the messages of an '
+        '<div class="banner ok"><span aria-hidden="true">↺</span>'
+        "<div>This undo moved the messages of an "
         "earlier batch back to where they came from.{}</div></div>{}",
         h(" Run by <b>{}</b>.", caller) if caller else "",
         h(
@@ -773,7 +777,8 @@ def _render(
     )
     banners = join(
         h(
-            '<div class="banner bad"><span>⚠</span><div><b>The audit log could not '
+            '<div class="banner bad"><span aria-hidden="true">⚠</span>'
+            "<div><b>The audit log could not "
             "be read.</b> {} What follows may be incomplete.</div></div>",
             e,
         )
