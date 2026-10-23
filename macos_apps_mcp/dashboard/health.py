@@ -277,7 +277,7 @@ def last_dot() -> str | None:
 
 
 def _deployment(request, report: dict | None) -> Safe:
-    version = report["version"] if report else doctor._version()
+    version = report["version"] if report else doctor.version()
     build = report["build"] if report else doctor._build_stamp()
     mode = "daemon" if deploy.is_daemon_role() else "stdio"
     return join(

@@ -287,15 +287,17 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
-def _version(dist: str = "macos-apps-mcp") -> str:
+def version(dist: str = "macos-apps-mcp") -> str:
     """The version of the code actually SERVING this call. The daemon is a separate
     long-lived process from the repo you edit — it sat three releases behind for weeks
     with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
-    the repo. ``libs`` reuses it for the bundled libraries."""
-    from importlib.metadata import PackageNotFoundError, version
+    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
+    reads it too (#430 IN-02): one lookup, one fallback."""
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as dist_version
 
     try:
-        return version(dist)
+        return dist_version(dist)
     except PackageNotFoundError:
         return "unknown"
 
@@ -485,11 +487,11 @@ def diagnose(request: bool = False) -> dict:
     )
 
     return {
-        "version": _version(),
+        "version": version(),
         "build": _build_stamp(),
         # #285: a bundle once shipped another mcp than uv.lock; this shows the bundled
         # versions without opening the bundle.
-        "libs": {name: _version(name) for name in ("mcp", "fastmcp")},
+        "libs": {name: version(name) for name in ("mcp", "fastmcp")},
         "responsible_process": _responsible_process(),
         "note": (
             "TCC attributes permissions to the process that launched macos-apps-mcp "
