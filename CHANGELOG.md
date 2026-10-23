@@ -6,6 +6,15 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mail mailboxes show as `Account › folder` on the dashboard** (#427) — the write list,
+  the write detail, the recovery view and the Backups page name a Mail mailbox by its
+  account name and decoded folder (`Personal › INBOX`) instead of the raw `imap://` URL.
+  The name comes from the Mail adapter's in-memory account map, so a page never starts
+  Mail; until a Mail tool has filled that map (for example right after a daemon restart)
+  the page shows the raw URL.
+
 ## [0.15.0] - 2026-10-22 — Photos and the dashboard
 
 ### Added
