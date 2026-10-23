@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import html
 import re
-from importlib.metadata import PackageNotFoundError, version
 
 from starlette.responses import HTMLResponse
 
-from .. import registry
+from .. import doctor, registry
 
 
 class Safe(str):
@@ -84,13 +83,6 @@ SIDEBAR: list[tuple[str, str, str, str]] = [
     ("System", "Usage", "/usage", "usage"),
     ("System", "Backups", "/backups", "backups"),
 ]
-
-
-def _version() -> str:
-    try:
-        return version("macos-apps-mcp")
-    except PackageNotFoundError:
-        return "dev"
 
 
 def _badge(key: str) -> Safe:
@@ -180,7 +172,7 @@ def _sidebar(active: str, counts: dict | None = None) -> Safe:
             group = g
             parts.append(h("<h6>{}</h6>", g))
         parts.append(_nav(active, key, href, label, _badge(key)))
-    foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', _version())
+    foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', doctor.version())
     return h('<aside class="sidebar">{}{}</aside>', join(parts), foot)
 
 
