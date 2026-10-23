@@ -262,7 +262,8 @@ def _unreadable_banner(got: dict) -> Safe:
         )
     why = ", ".join(f"{k} db: {v}" for k, v in failed.items())
     return h(
-        '<div class="banner warn"><span>●</span><div><b>Some grants could not be '
+        '<div class="banner warn"><span aria-hidden="true">●</span>'
+        "<div><b>Some grants could not be "
         "read.</b> The macOS grant database did not answer ({}), so rows that depend "
         "on it say that instead of guessing.</div></div>\n",
         why,
@@ -312,7 +313,8 @@ def _render(request, got: dict | None, failure: str | None):
         banner = join(
             [
                 h(
-                    '<div class="banner bad"><span>●</span><div><b>{} active adapter'
+                    '<div class="banner bad"><span aria-hidden="true">●</span>'
+                    "<div><b>{} active adapter"
                     "{} cannot work:</b> {}. "
                     "Grant access, or turn the adapter off.</div></div>\n",
                     n,
@@ -336,7 +338,8 @@ def _render(request, got: dict | None, failure: str | None):
         rows.append(_outbound_row())
         banner = (
             h(
-                '<div class="banner bad"><span>●</span><div><b>doctor could not run:'
+                '<div class="banner bad"><span aria-hidden="true">●</span>'
+                "<div><b>doctor could not run:"
                 "</b> {}</div></div>\n",
                 failure,
             )

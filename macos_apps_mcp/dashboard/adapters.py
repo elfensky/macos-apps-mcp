@@ -124,7 +124,8 @@ def _row(
         '<div class="row"><span class="appico {}">{}</span>'
         '<div class="grow"><div class="title">{}</div><div class="sub">{}</div></div>'
         '{}<form method="post" action="/adapters" class="switch-form">{}'
-        '<button type="submit" class="switch" aria-pressed="{}" aria-label="{}"{}>'
+        '<button type="submit" class="switch" '
+        'aria-pressed="{}" aria-label="{} adapter, {}"{}>'
         "<span></span></button></form></div>",
         label,
         label[0],
@@ -134,6 +135,7 @@ def _row(
         _hidden(token, action="toggle", adapter=name, on="0" if on else "1"),
         "true" if on else "false",
         label,
+        "on" if on else "off",
         Safe(" disabled") if disabled else Safe(""),
     )
 

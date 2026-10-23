@@ -189,7 +189,8 @@ async def receipt(request):
             row.title,
             name,
             Safe(
-                '<div class="banner ok"><span>↩</span><div>This batch was undone: a '
+                '<div class="banner ok"><span aria-hidden="true">↩</span>'
+                "<div>This batch was undone: a "
                 "later mail_undo moved the messages back.</div></div>\n"
             )
             if row.undone
