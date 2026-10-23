@@ -490,7 +490,7 @@ def test_the_from_list_keeps_target_order_and_skips_an_empty_folder(monkeypatch)
 
 
 def test_undone_banner_names_the_folders_the_messages_are_back_in(monkeypatch):
-    labelled(monkeypatch)
+    labelled(monkeypatch, {"UUID-1": "<i>P</i>"})
     in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
     undo_rid = "20260928-102538-123456-002-move"
     batch(
@@ -508,7 +508,9 @@ def test_undone_banner_names_the_folders_the_messages_are_back_in(monkeypatch):
             receipt=undo_rid,
         )
     )
-    assert "The messages are back in Personal › INBOX." in page(DETAIL)
+    text = page(DETAIL)
+    assert "The messages are back in &lt;i&gt;P&lt;/i&gt; › INBOX." in text
+    assert "<i>P</i>" not in text
 
 
 def test_an_unknown_or_uncached_account_shows_the_raw_url(monkeypatch):
@@ -539,6 +541,18 @@ def test_search_finds_a_batch_by_its_account_name(monkeypatch):
     for q in ("Personal", "UUID-1"):
         assert len(rows_in(page(f"/?q={q}"))) == 1, q
     assert rows_in(page("/?q=Nowhere")) == []
+
+
+def test_search_finds_a_batch_by_a_second_accounts_name_and_decoded_folder(
+    monkeypatch,
+):
+    labelled(monkeypatch, {"UUID-1": "Personal", "UUID-2": "Work"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/Archiv%C3%A9")
+    for q in ("Work", "Archivé"):
+        assert len(rows_in(page(f"/?q={q}"))) == 1, q
+    labelled(monkeypatch, None)
+    assert rows_in(page("/?q=Archivé")) == []
+    assert len(rows_in(page("/?q=Archiv%25C3%25A9"))) == 1
 
 
 # --- finding a write (D-11) -----------------------------------------------------

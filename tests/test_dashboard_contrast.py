@@ -258,6 +258,12 @@ def test_dark_mode_declares_every_text_token(css, token):
         assert token in _tokens(css, opener), f"{token} missing from {opener}"
 
 
+def test_os_dark_block_equals_the_explicit_dark_block(css):
+    """WR-01: OS-dark users must get the measured values, token for token."""
+    os_dark = _tokens(css, DARK_OPENERS[0])
+    assert os_dark and os_dark == _tokens(css, DARK_OPENERS[1])
+
+
 def test_no_raw_pixel_font_size_outside_the_token_block(css):
     start = css.index(":root {")
     rest = css[:start] + css[css.index("}", start) + 1 :]
