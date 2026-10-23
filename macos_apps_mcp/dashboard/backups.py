@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit
-from ..adapters import mail_recover
+from ..adapters import mail_addressing, mail_recover
 from . import recovery, writes
 from .html import Safe, h, join
 from .html import page as render_page
@@ -73,7 +73,7 @@ def _receipt_row(name: str, files: int, size: int, plan: dict | None) -> Safe:
     title = f"{op} · {k} {'message' if k == 1 else 'messages'}"
     dest = plan.get("destination") if plan else None
     if isinstance(dest, str) and dest:
-        title += f" → {dest}"
+        title += f" → {mail_addressing.mailbox_label(dest)}"
     return h(
         '<a class="row clickable" href="/backups/{}"><div class="grow">'
         '<div class="title">{}</div><div class="sub mono">{}</div></div>'

@@ -489,9 +489,9 @@ def test_backups_page_lists_the_receipts_on_disk_newest_first(tree):
 
 def test_backups_row_names_the_destination_account(tree, monkeypatch):
     monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
-    put(
-        *plan_for(RID2, ["c3@x.invalid"], destination="imap://UUID-1/%5BGmail%5D/Trash")
-    )
+    eml(backup_root() / RID4, "301.eml", KB)
+    trash = "imap://UUID-1/%5BGmail%5D/Trash"
+    put(*plan_for(RID4, ["c3@x.invalid"], destination=trash))
     assert "move · 1 message → Personal › [Gmail]/Trash" in get("/backups").text
 
 
