@@ -386,7 +386,11 @@ def test_the_dashboard_footer_names_the_doctor_version(monkeypatch):
     """#430 IN-02: the sidebar footer and the Health page share one version lookup."""
     from tests import _dashboard
 
-    monkeypatch.setattr(doc, "version", lambda dist="macos-apps-mcp": "9.9.9")
+    monkeypatch.setattr(
+        doc,
+        "version",
+        lambda dist="macos-apps-mcp": {"macos-apps-mcp": "9.9.9"}[dist],
+    )
     r = _dashboard.get("/usage")
     assert r.status_code == 200
     assert "v9.9.9 · 127.0.0.1 only" in r.text
@@ -433,8 +437,23 @@ def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
     assert len(reads) == 2
 
 
-@pytest.mark.parametrize("role", ["stdio", "daemon"])
-def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
+def _budget_cases():
+    from macos_apps_mcp import daemon
+
+    return [
+        pytest.param("stdio", None, id="stdio"),
+        pytest.param("daemon", "not bound: [Errno 48] in use", id="daemon-not-bound"),
+        pytest.param("daemon", daemon.KEY_UNUSABLE_STATE, id="daemon-key-unusable"),
+        pytest.param(
+            "daemon",
+            "not built: " + '"' * daemon.NOT_BUILT_MAX,
+            id="daemon-not-built-worst-escape",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(("role", "state"), _budget_cases())
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
     if role == "daemon":
@@ -450,7 +469,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
         monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", f"photos,{junk}")
         sending = registry.outbound_status()["registered"]
         monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "" if sending else "mail")
-        monkeypatch.setattr(daemon, "dashboard_state", "not bound: [Errno 48] in use")
+        monkeypatch.setattr(daemon, "dashboard_state", state)
 
     def denied_automation(*a, **k):
         raise AutomationDenied(
