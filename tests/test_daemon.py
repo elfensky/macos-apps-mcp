@@ -203,7 +203,10 @@ def test_serve_keeps_mcp_up_when_the_dashboard_port_is_in_use(sockdir, monkeypat
 
     try:
         assert "ok" in asyncio.run(go()).content[0].text
-        assert str(daemon.dashboard_state).startswith("not bound: ")
+        state = str(daemon.dashboard_state)
+        assert state.startswith("not bound: ")
+        assert "\n" not in state
+        assert "\r" not in state
     finally:
         taken.close()
 
@@ -271,6 +274,17 @@ def test_dashboard_not_built_names_the_exception_type_when_its_message_is_empty(
     sockdir, monkeypatch
 ):
     _break_build(monkeypatch, RuntimeError())
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    assert daemon.dashboard_state == "not built: RuntimeError"
+
+
+def test_dashboard_not_built_names_the_exception_type_when_its_message_is_blank(
+    sockdir, monkeypatch
+):
+    _break_build(monkeypatch, RuntimeError("   "))
     monkeypatch.setattr(daemon, "dashboard_state", None)
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
