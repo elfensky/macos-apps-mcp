@@ -19,7 +19,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .. import audit
-from ..adapters import mail_recover
+from ..adapters import mail_addressing, mail_recover
 from ..errors import NativeError
 from .html import Safe, h, join
 
@@ -144,7 +144,12 @@ def _target_row(t: dict, outcome: str, files: dict[str, int]) -> Safe:
         else h('<span class="chip danger">{}</span>', outcome)
     )
     folder = (
-        h('<div class="faint">from {}</div>', t["folder"]) if t.get("folder") else ""
+        h(
+            '<div class="faint">from {}</div>',
+            mail_addressing.mailbox_label(str(t["folder"])),
+        )
+        if t.get("folder")
+        else ""
     )
     return h(
         '<tr{}><td class="main"><span class="mono">{}</span>{}{}</td>'
@@ -187,9 +192,15 @@ def render_batch(
     ok = sum(o == "ok" for _, o in rows)
     full = sum(t.get("fidelity") == "full" for t, _ in rows)
     sources = ", ".join(
-        dict.fromkeys(str(t["folder"]) for t, _ in rows if t.get("folder"))
+        dict.fromkeys(
+            mail_addressing.mailbox_label(str(t["folder"]))
+            for t, _ in rows
+            if t.get("folder")
+        )
     )
     dest = plan.get("destination")
+    if isinstance(dest, str):
+        dest = mail_addressing.mailbox_label(dest)
     backup_dir = plan.get("backup_dir")
     kept = (
         f"{full} full backup{'' if full == 1 else 's'}, "

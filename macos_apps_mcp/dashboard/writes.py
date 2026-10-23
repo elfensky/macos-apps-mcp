@@ -591,7 +591,8 @@ def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     back = Safe("")
     if moved and all(o == "ok" for _, o in moved):
         folders = [
-            str(t.get("folder") or "") for t, _ in recovery.outcomes(row.plan, row.done)
+            mail_addressing.mailbox_label(str(t.get("folder") or ""))
+            for t, _ in recovery.outcomes(row.plan, row.done)
         ]
         back = h(
             " The messages are back in {}.",
@@ -693,9 +694,15 @@ def _haystack(row: Row) -> str:
         *map(str, _d(rec.get("args")).values()),
     ]
     if row.kind == "batch":
-        parts += [row.receipt or "", str((row.plan or {}).get("destination") or "")]
+        dest = str((row.plan or {}).get("destination") or "")
+        parts += [row.receipt or "", dest, mail_addressing.mailbox_label(dest)]
         for t in recovery.targets(row.plan, row.done):
-            parts += [str(t.get("id", "")), str(t.get("folder", ""))]
+            folder = str(t.get("folder", ""))
+            parts += [
+                str(t.get("id", "")),
+                folder,
+                mail_addressing.mailbox_label(folder),
+            ]
     return fold_text(" ".join(parts))
 
 
