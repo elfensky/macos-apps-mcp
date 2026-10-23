@@ -14,6 +14,12 @@ surface may still shift between minor versions.
   The name comes from the Mail adapter's in-memory account map, so a page never starts
   Mail; until a Mail tool has filled that map (for example right after a daemon restart)
   the page shows the raw URL.
+- **The dashboard reads well and works by keyboard, screen reader and phone** (#428) — a
+  solid focus ring; chip, word-diff and status-dot colours measured at 4.5:1 for text and
+  3:1 for glyphs in light mode; a refused toggle shows the Adapters page with the reason
+  and a way back, under the same status code; Restart locks with the switches; the switch
+  label names the adapter and its state; a skip link, a navigation landmark, 44 px targets
+  and the System pages first on a phone.
 
 ## [0.15.0] - 2026-10-22 — Photos and the dashboard
 
