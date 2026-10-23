@@ -262,7 +262,8 @@ async def _render(
         title="Adapters",
         active="adapters",
         body=body,
-        refresh=(12, "/adapters") if restarting else None,
+        # PM-26: a lost record must outlive the page's own timer
+        refresh=(12, "/adapters") if restarting and not _audit_lost else None,
         status=status,
     )
 
