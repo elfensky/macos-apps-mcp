@@ -286,3 +286,29 @@ def test_reduced_motion_stops_the_animations(css):
 def test_the_lock_glyph_has_empty_alt_text(css):
     order = re.compile(r'content:\s*" 🔒";\s*content:\s*" 🔒"\s*/\s*"";')
     assert any(order.search(b) for b in _bodies(css, ".row.locked .title::after"))
+
+
+def _media_blocks(css: str, query: str) -> list[str]:
+    """The text inside every ``@media <query> { ... }`` block (brace matching)."""
+    out = []
+    for m in re.finditer(re.escape(f"@media {query}") + r"\s*\{", css):
+        depth, i = 1, m.end()
+        while depth:
+            depth += {"{": 1, "}": -1}.get(css[i], 0)
+            i += 1
+        out.append(css[m.end() : i - 1])
+    return out
+
+
+def test_phone_targets_are_44px_and_system_pages_lead_the_strip(css):
+    phone = "\n".join(_media_blocks(css, "(max-width: 700px)"))
+    assert any("min-height: 44px" in b for b in _bodies(phone, ".nav-item"))
+    assert any("inset: -13px -6px" in b for b in _bodies(phone, "button.switch::after"))
+    assert any("order: -1" in b for b in _bodies(phone, ".nav-item.system"))
+    assert any("display: flex" in b for b in _bodies(phone, ".b-shell .sidebar nav"))
+    outside = css
+    for block in _media_blocks(css, "(max-width: 700px)"):
+        outside = outside.replace(block, "")
+    assert any("left: -9999px" in b for b in _bodies(outside, ".skip"))
+    focus = _bodies(outside, ".skip:focus")
+    assert focus and all("-9999px" not in b and "left:" in b for b in focus)
