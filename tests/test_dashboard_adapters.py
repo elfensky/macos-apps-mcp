@@ -5,16 +5,19 @@ Same harness as ``test_dashboard_guard.py``: ``httpx.ASGITransport`` inside
 dir at ``tmp_path``, so no test touches the developer's real files.
 """
 
+import concurrent.futures
 import json
 import os
 import re
 import stat
+import threading
 from urllib.parse import urlencode
 
 import pytest
 
 from macos_apps_mcp import audit, deploy, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
+from macos_apps_mcp.dashboard import adapters
 from tests import _dashboard
 from tests._dashboard import ORIGIN, TOKEN
 
@@ -598,3 +601,60 @@ def test_the_switch_label_names_the_adapter_and_its_state(state):
     assert 'aria-pressed="true" aria-label="Photos adapter, on"' in _get().text
     _toggle("photos", "0")
     assert 'aria-pressed="false" aria-label="Photos adapter, off"' in _get().text
+
+
+# --- a lost audit record is shown, never a silent 303 (#430 WR-06) --------------------
+
+LOST = "its audit record could not be written"
+
+
+def test_a_toggle_whose_audit_record_was_lost_says_so_on_the_next_page(
+    state, monkeypatch
+):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    real = audit.audit_write
+    monkeypatch.setattr(audit, "audit_write", lambda record: False)
+    r = _toggle("photos", "0")
+    assert r.status_code == 303 and r.headers["location"] == "/adapters"
+    assert _file().read_text() == "photos"
+    assert LOST in _get().text
+    assert _toggle("photos", "0").status_code == 303  # still failing: banner stays
+    assert LOST in _get().text
+    monkeypatch.setattr(audit, "audit_write", real)
+    assert _toggle("photos", "1").status_code == 303
+    assert LOST not in _get().text
+    (rec,) = _records()
+    assert rec["op"] == "toggle" and rec["args"] == {"adapter": "photos", "on": True}
+
+
+def test_a_restart_whose_audit_record_was_lost_says_so_on_the_restarting_page(
+    state, monkeypatch
+):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    monkeypatch.setattr(audit, "audit_write", lambda record: False)
+    fake = _OneShot()
+    r = _post("/restart", app=_restart_app(fake))
+    assert r.status_code == 200 and "Restarting the daemon…" in r.text
+    assert LOST in r.text
+    assert fake.calls == 1
+
+
+def test_the_lost_audit_flag_follows_the_last_write_in_lock_order(state, monkeypatch):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    guard, calls = threading.Lock(), []
+
+    def flaky(record):
+        with guard:
+            calls.append(record)
+            return len(calls) > 1  # the first write in lock order fails
+
+    monkeypatch.setattr(audit, "audit_write", flaky)
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        jobs = [
+            pool.submit(adapters._apply_toggle, name, False)
+            for name in ("music", "photos")
+        ]
+        for job in jobs:
+            job.result()
+    assert len(calls) == 2 and adapters._audit_lost is False
+    assert set(_file().read_text().split(",")) == {"music", "photos"}
