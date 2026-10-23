@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.1"
 current_phase_name: "Bug fixes — dashboard follow-ups (#427, #428, #430)"
 status: executing
-stopped_at: "Phase 05.1 planned: 7 plans in 5 waves (PR docs/phase-05.1-records); ready to execute"
-last_updated: "2026-10-23T13:08:39.856Z"
+stopped_at: "Phase 05.1 executed: 7/7 plans merged (PRs #435-#448; #427 #428 #430 closed); verification human_needed, 6 UAT items in 05.1-UAT.md need the rebuilt .app — next /gsd-verify-work 05.1"
+last_updated: "2026-10-23T15:03:03.691Z"
 last_activity: 2026-10-23
 last_activity_desc: Phase 05.1 execution started
-state_head: 184b2e6e16c03487e4f528a633690b04b83ed3dd
+state_head: d2ffbf50699da150e53e832d1a33a762cd713f4f
 progress:
   total_phases: 10
   completed_phases: 8
@@ -183,5 +183,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-21T12:19:18.187Z
-Stopped at: Phase 05.1 planned (7 plans, 5 waves); ready to execute once the records PR has merged
+Stopped at: Phase 05.1 executed: 7/7 plans merged (PRs #435-#448; #427 #428 #430 closed); verification human_needed, 6 UAT items in 05.1-UAT.md need the rebuilt .app — next /gsd-verify-work 05.1
 Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md
