@@ -101,7 +101,7 @@ def _badge(key: str) -> Safe:
         return Safe("")
     st = registry.adapter_status()
     registered, configured = set(st["registered"]), set(st["configured"])
-    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    known = registry.adapter_names()
     pending = len(registered ^ configured)
     inner = (
         h('<span class="chip pending">{} pending</span>', pending)

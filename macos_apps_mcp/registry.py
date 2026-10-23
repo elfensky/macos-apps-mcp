@@ -174,6 +174,11 @@ def by_adapter(adapter: str) -> frozenset[str]:
     return frozenset(n for n, r in TOOLS.items() if r.adapter == adapter)
 
 
+def adapter_names() -> list[str]:
+    """The adapter names the registry holds, sorted; read per call (#430 IN-02)."""
+    return sorted({r.adapter for r in TOOLS.values() if r.adapter})
+
+
 def outbound_status() -> dict[str, list[str]]:
     """The two outbound facts that can DISAGREE (C6): ``registered`` = the adapters
     whose send tools actually got registered at import; ``configured`` = what the
@@ -209,9 +214,8 @@ def adapter_status() -> dict[str, list[str]]:
     ``adapters_off`` file changes but the daemon keeps running — doctor reports the
     delta as ``adapters_pending`` with a restart directive. Every adapter has a read
     tool, so under ``MACOS_APPS_READ_ONLY`` an enabled adapter still shows up."""
-    names = {r.adapter for r in TOOLS.values() if r.adapter}
     registered = {r.adapter for r in TOOLS.values() if r.adapter and r.registered}
     return {
         "registered": sorted(registered),
-        "configured": sorted(n for n in names if tiers.adapter_enabled(n)),
+        "configured": sorted(n for n in adapter_names() if tiers.adapter_enabled(n)),
     }

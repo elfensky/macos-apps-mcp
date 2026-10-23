@@ -424,7 +424,7 @@ def diagnose(request: bool = False) -> dict:
     # Adapter deny-list (PLAT-01, D-03/D-05): `adapters` is what this process serves,
     # `adapters_off` what it does not. No CLI twin — the note names the file instead.
     ad = registry.adapter_status()
-    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    known = set(registry.adapter_names())
     deployment["adapters"] = ad["registered"]
     deployment["adapters_off"] = sorted(known - set(ad["registered"]))
     deployment["adapters_note"] = (
