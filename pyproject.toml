@@ -71,7 +71,7 @@ dev = [
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
     "python-dateutil>=2.9.0.post0",
-    "ruff>=0.15,<0.17",
+    "ruff>=0.15,<0.18",
 ]
 # #373: the build backend and its dependencies, hash-locked in uv.lock. build_app.sh
 # exports this group as the build constraints. Not a default group, so `uv sync` never
