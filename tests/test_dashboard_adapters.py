@@ -66,7 +66,9 @@ def test_adapters_page_lists_every_adapter_alphabetically_as_token_forms(state):
     r = _get()
     assert r.status_code == 200
     names = re.findall(
-        r'<button type="submit" class="switch"[^>]*aria-label="(\w+)"', r.text
+        r'<button type="submit" class="switch"[^>]*'
+        r'aria-label="(\w+) adapter, (?:on|off)"',
+        r.text,
     )
     assert names == [a.capitalize() for a in ADAPTERS] and len(names) == 10
     assert (
@@ -260,7 +262,7 @@ def test_unreadable_file_reads_every_switch_off_and_refuses_writes(state):
         assert page.count('aria-pressed="false"') == 10
         assert 'aria-pressed="true"' not in page
         assert "cannot be read" in page
-        assert ">*<" not in page and 'aria-label="*"' not in page
+        assert ">*<" not in page and 'aria-label="* adapter' not in page
         for r in (_toggle("photos", "0"), _post(action="discard")):
             assert r.status_code == 409 and "permissions" in r.text
         assert _records() == []
@@ -340,7 +342,9 @@ def test_grant_state_is_unknown_when_it_cannot_tell():
 
 def _row_html(page, label):
     (row,) = [
-        r for r in page.split('<div class="row">') if f'aria-label="{label}"' in r
+        r
+        for r in page.split('<div class="row">')
+        if f'aria-label="{label} adapter, ' in r
     ]
     return row
 
@@ -588,3 +592,9 @@ def test_guard_refusals_stay_plain_text(state):
     r = _dashboard.request("GET", "/adapters", cookie=False)
     assert r.status_code == 403 and r.headers["content-type"].startswith("text/plain")
     assert "b-shell" not in r.text
+
+
+def test_the_switch_label_names_the_adapter_and_its_state(state):
+    assert 'aria-pressed="true" aria-label="Photos adapter, on"' in _get().text
+    _toggle("photos", "0")
+    assert 'aria-pressed="false" aria-label="Photos adapter, off"' in _get().text
