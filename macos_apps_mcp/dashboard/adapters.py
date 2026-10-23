@@ -95,14 +95,15 @@ def _pending(known: list[str]) -> list[tuple[str, bool]]:
     ]
 
 
-def _bar(token: str, pending: list[tuple[str, bool]], locked: bool) -> Safe:
+def _bar(token: str, pending: list[tuple[str, bool]]) -> Safe:
     n = len(pending)
     what = ", ".join(f"{a.capitalize()} {'on' if on else 'off'}" for a, on in pending)
     return h(
         '<div class="restart-bar"><div class="grow"><b>{}</b> <span class="muted">'
         "{}. A restart drops open MCP connections for a moment and stops a Mail batch "
         "that is running; its receipt and backups stay.</span></div>"
-        "{}"
+        '<form method="post" action="/adapters">{}'
+        '<button class="btn" type="submit">Discard</button></form>'
         '<form method="post" action="/restart">{}'
         '<button class="btn primary" type="submit">Restart daemon</button>'
         "</form></div>",
@@ -110,13 +111,7 @@ def _bar(token: str, pending: list[tuple[str, bool]], locked: bool) -> Safe:
         if n == 1
         else f"{n} changes wait for a restart.",
         what,
-        Safe("")
-        if locked
-        else h(
-            '<form method="post" action="/adapters">{}'
-            '<button class="btn" type="submit">Discard</button></form>',
-            _hidden(token, action="discard"),
-        ),
+        _hidden(token, action="discard"),
         _hidden(token),
     )
 
@@ -183,7 +178,23 @@ _RESTARTING_BAR = Safe(
 )
 
 
-async def _render(request, *, restarting: bool = False):
+def _banner(notice: str | None, why: str | None) -> Safe:
+    """The one warning: a refusal with a way back, else the standing lock reason."""
+    if notice:
+        return h(
+            '<div class="banner warn"><div>{} '
+            '<a href="/adapters">Back to the switches</a></div></div>\n',
+            notice,
+        )
+    return h('<div class="banner warn"><div>{}</div></div>\n', why) if why else Safe("")
+
+
+async def _render(
+    request, *, restarting: bool = False, status: int = 200, notice: str | None = None
+):
+    """The Adapters page. ``notice`` is a refusal (409 lock, 400 bad action): it takes
+    the banner with a way back, under ``status``. Only handlers the Guard let through
+    call this, so no unauthenticated caller reads the sidebar's counts."""
     token = request.app.state.token
     known = registry.adapter_names()
     configured = set(registry.adapter_status()["configured"])
@@ -209,8 +220,8 @@ async def _render(request, *, restarting: bool = False):
     )
     if restarting:
         top = _RESTARTING_BAR
-    elif pending:
-        top = _bar(token, pending, why is not None)
+    elif pending and why is None:  # D-20 / O5: Restart locks with the switches
+        top = _bar(token, pending)
     else:
         top = Safe("")
     body = h(
@@ -222,7 +233,7 @@ async def _render(request, *, restarting: bool = False):
         "~/.local/state/macos-apps-mcp/adapters_off. Each change is logged in "
         "audit.jsonl with caller <b>dashboard</b>.</p>\n",
         top,
-        h('<div class="banner warn"><div>{}</div></div>\n', why) if why else Safe(""),
+        _banner(notice, why),
         " restarting" if restarting else "",
         rows,
         _outbound(),
@@ -233,6 +244,7 @@ async def _render(request, *, restarting: bool = False):
         active="adapters",
         body=body,
         refresh=(12, "/adapters") if restarting else None,
+        status=status,
     )
 
 
@@ -287,7 +299,7 @@ async def toggle(request):
     """``POST /adapters``: ``action=toggle`` (adapter, on) or ``action=discard``."""
     why = _lock_reason()
     if why is not None:
-        return PlainTextResponse(why, 409)
+        return await _render(request, status=409, notice=why)
     form = parse_qs((await request.body()).decode("utf-8", "replace"))
     action, adapter, on = (form.get(k, [""])[0] for k in ("action", "adapter", "on"))
     if action == "discard":
@@ -297,9 +309,13 @@ async def toggle(request):
     ):
         why = await run_in_threadpool(_apply_toggle, adapter, on == "1")
     else:
-        return PlainTextResponse("Unknown action, adapter or value.", 400)
+        return await _render(
+            request,
+            status=400,
+            notice="Unknown action, adapter or value. Nothing changed.",
+        )
     if why is not None:
-        return PlainTextResponse(why, 409)
+        return await _render(request, status=409, notice=why)
     return RedirectResponse("/adapters", 303)
 
 
@@ -309,6 +325,8 @@ async def restart(request):
     hook = request.app.state.restart
     if hook is None:
         return PlainTextResponse("restart is available only in the daemon", 503)
+    if (why := _lock_reason()) is not None:  # D-20: before the hook and the audit log
+        return await _render(request, status=409, notice=why)
 
     def go() -> None:
         if hook():  # False while a restart is already under way: one exit, one record
