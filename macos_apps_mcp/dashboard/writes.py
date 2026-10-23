@@ -705,8 +705,7 @@ def _view(request) -> tuple[str, bool, str]:
     params = request.query_params
     flag = params.getlist("previews")
     filt = params.get("filter", "all")
-    adapters = {r.adapter for r in registry.TOOLS.values() if r.adapter}
-    app = filt.startswith("app:") and filt[4:] in adapters
+    app = filt.startswith("app:") and filt[4:] in registry.adapter_names()
     if filt not in ("all", "receipt", "outbound") and not app:
         filt = "all"
     return params.get("q", ""), not flag or flag[-1] == "1", filt

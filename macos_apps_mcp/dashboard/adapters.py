@@ -45,11 +45,6 @@ def _lock_reason() -> str | None:
     return None
 
 
-def known_adapters() -> list[str]:
-    """The adapter names the registry holds, sorted; read per call."""
-    return sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
-
-
 def _sub(adapter: str, calls: dict[str, dict]) -> str:
     """``Automation · Full Disk Access · 27 tools · 3 calls`` (no calls: left out)."""
     tools = [n for n, r in registry.TOOLS.items() if r.adapter == adapter]
@@ -190,7 +185,7 @@ _RESTARTING_BAR = Safe(
 
 async def _render(request, *, restarting: bool = False):
     token = request.app.state.token
-    known = known_adapters()
+    known = registry.adapter_names()
     configured = set(registry.adapter_status()["configured"])
     pending = _pending(known)
     after = dict(pending)
@@ -267,7 +262,8 @@ def _apply_toggle(adapter: str, on: bool) -> str | None:
     with _write_lock:
         if (why := _lock_reason()) is not None:
             return why
-        off = tiers.adapters_off() & set(known_adapters())  # known names only (D-01)
+        known = set(registry.adapter_names())  # known names only (D-01)
+        off = tiers.adapters_off() & known
         off = off - {adapter} if on else off | {adapter}
         deploy.write_adapters_off(off)
         _log("toggle", {"adapter": adapter, "on": on}, adapter)
@@ -280,7 +276,7 @@ def _apply_discard() -> str | None:
         if (why := _lock_reason()) is not None:
             return why
         off = sorted(
-            set(known_adapters()) - set(registry.adapter_status()["registered"])
+            set(registry.adapter_names()) - set(registry.adapter_status()["registered"])
         )
         deploy.write_adapters_off(off)
         _log("discard", {"adapters_off": off}, None)
@@ -296,7 +292,9 @@ async def toggle(request):
     action, adapter, on = (form.get(k, [""])[0] for k in ("action", "adapter", "on"))
     if action == "discard":
         why = await run_in_threadpool(_apply_discard)
-    elif action == "toggle" and adapter in known_adapters() and on in ("0", "1"):
+    elif (
+        action == "toggle" and adapter in registry.adapter_names() and on in ("0", "1")
+    ):
         why = await run_in_threadpool(_apply_toggle, adapter, on == "1")
     else:
         return PlainTextResponse("Unknown action, adapter or value.", 400)
