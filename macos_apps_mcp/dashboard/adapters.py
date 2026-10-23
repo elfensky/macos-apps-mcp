@@ -9,6 +9,7 @@ and never counts as a tool call in the usage tally (D-15).
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from datetime import datetime
@@ -23,7 +24,17 @@ from . import grants
 from .html import Safe, h, join
 from .html import page as render_page
 
+log = logging.getLogger(__name__)
+
 _write_lock = threading.Lock()  # one read-modify-write of the file at a time
+# The last dashboard audit write failed. Assigned only under ``_write_lock``; shown on
+# the Adapters page until the next good write (owner default O3, #430 WR-06).
+_audit_lost = False
+_LOST_NOTE = (
+    "The last change was applied, but its audit record could not be written to "
+    "audit.jsonl, so the Writes page does not show it. Check free disk space and the "
+    "permissions of ~/.local/state/macos-apps-mcp."
+)
 _ENV_NOTE = (
     "MACOS_APPS_ADAPTERS_OFF is set for this daemon and wins over the file. "
     "Unset it to use these switches."
@@ -191,6 +202,12 @@ def _banner(notice: str | None, why: str | None) -> Safe:
     return h('<div class="banner warn"><div>{}</div></div>\n', why) if why else Safe("")
 
 
+def _lost_banner() -> Safe:
+    if not _audit_lost:
+        return Safe("")
+    return h('<div class="banner warn"><div>{}</div></div>\n', _LOST_NOTE)
+
+
 async def _render(
     request, *, restarting: bool = False, status: int = 200, notice: str | None = None
 ):
@@ -235,7 +252,7 @@ async def _render(
         "~/.local/state/macos-apps-mcp/adapters_off. Each change is logged in "
         "audit.jsonl with caller <b>dashboard</b>.</p>\n",
         top,
-        _banner(notice, why),
+        join([_banner(notice, why), _lost_banner()]),
         " restarting" if restarting else "",
         rows,
         _outbound(),
@@ -254,8 +271,10 @@ async def page(request):
     return await _render(request)
 
 
-def _log(op: str, args: dict, target_id: str | None) -> None:
-    audit.audit_write(
+def _log(op: str, args: dict, target_id: str | None) -> bool:
+    """Write the dashboard audit record; call under ``_write_lock``."""
+    global _audit_lost
+    ok = audit.audit_write(
         {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "tool": "dashboard",
@@ -268,6 +287,10 @@ def _log(op: str, args: dict, target_id: str | None) -> None:
             "after": None,
         }
     )
+    _audit_lost = not ok
+    if not ok:
+        log.warning("dashboard %s applied but its audit record was not written", op)
+    return ok
 
 
 def _apply_toggle(adapter: str, on: bool) -> str | None:
@@ -297,6 +320,11 @@ def _apply_discard() -> str | None:
     return None
 
 
+def _log_restart() -> None:
+    with _write_lock:
+        _log("restart", {}, None)
+
+
 async def toggle(request):
     """``POST /adapters``: ``action=toggle`` (adapter, on) or ``action=discard``."""
     why = _lock_reason()
@@ -322,18 +350,18 @@ async def toggle(request):
 
 
 async def restart(request):
-    """``POST /restart``: answer first, then ask the daemon to exit and log the restart
-    it armed (D-16)."""
+    """``POST /restart``: log the restart once per daemon process, answer, then ask
+    the daemon to exit after the response (D-16). The record comes first so the
+    restarting page can show a lost one (#430)."""
     hook = request.app.state.restart
     if hook is None:
         return PlainTextResponse("restart is available only in the daemon", 503)
     if (why := _lock_reason()) is not None:  # D-20: before the hook and the audit log
         return await _render(request, status=409, notice=why)
 
-    def go() -> None:
-        if hook():  # False while a restart is already under way: one exit, one record
-            _log("restart", {}, None)
-
+    if not getattr(request.app.state, "restart_logged", False):  # one exit, one record
+        request.app.state.restart_logged = True
+        await run_in_threadpool(_log_restart)
     response = await _render(request, restarting=True)
-    response.background = BackgroundTask(go)  # runs after the body is sent
+    response.background = BackgroundTask(hook)  # runs after the body is sent
     return response

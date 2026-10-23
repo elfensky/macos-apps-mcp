@@ -58,10 +58,11 @@ def _audit_path() -> Path:
     return state_dir() / "audit.jsonl"
 
 
-def audit_write(record: dict) -> None:
+def audit_write(record: dict) -> bool:
     """Append one JSON record to the audit log. NEVER raises — auditing must not fail a
     user's write, so a logging error (disk full, permission, missing dir) is
-    swallowed."""
+    swallowed. Returns True after the append, False when the write failed; callers
+    may ignore the value (the dashboard shows a lost record, #430)."""
     try:
         path = _audit_path()
         if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
@@ -70,6 +71,8 @@ def audit_write(record: dict) -> None:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa: BLE001 — audit must never break a write
         log.debug("audit_write failed: %s", e)
+        return False
+    return True
 
 
 def _instant(ts) -> datetime | None:
