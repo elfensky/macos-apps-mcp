@@ -33,14 +33,22 @@ from mcp.types import (
     JSONRPCResponse,
 )
 
+from .text import sanitize_line
+
 log = logging.getLogger(__name__)
 
 DASHBOARD_HOST = "127.0.0.1"
 # Tests set this to 0 (an ephemeral port); no override exists for the daemon itself.
 DASHBOARD_PORT = 47632
-# `http://127.0.0.1:<port>`, `not bound: <reason>`, `not built: <reason>` or the
-# unusable-key text, set by serve() and read by doctor.
+# `http://127.0.0.1:<port>`, `not bound: <reason>`, `not built: <reason>` or
+# KEY_UNUSABLE_STATE, set by serve() and read by doctor.
 dashboard_state: str | None = None
+# shortcut: 30 raw chars keep the worst-case doctor report under its 7000-char
+# budget even when every char JSON-escapes to two; raise it together with that budget.
+NOT_BUILT_MAX = 30
+KEY_UNUSABLE_STATE = (
+    "key unusable: pages answer 503; delete dashboard_key, restart daemon"
+)
 
 
 class AlreadyRunning(Exception):
@@ -340,7 +348,8 @@ def serve() -> None:
                 )
             except Exception as e:  # noqa: BLE001 — a dashboard fault must not take MCP down (WR-05)
                 log.warning("dashboard not built: %s", e, exc_info=True)
-                dashboard_state = f"not built: {(str(e) or type(e).__name__)[:120]}"
+                msg = sanitize_line(str(e) or type(e).__name__)[:NOT_BUILT_MAX]
+                dashboard_state = f"not built: {msg}"
                 tcp.close()
                 tcp = None
             else:
@@ -348,8 +357,7 @@ def serve() -> None:
                 dashboard_state = (
                     f"http://{DASHBOARD_HOST}:{port}"
                     if key is not None
-                    else "key unusable: every page answers 503; "
-                    "remove the dashboard_key file and restart the daemon"
+                    else KEY_UNUSABLE_STATE
                 )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
