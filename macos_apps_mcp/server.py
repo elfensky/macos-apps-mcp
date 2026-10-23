@@ -42,6 +42,10 @@ from .lifecycle import install_lifecycle_guards
 
 mcp = FastMCP("macos-apps-mcp")
 
+# One deny-list snapshot per import: a file change mid-import must not register part
+# of an adapter (IN-05).
+_ADAPTERS_OFF = tiers.adapters_off()
+
 _reminders = RemindersAdapter()
 _reminder_delete_snapshot = ReminderDeleteSnapshotter()
 _calendar = CalendarAdapter()
@@ -162,7 +166,7 @@ def _tool(
                 f.__doc__ = (f.__doc__ or "") + _MAIL_AUTOSAVE_DOC
         # PLAT-01 (D-02): the adapter deny-list gates every tier; meta tools
         # (adapter=None) are never gated.
-        on = adapter is None or tiers.adapter_enabled(adapter)
+        on = adapter is None or tiers.adapter_enabled(adapter, off=_ADAPTERS_OFF)
         if tier == "send":
             registered = on and tiers.allow_send(adapter)
         elif tier == "read":
