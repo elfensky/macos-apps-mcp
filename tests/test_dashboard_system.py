@@ -24,7 +24,7 @@ from macos_apps_mcp.adapters import mail_recover
 from macos_apps_mcp.dashboard import grants, health, recovery
 from tests._dashboard import get
 
-BUNDLE = deploy._BUNDLE_ID
+BUNDLE = deploy.BUNDLE_ID
 BOTH_READ = {"user": None, "system": None}
 
 

@@ -306,7 +306,7 @@ def version(dist: str = "macos-apps-mcp") -> str:
 _BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
 
 
-def _build_stamp() -> str:
+def build_stamp() -> str:
     """Which BUILD is serving this call (#143) — `version` alone cannot see a
     same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
     `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
@@ -488,7 +488,7 @@ def diagnose(request: bool = False) -> dict:
 
     return {
         "version": version(),
-        "build": _build_stamp(),
+        "build": build_stamp(),
         # #285: a bundle once shipped another mcp than uv.lock; this shows the bundled
         # versions without opening the bundle.
         "libs": {name: version(name) for name in ("mcp", "fastmcp")},
