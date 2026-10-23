@@ -636,6 +636,7 @@ def test_a_restart_whose_audit_record_was_lost_says_so_on_the_restarting_page(
     r = _post("/restart", app=_restart_app(fake))
     assert r.status_code == 200 and "Restarting the daemon…" in r.text
     assert LOST in r.text
+    assert 'http-equiv="refresh"' not in r.text  # PM-26: the timer must not wipe it
     assert fake.calls == 1
 
 
