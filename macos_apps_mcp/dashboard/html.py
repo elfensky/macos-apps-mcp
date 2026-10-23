@@ -111,10 +111,11 @@ def _badge(key: str) -> Safe:
     return h('<span class="count">{}</span>', inner)
 
 
-def _nav(active: str, key: str, href: str, label, badge) -> Safe:
+def _nav(active: str, key: str, href: str, label, badge, *, extra: str = "") -> Safe:
     on = key == active
     return h(
-        '<a class="nav-item{}" href="{}"{}>{}{}</a>',
+        '<a class="nav-item{}{}" href="{}"{}>{}{}</a>',
+        extra,
         " active" if on else "",
         href,
         Safe(' aria-current="page"') if on else Safe(""),
@@ -171,9 +172,14 @@ def _sidebar(active: str, counts: dict | None = None) -> Safe:
         if g != group:
             group = g
             parts.append(h("<h6>{}</h6>", g))
-        parts.append(_nav(active, key, href, label, _badge(key)))
+        # " system": the phone strip leads with these (CSS ``order``, not DOM order)
+        parts.append(_nav(active, key, href, label, _badge(key), extra=" system"))
     foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', doctor.version())
-    return h('<aside class="sidebar">{}{}</aside>', join(parts), foot)
+    return h(
+        '<aside class="sidebar"><nav aria-label="Dashboard">{}</nav>{}</aside>',
+        join(parts),
+        foot,
+    )
 
 
 def page(
@@ -204,14 +210,19 @@ def page(
         if refresh
         else Safe("")
     )
+    target = Safe(' id="content" tabindex="-1"')  # the skip link lands here
     if mode == "list":
+        # the open detail is the target when a write is selected (the phone hides
+        # the list then), else the list column
         content = h(
-            '<div class="b-list">{}</div><div class="b-detail">{}</div>',
+            '<div class="b-list"{}>{}</div><main class="b-detail"{}>{}</main>',
+            Safe("") if selected else target,
             listing or Safe(""),
+            target if selected else Safe(""),
             body,
         )
     elif mode == "page":
-        content = h('<main class="b-page">{}</main>', body)
+        content = h('<main class="b-page"{}>{}</main>', target, body)
     else:
         content = body
     return HTMLResponse(
@@ -221,6 +232,7 @@ def page(
             "{}<title>{} · macos-apps-mcp</title>\n"
             '<link rel="stylesheet" href="/static/dashboard.css">\n'
             '<script src="/static/dashboard.js" defer></script>\n</head>\n<body>\n'
+            '<a class="skip" href="#content">Skip to content</a>\n'
             '<div class="b-shell{}">{}{}</div>\n</body>\n</html>\n',
             meta,
             title,
