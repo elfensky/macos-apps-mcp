@@ -490,3 +490,101 @@ def test_the_row_counts_registered_tools_only(state, monkeypatch):
         rec = dataclasses.replace(registry.TOOLS[name], registered=False)
         monkeypatch.setitem(registry.TOOLS, name, rec)
     assert "Full Disk Access · 0 tools</div>" in _row_html(_get().text, "Photos")
+
+
+# --- refusals in the frame; Restart locks with the switches (#428) --------------------
+
+_BACK = '<a href="/adapters">Back to the switches</a>'
+_BAD = "Unknown action, adapter or value. Nothing changed."
+
+
+def _framed(r, status, needle):
+    assert r.status_code == status
+    assert r.headers["content-type"].startswith("text/html")
+    assert 'class="b-shell' in r.text and 'class="banner warn"' in r.text
+    assert _BACK in r.text
+    assert r.text.count(needle) == 1
+
+
+@pytest.mark.parametrize(
+    "case", ["env", "file", "discard", "unknown", "empty", "bad_value"]
+)
+def test_a_refused_toggle_renders_in_the_frame_with_a_way_back(
+    state, monkeypatch, case
+):
+    if case in ("env", "discard"):
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos")
+    if case == "file":
+        _file().parent.mkdir(parents=True)
+        _file().write_text("music")
+        _file().chmod(0)
+    try:
+        if case in ("env", "file"):
+            send, status = (lambda: _toggle("music", "0")), 409
+        elif case == "discard":
+            send, status = (lambda: _post(action="discard")), 409
+        elif case == "unknown":
+            send, status = (lambda: _toggle("nosuch", "0")), 400
+        elif case == "bad_value":
+            send, status = (lambda: _toggle("photos", "2")), 400
+        else:
+            send, status = (lambda: _post()), 400  # only the token
+        needle = {
+            "file": "permissions",
+            "env": "MACOS_APPS_ADAPTERS_OFF is set",
+            "discard": "MACOS_APPS_ADAPTERS_OFF is set",
+        }.get(case, _BAD)
+        for _ in range(2):  # a repeated refusal answers the same and writes nothing
+            _framed(send(), status, needle)
+    finally:
+        if case == "file":
+            _file().chmod(0o600)
+    if case == "file":
+        assert _file().read_text() == "music"  # the unreadable file's intent survived
+    elif case in ("unknown", "empty", "bad_value"):
+        assert not _file().exists()
+    assert _records() == []
+
+
+def test_a_bad_action_never_echoes_the_posted_value(state):
+    r = _post(action="toggle", adapter="<script>x</script>", on="1")
+    _framed(r, 400, _BAD)
+    assert "<script>x" not in r.text
+
+
+@pytest.mark.parametrize("lock", ["env", "file"])
+def test_restart_is_locked_with_the_switches(state, monkeypatch, lock):
+    if lock == "env":
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos")
+    else:
+        _file().parent.mkdir(parents=True)
+        _file().write_text("music")
+        _file().chmod(0)
+    fake = _OneShot()
+    app = _restart_app(fake)
+    try:
+        # A pending change makes the bar show when nothing locks (the lock hides it).
+        monkeypatch.setattr(
+            registry,
+            "adapter_status",
+            lambda: {"registered": ADAPTERS, "configured": ADAPTERS[1:]},
+        )
+        page = _get(app=app).text
+        assert 'action="/restart"' not in page and 'class="restart-bar"' not in page
+        r = _post("/restart", app=app)
+        _framed(r, 409, "permissions" if lock == "file" else "is set for this daemon")
+    finally:
+        if lock == "file":
+            _file().chmod(0o600)
+    assert fake.calls == 0 and _records() == []
+
+
+def test_guard_refusals_stay_plain_text(state):
+    r = _call(
+        "POST", "/adapters", content=urlencode({"action": "discard"}), headers=FORM
+    )
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/plain")
+    assert "b-shell" not in r.text
+    r = _dashboard.request("GET", "/adapters", cookie=False)
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/plain")
+    assert "b-shell" not in r.text
