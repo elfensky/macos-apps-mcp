@@ -378,8 +378,18 @@ def test_diagnose_shape(monkeypatch, tmp_path):
 def test_version_reads_any_distribution():
     from importlib.metadata import version
 
-    assert doc._version("mcp") == version("mcp")
-    assert doc._version("no-such-dist-291") == "unknown"
+    assert doc.version("mcp") == version("mcp")
+    assert doc.version("no-such-dist-291") == "unknown"
+
+
+def test_the_dashboard_footer_names_the_doctor_version(monkeypatch):
+    """#430 IN-02: the sidebar footer and the Health page share one version lookup."""
+    from tests import _dashboard
+
+    monkeypatch.setattr(doc, "version", lambda dist="macos-apps-mcp": "9.9.9")
+    r = _dashboard.get("/usage")
+    assert r.status_code == 200
+    assert "v9.9.9 · 127.0.0.1 only" in r.text
 
 
 def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
