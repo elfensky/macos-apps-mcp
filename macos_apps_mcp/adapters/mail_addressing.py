@@ -436,6 +436,30 @@ ON_MY_MAC = "On My Mac"
 _LOCAL_ACCOUNT_ALIASES = frozenset({ON_MY_MAC.casefold(), "local"})
 
 
+def cached_account_names() -> dict[str, str]:
+    """A copy of the account-name cache — and nothing else. It reads the dict and never
+    runs osascript, so a dashboard page load cannot launch Mail or raise a TCC prompt
+    (#427). Empty until a Mail tool has filled the cache (for example after a daemon
+    restart)."""
+    return dict(_ACCOUNT_MAP_CACHE or {})
+
+
+def mailbox_label(url: str) -> str:
+    """``Personal › [Gmail]/Trash`` for a mailbox url — the account name from the cached
+    map, the folder decoded. Anything it cannot name (not a url, an unknown account, a
+    cold cache) comes back unchanged, so the caller shows the raw value (#427)."""
+    parsed = mailbox_url.parse(url) if isinstance(url, str) else None
+    if not parsed or not parsed[1]:
+        return url
+    scheme, uuid, mailbox_path = parsed
+    name = (
+        ON_MY_MAC if scheme.casefold() == "local" else cached_account_names().get(uuid)
+    )
+    if not name:
+        return url
+    return f"{name} › {mailbox_path}" if mailbox_path else name
+
+
 def local_account_id() -> str | None:
     """The account segment mailboxes.url embeds for the On My Mac store — the exact
     value build_header_query's ``account`` clause anchors on for a ``local://``
