@@ -20,6 +20,12 @@ surface may still shift between minor versions.
   and a way back, under the same status code; Restart locks with the switches; the switch
   label names the adapter and its state; a skip link, a navigation landmark, 44 px targets
   and the System pages first on a phone.
+- **Dashboard resilience and honest records** (#430) — a dashboard that cannot be built no
+  longer takes MCP down (`doctor` says `not built: …`), and `doctor` names the dashboard
+  URL only when a page can answer; a toggle, Discard or Restart whose audit record could
+  not be written says so on the Adapters page; dashboard toggles and restarts show as
+  operator actions, with no `dry_run` row and no model chip; the daemon reads its adapter
+  deny-list once per start.
 
 ## [0.15.0] - 2026-10-22 — Photos and the dashboard
 
