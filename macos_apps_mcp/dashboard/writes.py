@@ -65,6 +65,7 @@ _CHIP_CLASS = {
     "changes": "chip destructive",
     "sends": "chip outbound",
     "preview": "chip",
+    "operator": "chip",
 }
 
 
@@ -80,7 +81,7 @@ class Row:
     tier: str | None
     kind: str  # "write" | "dashboard" | "batch"
     title: str
-    chip: str  # adds | changes | sends | preview
+    chip: str  # adds | changes | sends | preview | operator
     preview: bool
     record: dict  # the record the row is about (the middleware or dashboard line)
     records: tuple[dict, ...]  # every raw audit line behind the row, in file order
@@ -301,6 +302,7 @@ def _write_row(rec: dict, ts: str, n: int, defaults: dict[str, bool]) -> Row:
     preview = _is_preview(rec, defaults)
     reg = registry.TOOLS.get(tool)
     tier = reg.tier if reg else None
+    chip = "preview" if preview else _TIER_CHIP.get(tier, "changes")
     return Row(
         ts=ts,
         n=n,
@@ -310,7 +312,7 @@ def _write_row(rec: dict, ts: str, n: int, defaults: dict[str, bool]) -> Row:
         tier=tier,
         kind="dashboard" if tool == "dashboard" else "write",
         title=_title(rec, preview),
-        chip="preview" if preview else _TIER_CHIP.get(tier, "changes"),
+        chip="operator" if tool == "dashboard" else chip,
         preview=preview,
         record=rec,
         records=(rec,),
@@ -508,9 +510,14 @@ def _changed(row: Row) -> Safe:
 def _asked(row: Row) -> Safe:
     rec = row.record
     args = _d(rec.get("args"))
-    rows = [h('<dt>tool</dt><dd class="mono">{}</dd>', row.tool)]
+    operator = row.kind == "dashboard"  # the operator's own action, not a model call
+    rows = [
+        h("<dt>action</dt><dd>{}</dd>", _op(rec) or "")
+        if operator
+        else h('<dt>tool</dt><dd class="mono">{}</dd>', row.tool)
+    ]
     rows += [h("<dt>{}</dt><dd>{}</dd>", k, _argval(v)) for k, v in args.items()]
-    if "dry_run" not in args:
+    if "dry_run" not in args and not operator:
         default = registry.dry_run_defaults().get(row.tool)
         rows.append(
             h(
@@ -524,8 +531,8 @@ def _asked(row: Row) -> Safe:
         if rec.get(key):
             rows.append(h("<dt>{}</dt><dd>{}</dd>", key, rec[key]))
     return h(
-        '<div class="section-label">What the model asked for</div>'
-        '<dl class="kv">{}</dl>',
+        '<div class="section-label">{}</div><dl class="kv">{}</dl>',
+        "What the operator did" if operator else "What the model asked for",
         join(rows),
     )
 
