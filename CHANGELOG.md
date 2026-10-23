@@ -24,8 +24,8 @@ surface may still shift between minor versions.
   longer takes MCP down (`doctor` says `not built: …`), and `doctor` names the dashboard
   URL only when a page can answer; a toggle, Discard or Restart whose audit record could
   not be written says so on the Adapters page; dashboard toggles and restarts show as
-  operator actions, with no `dry_run` row and no model chip; the daemon reads its adapter
-  deny-list once per start.
+  operator actions, with no `dry_run` row and no model chip; tool registration takes one
+  adapter deny-list snapshot per server import.
 
 ## [0.15.0] - 2026-10-22 — Photos and the dashboard
 
