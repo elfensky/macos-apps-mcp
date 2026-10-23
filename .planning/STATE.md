@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "05.1"
-current_phase_name: Bug fixes — dashboard follow-ups (#427, #428, #430)
-status: planning
-stopped_at: "Phase 05 complete; Phase 05.1 (dashboard follow-ups #427, #428, #430) inserted, ready to plan"
-last_updated: "2026-10-23T08:20:10.262Z"
+current_phase_name: "Bug fixes — dashboard follow-ups (#427, #428, #430)"
+status: executing
+stopped_at: "Phase 05.1 planned: 7 plans in 5 waves (PR docs/phase-05.1-records); ready to execute"
+last_updated: "2026-10-23T09:58:02.366Z"
 last_activity: 2026-10-23
-last_activity_desc: Phase 05 complete; Phase 05.1 inserted for the dashboard follow-ups
-state_head: 8c8f605fda760e04d2d2fa37222273e943aa1533
+last_activity_desc: Phase 05.1 planned — 7 plans in 5 waves for #427, #428, #430
+state_head: 1ce82eef90094dd90d75c5027068c731f070f80f
 progress:
   total_phases: 10
   completed_phases: 7
-  total_plans: 65
+  total_plans: 72
   completed_plans: 65
   percent: 88
 ---
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-21)
 
 ## Current Position
 
-Phase: 05.1 — Bug fixes — dashboard follow-ups (#427, #428, #430) (INSERTED)
+Phase: 05.1 (Bug fixes — dashboard follow-ups (#427, #428, #430)) — READY TO EXECUTE
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-23 — Phase 05 complete; Phase 05.1 inserted for the dashboard follow-ups
+Status: Ready to execute
+Last activity: 2026-10-23 — Phase 05.1 planned: 7 plans in 5 waves for #427, #428, #430
 
 Progress: [█████████░] 88%
 
@@ -184,5 +184,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-21T12:19:18.187Z
-Stopped at: Phase 05 complete; Phase 05.1 (dashboard follow-ups #427, #428, #430) inserted, ready to plan
+Stopped at: Phase 05.1 planned (7 plans, 5 waves); ready to execute once the records PR has merged
 Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md

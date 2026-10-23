@@ -373,12 +373,36 @@ Plans:
 ### Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430) (INSERTED)
 
 **Goal**: Every bug the Phase 5 reviews left open is fixed before the next feature phase: the write-detail and recovery pages show raw `imap://` account UUIDs instead of the account name (#427); the UI review's accessibility and state findings — focus ring, contrast, bare refusals — are open (#428); the close review's deferred findings — test TCC isolation, dashboard-record rendering, `serve()` resilience to a dashboard build failure, duplicated adapter-name sets — are open (#430). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: TBD (planned from #427, #428, #430)
+**Requirements**: FIX-11, FIX-12, FIX-13
 **Depends on:** Phase 5
-**Plans:** 0 plans
+**Success Criteria** (what must be TRUE):
+
+  1. On the write detail and recovery pages a Mail mailbox shows as the account's name or address plus the decoded folder name (`Personal › INBOX`), in the batch title, the `from` sources, the destination, the target rows and the undone banner; the `imap://` URL stays internal, the name comes from the Mail adapter's process-local account cache with no native call per page load (after a daemon restart the raw URL shows until the first Mail tool call fills the cache — researcher default O1, no persisted map; the owner confirms at verify-work), every value is escaped and an unknown account falls back to the raw URL (#427).
+  2. The dashboard passes the Phase 5 UI review's actionable findings: a visible `--color-primary` focus ring; measured contrast of at least 4.5:1 for text and 3:1 for UI glyphs on the faint, success, outbound and orange tokens in light mode; refused toggles rendered in the page frame with a banner and a way back, the Restart form locked with the switches; `aria-hidden` banner glyphs, a switch label that names adapter and state, a `<nav>` landmark with a skip link, token font sizes, 44px targets and reachable System pages on phone — inside the CSP, the sketch copy and escaping (#428).
+  3. The Phase 5 close review's deferred findings are closed: no unit test opens the developer's TCC databases; a dashboard toggle or restart record renders as an operator action without a `dry_run` row or model chip; a dashboard build failure leaves MCP serving with `dashboard_state` saying why; a failed audit write of a dashboard action is visible to the operator on the next page; the adapter-name set and `_version` have one home, no cross-module underscore imports in `dashboard/`, `doctor` names the dashboard URL only when a page can answer, and the deny-list is read once (#430).
+
+**Plans:** 0/7 plans complete
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.1 to break down)
+**Wave 1**
+- [ ] 05.1-01-PLAN.md — `serve()` keeps MCP up when the dashboard cannot be built and `doctor` names no URL a page cannot answer; the suite never opens the real TCC databases; the deny-list is read once (FIX-13: WR-05, IN-04, WR-01, IN-05, #430)
+- [ ] 05.1-02-PLAN.md — one home each for `doctor.version` and `registry.adapter_names()` (FIX-13: IN-02, #430)
+- [ ] 05.1-03-PLAN.md — measured contrast tokens, a solid primary focus ring, type tokens, a preview that dims without opacity, reduced motion (FIX-12 part 1, #428)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05.1-04-PLAN.md — `dashboard/` modules use only public names of other modules, held by an AST test (FIX-13: IN-03, #430)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 05.1-05-PLAN.md — Mail mailboxes render as `Account › folder` from the process-local account cache, escaped, with the raw URL as fallback (FIX-11, closes #427)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 05.1-06-PLAN.md — refusals inside the page frame, Restart locked with the switches, a switch label with state, hidden banner glyphs, skip link and nav landmark, 44px targets and System pages first on a phone (FIX-12 part 2, closes #428)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 05.1-07-PLAN.md — a lost audit record shows on the next page; dashboard records render as operator actions (FIX-13: WR-06, WR-03, closes #430)
+
+**Cross-cutting constraints:**
+- The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #430` with no closing keyword
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
@@ -399,7 +423,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -409,5 +433,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
+| 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
+| 05.1. Dashboard Follow-ups (INSERTED) | 0/7 | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
