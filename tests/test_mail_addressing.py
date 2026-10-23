@@ -293,3 +293,43 @@ def test_resolve_mailbox_still_substring_matches_a_plain_name(blank_envelope):
     blank_envelope.add_mailbox("imap://AAAA-1/Junk%20E-mail")
     blank_envelope.add_mailbox("imap://AAAA-1/INBOX")
     assert ma.resolve_mailbox("junk") == ["imap://AAAA-1/Junk%20E-mail"]
+
+
+# --- the dashboard's mailbox label (#427) --------------------------------------------
+
+
+def test_mailbox_label_names_the_account_and_decodes_the_folder(monkeypatch):
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    assert ma.mailbox_label("imap://UUID-1/%5BGmail%5D/Trash") == (
+        "Personal › [Gmail]/Trash"
+    )
+    assert ma.mailbox_label("imap://UUID-1/INBOX") == "Personal › INBOX"
+    assert ma.mailbox_label("imap://UUID-1/Archiv%C3%A9") == "Personal › Archivé"
+    assert ma.mailbox_label("imap://UUID-1") == "Personal"
+    assert ma.mailbox_label("local://LOCAL-1/Drafts") == "On My Mac › Drafts"
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", None)
+    assert ma.mailbox_label("local://LOCAL-1/Drafts") == "On My Mac › Drafts"
+
+
+def test_mailbox_label_falls_back_to_the_raw_value(monkeypatch):
+    url = "imap://UUID-1/%5BGmail%5D/Trash"
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"OTHER": "x"})
+    assert ma.mailbox_label(url) == url
+    for cache in (None, {}):
+        monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", cache)
+        assert ma.mailbox_label(url) == url
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"": "Nameless", "UUID-1": "P"})
+    assert ma.mailbox_label("INBOX") == "INBOX"
+    assert ma.mailbox_label("") == ""
+    assert ma.mailbox_label("imap:///INBOX") == "imap:///INBOX"
+    assert ma.mailbox_label(None) is None  # a corrupt record is not a crash
+
+
+def test_cached_account_names_never_fills_the_cache(monkeypatch):
+    assert ma.cached_account_names() == {}
+    assert ma._ACCOUNT_MAP_CACHE is None
+    monkeypatch.setattr(ma, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    names = ma.cached_account_names()
+    assert names == {"UUID-1": "Personal"}
+    names["UUID-2"] = "Work"
+    assert ma._ACCOUNT_MAP_CACHE == {"UUID-1": "Personal"}

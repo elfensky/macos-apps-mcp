@@ -18,7 +18,7 @@ import pytest
 
 from macos_apps_mcp import audit, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
-from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.adapters import mail_addressing, mail_recover
 from macos_apps_mcp.dashboard import writes
 from macos_apps_mcp.errors import NativeError
 from tests._dashboard import get
@@ -402,6 +402,22 @@ def test_escape_batch_fields():
     for path in ("/", "/write/2026-09-28T09:40:12/0"):
         assert "<script>alert" not in page(path)
     assert "&lt;script&gt;" in page("/write/2026-09-28T09:40:12/0")
+
+
+def test_a_batch_title_names_the_account_and_folder(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    batch(plan={"destination": "imap://UUID-1/%5BGmail%5D/Trash"})
+    assert titles(page("/")) == ["Moved 2 messages to Personal › [Gmail]/Trash"]
+    assert mail_addressing._ACCOUNT_MAP_CACHE == {"UUID-1": "Personal"}
+
+
+def test_an_undo_batch_title_names_the_account_and_folder(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    batch(mw=False, plan={"destination": "imap://UUID-1/INBOX"})
+    put(move_line("2026-09-28T09:40:13", tool="mail_undo", receipt=RID))
+    assert titles(page("/")) == [
+        "Undid a batch: moved 2 messages back to Personal › INBOX"
+    ]
 
 
 # --- finding a write (D-11) -----------------------------------------------------
