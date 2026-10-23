@@ -44,6 +44,9 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **FIX-08**: A `FileExistsError` from `files.target_path` and an `OSError` from the `mkdir` in `files.resolve_dest` reach the client as a typed tool error with an error kind and the agent-directed text, for `save_mail_attachment`, `export_mail` and `export_photo`, so a caller can tell the never-overwrite refusal from a crash; the Mail tests that pin the raw exception types follow (#383)
 - [x] **FIX-09**: `[tool.ruff] target-version` is `py312`, matching `requires-python = ">=3.12"` (D-16), and the UP047 rewrites it raises land in the same PR with the suite and ruff green (#384)
 - [x] **FIX-10**: `export_photo` leaves no hidden staging copy behind when the process is killed (SIGTERM, orphan `_exit`, SIGKILL): the staging prefix carries the pid and a later call removes only staging directories whose pid is dead, never a live one; and a staging cleanup error after a successful publish does not replace the written result — the outcome stands, the error is logged and the leftover directory is named (#387)
+- [ ] **FIX-11**: On the dashboard's write detail and recovery pages, a Mail mailbox renders as the account's name or address plus the decoded folder name (`Personal › INBOX`) — in the batch title, the `from` sources, the destination, the target rows and the undone banner — while the `imap://` URL stays internal; the name comes from the Mail adapter's process-local account cache through the existing seam, never a native call from a page load — the cache fills on the first Mail tool call after a daemon start, so until then the raw URL shows; every value is escaped (D-09) and an unknown account falls back to the raw URL (#427)
+- [ ] **FIX-12**: The dashboard passes the Phase 5 UI review's actionable findings: the `:focus-visible` ring is a solid `--color-primary` outline; the faint, success, outbound and orange text tokens measure at least 4.5:1 for text and 3:1 for UI glyphs in light mode; a refused toggle (409, 400) renders inside the page frame with a `banner warn`, a way back and the same status code, and the Restart form locks with the switches when the adapters file is unreadable; banner glyphs are `aria-hidden`, the switch `aria-label` names the adapter and its state, the sidebar links sit in a `<nav>` landmark behind a skip link, raw font sizes map to the type tokens, switch and sidebar rows reach 44px targets on phone and the System pages stay reachable in the phone strip — all inside the CSP (D-08), the sketch copy (D-11) and escaping (D-09) (#428)
+- [ ] **FIX-13**: The Phase 5 close review's deferred findings are closed: the test session patches `deploy._TCC_DB` and `deploy._TCC_SYSTEM_DB` to absent paths so no unit test opens the developer's TCC databases (WR-01); a `tool: "dashboard"` toggle or restart record renders on the write pages as an operator action with no `dry_run` row and no model chip (WR-03); a dashboard build or import failure in `daemon.serve()` is logged, sets `dashboard_state = "not built: …"` and MCP serves alone, with a test (WR-05); a toggle or restart whose audit record could not be written says so on the next page instead of a silent 303 (WR-06); and the adapter-name set and `_version` have one home, `dashboard/` modules import no underscore names across modules, `doctor` reports the dashboard URL only when a page can answer, and the deny-list is read once at import (IN-02..IN-05) (#430)
 
 ### Calendar
 
@@ -200,6 +203,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PHO-04 | Phase 4 | Complete |
 | PLAT-01 | Phase 5 | Complete |
 | PLAT-02 | Phase 5 | Complete |
+| FIX-11 | Phase 05.1 | Pending |
+| FIX-12 | Phase 05.1 | Pending |
+| FIX-13 | Phase 05.1 | Pending |
 | DIST-01 | Phase 6 | Pending |
 | DIST-02 | Phase 6 | Pending |
 | DIST-03 | Phase 6 | Pending |
@@ -209,11 +215,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 52 total
-- Mapped to phases: 52
+- v1 requirements: 55 total
+- Mapped to phases: 55
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
