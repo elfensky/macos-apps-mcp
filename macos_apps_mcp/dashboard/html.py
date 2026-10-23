@@ -187,6 +187,7 @@ def page(
     listing: Safe | None = None,
     selected: bool = False,
     counts: dict | None = None,
+    status: int = 200,
 ):
     """The Console frame of sketch 001 (variant D): sidebar plus content.
 
@@ -195,7 +196,8 @@ def page(
     ``mode="list"`` is the write list: ``listing`` is the list column and ``body`` the
     detail column; ``selected`` marks a detail as open (the phone shows it instead of
     the list). ``counts`` are the sidebar's write counts when the caller already read
-    the log. ``refresh=(seconds, path)`` adds a meta refresh to a page dashboard code
+    the log. ``status`` is the HTTP status (a framed refusal keeps its 409 or 400).
+    ``refresh=(seconds, path)`` adds a meta refresh to a page dashboard code
     builds."""
     meta = (
         h('<meta http-equiv="refresh" content="{};url={}">\n', refresh[0], refresh[1])
@@ -225,5 +227,6 @@ def page(
             " detail-open" if selected else "",
             _sidebar(active, counts),
             content,
-        )
+        ),
+        status_code=status,
     )
