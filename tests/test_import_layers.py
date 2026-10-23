@@ -176,7 +176,13 @@ def test_dashboard_reaches_no_private_name_of_another_module():
         tree = ast.parse(path.read_text(), filename=str(path))
         imported: set[str] = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.level > 0:
+            if isinstance(node, ast.Import):  # PM-14: absolute `import a.b as x`
+                for alias in node.names:
+                    if alias.name.startswith("macos_apps_mcp."):
+                        imported.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and (
+                node.level > 0 or (node.module or "").split(".")[0] == "macos_apps_mcp"
+            ):
                 for alias in node.names:
                     imported.add(alias.asname or alias.name)
                     if _is_private(alias.name):
