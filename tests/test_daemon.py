@@ -4,6 +4,7 @@ import re
 import shutil
 import socket
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -18,6 +19,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.providers.proxy import FastMCPProxy
 from mcp.types import Implementation
 
+import macos_apps_mcp
 from macos_apps_mcp import audit as au
 from macos_apps_mcp import daemon, deploy, registry
 
@@ -204,6 +206,88 @@ def test_serve_keeps_mcp_up_when_the_dashboard_port_is_in_use(sockdir, monkeypat
         assert str(daemon.dashboard_state).startswith("not bound: ")
     finally:
         taken.close()
+
+
+def _serve_and_ping(p) -> str:
+    """Start daemon.serve in a thread, wait for the socket, return the ping text."""
+    threading.Thread(target=daemon.serve, daemon=True).start()
+    for _ in range(100):
+        if p.exists():
+            break
+        time.sleep(0.05)
+
+    async def go():
+        transport = StreamableHttpTransport(
+            "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+        )
+        async with Client(transport) as c:
+            return await c.call_tool("ping")
+
+    return asyncio.run(go()).content[0].text
+
+
+def _break_build(monkeypatch, exc):
+    def boom(**_kw):
+        raise exc
+
+    monkeypatch.setattr("macos_apps_mcp.dashboard.build_app", boom)
+
+
+def _break_import(monkeypatch):
+    monkeypatch.delattr(macos_apps_mcp, "dashboard", raising=False)
+    monkeypatch.setitem(sys.modules, "macos_apps_mcp.dashboard", None)
+
+
+@pytest.mark.parametrize("failure", ["build", "import"])
+def test_serve_keeps_mcp_up_when_the_dashboard_cannot_be_built(
+    sockdir, monkeypatch, failure
+):
+    """WR-05 (D-07): a dashboard import or build fault is logged, named in
+    `dashboard_state`, frees the TCP socket, and MCP keeps serving."""
+    if failure == "build":
+        _break_build(monkeypatch, RuntimeError("x" * 500))
+    else:
+        _break_import(monkeypatch)
+    bound = []
+    real_bind = daemon.bind_dashboard
+
+    def recorder(host, port):
+        bound.append(real_bind(host, port))
+        return bound[-1]
+
+    monkeypatch.setattr(daemon, "bind_dashboard", recorder)
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    state = daemon.dashboard_state
+    assert state.startswith("not built: "), state
+    assert "http://" not in state
+    assert len(state) <= len("not built: ") + 120
+    assert len(bound) == 1 and bound[0].fileno() == -1
+
+
+def test_dashboard_not_built_names_the_exception_type_when_its_message_is_empty(
+    sockdir, monkeypatch
+):
+    _break_build(monkeypatch, RuntimeError())
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    assert daemon.dashboard_state == "not built: RuntimeError"
+
+
+def test_serve_reports_no_url_when_the_page_key_is_unusable(sockdir, monkeypatch):
+    """IN-04: every page answers 503, so doctor must not name a URL."""
+    monkeypatch.setattr(deploy, "dashboard_key", lambda create=False: None)
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    state = daemon.dashboard_state
+    assert state.startswith("key unusable: "), state
+    assert "http://" not in state
 
 
 def _serve(app, path):
