@@ -496,7 +496,7 @@ def test_backups_page_lists_the_receipts_on_disk_newest_first(tree):
     assert rows_in(text) == [f"/backups/{RID2}", f"/backups/{RID1}"]
     assert "move · 2 messages → Archive" in text and "trash · 1 message<" in text
     assert "notes" not in " ".join(rows_in(text)) and LINK not in text
-    assert re.search(r'<a class="nav-item active" href="/backups"', text)
+    assert re.search(r'<a class="nav-item system active" href="/backups"', text)
 
 
 def test_backups_row_names_the_destination_account(tree, monkeypatch):
@@ -612,3 +612,43 @@ def test_receipt_ids_take_ascii_digits_only():
     assert recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-001-move")
     assert not recovery.RECEIPT_RE.fullmatch("٢" * 8 + "-094010-123456-001-move")
     assert not recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-１２３-move")
+
+
+# --- landmarks: skip link, nav, one content target (#428) -----------------------------
+
+
+@pytest.mark.parametrize("path", ["/", "/adapters", "/health", "/usage", "/backups"])
+def test_every_page_has_a_skip_link_a_nav_landmark_and_one_content_target(doc, path):
+    text = get(path).text
+    assert re.search(
+        r'<body>\s*<a class="skip" href="#content">Skip to content</a>', text
+    )
+    assert text.count('id="content"') == 1
+    assert text.count('<nav aria-label="Dashboard">') == 1
+    assert text.count("<main") == 1
+    for href in ("/adapters", "/health", "/usage", "/backups"):
+        assert re.search(rf'<a class="nav-item system[ "][^>]*href="{href}"', text)
+
+
+def test_an_open_write_moves_the_content_target_to_its_detail(state):
+    ts = "2026-10-20T10:00:00"
+    audit.audit_write(
+        {
+            "ts": ts,
+            "tool": "create_reminder",
+            "op": "create",
+            "args": {"title": "Buy milk"},
+            "dry_run": False,
+            "caller": "claude-code 2.1",
+            "target_id": "R-1",
+            "before": None,
+            "after": {"id": "R-1", "summary": "Buy milk", "deeplink": ""},
+        }
+    )
+    assert (
+        '<main class="b-detail" id="content" tabindex="-1">'
+        in get(f"/write/{ts}/0").text
+    )
+    home = get("/").text
+    assert '<div class="b-list" id="content" tabindex="-1">' in home
+    assert '<main class="b-detail">' in home
