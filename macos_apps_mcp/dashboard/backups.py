@@ -81,7 +81,7 @@ def _receipt_row(name: str, files: int, size: int, plan: dict | None) -> Safe:
         name,
         title,
         name,
-        recovery._size(size),
+        recovery.size_label(size),
     )
 
 
@@ -136,7 +136,7 @@ def _load_receipt(name: str):
     row = next(
         (r for r in writes.build_rows(audit.read_all()) if r.receipt == name), None
     )
-    return folder, row, *writes._recovery_facts(name)
+    return folder, row, *recovery.facts(name)
 
 
 _BACK = Safe('<a class="btn link" href="/backups">‹ Backups</a>')
@@ -150,7 +150,7 @@ def _rotated(name: str, folder, files: dict[str, int]) -> Safe:
                 '<div class="row"><span class="grow mono">{}</span>'
                 '<span class="muted">{}</span></div>',
                 n,
-                recovery._size(files[n]),
+                recovery.size_label(files[n]),
             )
             for n in sorted(files)
         )

@@ -261,7 +261,7 @@ _BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to d
 _FALLBACK_CALLER = "unknown-client"
 
 
-def _resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
+def resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
     """The ``dry_run`` the tool will act on (#222): the client's value coerced as
     pydantic coerces it for the tool (``"false"`` is False), else the signature default;
     a tool with no ``dry_run`` parameter always acts. The middleware runs BEFORE that
@@ -331,7 +331,7 @@ class AuditMiddleware(Middleware):
         tool = context.message.name
         usage_log(tool)  # tally every call (reads included) — swallows its own errors
         args = dict(context.message.arguments or {})
-        dry_run = _resolve_dry_run(tool, args, self._dry_run_defaults)
+        dry_run = resolve_dry_run(tool, args, self._dry_run_defaults)
         caller, session = _caller(context)
         before = None
         source = self._snapshot_sources.get(tool)
