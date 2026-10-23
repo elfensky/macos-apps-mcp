@@ -16,6 +16,12 @@ from tests._dashboard import get
 
 TEXT, GLYPH = 4.5, 3.0
 LIGHT_BACKGROUNDS = ("--color-surface", "--color-bg", "--color-sidebar")
+DARK_BACKGROUNDS = (
+    "--color-surface",
+    "--color-bg",
+    "--color-sidebar",
+    "--color-surface-2",
+)
 DARK_OPENERS = (':root:not([data-theme="light"]) {', ':root[data-theme="dark"] {')
 
 
@@ -88,6 +94,17 @@ def light(css) -> dict[str, tuple[float, float, float, float]]:
     }
 
 
+@pytest.fixture(scope="module")
+def dark(css, light) -> dict[str, tuple[float, float, float, float]]:
+    """The ``data-theme="dark"`` tokens over the light ones (an untouched token keeps
+    its light value, as in the browser)."""
+    return light | {
+        k: parse(v)
+        for k, v in _tokens(css, ':root[data-theme="dark"] {').items()
+        if k.startswith("--color")
+    }
+
+
 def _on_tint(light, fg: str, tint: str, background: str) -> float:
     """Ratio of ``fg`` on its translucent ``tint`` composited over ``background``."""
     return ratio(light[fg], over(light[tint], light[background]))
@@ -154,6 +171,61 @@ def test_every_light_glyph_token_reaches_3_to_1(light, token, background):
     assert got >= GLYPH, f"{token}: {got:.2f}:1 on {background}"
 
 
+# Known light-mode nits left to a later plan (PM-04): muted text on a selected row
+# is 4.38:1 over the page and 3.94:1 over the sidebar; only the surface reaches 4.5:1.
+LIGHT_CHIP_PAIRS = [
+    ("--color-neutral-bg", "--color-surface"),
+    ("--color-neutral-bg", "--color-bg"),
+    ("--color-selection", "--color-surface"),
+]
+
+
+@pytest.mark.parametrize(("tint", "background"), LIGHT_CHIP_PAIRS)
+def test_light_muted_text_on_a_chip_or_selected_row_reaches_4_5_to_1(
+    light, tint, background
+):
+    got = _on_tint(light, "--color-text-muted", tint, background)
+    assert got >= TEXT, f"muted on {tint} over {background}: {got:.2f}:1"
+
+
+@pytest.mark.parametrize("background", DARK_BACKGROUNDS)
+@pytest.mark.parametrize("tint", ["--color-neutral-bg", "--color-selection"])
+def test_dark_muted_text_on_a_chip_or_selected_row_reaches_4_5_to_1(
+    dark, tint, background
+):
+    got = _on_tint(dark, "--color-text-muted", tint, background)
+    assert got >= TEXT, f"muted on {tint} over {background}: {got:.2f}:1"
+
+
+@pytest.mark.parametrize("background", DARK_BACKGROUNDS)
+def test_dark_muted_text_reaches_4_5_to_1(dark, background):
+    got = ratio(dark["--color-text-muted"], dark[background])
+    assert got >= TEXT, f"{got:.2f}:1 on {background}"
+
+
+@pytest.mark.parametrize("background", DARK_BACKGROUNDS)
+@pytest.mark.parametrize("token", TEXT_ON_TINT)
+def test_every_dark_text_token_reaches_4_5_to_1(dark, token, background):
+    got = _on_tint(dark, token, TEXT_ON_TINT[token], background)
+    assert got >= TEXT, f"{token}: {got:.2f}:1 on its tint over {background}"
+
+
+@pytest.mark.parametrize("background", DARK_BACKGROUNDS)
+@pytest.mark.parametrize(
+    "token",
+    [
+        "--color-text-faint",
+        "--color-success-text",
+        "--color-accent-text",
+        "--color-danger-text",
+        "--color-primary",
+    ],
+)
+def test_every_dark_glyph_token_reaches_3_to_1(dark, token, background):
+    got = ratio(dark[token], dark[background])
+    assert got >= GLYPH, f"{token}: {got:.2f}:1 on {background}"
+
+
 def test_text_rules_use_the_text_tokens(css):
     def uses(selector: str, prop: str, token: str) -> bool:
         return any(f"{prop}: var({token})" in b for b in _bodies(css, selector))
@@ -212,4 +284,5 @@ def test_reduced_motion_stops_the_animations(css):
 
 
 def test_the_lock_glyph_has_empty_alt_text(css):
-    assert any('/ ""' in b for b in _bodies(css, ".row.locked .title::after"))
+    order = re.compile(r'content:\s*" 🔒";\s*content:\s*" 🔒"\s*/\s*"";')
+    assert any(order.search(b) for b in _bodies(css, ".row.locked .title::after"))
