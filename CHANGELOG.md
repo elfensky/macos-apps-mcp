@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependabot uses the `uv` ecosystem.** Python updates move only `uv.lock`
+  (`lockfile-only`, so the deliberate caps stay) after a 7-day cooldown; version updates
+  and security updates each arrive as one grouped PR per ecosystem.
+
 ### Fixed
 
 - **Mail mailboxes show as `Account › folder` on the dashboard** (#427) — the write list,
