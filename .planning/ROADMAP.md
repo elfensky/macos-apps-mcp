@@ -39,7 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
-- [ ] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6
+- [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -381,7 +381,7 @@ Plans:
   2. The dashboard passes the Phase 5 UI review's actionable findings: a visible `--color-primary` focus ring; measured contrast of at least 4.5:1 for text and 3:1 for UI glyphs on the faint, success, outbound and orange tokens in light mode; refused toggles rendered in the page frame with a banner and a way back, the Restart form locked with the switches; `aria-hidden` banner glyphs, a switch label that names adapter and state, a `<nav>` landmark with a skip link, token font sizes, 44px targets and reachable System pages on phone — inside the CSP, the sketch copy and escaping (#428).
   3. The Phase 5 close review's deferred findings are closed: no unit test opens the developer's TCC databases; a dashboard toggle or restart record renders as an operator action without a `dry_run` row or model chip; a dashboard build failure leaves MCP serving with `dashboard_state` saying why; a failed audit write of a dashboard action is visible to the operator on the next page; the adapter-name set and `_version` have one home, no cross-module underscore imports in `dashboard/`, `doctor` names the dashboard URL only when a page can answer, and the deny-list is read once (#430).
 
-**Plans:** 7/7 plans executed
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -435,5 +435,5 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
-| 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | In Progress | - |
+| 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 6. Distribution | 0/TBD | Not started | - |

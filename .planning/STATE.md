@@ -1,44 +1,45 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "05.1"
-current_phase_name: "Bug fixes — dashboard follow-ups (#427, #428, #430)"
-status: executing
-stopped_at: "Phase 05.1 executed: 7/7 plans merged (PRs #435-#448; #427 #428 #430 closed); verification human_needed, 6 UAT items in 05.1-UAT.md need the rebuilt .app — next /gsd-verify-work 05.1"
-last_updated: "2026-10-23T15:03:03.691Z"
-last_activity: 2026-10-23
-last_activity_desc: Phase 05.1 execution started
-state_head: d2ffbf50699da150e53e832d1a33a762cd713f4f
+current_phase: 6
+current_phase_name: Distribution — uvx, Bundles, Cask, and the Companion Plugin
+status: planning
+stopped_at: Phase 05.1 complete, ready to plan Phase 6
+last_updated: "2026-10-24T23:01:58.433Z"
+last_activity: 2026-10-25
+last_activity_desc: Phase 05.1 complete, transitioned to Phase 6
+state_head: dbbb67a24c4f93bd3501e1f50ab7195622b0b98e
 progress:
   total_phases: 10
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 72
-  completed_plans: 65
+  completed_plans: 72
+  percent: 90
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-21)
+See: .planning/PROJECT.md (updated 2026-10-25)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 05.1 — Bug fixes — dashboard follow-ups (#427, #428, #430)
+**Current focus:** Phase 6 — Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
 ## Current Position
 
-Phase: 05.1 (Bug fixes — dashboard follow-ups (#427, #428, #430)) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 05.1
-Last activity: 2026-10-23 — Phase 05.1 execution started
+Phase: 6 — Distribution — uvx, Bundles, Cask, and the Companion Plugin
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-25 — Phase 05.1 complete, transitioned to Phase 6
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 65
+- Total plans completed: 72
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -54,6 +55,7 @@ Progress: [█████████░] 88%
 | 04 | 6 | - | - |
 | 04.1 | 5 | - | - |
 | 05 | 9 | - | - |
+| 05.1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -110,6 +112,9 @@ Recent decisions affecting current work:
 - [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.
 - [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.
 - [Phase 04.1]: Bugs before any feature: #373 (hash-locked `build` group, the bundled wheel installed `--no-deps`), #383 (an existing target and a failed `mkdir` raise `WriteRefused`; `_guard` untouched), #384 (ruff on py312 with a drift-guard test), #387 (pid-tagged staging, a dead-pid sweep with five guards, a cleanup error never replaces a written result) — PRs #390/#392/#394/#396, close PR #398.
+- [Phase 05.1]: Owner decisions 2026-10-24: O3/O4/O5 confirmed, O1 overturned → #450 (file-backed account-name cache; a Mail call at daemon start would launch Mail, so refresh only when Mail already runs). PM-04/PM-16 fixed by #451 on the owner's word.
+- [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
+- [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
 
 ### Pending Todos
@@ -124,7 +129,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.3 (universal2, build `85a3baf`, notarized and stapled, installed with `ditto` after moving 0.14.2 to `~/.local/state/macos-apps-mcp/app-backup/`; `doctor()` proven 2026-10-11: version 0.14.3, build `85a3baf 2026-10-11T01:32:20Z`, libs mcp 1.29.0 / fastmcp 3.4.7, daemon mode; code seal intact after the first run, 0 files written in the bundle; TestPyPI from the main merge — the production PyPI dispatch is the operator's). It adds #313 (#307 Local reminders), #316 (#297 hash .pyc), #319 (#302 UDS teardown), #314 (#111), #315 (#113) and the Intel note (#323) to v0.14.2. Release zip sha256 `42c8b46c…f8d8408e`. Open from this cycle: #317, #318, #322.
+- The installed daemon is a develop build: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -182,6 +187,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T12:19:18.187Z
-Stopped at: Phase 05.1 executed: 7/7 plans merged (PRs #435-#448; #427 #428 #430 closed); verification human_needed, 6 UAT items in 05.1-UAT.md need the rebuilt .app — next /gsd-verify-work 05.1
-Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md
+Last session: 2026-10-24T23:03:30Z
+Stopped at: Phase 05.1 complete, ready to plan Phase 6
+Resume file: None
