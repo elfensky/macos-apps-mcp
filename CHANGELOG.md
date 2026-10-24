@@ -20,6 +20,8 @@ surface may still shift between minor versions.
   and a way back, under the same status code; Restart locks with the switches; the switch
   label names the adapter and its state; a skip link, a navigation landmark, 44 px targets
   and the System pages first on a phone.
+- **Selected-row contrast** (#447) — the detail line and time of a selected write, and the
+  count on the active menu item, now read at 4.5:1 on the selection highlight.
 - **Dashboard resilience and honest records** (#430) — a dashboard that cannot be built no
   longer takes MCP down (`doctor` says `not built: …`), and `doctor` names the dashboard
   URL only when a page can answer; a toggle, Discard or Restart whose audit record could
