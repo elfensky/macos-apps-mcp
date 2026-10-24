@@ -1,16 +1,16 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 6
-current_phase_name: Distribution — uvx, Bundles, Cask, and the Companion Plugin
+current_phase: "05.2"
+current_phase_name: Bug fixes — Automation grants unreadable on macOS 27 (#455)
 status: planning
-stopped_at: Phase 05.1 complete, ready to plan Phase 6
-last_updated: "2026-10-24T23:01:58.433Z"
+stopped_at: "Phase 05.1 complete; Phase 05.2 (Automation grants unreadable on macOS 27, #455) inserted, ready to plan"
+last_updated: "2026-10-24T23:27:31.222Z"
 last_activity: 2026-10-25
-last_activity_desc: Phase 05.1 complete, transitioned to Phase 6
-state_head: dbbb67a24c4f93bd3501e1f50ab7195622b0b98e
+last_activity_desc: Phase 05.1 complete; Phase 05.2 inserted for the macOS 27 Automation grant read
+state_head: 6351e36849dd30dcdfc182c5261a12b63c205dd6
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 9
   total_plans: 72
   completed_plans: 72
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-25)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 6 — Distribution — uvx, Bundles, Cask, and the Companion Plugin
+**Current focus:** Phase 05.2 — Bug fixes — Automation grants unreadable on macOS 27 (#455)
 
 ## Current Position
 
-Phase: 6 — Distribution — uvx, Bundles, Cask, and the Companion Plugin
+Phase: 05.2 — Bug fixes — Automation grants unreadable on macOS 27 (#455) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 — Phase 05.1 complete, transitioned to Phase 6
+Last activity: 2026-10-25 — Phase 05.1 complete; Phase 05.2 inserted for the macOS 27 Automation grant read
 
 Progress: [█████████░] 90%
 
@@ -176,6 +176,7 @@ Recent decisions affecting current work:
 - Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
 - Phase 04.1 inserted after Phase 4: Bug Fixes — Phase 4 Follow-ups Before Any Feature (#373, #383, #384, #387) (URGENT)
 - Phase 05.1 inserted after Phase 5: Bug fixes — dashboard follow-ups (#427, #428, #430) (URGENT)
+- Phase 05.2 inserted after Phase 5: Bug fixes — Automation grants unreadable on macOS 27 (#455) (URGENT)
 
 ## Deferred Items
 
@@ -188,5 +189,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-24T23:03:30Z
-Stopped at: Phase 05.1 complete, ready to plan Phase 6
+Stopped at: Phase 05.1 complete; Phase 05.2 (Automation grants unreadable on macOS 27, #455) inserted, ready to plan
 Resume file: None
