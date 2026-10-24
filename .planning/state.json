@@ -46,7 +46,7 @@
     {
       "number": "05.1",
       "name": "Dashboard Follow-ups (INSERTED)",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "number": "6",
@@ -55,9 +55,9 @@
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 05.1 of 10 · executing"
+    "command": "/gsd-progress --next",
+    "label": "Advance to the next step (plan phase 6)",
+    "reason": "Phase 10 of 10 — needs a plan"
   },
-  "updated_at": "2026-10-23T13:08:39.870Z"
+  "updated_at": "2026-10-24T23:01:58.444Z"
 }
