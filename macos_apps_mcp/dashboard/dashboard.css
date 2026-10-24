@@ -200,6 +200,8 @@ button, input, select { font: inherit; color: inherit; }
 .row.clickable { cursor: pointer; transition: background .15s ease; }
 .row.clickable:hover { background: var(--color-neutral-bg); }
 .row.selected, .row.selected:hover { background: var(--color-selection); }
+/* PM-04/PM-16: muted text on the selection highlight read under 4.5:1 */
+.row.selected .sub, .row.selected .time { color: inherit; }
 
 /* sidebar */
 .sidebar { background: var(--color-sidebar); padding: var(--space-3) var(--space-2); }
@@ -215,6 +217,7 @@ button, input, select { font: inherit; color: inherit; }
 .nav-item:hover { background: var(--color-neutral-bg); }
 .nav-item.active { background: var(--color-selection); }
 .nav-item .count { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+.nav-item.active .count { color: inherit; }
 .nav-item .ico { width: 18px; text-align: center; }
 
 /* app icon placeholders */
