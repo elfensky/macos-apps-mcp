@@ -171,8 +171,6 @@ def test_every_light_glyph_token_reaches_3_to_1(light, token, background):
     assert got >= GLYPH, f"{token}: {got:.2f}:1 on {background}"
 
 
-# Known light-mode nits left to a later plan (PM-04): muted text on a selected row
-# is 4.38:1 over the page and 3.94:1 over the sidebar; only the surface reaches 4.5:1.
 LIGHT_CHIP_PAIRS = [
     ("--color-neutral-bg", "--color-surface"),
     ("--color-neutral-bg", "--color-bg"),
@@ -186,6 +184,35 @@ def test_light_muted_text_on_a_chip_or_selected_row_reaches_4_5_to_1(
 ):
     got = _on_tint(light, "--color-text-muted", tint, background)
     assert got >= TEXT, f"muted on {tint} over {background}: {got:.2f}:1"
+
+
+SELECTED_BACKGROUNDS = ("--color-surface", "--color-bg", "--color-sidebar")
+
+
+@pytest.mark.parametrize("background", SELECTED_BACKGROUNDS)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_row_text_on_the_selection_highlight_reaches_4_5_to_1(
+    request, theme, background
+):
+    """PM-04/PM-16: a selected row and the active nav count use ``--color-text``."""
+    tokens = request.getfixturevalue(theme)
+    got = _on_tint(tokens, "--color-text", "--color-selection", background)
+    assert got >= TEXT, f"text on selection over {background} ({theme}): {got:.2f}:1"
+
+
+def _selectors_with(css: str, selector: str, decl: str) -> bool:
+    return any(
+        selector in [" ".join(s.split()) for s in sel.split(",")] and decl in body
+        for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+    )
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [".nav-item.active .count", ".row.selected .sub", ".row.selected .time"],
+)
+def test_selected_details_inherit_the_row_colour(css, selector):
+    assert _selectors_with(css, selector, "color: inherit"), selector
 
 
 @pytest.mark.parametrize("background", DARK_BACKGROUNDS)
