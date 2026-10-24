@@ -40,7 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
-- [ ] **Phase 05.2: Bug fixes — Automation grants unreadable on macOS 27 (#455)** (INSERTED) - The Health page and doctor read Automation grants on macOS 27 from a live check that never prompts (#455), before Phase 6
+- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The three open bugs (#455, #399, #348) are fixed before Phase 6
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -405,10 +405,10 @@ Plans:
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #430` with no closing keyword
 
-### Phase 05.2: Bug fixes — Automation grants unreadable on macOS 27 (#455) (INSERTED)
+### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
-**Goal**: On macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455). The Health page and `doctor(request=False)` show each Automation grant as granted, denied or not asked yet from a live check that sends no Apple Event and shows no prompt; for an app that is not running they say the state cannot be told until the app runs. Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: TBD (planned from #455)
+**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: TBD (planned from #455, #399, #348)
 **Depends on:** Phase 05.1
 **Plans:** 0 plans
 
