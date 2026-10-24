@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: planning
 stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-24T23:33:51.771Z"
+last_updated: "2026-10-24T23:46:40.982Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.1 complete; Phase 05.2 inserted for the open bugs #455, #399, #348
-state_head: 4e6585ce6c42fc4e9c84d2d37a94b7203796f745
+state_head: b4ced7ef6be0f8271496920071ca9f7e01603f61
 progress:
   total_phases: 11
   completed_phases: 9
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 — Phase 05.1 complete; Phase 05.2 inserted for the open bugs #455, #399, #348
+Last activity: 2026-10-25 - Completed quick task 261025-2fq: Dependabot on the uv ecosystem, every update grouped (Phase 05.2 inserted for the open bugs #455, #399, #348)
 
 Progress: [█████████░] 90%
 
@@ -164,6 +164,7 @@ Recent decisions affecting current work:
 | 261011-p90 | uvx on an Intel Mac installs without Rust: cryptography<49 on darwin x86_64 only (48.0.1 is the last Intel wheel); PR #330, closes #322 | 2026-10-11 | 2fa3524 | [261011-p90-322-uvx-on-an-intel-mac-installs-without](./quick/261011-p90-322-uvx-on-an-intel-mac-installs-without/) |
 | 261012-utn | Ship the macOS app icon: packaging/AppIcon.icon (Icon Composer), actool compile step in build_app.sh, Info.plist icon keys, packaging test, DAEMON.md note | 2026-10-12 | 22870dc | [261012-utn-ship-the-macos-app-icon-packaging-appico](./quick/261012-utn-ship-the-macos-app-icon-packaging-appico/) |
 | 261018-1sb | mail_overview re-reads the account map once (per minute) before labelling an unknown id; a failed re-read keeps the known names (#359) | 2026-10-18 | 3fbc3d0 | [261018-1sb-fix-359-one-map-re-read-before-the-label](./quick/261018-1sb-fix-359-one-map-re-read-before-the-label/) |
+| 261025-2fq | Dependabot on the uv ecosystem: lockfile-only, 7-day cooldown, one group per ecosystem incl. security (CI/security plan item 2) | 2026-10-25 | b4ced7e | [261025-2fq-move-dependabot-from-pip-to-uv-and-group](./quick/261025-2fq-move-dependabot-from-pip-to-uv-and-group/) |
 
 ### Roadmap Evolution
 
