@@ -103,7 +103,7 @@ def _settings(pane: str) -> Safe:
 
 def _daemon_row() -> Safe:
     if deploy.is_daemon_role():
-        sub = f"Running as {deploy._BUNDLE_ID}, pid {os.getpid()}, {_up()}"
+        sub = f"Running as {deploy.BUNDLE_ID}, pid {os.getpid()}, {_up()}"
         return _row("ok", "Daemon", sub)
     sub = f"Not the daemon: a stdio process serves this page, pid {os.getpid()}"
     return _row("warn", "Daemon", sub)
@@ -200,7 +200,7 @@ def _refused_by_probe(report: dict) -> set[str]:
         out |= {
             a
             for a, needs in grants.ADAPTER_GRANTS.items()
-            if any(svc == grants._FDA for svc, _ in needs)
+            if any(svc == grants.FDA for svc, _ in needs)
         }
     return out
 
@@ -217,9 +217,9 @@ def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
     instead of guessing "not asked" (PM-20)."""
     rows, unreadable = [], []
     for adapter, needs in grants.ADAPTER_GRANTS.items():
-        if not any(svc == grants._EVENTS for svc, _ in needs):
+        if not any(svc == grants.EVENTS for svc, _ in needs):
             continue
-        state = _state(got, adapter, grants._EVENTS)
+        state = _state(got, adapter, grants.EVENTS)
         on = adapter in active
         if state is None:
             if on:
@@ -262,7 +262,8 @@ def _unreadable_banner(got: dict) -> Safe:
         )
     why = ", ".join(f"{k} db: {v}" for k, v in failed.items())
     return h(
-        '<div class="banner warn"><span>●</span><div><b>Some grants could not be '
+        '<div class="banner warn"><span aria-hidden="true">●</span>'
+        "<div><b>Some grants could not be "
         "read.</b> The macOS grant database did not answer ({}), so rows that depend "
         "on it say that instead of guessing.</div></div>\n",
         why,
@@ -277,15 +278,15 @@ def last_dot() -> str | None:
 
 
 def _deployment(request, report: dict | None) -> Safe:
-    version = report["version"] if report else doctor._version()
-    build = report["build"] if report else doctor._build_stamp()
+    version = report["version"] if report else doctor.version()
+    build = report["build"] if report else doctor.build_stamp()
     mode = "daemon" if deploy.is_daemon_role() else "stdio"
     return join(
         [
             _kv("Version", f"{version} · built {build}"),
             _kv("Mode", f"{mode}, pid {os.getpid()}, {_up()}"),
             _kv("Listens on", f"127.0.0.1:{request.app.state.port} (loopback only)"),
-            _kv("Grant identity", deploy._BUNDLE_ID),
+            _kv("Grant identity", deploy.BUNDLE_ID),
         ]
     )
 
@@ -312,7 +313,8 @@ def _render(request, got: dict | None, failure: str | None):
         banner = join(
             [
                 h(
-                    '<div class="banner bad"><span>●</span><div><b>{} active adapter'
+                    '<div class="banner bad"><span aria-hidden="true">●</span>'
+                    "<div><b>{} active adapter"
                     "{} cannot work:</b> {}. "
                     "Grant access, or turn the adapter off.</div></div>\n",
                     n,
@@ -336,7 +338,8 @@ def _render(request, got: dict | None, failure: str | None):
         rows.append(_outbound_row())
         banner = (
             h(
-                '<div class="banner bad"><span>●</span><div><b>doctor could not run:'
+                '<div class="banner bad"><span aria-hidden="true">●</span>'
+                "<div><b>doctor could not run:"
                 "</b> {}</div></div>\n",
                 failure,
             )

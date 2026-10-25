@@ -80,6 +80,19 @@ dev venv keeps it. On an Intel Mac, `pyproject.toml` caps cryptography below 49 
 The dev venv and a PyPI install (`uvx`) get 48.x, the last release with an Intel wheel, so
 nothing is built from source.
 
+**cryptography 48.0.1 and its known advisories are accepted** (owner, 2026-10-25). Intel
+Macs stay supported. `uv.lock` holds one entry, 48.0.1, for every platform. Three advisories
+are fixed only in 49 and later: GHSA-m2h6-j472-rp4c and GHSA-jwv3-5hgf-82ww (X.509
+certificate verification) and GHSA-g6cj-pr64-35w5 (PKCS#7 decryption). They do not apply,
+because nothing imports cryptography: the full suite passes with it blocked
+(`sys.modules["cryptography"] = None`, 2026-10-25). Dependabot alerts #2, #17 and #18 track
+these advisories, and the Dependabot security run reports `security_update_not_possible`
+for cryptography; both follow from the cap.
+This holds only while nothing imports cryptography. Resolve the cap before any change that
+turns on FastMCP or mcp auth (OAuth, JWT), verifies certificates or decrypts PKCS#7. The
+mcp 2 migration does not change this: mcp 2 still requires `pyjwt[crypto]`. Revisit an
+arm64-only PyPI install in 2028.
+
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
 

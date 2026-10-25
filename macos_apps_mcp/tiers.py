@@ -88,8 +88,9 @@ def adapters_off() -> set[str]:
     return {p.strip().lower() for p in val.split(",") if p.strip()}
 
 
-def adapter_enabled(name: str) -> bool:
+def adapter_enabled(name: str, off: set[str] | None = None) -> bool:
     """True unless ``name`` is on the deny-list (D-02), or the deny-list file exists
-    but cannot be read (every adapter off). Meta tools never ask."""
-    off = adapters_off()
+    but cannot be read (every adapter off). Meta tools never ask. ``off`` is a
+    snapshot the caller already read; None reads the deny-list now."""
+    off = adapters_off() if off is None else off
     return deploy.ADAPTERS_ALL_OFF not in off and name not in off

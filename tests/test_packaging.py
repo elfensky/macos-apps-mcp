@@ -22,6 +22,49 @@ def test_bundle_version_tracks_pyproject():
     assert info["CFBundleShortVersionString"] == project["project"]["version"]
 
 
+def test_registry_metadata_tracks_pyproject():
+    """The MCP Registry lists the version server.json names and finds the owner by the
+    `mcp-name:` line in the PyPI description (README.md). A bump that misses server.json
+    lists a stale version, and a renamed server fails the ownership check at publish."""
+    server = json.loads((ROOT / "server.json").read_text())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert server["version"] == project["version"]
+    packages = [
+        (p["registryType"], p["identifier"], p["version"]) for p in server["packages"]
+    ]
+    assert packages == [("pypi", project["name"], project["version"])]
+    readme = (ROOT / "README.md").read_text()
+    markers = re.findall(r"^<!-- mcp-name: (\S+) -->$", readme, re.MULTILINE)
+    assert markers == [server["name"]]
+
+
+def test_plugin_marketplace_contract():
+    """`claude plugin validate` does not check that the marketplace entry name equals
+    the manifest name (a mismatch passed in planning), and a skill that names a renamed
+    tool teaches the model a tool that does not exist."""
+    market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
+    (entry,) = market["plugins"]
+    manifest = json.loads((ROOT / "plugin/.claude-plugin/plugin.json").read_text())
+    assert entry["name"] == manifest["name"]
+    assert (ROOT / entry["source"]).resolve() == ROOT / "plugin"
+    # A version here would be a fourth place the release bump must reach.
+    assert "version" not in entry
+    assert "version" not in manifest
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    mcp = json.loads((ROOT / "plugin/.mcp.json").read_text())
+    assert mcp["mcpServers"] == {
+        "macos-apps": {"command": "uvx", "args": [project["name"]]}
+    }
+    skill = (ROOT / "plugin/skills/macos-apps/SKILL.md").read_text()
+    names = set(re.findall(r"`([a-z][a-z_]*)`", skill))
+    assert len(names) >= 8
+    server = (ROOT / "macos_apps_mcp/server.py").read_text()
+    for name in sorted(names):
+        assert re.search(rf"^def {name}\(", server, re.MULTILINE) or re.search(
+            rf"\b{name}: ", server
+        ), name
+
+
 def test_only_intel_macs_cap_cryptography():
     """cryptography 49+ ships no Intel macOS wheel, so a plain uvx on an Intel Mac built
     it from source and needed Rust (#322). The cap must stay Intel-only: Apple silicon

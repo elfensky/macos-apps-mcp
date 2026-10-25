@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import html
 import re
-from importlib.metadata import PackageNotFoundError, version
 
 from starlette.responses import HTMLResponse
 
-from .. import registry
+from .. import doctor, registry
 
 
 class Safe(str):
@@ -86,13 +85,6 @@ SIDEBAR: list[tuple[str, str, str, str]] = [
 ]
 
 
-def _version() -> str:
-    try:
-        return version("macos-apps-mcp")
-    except PackageNotFoundError:
-        return "dev"
-
-
 def _badge(key: str) -> Safe:
     """The Adapters entry shows ``registered/known``, or a chip while changes wait; the
     Health entry shows the dot of the last report, once there is one."""
@@ -109,7 +101,7 @@ def _badge(key: str) -> Safe:
         return Safe("")
     st = registry.adapter_status()
     registered, configured = set(st["registered"]), set(st["configured"])
-    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    known = registry.adapter_names()
     pending = len(registered ^ configured)
     inner = (
         h('<span class="chip pending">{} pending</span>', pending)
@@ -119,10 +111,11 @@ def _badge(key: str) -> Safe:
     return h('<span class="count">{}</span>', inner)
 
 
-def _nav(active: str, key: str, href: str, label, badge) -> Safe:
+def _nav(active: str, key: str, href: str, label, badge, *, extra: str = "") -> Safe:
     on = key == active
     return h(
-        '<a class="nav-item{}" href="{}"{}>{}{}</a>',
+        '<a class="nav-item{}{}" href="{}"{}>{}{}</a>',
+        extra,
         " active" if on else "",
         href,
         Safe(' aria-current="page"') if on else Safe(""),
@@ -179,9 +172,14 @@ def _sidebar(active: str, counts: dict | None = None) -> Safe:
         if g != group:
             group = g
             parts.append(h("<h6>{}</h6>", g))
-        parts.append(_nav(active, key, href, label, _badge(key)))
-    foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', _version())
-    return h('<aside class="sidebar">{}{}</aside>', join(parts), foot)
+        # " system": the phone strip leads with these (CSS ``order``, not DOM order)
+        parts.append(_nav(active, key, href, label, _badge(key), extra=" system"))
+    foot = h('<div class="sidebar-foot">v{} · 127.0.0.1 only</div>', doctor.version())
+    return h(
+        '<aside class="sidebar"><nav aria-label="Dashboard">{}</nav>{}</aside>',
+        join(parts),
+        foot,
+    )
 
 
 def page(
@@ -195,6 +193,7 @@ def page(
     listing: Safe | None = None,
     selected: bool = False,
     counts: dict | None = None,
+    status: int = 200,
 ):
     """The Console frame of sketch 001 (variant D): sidebar plus content.
 
@@ -203,21 +202,27 @@ def page(
     ``mode="list"`` is the write list: ``listing`` is the list column and ``body`` the
     detail column; ``selected`` marks a detail as open (the phone shows it instead of
     the list). ``counts`` are the sidebar's write counts when the caller already read
-    the log. ``refresh=(seconds, path)`` adds a meta refresh to a page dashboard code
+    the log. ``status`` is the HTTP status (a framed refusal keeps its 409 or 400).
+    ``refresh=(seconds, path)`` adds a meta refresh to a page dashboard code
     builds."""
     meta = (
         h('<meta http-equiv="refresh" content="{};url={}">\n', refresh[0], refresh[1])
         if refresh
         else Safe("")
     )
+    target = Safe(' id="content" tabindex="-1"')  # the skip link lands here
     if mode == "list":
+        # the open detail is the target when a write is selected (the phone hides
+        # the list then), else the list column
         content = h(
-            '<div class="b-list">{}</div><div class="b-detail">{}</div>',
+            '<div class="b-list"{}>{}</div><main class="b-detail"{}>{}</main>',
+            Safe("") if selected else target,
             listing or Safe(""),
+            target if selected else Safe(""),
             body,
         )
     elif mode == "page":
-        content = h('<main class="b-page">{}</main>', body)
+        content = h('<main class="b-page"{}>{}</main>', target, body)
     else:
         content = body
     return HTMLResponse(
@@ -227,11 +232,13 @@ def page(
             "{}<title>{} · macos-apps-mcp</title>\n"
             '<link rel="stylesheet" href="/static/dashboard.css">\n'
             '<script src="/static/dashboard.js" defer></script>\n</head>\n<body>\n'
+            '<a class="skip" href="#content">Skip to content</a>\n'
             '<div class="b-shell{}">{}{}</div>\n</body>\n</html>\n',
             meta,
             title,
             " detail-open" if selected else "",
             _sidebar(active, counts),
             content,
-        )
+        ),
+        status_code=status,
     )

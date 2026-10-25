@@ -287,15 +287,17 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
-def _version(dist: str = "macos-apps-mcp") -> str:
+def version(dist: str = "macos-apps-mcp") -> str:
     """The version of the code actually SERVING this call. The daemon is a separate
     long-lived process from the repo you edit — it sat three releases behind for weeks
     with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
-    the repo. ``libs`` reuses it for the bundled libraries."""
-    from importlib.metadata import PackageNotFoundError, version
+    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
+    reads it too (#430 IN-02): one lookup, one fallback."""
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as dist_version
 
     try:
-        return version(dist)
+        return dist_version(dist)
     except PackageNotFoundError:
         return "unknown"
 
@@ -304,7 +306,7 @@ def _version(dist: str = "macos-apps-mcp") -> str:
 _BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
 
 
-def _build_stamp() -> str:
+def build_stamp() -> str:
     """Which BUILD is serving this call (#143) — `version` alone cannot see a
     same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
     `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
@@ -422,7 +424,7 @@ def diagnose(request: bool = False) -> dict:
     # Adapter deny-list (PLAT-01, D-03/D-05): `adapters` is what this process serves,
     # `adapters_off` what it does not. No CLI twin — the note names the file instead.
     ad = registry.adapter_status()
-    known = {r.adapter for r in registry.TOOLS.values() if r.adapter}
+    known = set(registry.adapter_names())
     deployment["adapters"] = ad["registered"]
     deployment["adapters_off"] = sorted(known - set(ad["registered"]))
     deployment["adapters_note"] = (
@@ -431,8 +433,9 @@ def diagnose(request: bool = False) -> dict:
     )
     off = tiers.adapters_off()
     if unknown_adapters := off - known - {deploy.ADAPTERS_ALL_OFF}:
-        # operator input, so unbounded: three names keep the report in budget
-        names = sorted(unknown_adapters)
+        # operator input, so unbounded in count AND length: three names of at most 40
+        # characters keep the report in budget
+        names = sorted(n if len(n) <= 40 else n[:40] + "…" for n in unknown_adapters)
         deployment["adapters_unknown"] = names[:3] + (
             [f"+{len(names) - 3} more"] if len(names) > 3 else []
         )
@@ -484,11 +487,11 @@ def diagnose(request: bool = False) -> dict:
     )
 
     return {
-        "version": _version(),
-        "build": _build_stamp(),
+        "version": version(),
+        "build": build_stamp(),
         # #285: a bundle once shipped another mcp than uv.lock; this shows the bundled
         # versions without opening the bundle.
-        "libs": {name: _version(name) for name in ("mcp", "fastmcp")},
+        "libs": {name: version(name) for name in ("mcp", "fastmcp")},
         "responsible_process": _responsible_process(),
         "note": (
             "TCC attributes permissions to the process that launched macos-apps-mcp "

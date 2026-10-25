@@ -38,7 +38,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 03.1: Bug Fixes — Device-Report Findings Before Any Feature** (INSERTED) - Every open bug — the Intel iMac report's findings, the unproven #317 daemon path, the audit record's missing `dry_run` — is fixed or settled on device before Phase 4 (completed 2026-10-16)
 - [x] **Phase 4: Notes & Photos — Settle the Mechanism, Then Ship the Read Plane** - Two open mechanisms are probed on device first; what survives ships bounded, what does not ships documented (completed 2026-10-20)
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
-- [ ] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups
+- [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
+- [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
+- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
+- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
+- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -338,7 +342,7 @@ Plans:
   3. The dashboard exposes the adapter toggles, and a toggle changed there is reflected by `doctor` and by tool presence after the daemon restarts.
   4. The dashboard answers on loopback only — a non-loopback bind is refused — so nothing is exposed beyond the machine.
 
-**Plans**: 7/9 plans executed
+**Plans**: 9/9 plans complete
 
 Plans:
 **Wave 1**
@@ -359,15 +363,99 @@ Plans:
 - [x] 05-05-PLAN.md — Health, Backups and the dashboard docs (PLAT-02)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 05-06-PLAN.md — Release 0.15.0: owner-approved one-way cut, notarized build, install, doctor proof (D-18)
+- [x] 05-06-PLAN.md — Release 0.15.0: owner-approved one-way cut, notarized build, install, doctor proof (D-18)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
+- [x] 05-07-PLAN.md — Device proof on the installed release: Photos off and back on from the dashboard (D-18)
 
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #126` with no closing keyword
 
 **UI hint**: yes
+
+### Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430) (INSERTED)
+
+**Goal**: Every bug the Phase 5 reviews left open is fixed before the next feature phase: the write-detail and recovery pages show raw `imap://` account UUIDs instead of the account name (#427); the UI review's accessibility and state findings — focus ring, contrast, bare refusals — are open (#428); the close review's deferred findings — test TCC isolation, dashboard-record rendering, `serve()` resilience to a dashboard build failure, duplicated adapter-name sets — are open (#430). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: FIX-11, FIX-12, FIX-13
+**Depends on:** Phase 5
+**Success Criteria** (what must be TRUE):
+
+  1. On the write detail and recovery pages a Mail mailbox shows as the account's name or address plus the decoded folder name (`Personal › INBOX`), in the batch title, the `from` sources, the destination, the target rows and the undone banner; the `imap://` URL stays internal, the name comes from the Mail adapter's process-local account cache with no native call per page load (after a daemon restart the raw URL shows until the first Mail tool call fills the cache — researcher default O1, no persisted map; the owner confirms at verify-work), every value is escaped and an unknown account falls back to the raw URL (#427).
+  2. The dashboard passes the Phase 5 UI review's actionable findings: a visible `--color-primary` focus ring; measured contrast of at least 4.5:1 for text and 3:1 for UI glyphs on the faint, success, outbound and orange tokens in light mode; refused toggles rendered in the page frame with a banner and a way back, the Restart form locked with the switches; `aria-hidden` banner glyphs, a switch label that names adapter and state, a `<nav>` landmark with a skip link, token font sizes, 44px targets and reachable System pages on phone — inside the CSP, the sketch copy and escaping (#428).
+  3. The Phase 5 close review's deferred findings are closed: no unit test opens the developer's TCC databases; a dashboard toggle or restart record renders as an operator action without a `dry_run` row or model chip; a dashboard build failure leaves MCP serving with `dashboard_state` saying why; a failed audit write of a dashboard action is visible to the operator on the next page; the adapter-name set and `_version` have one home, no cross-module underscore imports in `dashboard/`, `doctor` names the dashboard URL only when a page can answer, and the deny-list is read once (#430).
+
+**Plans:** 7/7 plans complete
+
+Plans:
+**Wave 1**
+- [x] 05.1-01-PLAN.md — `serve()` keeps MCP up when the dashboard cannot be built and `doctor` names no URL a page cannot answer; the suite never opens the real TCC databases; the deny-list is read once (FIX-13: WR-05, IN-04, WR-01, IN-05, #430)
+- [x] 05.1-02-PLAN.md — one home each for `doctor.version` and `registry.adapter_names()` (FIX-13: IN-02, #430)
+- [x] 05.1-03-PLAN.md — measured contrast tokens, a solid primary focus ring, type tokens, a preview that dims without opacity, reduced motion (FIX-12 part 1, #428)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [x] 05.1-04-PLAN.md — `dashboard/` modules use only public names of other modules, held by an AST test (FIX-13: IN-03, #430)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [x] 05.1-05-PLAN.md — Mail mailboxes render as `Account › folder` from the process-local account cache, escaped, with the raw URL as fallback (FIX-11, closes #427)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [x] 05.1-06-PLAN.md — refusals inside the page frame, Restart locked with the switches, a switch label with state, hidden banner glyphs, skip link and nav landmark, 44px targets and System pages first on a phone (FIX-12 part 2, closes #428)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [x] 05.1-07-PLAN.md — a lost audit record shows on the next page; dashboard records render as operator actions (FIX-13: WR-06, WR-03, closes #430)
+
+**Cross-cutting constraints:**
+- The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #430` with no closing keyword
+
+### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
+
+**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17
+**Depends on:** Phase 05.1
+**Success Criteria** (what must be TRUE):
+
+  1. On macOS 27, where no readable TCC database holds AppleEvents rows, the Health page and `doctor(request=False)` give each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs; the check sends no Apple Event, shows no prompt (D-14) and runs through `runtime.run_native()`; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam; a device check from the installed daemon shows the bundle's own grants on the Health page (#455).
+  2. `export_mail` never hides a written file: a collision on a later id either refuses the whole batch before the first write, or every id reports its own status (`written` / `exists` / `absent`) and the call returns the files it wrote, so a retry writes no duplicate; a unit test covers the later-id collision (#399).
+  3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
+  4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
+
+**Plans:** 0/7 plans complete
+
+Plans:
+**Wave 1**
+- [ ] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05.2-02-PLAN.md — `export_mail` checks every target path before the first write, refuses the batch on any collision with nothing written, creates files exclusively and names the files already written on a late failure (FIX-15, closes #399)
+- [ ] 05.2-03-PLAN.md — `runtime.automation_permission` wraps `AEDeterminePermissionToAutomateTarget` through `run_native`; `doctor(request=False)` reports each Automation adapter as granted, denied, not asked, not running or probe error; the seam is locked in conftest with a shared fake (FIX-14 part 1, #455)
+- [ ] 05.2-05-PLAN.md — owner sitting: the draft-only reply-quote probe decides the FIX-16 route and the facts entry; the FIX-14 revoke pre-check settles the `-1743`/`-1744` wording (FIX-16, FIX-14; #348, #455)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 05.2-04-PLAN.md — the Health page shows the live Automation grants first, a grey "cannot be told until the app runs" row with no Settings button, the docs in `DAEMON.md`, and the O12 follow-up issue (FIX-14 part 2, #455)
+- [ ] 05.2-06-PLAN.md — reply drafts stop overwriting Mail's native quote on the proven route, or the hand-built quote takes Mail's attribution line with the whole original and honest docstrings (FIX-16, #348)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
+
+### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
+
+**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
+**Requirements**: TBD (planned from #465)
+**Depends on:** Phase 05.2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
+
+### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
+
+**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed after Phase 05.3 and before Phase 6 (owner, 2026-10-25).
+**Requirements**: TBD (planned from #470)
+**Depends on:** Phase 05.3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
@@ -388,7 +476,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.3 → 05.4 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -398,5 +486,10 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 5 →
 | 3. EventKit Depth — Calendar & Reminders | 10/10 | Complete    | 2026-10-11 |
 | 03.1. Bug Fixes (INSERTED) | 7/7 | Complete    | 2026-10-16 |
 | 4. Notes & Photos | 6/6 | Complete    | 2026-10-20 |
-| 5. Operator Control Plane | 7/9 | In Progress | - |
+| 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
+| 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
+| 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 0/7 | Planned | - |
+| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

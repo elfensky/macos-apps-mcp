@@ -21,6 +21,7 @@ import pytest
 from fastmcp import Client
 
 import macos_apps_mcp.audit as au
+import macos_apps_mcp.deploy as deploy
 import macos_apps_mcp.registry as reg
 import macos_apps_mcp.server as srv
 import macos_apps_mcp.tiers as tiers
@@ -237,6 +238,46 @@ def test_adapters_off_file_is_read_only_in_the_daemon_role(tmp_path):
     assert set(daemon["all_recorded"]) >= _PHOTOS_TOOLS
     stdio = _subprocess_registry_snapshot({"HOME": str(tmp_path)})
     assert set(stdio["tools"]) >= _PHOTOS_TOOLS
+
+
+def test_the_server_import_reads_the_deny_list_once(tmp_path):
+    # IN-05: one snapshot per import, so a file change mid-import cannot register part
+    # of an adapter. An audit hook counts the opens of the adapters_off file.
+    f = tmp_path / ".local/state/macos-apps-mcp/adapters_off"
+    f.parent.mkdir(parents=True)
+    f.write_text("photos\n")
+    code = (
+        "import sys, json\n"
+        "n = []\n"
+        "sys.addaudithook(lambda ev, a: ev == 'open' and str(a[0]).endswith("
+        "'adapters_off') and n.append(1))\n"
+        "import macos_apps_mcp.server, macos_apps_mcp.registry as reg\n"
+        "print(json.dumps({'opens': len(n), 'photos': sorted(k for k, r in "
+        "reg.TOOLS.items() if r.adapter == 'photos' and r.registered)}))"
+    )
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "MACOS_APPS_MCP_ROLE": "daemon",
+    }
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    assert got == {"opens": 1, "photos": []}
+
+
+def test_adapter_enabled_decides_from_the_snapshot_it_is_given(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    assert tiers.adapter_enabled("mail", off=set()) is True
+    assert tiers.adapter_enabled("photos", off={"photos"}) is False
+    assert tiers.adapter_enabled("mail", off={deploy.ADAPTERS_ALL_OFF}) is False
+    assert tiers.adapter_enabled("mail") is False  # no snapshot: reads as today
 
 
 def test_adapters_off_wins_over_allow_send_for_mail():

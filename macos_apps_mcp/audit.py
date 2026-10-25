@@ -58,10 +58,11 @@ def _audit_path() -> Path:
     return state_dir() / "audit.jsonl"
 
 
-def audit_write(record: dict) -> None:
+def audit_write(record: dict) -> bool:
     """Append one JSON record to the audit log. NEVER raises — auditing must not fail a
     user's write, so a logging error (disk full, permission, missing dir) is
-    swallowed."""
+    swallowed. Returns True after the append, False when the write failed; callers
+    may ignore the value (the dashboard shows a lost record, #430)."""
     try:
         path = _audit_path()
         if path.exists() and path.stat().st_size > _AUDIT_MAX_BYTES:
@@ -70,6 +71,8 @@ def audit_write(record: dict) -> None:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:  # noqa: BLE001 — audit must never break a write
         log.debug("audit_write failed: %s", e)
+        return False
+    return True
 
 
 def _instant(ts) -> datetime | None:
@@ -100,7 +103,7 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
         return [{"error": f"audit log unreadable: {e}"}]
     since_i = _instant(since) if since else None
     out = []
-    for line in text.splitlines():
+    for line in text.split("\n"):
         try:
             rec = json.loads(line)
         except ValueError:
@@ -138,7 +141,7 @@ def read_all() -> list[dict]:
             log.debug("read_all failed: %s", e)
             out.append({"error": f"audit log unreadable: {e}"})
             continue
-        for line in text.splitlines():
+        for line in text.split("\n"):
             try:
                 rec = json.loads(line)
             except ValueError:
@@ -184,7 +187,7 @@ def usage_read() -> dict[str, dict]:
     except OSError as e:
         log.debug("usage_read failed: %s", e)
         return out
-    for line in text.splitlines():
+    for line in text.split("\n"):
         try:
             rec = json.loads(line)
             tool, ts = rec["tool"], rec.get("ts", "")
@@ -261,7 +264,7 @@ _BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to d
 _FALLBACK_CALLER = "unknown-client"
 
 
-def _resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
+def resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
     """The ``dry_run`` the tool will act on (#222): the client's value coerced as
     pydantic coerces it for the tool (``"false"`` is False), else the signature default;
     a tool with no ``dry_run`` parameter always acts. The middleware runs BEFORE that
@@ -331,7 +334,7 @@ class AuditMiddleware(Middleware):
         tool = context.message.name
         usage_log(tool)  # tally every call (reads included) — swallows its own errors
         args = dict(context.message.arguments or {})
-        dry_run = _resolve_dry_run(tool, args, self._dry_run_defaults)
+        dry_run = resolve_dry_run(tool, args, self._dry_run_defaults)
         caller, session = _caller(context)
         before = None
         source = self._snapshot_sources.get(tool)

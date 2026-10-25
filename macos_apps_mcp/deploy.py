@@ -22,7 +22,7 @@ from pathlib import Path
 from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
-_BUNDLE_ID = _PLIST.removesuffix(".plist")  # our signed .app's CFBundleIdentifier
+BUNDLE_ID = _PLIST.removesuffix(".plist")  # our signed .app's CFBundleIdentifier
 _TCC_DB = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
 # FDA (kTCCServiceSystemPolicyAllFiles) rows live in the SYSTEM db, not the user one
 # (#123 — found during #71 acceptance: FDA granted + functional, yet invisible here).
@@ -53,7 +53,7 @@ def _agent_service():
     # `is None` check let this proceed off-bundle and register the wrong plist. Pin
     # the exact CFBundleIdentifier. Guard BEFORE importing ServiceManagement so the
     # off-bundle error path never depends on that framework.
-    if _main_bundle_id() != _BUNDLE_ID:
+    if _main_bundle_id() != BUNDLE_ID:
         raise NativeError(
             "not running from the ren.lav.macos-apps-mcp .app bundle — SMAppService "
             "registers plists from the calling bundle. Build with scripts/build_app.sh "
@@ -453,7 +453,7 @@ def dashboard(argv: list[str]) -> None:
         print(
             f"macos-apps-mcp: no usable dashboard key at {_DASHBOARD_KEY_FILE}. The "
             "daemon writes it when it starts: remove the file if it exists, then "
-            f"restart the daemon (launchctl kickstart -k gui/$(id -u)/{_BUNDLE_ID}), "
+            f"restart the daemon (launchctl kickstart -k gui/$(id -u)/{BUNDLE_ID}), "
             "or install it (macos-apps-mcp install-agent).",
             file=sys.stderr,
         )
@@ -482,7 +482,7 @@ def allow_send(argv: list[str]) -> None:
     # Registration happens at import, so the running daemon still has the old gate.
     # No agent registered (stdio-only user) → nothing to restart, and that is fine.
     kick = subprocess.run(
-        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{_BUNDLE_ID}"],
+        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{BUNDLE_ID}"],
         capture_output=True,
         text=True,
     )

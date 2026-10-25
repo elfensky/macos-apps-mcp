@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import deploy
+from macos_apps_mcp import deploy, doctor
 from macos_apps_mcp.errors import NativeError
 
 
@@ -37,6 +37,19 @@ def _fake_tcc(path):
             ),
         ],
     )
+
+
+def test_session_points_tcc_at_absent_paths(_isolated_state):
+    """WR-01: no unit test may read the developer's real TCC databases."""
+    real = (
+        Path.home() / "Library/Application Support/com.apple.TCC/TCC.db",
+        Path("/Library/Application Support/com.apple.TCC/TCC.db"),
+    )
+    for p in (deploy._TCC_DB, deploy._TCC_SYSTEM_DB):
+        assert not p.exists()
+        assert p.is_relative_to(_isolated_state)
+        assert p not in real
+    assert doctor._FDA_PATHS == (deploy._TCC_DB, deploy._TCC_SYSTEM_DB)
 
 
 def test_grant_identities_maps_rows(tmp_path, monkeypatch):
@@ -208,7 +221,7 @@ def test_agent_service_foreign_bundle_raises(monkeypatch):
 def test_agent_service_our_bundle_proceeds(monkeypatch):
     # our exact bundle id passes the gate: _agent_service goes on to call SMAppService.
     # Stub the framework seam so the positive path is asserted without a real bundle.
-    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: deploy._BUNDLE_ID)
+    monkeypatch.setattr(deploy, "_main_bundle_id", lambda: deploy.BUNDLE_ID)
     import sys
     import types
 

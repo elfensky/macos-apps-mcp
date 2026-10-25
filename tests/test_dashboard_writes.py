@@ -18,7 +18,7 @@ import pytest
 
 from macos_apps_mcp import audit, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
-from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.adapters import mail_addressing, mail_recover
 from macos_apps_mcp.dashboard import writes
 from macos_apps_mcp.errors import NativeError
 from tests._dashboard import get
@@ -404,6 +404,157 @@ def test_escape_batch_fields():
     assert "&lt;script&gt;" in page("/write/2026-09-28T09:40:12/0")
 
 
+def test_a_batch_title_names_the_account_and_folder(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    batch(plan={"destination": "imap://UUID-1/%5BGmail%5D/Trash"})
+    assert titles(page("/")) == ["Moved 2 messages to Personal › [Gmail]/Trash"]
+    assert mail_addressing._ACCOUNT_MAP_CACHE == {"UUID-1": "Personal"}
+
+
+def test_an_undo_batch_title_names_the_account_and_folder(monkeypatch):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    batch(mw=False, plan={"destination": "imap://UUID-1/INBOX"})
+    put(move_line("2026-09-28T09:40:13", tool="mail_undo", receipt=RID))
+    assert titles(page("/")) == [
+        "Undid a batch: moved 2 messages back to Personal › INBOX"
+    ]
+
+
+ACCOUNTS = {"UUID-1": "Personal", "UUID-2": "Work"}
+TRASH = "imap://UUID-1/%5BGmail%5D/Trash"
+
+
+def labelled(monkeypatch, accounts=ACCOUNTS):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", accounts)
+
+
+def in_folders(*folders, destination=TRASH, **kw):
+    """A batch whose targets sit in the given folders (one target per folder)."""
+    ids = tuple(f"m{n}@x.invalid" for n, _ in enumerate(folders))
+    targets = [
+        {
+            "id": i,
+            "folder": f,
+            "fidelity": "full",
+            "rowid": 101 + n,
+            "status": "planned",
+        }
+        for n, (i, f) in enumerate(zip(ids, folders, strict=True))
+    ]
+    done = {"results": {i: "ok" for i in ids}}
+    return batch(
+        ids=ids + ("pad@x.invalid",) * (2 - len(ids)),
+        files=False,
+        plan={"destination": destination, "targets": targets},
+        done=done,
+        **kw,
+    )
+
+
+def without_raw(text):
+    return re.sub(r'<details class="raw">.*?</details>', "", text, flags=re.S)
+
+
+DETAIL = "/write/2026-09-28T09:40:12/0"
+
+
+def test_batch_detail_names_accounts_and_folders(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/Archiv%C3%A9")
+    text = page(DETAIL)
+    shown = without_raw(text)
+    assert "from Personal › INBOX, Work › Archivé" in shown
+    assert " to <b>Personal › [Gmail]/Trash</b>" in shown
+    assert '<div class="faint">from Personal › INBOX</div>' in shown
+    assert "imap://" not in shown
+    assert "imap://UUID-1/INBOX" in text and "imap://UUID-2/Archiv%C3%A9" in text
+    assert mail_addressing._ACCOUNT_MAP_CACHE == ACCOUNTS
+
+
+def test_one_label_for_two_accounts_with_one_name(monkeypatch):
+    labelled(monkeypatch, {"UUID-1": "Personal", "UUID-2": "Personal"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/INBOX")
+    shown = without_raw(page(DETAIL))
+    assert "from Personal › INBOX" in shown
+    assert "Personal › INBOX, Personal" not in shown
+    assert "imap://UUID-1/INBOX" in page(DETAIL) and "imap://UUID-2/INBOX" in page(
+        DETAIL
+    )
+
+
+def test_the_from_list_keeps_target_order_and_skips_an_empty_folder(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-2/Boxes", "", "imap://UUID-1/INBOX")
+    shown = without_raw(page(DETAIL))
+    assert "from Work › Boxes, Personal › INBOX" in shown
+
+
+def test_undone_banner_names_the_folders_the_messages_are_back_in(monkeypatch):
+    labelled(monkeypatch, {"UUID-1": "<i>P</i>"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    undo_rid = "20260928-102538-123456-002-move"
+    batch(
+        rid=undo_rid,
+        files=False,
+        mw=False,
+        plan={"ts": "2026-09-28T10:25:38"},
+        done={"ts": "2026-09-28T10:25:40", "results": dict.fromkeys(IDS, "ok")},
+    )
+    put(
+        move_line(
+            "2026-09-28T10:25:40",
+            tool="mail_undo",
+            args={"receipt": RID, "dry_run": False},
+            receipt=undo_rid,
+        )
+    )
+    text = page(DETAIL)
+    assert "The messages are back in &lt;i&gt;P&lt;/i&gt; › INBOX." in text
+    assert "<i>P</i>" not in text
+
+
+def test_an_unknown_or_uncached_account_shows_the_raw_url(monkeypatch):
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    assert mail_addressing._ACCOUNT_MAP_CACHE is None
+    assert "to Personal" not in page("/")
+    assert titles(page("/")) == [f"Moved 2 messages to {TRASH}"]
+    assert f" to <b>{TRASH}</b>" in page(DETAIL)
+    assert "from imap://UUID-1/INBOX" in page(DETAIL)
+    assert mail_addressing._ACCOUNT_MAP_CACHE is None
+    labelled(monkeypatch, {"OTHER": "x"})
+    assert titles(page("/")) == [f"Moved 2 messages to {TRASH}"]
+    assert f" to <b>{TRASH}</b>" in page(DETAIL)
+
+
+def test_an_account_name_with_markup_is_escaped(monkeypatch):
+    labelled(monkeypatch, {"UUID-1": "<script>alert(1)</script>"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    for path in ("/", DETAIL):
+        text = page(path)
+        assert "<script>alert" not in text
+        assert "&lt;script&gt;alert(1)&lt;/script&gt; › [Gmail]/Trash" in text
+
+
+def test_search_finds_a_batch_by_its_account_name(monkeypatch):
+    labelled(monkeypatch)
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-1/INBOX")
+    for q in ("Personal", "UUID-1"):
+        assert len(rows_in(page(f"/?q={q}"))) == 1, q
+    assert rows_in(page("/?q=Nowhere")) == []
+
+
+def test_search_finds_a_batch_by_a_second_accounts_name_and_decoded_folder(
+    monkeypatch,
+):
+    labelled(monkeypatch, {"UUID-1": "Personal", "UUID-2": "Work"})
+    in_folders("imap://UUID-1/INBOX", "imap://UUID-2/Archiv%C3%A9")
+    for q in ("Work", "Archivé"):
+        assert len(rows_in(page(f"/?q={q}"))) == 1, q
+    labelled(monkeypatch, None)
+    assert rows_in(page("/?q=Archivé")) == []
+    assert len(rows_in(page("/?q=Archiv%25C3%25A9"))) == 1
+
+
 # --- finding a write (D-11) -----------------------------------------------------
 
 
@@ -573,9 +724,19 @@ def test_dashboard_records_render_truthfully():
         "Turned &lt;b&gt;x&lt;/b&gt; on",
     } <= set(titles(listing))
     assert "<b>x</b>" not in listing and "<b>X</b>" not in listing
+    # WR-03: the operator did these, not the model
+    assert listing.count('<span class="chip">operator</span>') == 4
+    assert "chip destructive" not in listing
     for ts in ("08:00:00", "08:01:00", "08:02:00", "08:03:00"):
         text = page(f"/write/2026-09-28T{ts}/0")
         assert "<dd>dashboard</dd>" in text  # the caller
+        assert "What the operator did" in text and "<dt>action</dt>" in text
+        for model_only in (
+            "What the model asked for",
+            "<dt>tool</dt>",
+            "<dt>dry_run</dt>",
+        ):
+            assert model_only not in text
         for absent in (
             "To undo, ask Claude",
             "No backup for this write.",
@@ -587,6 +748,7 @@ def test_dashboard_records_render_truthfully():
             assert absent not in text
         assert "<b>x</b>" not in text and "<b>X</b>" not in text
     assert "Turned Mail off" in page("/write/2026-09-28T08:00:00/0")
+    assert "<dd>restart</dd>" in page("/write/2026-09-28T08:02:00/0")
 
 
 def test_corrupt_records_never_crash_a_page():

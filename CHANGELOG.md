@@ -6,6 +6,57 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
+
+### Added
+
+- **The server is listed in the official MCP Registry**, as
+  `io.github.elfensky/macos-apps-mcp`. The publish workflow uploads `server.json` right
+  after the PyPI upload, and `glama.json` lets the maintainer claim the Glama listing.
+- **A Claude Code plugin ships in this repo.** Run `/plugin marketplace add
+  elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp`. It adds the
+  server and a skill that teaches the dry-run workflow.
+- **The app icon is the project logo** everywhere a listing shows one: the README, the
+  plugin (`plugin/.claude-plugin/icon.png`) and `server.json`'s `icons` for the registry.
+  It is exported from `packaging/AppIcon.icon` at 512 px with Icon Composer's `ictool`.
+
+### Changed
+
+- **Dependabot uses the `uv` ecosystem.** Python updates move only `uv.lock`
+  (`lockfile-only`, so the deliberate caps stay) after a 3-day cooldown; version updates
+  and security updates each arrive as one grouped PR per ecosystem.
+- **The version gate runs only on release PRs.** It checks every PR into `main` that the
+  version moved, and no longer fails ordinary PRs that touch `pyproject.toml`. It runs
+  with read-only permissions.
+
+### Fixed
+
+- **Dependencies with known vulnerabilities are updated.** fastmcp 3.4.11
+  (GHSA-7xgj-8392-5q4r) and opentelemetry-api 1.45.1 (GHSA-xcq7-p3pf-p88h), plus 29 other
+  locked updates inside the existing limits. cryptography stays at 48.0.1, the last release
+  with an Intel macOS wheel: nothing imports it, so its advisories do not apply
+  (docs/DAEMON.md).
+- **Mail mailboxes show as `Account › folder` on the dashboard** (#427) — the write list,
+  the write detail, the recovery view and the Backups page name a Mail mailbox by its
+  account name and decoded folder (`Personal › INBOX`) instead of the raw `imap://` URL.
+  The name comes from the Mail adapter's in-memory account map, so a page never starts
+  Mail; until a Mail tool has filled that map (for example right after a daemon restart)
+  the page shows the raw URL.
+- **The dashboard reads well and works by keyboard, screen reader and phone** (#428) — a
+  solid focus ring; chip, word-diff and status-dot colours measured at 4.5:1 for text and
+  3:1 for glyphs in light mode; a refused toggle shows the Adapters page with the reason
+  and a way back, under the same status code; Restart locks with the switches; the switch
+  label names the adapter and its state; a skip link, a navigation landmark, 44 px targets
+  and the System pages first on a phone.
+- **Selected-row contrast** (#447) — the detail line and time of a selected write, and the
+  count on the active menu item, now read at 4.5:1 on the selection highlight.
+- **Dashboard resilience and honest records** (#430) — a dashboard that cannot be built no
+  longer takes MCP down (`doctor` says `not built: …`), and `doctor` names the dashboard
+  URL only when a page can answer; a toggle, Discard or Restart whose audit record could
+  not be written says so on the Adapters page; dashboard toggles and restarts show as
+  operator actions, with no `dry_run` row and no model chip; tool registration takes one
+  adapter deny-list snapshot per server import.
+
 ## [0.15.0] - 2026-10-22 — Photos and the dashboard
 
 ### Added

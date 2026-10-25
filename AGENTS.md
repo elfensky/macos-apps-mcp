@@ -65,7 +65,7 @@ uv run macos-apps-mcp            # run the server (stdio)
 
 **Branches & releases.** `develop` is the trunk — every PR **rebase-merged**, so it stays linear.
 `main` is release-only: nothing but `--no-ff` release cuts, each tagged `vX.Y.Z`. Full procedure,
-including the two-file version bump and the mandatory `doctor().version` proof, is in
+including the three-file version bump and the mandatory `doctor().version` proof, is in
 [docs/RELEASING.md](docs/RELEASING.md). **The repo is not the daemon** — merging changes nothing
 about what Claude Code sees until the `.app` is rebuilt and reinstalled.
 
@@ -95,6 +95,8 @@ gh pr checks --watch --required && gh pr merge --rebase --delete-branch
 cd - && git pull --ff-only
 git worktree unlock .worktrees/<slug> && git worktree remove .worktrees/<slug> && git branch -D <type>/<slug>
 ```
+
+Clean a lane only after `gh pr view <n> --json state` reports `MERGED`: a cleanup run after a failed merge deletes an open PR's branch, and GitHub closes the PR.
 
 A new worktree has no dependencies installed: run `uv sync` in it first. A locked worktree
 you did not create belongs to another session — leave it. `.claude/worktrees/` is Claude Code's own

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import deploy, runtime
+from macos_apps_mcp import deploy, doctor, runtime
 from macos_apps_mcp.adapters import mail_addressing, mail_ids, mail_index
 from tests.envelope import SCHEMA, Envelope, seed_base
 
@@ -38,6 +38,12 @@ def _isolated_state(tmp_path_factory):
     mp.setattr(deploy, "_ALLOW_SEND_FILE", state_home / "allow_send")
     mp.setattr(deploy, "_ADAPTERS_OFF_FILE", state_home / "adapters_off")
     mp.setattr(deploy, "_DASHBOARD_KEY_FILE", state_home / "daemon" / "dashboard_key")
+    tcc_user = state_home / "absent-tcc-user" / "TCC.db"
+    tcc_system = state_home / "absent-tcc-system" / "TCC.db"
+    mp.setattr(deploy, "_TCC_DB", tcc_user)
+    mp.setattr(deploy, "_TCC_SYSTEM_DB", tcc_system)
+    # a tuple frozen at import, so it needs its own patch beside the two constants
+    mp.setattr(doctor, "_FDA_PATHS", (tcc_user, tcc_system))
     yield state_home
     mp.undo()
 

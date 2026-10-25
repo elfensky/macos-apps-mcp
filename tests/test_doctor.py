@@ -378,8 +378,22 @@ def test_diagnose_shape(monkeypatch, tmp_path):
 def test_version_reads_any_distribution():
     from importlib.metadata import version
 
-    assert doc._version("mcp") == version("mcp")
-    assert doc._version("no-such-dist-291") == "unknown"
+    assert doc.version("mcp") == version("mcp")
+    assert doc.version("no-such-dist-291") == "unknown"
+
+
+def test_the_dashboard_footer_names_the_doctor_version(monkeypatch):
+    """#430 IN-02: the sidebar footer and the Health page share one version lookup."""
+    from tests import _dashboard
+
+    monkeypatch.setattr(
+        doc,
+        "version",
+        lambda dist="macos-apps-mcp": {"macos-apps-mcp": "9.9.9"}[dist],
+    )
+    r = _dashboard.get("/usage")
+    assert r.status_code == 200
+    assert "v9.9.9 · 127.0.0.1 only" in r.text
 
 
 def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
@@ -423,8 +437,23 @@ def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
     assert len(reads) == 2
 
 
-@pytest.mark.parametrize("role", ["stdio", "daemon"])
-def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
+def _budget_cases():
+    from macos_apps_mcp import daemon
+
+    return [
+        pytest.param("stdio", None, id="stdio"),
+        pytest.param("daemon", "not bound: [Errno 48] in use", id="daemon-not-bound"),
+        pytest.param("daemon", daemon.KEY_UNUSABLE_STATE, id="daemon-key-unusable"),
+        pytest.param(
+            "daemon",
+            "not built: " + '"' * daemon.NOT_BUILT_MAX,
+            id="daemon-not-built-worst-escape",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(("role", "state"), _budget_cases())
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
     if role == "daemon":
@@ -434,10 +463,13 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role):
 
         monkeypatch.setenv("MACOS_APPS_MCP_ROLE", "daemon")
         junk = ",".join(f"no-such-adapter-{i}" for i in range(10))
+        junk += (
+            "," + "a" * 4000
+        )  # WR-04: one long unknown name must not break the budget
         monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", f"photos,{junk}")
         sending = registry.outbound_status()["registered"]
         monkeypatch.setenv("MACOS_APPS_ALLOW_SEND", "" if sending else "mail")
-        monkeypatch.setattr(daemon, "dashboard_state", "not bound: [Errno 48] in use")
+        monkeypatch.setattr(daemon, "dashboard_state", state)
 
     def denied_automation(*a, **k):
         raise AutomationDenied(
@@ -523,18 +555,18 @@ def test_doctor_integration_real():
 def test_build_stamp_reports_dev_without_a_stamp_file(tmp_path, monkeypatch):
     # a dev checkout (and any bundle whose build script predates #143) has no stamp
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", tmp_path / "build_stamp")
-    assert doc._build_stamp() == "dev"
+    assert doc.build_stamp() == "dev"
 
 
 def test_build_stamp_reads_the_baked_file(tmp_path, monkeypatch):
     stamp = tmp_path / "build_stamp"
     stamp.write_text("b7fbde6 2026-08-20T10:00:00Z\n")
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", stamp)
-    assert doc._build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
+    assert doc.build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
 
 
 def test_report_carries_the_build_stamp(monkeypatch):
     monkeypatch.setattr(doc, "run_native", lambda fn: 3)
-    monkeypatch.setattr(doc, "_build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
+    monkeypatch.setattr(doc, "build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
     report = doc.diagnose(request=False)
     assert report["build"] == "b7fbde6 2026-08-20T10:00:00Z"

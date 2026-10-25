@@ -11,19 +11,19 @@ from __future__ import annotations
 from .. import deploy
 
 _CAL, _REM = "kTCCServiceCalendar", "kTCCServiceReminders"
-_EVENTS, _FDA = "kTCCServiceAppleEvents", "kTCCServiceSystemPolicyAllFiles"
+EVENTS, FDA = "kTCCServiceAppleEvents", "kTCCServiceSystemPolicyAllFiles"
 
 # adapter -> ((TCC service, target bundle id | None), ...); () = needs no grant.
 ADAPTER_GRANTS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "calendar": ((_CAL, None),),
-    "contacts": ((_EVENTS, "com.apple.AddressBook"),),
-    "mail": ((_EVENTS, "com.apple.mail"), (_FDA, None)),
-    "messages": ((_EVENTS, "com.apple.MobileSMS"), (_FDA, None)),
-    "music": ((_EVENTS, "com.apple.Music"),),
-    "notes": ((_EVENTS, "com.apple.Notes"),),
-    "photos": ((_FDA, None),),
-    "reminders": ((_REM, None), (_FDA, None)),
-    "safari": ((_EVENTS, "com.apple.Safari"),),
+    "contacts": ((EVENTS, "com.apple.AddressBook"),),
+    "mail": ((EVENTS, "com.apple.mail"), (FDA, None)),
+    "messages": ((EVENTS, "com.apple.MobileSMS"), (FDA, None)),
+    "music": ((EVENTS, "com.apple.Music"),),
+    "notes": ((EVENTS, "com.apple.Notes"),),
+    "photos": ((FDA, None),),
+    "reminders": ((_REM, None), (FDA, None)),
+    "safari": ((EVENTS, "com.apple.Safari"),),
     "shortcuts": (),
 }
 
@@ -31,7 +31,7 @@ ADAPTER_GRANTS: dict[str, tuple[tuple[str, str | None], ...]] = {
 def grant_state(
     identities: dict | None,
     adapter: str,
-    client: str = deploy._BUNDLE_ID,
+    client: str = deploy.BUNDLE_ID,
     *,
     complete: bool = True,
     service: str | None = None,
@@ -47,10 +47,10 @@ def grant_state(
     if identities is None or not needs:
         return None
     states = set()
-    for service, target in needs:
+    for svc, target in needs:
         rows = [
             r
-            for r in identities.get(service, [])
+            for r in identities.get(svc, [])
             if r.get("client") == client
             and (target is None or r.get("target") == target)
         ]

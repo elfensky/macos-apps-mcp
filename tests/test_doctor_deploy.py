@@ -248,7 +248,7 @@ def test_report_carries_the_serving_version(monkeypatch):
     from macos_apps_mcp import doctor as doc
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert doc._version() == tomllib.loads(pyproject.read_text())["project"]["version"]
+    assert doc.version() == tomllib.loads(pyproject.read_text())["project"]["version"]
 
 
 def test_daemon_role_is_detected_from_argv_not_only_the_env_var(monkeypatch):

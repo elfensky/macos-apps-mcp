@@ -34,8 +34,33 @@
       "status": "complete"
     },
     {
+      "number": "04.1",
+      "name": "Bug Fixes (INSERTED)",
+      "status": "complete"
+    },
+    {
       "number": "5",
       "name": "Operator Control Plane",
+      "status": "complete"
+    },
+    {
+      "number": "05.1",
+      "name": "Dashboard Follow-ups (INSERTED)",
+      "status": "complete"
+    },
+    {
+      "number": "05.2",
+      "name": "Bug Fixes — every open bug before Phase 6 (INSERTED)",
+      "status": "in_progress"
+    },
+    {
+      "number": "05.3",
+      "name": "Feedback — problem reports (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.4",
+      "name": "Migration — mcp 2 and fastmcp 4 (INSERTED)",
       "status": "pending"
     },
     {
@@ -45,9 +70,9 @@
     }
   ],
   "next": {
-    "command": "/gsd:progress --next",
+    "command": "/gsd-progress --next",
     "label": "Advance to the next step",
-    "reason": "Phase 05 of 9 · executing"
+    "reason": "Phase 10 of 13 · executing"
   },
-  "updated_at": "2026-10-22T08:26:17.689Z"
+  "updated_at": "2026-10-25T12:50:17.168Z"
 }

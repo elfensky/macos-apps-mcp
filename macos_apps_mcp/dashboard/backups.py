@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit
-from ..adapters import mail_recover
+from ..adapters import mail_addressing, mail_recover
 from . import recovery, writes
 from .html import Safe, h, join
 from .html import page as render_page
@@ -73,7 +73,7 @@ def _receipt_row(name: str, files: int, size: int, plan: dict | None) -> Safe:
     title = f"{op} · {k} {'message' if k == 1 else 'messages'}"
     dest = plan.get("destination") if plan else None
     if isinstance(dest, str) and dest:
-        title += f" → {dest}"
+        title += f" → {mail_addressing.mailbox_label(dest)}"
     return h(
         '<a class="row clickable" href="/backups/{}"><div class="grow">'
         '<div class="title">{}</div><div class="sub mono">{}</div></div>'
@@ -81,7 +81,7 @@ def _receipt_row(name: str, files: int, size: int, plan: dict | None) -> Safe:
         name,
         title,
         name,
-        recovery._size(size),
+        recovery.size_label(size),
     )
 
 
@@ -136,7 +136,7 @@ def _load_receipt(name: str):
     row = next(
         (r for r in writes.build_rows(audit.read_all()) if r.receipt == name), None
     )
-    return folder, row, *writes._recovery_facts(name)
+    return folder, row, *recovery.facts(name)
 
 
 _BACK = Safe('<a class="btn link" href="/backups">‹ Backups</a>')
@@ -150,7 +150,7 @@ def _rotated(name: str, folder, files: dict[str, int]) -> Safe:
                 '<div class="row"><span class="grow mono">{}</span>'
                 '<span class="muted">{}</span></div>',
                 n,
-                recovery._size(files[n]),
+                recovery.size_label(files[n]),
             )
             for n in sorted(files)
         )
@@ -189,7 +189,8 @@ async def receipt(request):
             row.title,
             name,
             Safe(
-                '<div class="banner ok"><span>↩</span><div>This batch was undone: a '
+                '<div class="banner ok"><span aria-hidden="true">↩</span>'
+                "<div>This batch was undone: a "
                 "later mail_undo moved the messages back.</div></div>\n"
             )
             if row.undone

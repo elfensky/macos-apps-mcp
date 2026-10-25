@@ -15,16 +15,17 @@ import os
 import re
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import audit, deploy, doctor, registry
+from macos_apps_mcp import audit, dashboard, deploy, doctor, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
-from macos_apps_mcp.adapters import mail_recover
+from macos_apps_mcp.adapters import mail_addressing, mail_recover
 from macos_apps_mcp.dashboard import grants, health, recovery
 from tests._dashboard import get
 
-BUNDLE = deploy._BUNDLE_ID
+BUNDLE = deploy.BUNDLE_ID
 BOTH_READ = {"user": None, "system": None}
 
 
@@ -254,11 +255,22 @@ EVERYONE = sorted({r.adapter for r in registry.TOOLS.values() if r.adapter})
 
 def banner(text):
     m = re.search(
-        r'<div class="banner bad"><span>●</span><div><b>(.*?)</b> (.*?)</div></div>',
+        r'<div class="banner bad"><span aria-hidden="true">●</span>'
+        r"<div><b>(.*?)</b> (.*?)</div></div>",
         text,
         re.S,
     )
     return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
+
+
+def test_every_banner_glyph_is_hidden_from_screen_readers(doc):
+    sources = "".join(
+        p.read_text() for p in Path(dashboard.__file__).parent.glob("*.py")
+    )
+    assert not re.search(r'class="banner[^"]*"><span>', sources)
+    assert sources.count('<span aria-hidden="true">') >= 9
+    doc.report = make_report(make_ids(fda=False), **FDA_DENIED)  # the ● banner
+    assert '<span aria-hidden="true">●</span>' in get("/health").text
 
 
 def row_of(text, title):
@@ -484,7 +496,15 @@ def test_backups_page_lists_the_receipts_on_disk_newest_first(tree):
     assert rows_in(text) == [f"/backups/{RID2}", f"/backups/{RID1}"]
     assert "move · 2 messages → Archive" in text and "trash · 1 message<" in text
     assert "notes" not in " ".join(rows_in(text)) and LINK not in text
-    assert re.search(r'<a class="nav-item active" href="/backups"', text)
+    assert re.search(r'<a class="nav-item system active" href="/backups"', text)
+
+
+def test_backups_row_names_the_destination_account(tree, monkeypatch):
+    monkeypatch.setattr(mail_addressing, "_ACCOUNT_MAP_CACHE", {"UUID-1": "Personal"})
+    eml(backup_root() / RID4, "301.eml", KB)
+    trash = "imap://UUID-1/%5BGmail%5D/Trash"
+    put(*plan_for(RID4, ["c3@x.invalid"], destination=trash))
+    assert "move · 1 message → Personal › [Gmail]/Trash" in get("/backups").text
 
 
 def test_backups_page_lists_a_receipt_with_a_four_digit_counter(tree):
@@ -592,3 +612,43 @@ def test_receipt_ids_take_ascii_digits_only():
     assert recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-001-move")
     assert not recovery.RECEIPT_RE.fullmatch("٢" * 8 + "-094010-123456-001-move")
     assert not recovery.RECEIPT_RE.fullmatch("20260928-094010-123456-１２３-move")
+
+
+# --- landmarks: skip link, nav, one content target (#428) -----------------------------
+
+
+@pytest.mark.parametrize("path", ["/", "/adapters", "/health", "/usage", "/backups"])
+def test_every_page_has_a_skip_link_a_nav_landmark_and_one_content_target(doc, path):
+    text = get(path).text
+    assert re.search(
+        r'<body>\s*<a class="skip" href="#content">Skip to content</a>', text
+    )
+    assert text.count('id="content"') == 1
+    assert text.count('<nav aria-label="Dashboard">') == 1
+    assert text.count("<main") == 1
+    for href in ("/adapters", "/health", "/usage", "/backups"):
+        assert re.search(rf'<a class="nav-item system[ "][^>]*href="{href}"', text)
+
+
+def test_an_open_write_moves_the_content_target_to_its_detail(state):
+    ts = "2026-10-20T10:00:00"
+    audit.audit_write(
+        {
+            "ts": ts,
+            "tool": "create_reminder",
+            "op": "create",
+            "args": {"title": "Buy milk"},
+            "dry_run": False,
+            "caller": "claude-code 2.1",
+            "target_id": "R-1",
+            "before": None,
+            "after": {"id": "R-1", "summary": "Buy milk", "deeplink": ""},
+        }
+    )
+    assert (
+        '<main class="b-detail" id="content" tabindex="-1">'
+        in get(f"/write/{ts}/0").text
+    )
+    home = get("/").text
+    assert '<div class="b-list" id="content" tabindex="-1">' in home
+    assert '<main class="b-detail">' in home

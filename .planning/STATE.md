@@ -1,44 +1,45 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: 05
-current_phase_name: Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+current_phase: "05.2"
+current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: Phase 5 context gathered (assumptions mode)
-last_updated: "2026-10-22T08:26:17.674Z"
-last_activity: 2026-10-22
-last_activity_desc: Phase 05 execution started
-state_head: d053ec151ed176c03cc27c13a27965370b3a5483
+stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
+last_updated: "2026-10-25T20:51:38.083Z"
+last_activity: 2026-10-25
+last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
+state_head: 5f899213edfd2bc9fd63f0ca590e67967b9cac7b
 progress:
-  total_phases: 9
-  completed_phases: 6
-  total_plans: 64
-  completed_plans: 56
+  total_phases: 13
+  completed_phases: 9
+  total_plans: 79
+  completed_plans: 72
+  percent: 90
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-21)
+See: .planning/PROJECT.md (updated 2026-10-25)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 05 — Operator Control Plane — Adapter Toggles and the Localhost Dashboard
+**Current focus:** Phase 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348)
 
 ## Current Position
 
-Phase: 05 (Operator Control Plane — Adapter Toggles and the Localhost Dashboard) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 05
-Last activity: 2026-10-22 — Phase 05 execution started
+Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
+Plan: Not started
+Status: Ready to execute
+Last activity: 2026-10-25 - Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); records PR docs/phase-05.2-records
 
-Progress: [████████░░] 75%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 56
+- Total plans completed: 72
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -53,6 +54,8 @@ Progress: [████████░░] 75%
 | 03.1 | 7 | - | - |
 | 04 | 6 | - | - |
 | 04.1 | 5 | - | - |
+| 05 | 9 | - | - |
+| 05.1 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -109,6 +112,9 @@ Recent decisions affecting current work:
 - [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.
 - [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.
 - [Phase 04.1]: Bugs before any feature: #373 (hash-locked `build` group, the bundled wheel installed `--no-deps`), #383 (an existing target and a failed `mkdir` raise `WriteRefused`; `_guard` untouched), #384 (ruff on py312 with a drift-guard test), #387 (pid-tagged staging, a dead-pid sweep with five guards, a cleanup error never replaces a written result) — PRs #390/#392/#394/#396, close PR #398.
+- [Phase 05.1]: Owner decisions 2026-10-24: O3/O4/O5 confirmed, O1 overturned → #450 (file-backed account-name cache; a Mail call at daemon start would launch Mail, so refresh only when Mail already runs). PM-04/PM-16 fixed by #451 on the owner's word.
+- [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
+- [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
 
 ### Pending Todos
@@ -123,7 +129,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is release v0.14.3 (universal2, build `85a3baf`, notarized and stapled, installed with `ditto` after moving 0.14.2 to `~/.local/state/macos-apps-mcp/app-backup/`; `doctor()` proven 2026-10-11: version 0.14.3, build `85a3baf 2026-10-11T01:32:20Z`, libs mcp 1.29.0 / fastmcp 3.4.7, daemon mode; code seal intact after the first run, 0 files written in the bundle; TestPyPI from the main merge — the production PyPI dispatch is the operator's). It adds #313 (#307 Local reminders), #316 (#297 hash .pyc), #319 (#302 UDS teardown), #314 (#111), #315 (#113) and the Intel note (#323) to v0.14.2. Release zip sha256 `42c8b46c…f8d8408e`. Open from this cycle: #317, #318, #322.
+- The installed daemon is a develop build: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -158,6 +164,19 @@ Recent decisions affecting current work:
 | 261011-p90 | uvx on an Intel Mac installs without Rust: cryptography<49 on darwin x86_64 only (48.0.1 is the last Intel wheel); PR #330, closes #322 | 2026-10-11 | 2fa3524 | [261011-p90-322-uvx-on-an-intel-mac-installs-without](./quick/261011-p90-322-uvx-on-an-intel-mac-installs-without/) |
 | 261012-utn | Ship the macOS app icon: packaging/AppIcon.icon (Icon Composer), actool compile step in build_app.sh, Info.plist icon keys, packaging test, DAEMON.md note | 2026-10-12 | 22870dc | [261012-utn-ship-the-macos-app-icon-packaging-appico](./quick/261012-utn-ship-the-macos-app-icon-packaging-appico/) |
 | 261018-1sb | mail_overview re-reads the account map once (per minute) before labelling an unknown id; a failed re-read keeps the known names (#359) | 2026-10-18 | 3fbc3d0 | [261018-1sb-fix-359-one-map-re-read-before-the-label](./quick/261018-1sb-fix-359-one-map-re-read-before-the-label/) |
+| 261025-2fq | Dependabot on the uv ecosystem: lockfile-only, 7-day cooldown, one group per ecosystem incl. security (CI/security plan item 2) | 2026-10-25 | b4ced7e | [261025-2fq-move-dependabot-from-pip-to-uv-and-group](./quick/261025-2fq-move-dependabot-from-pip-to-uv-and-group/) |
+| 261025-2s7 | Version gate runs only on release PRs (no paths filter) with root permissions contents: read for CodeQL alert #1 (CI/security plan item 4) | 2026-10-25 | 8c15cd2 | [261025-2s7-version-gate-runs-only-on-release-prs-wi](./quick/261025-2s7-version-gate-runs-only-on-release-prs-wi/) |
+| 261025-3kk | Fix Dependabot alerts #21-#23 (fastmcp 3.4.11, opentelemetry-api 1.45.1), 29 other lock updates inside the limits with a 7-day cooldown, setup-uv v10.3.2 | 2026-10-25 | 000308f | [261025-3kk-fix-dependabot-alerts-21-23-and-refresh-](./quick/261025-3kk-fix-dependabot-alerts-21-23-and-refresh-/) |
+| 261025-4qn | Dependabot uv cooldown 7 -> 3 days; uv.lock refreshed with a 3-day cutoff (12 updates inside the limits, python-dateutil 3.0.0 and starlette 1.9.0 among them) | 2026-10-25 | a038683 | [261025-4qn-set-the-dependabot-cooldown-to-3-days-an](./quick/261025-4qn-set-the-dependabot-cooldown-to-3-days-an/) |
+| 261025-64s | ruff 0.16.10 -> 0.17.1 (cap <0.18); docs/DAEMON.md records why cryptography stays at 48.0.1 (nothing imports it; Intel stays supported; arm64-only revisit 2028) | 2026-10-25 | 60885e2 | [261025-64s-upgrade-ruff-to-0-17-and-document-why-cr](./quick/261025-64s-upgrade-ruff-to-0-17-and-document-why-cr/) |
+| 261025-5sy | README first screen for new visitors (pitch, safety and privacy, first 5 minutes, why not apple-mcp) and CREDITS provenance fix; multi-AI review after each step; #471 filed | 2026-10-25 | 21434d3 | [261025-5sy-launch-readiness-readme-first-screen-and](./quick/261025-5sy-launch-readiness-readme-first-screen-and/) |
+| 261025-h09 | server.json + glama.json + README mcp-name marker; CI publishes to the MCP Registry after PyPI (mcp-publisher v1.8.1 pinned, sha256-checked) behind a release-tag guard; in-repo Claude Code plugin marketplace (macos-apps + dry-run skill); multi-AI review after each step | 2026-10-25 | 6495e9a | [261025-h09-official-mcp-registry-metadata-and-an-in](./quick/261025-h09-official-mcp-registry-metadata-and-an-in/) |
+| 32 | README pitch: 'destructive ones preview first' overclaimed (update_event/update_reminder/update_mail_status act when called) — now 'deletes, moves and sends preview first' (found by the multi-AI review of the awesome-mcp-servers entry) | 2026-10-25 | de5f293 | — |
+| 33 | AGENTS.md rule: clean a lane only after gh pr view <n> says MERGED (a cleanup after a failed merge deleted #474's branch and closed the PR, 2026-10-25) | 2026-10-25 | 4b1c9f3 | — |
+| 34 | README dashboard screenshots (invented data, served from a scratch state dir): batch detail (light/dark) in the first screen, word diff and adapter switches in the Dashboard section | 2026-10-25 | a8249a1 | — |
+| 35 | README: Claude Desktop needs the full uvx path (it does not read the shell PATH) — found while writing the tester brief | 2026-10-25 | 9c5d4a6 | — |
+| 36 | Logo (app icon exported at 512 px with ictool) in the README, the plugin icon and server.json icons, ahead of the 0.15.1 release | 2026-10-25 | e8b1ff5 | — |
+| 37 | Release bump 0.15.1 (pyproject, Info.plist, server.json, uv.lock root line; CHANGELOG section Registry, plugin and dashboard fixes) | 2026-10-25 | 5f89921 | — |
 
 ### Roadmap Evolution
 
@@ -169,6 +188,11 @@ Recent decisions affecting current work:
 - Phase 3 edited: edited fields: success_criteria (5: subtasks and tags read-only from the Reminders store — spike 002 found no public `parentReminder`); REM-03 and PROJECT.md reworded to match (2026-10-05, discuss-phase)
 - Phase 03.1 inserted after Phase 3: Bug Fixes — Device-Report Findings Before Any Feature: #333-#337 from the Intel iMac report (PR #332) and #222; bugs and errors come before any feature (owner, 2026-10-11) (URGENT)
 - Phase 04.1 inserted after Phase 4: Bug Fixes — Phase 4 Follow-ups Before Any Feature (#373, #383, #384, #387) (URGENT)
+- Phase 05.1 inserted after Phase 5: Bug fixes — dashboard follow-ups (#427, #428, #430) (URGENT)
+- Phase 05.2 inserted after Phase 5: Bug fixes — Automation grants unreadable on macOS 27 (#455) (URGENT)
+- Phase 05.2 edited: edited fields: title, goal, requirements — #399 and #348 added beside #455, so every open bug is fixed before Phase 6 (owner, 2026-10-25)
+- Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
+- Phase 05.4 inserted after Phase 05.3: Migration — mcp 2 and fastmcp 4 (#470); after Phase 05.3 and before Phase 6 (owner, 2026-10-25)
 
 ## Deferred Items
 
@@ -180,6 +204,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T12:19:18.187Z
-Stopped at: Phase 5 context gathered (assumptions mode)
-Resume file: .planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-CONTEXT.md
+Last session: 2026-10-24T23:03:30Z
+Stopped at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
+Resume file: None

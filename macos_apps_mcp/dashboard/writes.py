@@ -24,8 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import PlainTextResponse
 
 from .. import audit, registry
-from ..adapters import mail_recover
-from ..errors import NativeError
+from ..adapters import mail_addressing
 from ..text import fold_text
 from . import recovery
 from .html import Safe, appico, esc, h, join, page, safe_href
@@ -66,6 +65,7 @@ _CHIP_CLASS = {
     "changes": "chip destructive",
     "sends": "chip outbound",
     "preview": "chip",
+    "operator": "chip",
 }
 
 
@@ -81,7 +81,7 @@ class Row:
     tier: str | None
     kind: str  # "write" | "dashboard" | "batch"
     title: str
-    chip: str  # adds | changes | sends | preview
+    chip: str  # adds | changes | sends | preview | operator
     preview: bool
     record: dict  # the record the row is about (the middleware or dashboard line)
     records: tuple[dict, ...]  # every raw audit line behind the row, in file order
@@ -151,7 +151,7 @@ def _is_preview(rec: dict, defaults: dict[str, bool]) -> bool:
     if "dry_run" in rec:
         return bool(rec["dry_run"])
     # A record from before #222: the tool's own default decides (D-12).
-    return audit._resolve_dry_run(rec["tool"], _d(rec.get("args")), defaults)
+    return audit.resolve_dry_run(rec["tool"], _d(rec.get("args")), defaults)
 
 
 # The tools whose adapter methods call ``mail_recover.recoverable``, with the plan op
@@ -227,6 +227,8 @@ def _batch_row(g: dict, rid: str, primary: dict, ts: str, n: int) -> Row | None:
     head = g.get("plan") or g["done"]
     mw = g.get("mw")
     op, dest = _op(head), head.get("destination")
+    if isinstance(dest, str):
+        dest = mail_addressing.mailbox_label(dest)
     tool = mw["tool"] if mw else _BATCH_LABEL.get(op, "mail_recover")
     k = len(recovery.targets(g.get("plan"), g.get("done")))
     noun = f"{k} message{'' if k == 1 else 's'}"
@@ -300,6 +302,7 @@ def _write_row(rec: dict, ts: str, n: int, defaults: dict[str, bool]) -> Row:
     preview = _is_preview(rec, defaults)
     reg = registry.TOOLS.get(tool)
     tier = reg.tier if reg else None
+    chip = "preview" if preview else _TIER_CHIP.get(tier, "changes")
     return Row(
         ts=ts,
         n=n,
@@ -309,7 +312,7 @@ def _write_row(rec: dict, ts: str, n: int, defaults: dict[str, bool]) -> Row:
         tier=tier,
         kind="dashboard" if tool == "dashboard" else "write",
         title=_title(rec, preview),
-        chip="preview" if preview else _TIER_CHIP.get(tier, "changes"),
+        chip="operator" if tool == "dashboard" else chip,
         preview=preview,
         record=rec,
         records=(rec,),
@@ -471,7 +474,8 @@ def _preview_banner(row: Row, in_order: list[Row]) -> Safe:
         else Safe("")
     )
     return h(
-        '<div class="banner"><span>ⓘ</span><div><b>Preview only — nothing '
+        '<div class="banner"><span aria-hidden="true">ⓘ</span>'
+        "<div><b>Preview only — nothing "
         "changed.</b> {}{}</div></div>",
         why,
         later,
@@ -506,9 +510,14 @@ def _changed(row: Row) -> Safe:
 def _asked(row: Row) -> Safe:
     rec = row.record
     args = _d(rec.get("args"))
-    rows = [h('<dt>tool</dt><dd class="mono">{}</dd>', row.tool)]
+    operator = row.kind == "dashboard"  # the operator's own action, not a model call
+    rows = [
+        h("<dt>action</dt><dd>{}</dd>", _op(rec) or "")
+        if operator
+        else h('<dt>tool</dt><dd class="mono">{}</dd>', row.tool)
+    ]
     rows += [h("<dt>{}</dt><dd>{}</dd>", k, _argval(v)) for k, v in args.items()]
-    if "dry_run" not in args:
+    if "dry_run" not in args and not operator:
         default = registry.dry_run_defaults().get(row.tool)
         rows.append(
             h(
@@ -522,8 +531,8 @@ def _asked(row: Row) -> Safe:
         if rec.get(key):
             rows.append(h("<dt>{}</dt><dd>{}</dd>", key, rec[key]))
     return h(
-        '<div class="section-label">What the model asked for</div>'
-        '<dl class="kv">{}</dl>',
+        '<div class="section-label">{}</div><dl class="kv">{}</dl>',
+        "What the operator did" if operator else "What the model asked for",
         join(rows),
     )
 
@@ -555,7 +564,8 @@ def _no_backup(row: Row) -> Safe:
     if row.preview or row.kind != "write" or row.tool == "mail_undo":
         return Safe("")
     return h(
-        '<div class="banner"><span>ⓘ</span><div><b>No backup for this write.</b> '
+        '<div class="banner"><span aria-hidden="true">ⓘ</span>'
+        "<div><b>No backup for this write.</b> "
         "Recovery covers batch Mail writes — move, trash and dedupe. To reverse this, "
         "open it in {}, or ask Claude to change it back.</div></div>",
         row.adapter.capitalize() if row.adapter else "the app",
@@ -590,7 +600,8 @@ def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     back = Safe("")
     if moved and all(o == "ok" for _, o in moved):
         folders = [
-            str(t.get("folder") or "") for t, _ in recovery.outcomes(row.plan, row.done)
+            mail_addressing.mailbox_label(str(t.get("folder") or ""))
+            for t, _ in recovery.outcomes(row.plan, row.done)
         ]
         back = h(
             " The messages are back in {}.",
@@ -599,7 +610,8 @@ def _undone_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     elif moved:
         back = Safe(" Not every message moved back; open the undo to see which.")
     return h(
-        '<div class="banner ok"><span>✓</span><div><b>Undone {} at {}{}.</b>{} '
+        '<div class="banner ok"><span aria-hidden="true">✓</span>'
+        "<div><b>Undone {} at {}{}.</b>{} "
         '<a class="btn link" href="{}">Show the undo</a></div></div>',
         day.lower() if day in ("Today", "Yesterday") else day,
         undo.when.strftime("%H:%M"),
@@ -616,7 +628,8 @@ def _undo_record_banner(row: Row, in_order: list[Row], qs: str) -> Safe:
     )
     caller = row.record.get("caller")
     return h(
-        '<div class="banner ok"><span>↺</span><div>This undo moved the messages of an '
+        '<div class="banner ok"><span aria-hidden="true">↺</span>'
+        "<div>This undo moved the messages of an "
         "earlier batch back to where they came from.{}</div></div>{}",
         h(" Run by <b>{}</b>.", caller) if caller else "",
         h(
@@ -692,9 +705,15 @@ def _haystack(row: Row) -> str:
         *map(str, _d(rec.get("args")).values()),
     ]
     if row.kind == "batch":
-        parts += [row.receipt or "", str((row.plan or {}).get("destination") or "")]
+        dest = str((row.plan or {}).get("destination") or "")
+        parts += [row.receipt or "", dest, mail_addressing.mailbox_label(dest)]
         for t in recovery.targets(row.plan, row.done):
-            parts += [str(t.get("id", "")), str(t.get("folder", ""))]
+            folder = str(t.get("folder", ""))
+            parts += [
+                str(t.get("id", "")),
+                folder,
+                mail_addressing.mailbox_label(folder),
+            ]
     return fold_text(" ".join(parts))
 
 
@@ -705,8 +724,7 @@ def _view(request) -> tuple[str, bool, str]:
     params = request.query_params
     flag = params.getlist("previews")
     filt = params.get("filter", "all")
-    adapters = {r.adapter for r in registry.TOOLS.values() if r.adapter}
-    app = filt.startswith("app:") and filt[4:] in adapters
+    app = filt.startswith("app:") and filt[4:] in registry.adapter_names()
     if filt not in ("all", "receipt", "outbound") and not app:
         filt = "all"
     return params.get("q", ""), not flag or flag[-1] == "1", filt
@@ -766,7 +784,8 @@ def _render(
     )
     banners = join(
         h(
-            '<div class="banner bad"><span>⚠</span><div><b>The audit log could not '
+            '<div class="banner bad"><span aria-hidden="true">⚠</span>'
+            "<div><b>The audit log could not "
             "be read.</b> {} What follows may be incomplete.</div></div>",
             e,
         )
@@ -792,17 +811,6 @@ def _render(
     )
 
 
-def _recovery_facts(receipt: str) -> tuple[dict[str, int], bool]:
-    """The backup files on disk and whether ``mail_undo`` could still replay the
-    receipt (``find_receipt`` resolves its plan). Both are reads."""
-    try:
-        mail_recover.find_receipt(receipt)
-        resolves = True
-    except NativeError:
-        resolves = False
-    return recovery.backup_files(receipt), resolves
-
-
 def _errors(records: list[dict]) -> list[str]:
     return [str(r["error"]) for r in records if "error" in r and "tool" not in r]
 
@@ -821,5 +829,5 @@ async def detail(request):
         return PlainTextResponse("Not Found", 404)
     facts = ()
     if row.kind == "batch":
-        facts = await run_in_threadpool(_recovery_facts, row.receipt)
+        facts = await run_in_threadpool(recovery.facts, row.receipt)
     return _render(request, rows, row, _errors(records), facts)

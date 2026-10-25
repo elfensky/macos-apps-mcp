@@ -53,7 +53,7 @@ def test_static_assets_and_the_console_frame():
     text = page.text
     assert '<link rel="stylesheet" href="/static/dashboard.css">' in text
     assert 'class="b-shell"' in text
-    assert re.search(r'<a class="nav-item active" href="/usage"', text)
+    assert re.search(r'<a class="nav-item system active" href="/usage"', text)
     assert "127.0.0.1 only" in text
     assert " style=" not in text and "<style" not in text and "onclick=" not in text
     assert not re.search(r"<script(?![^>]*\bsrc=)", text)

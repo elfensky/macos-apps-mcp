@@ -38,8 +38,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Production publishes only from the release tag that matches the package version: a
+      # target=pypi dispatch on a branch would otherwise upload a non-release build for good.
+      - name: Refuse a production publish off a matching release tag
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'pypi'
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          if [ "$GITHUB_REF_TYPE" != tag ] || [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::target=pypi needs the tag v$version; this run is on $GITHUB_REF_TYPE $GITHUB_REF_NAME"
+            exit 1
+          fi
+
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v10.3.2
 
       - name: Verify before publishing
         run: |
@@ -60,3 +71,16 @@ jobs:
       - name: Publish to PyPI
         if: github.event_name == 'workflow_dispatch' && inputs.target == 'pypi'
         run: uv publish --trusted-publishing always
+
+      # After PyPI: the registry checks that this version is on PyPI. mcp-publisher is pinned and
+      # hash-checked because of the repo's 3-day dependency cooldown; the sha256 is GitHub's asset
+      # digest for v1.8.1, and the arm64 build matches macos-latest. Only the binary is extracted,
+      # outside the checkout (the archive also holds a README.md and LICENSE).
+      - name: Publish to the MCP Registry
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'pypi'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/mcp-publisher.tar.gz" https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_darwin_arm64.tar.gz
+          echo "e45e520892460732a4bdf37255576415d4a53ec171f8b913faf15bb1aef7cb77  $RUNNER_TEMP/mcp-publisher.tar.gz" | shasum -a 256 -c
+          tar -xzf "$RUNNER_TEMP/mcp-publisher.tar.gz" -C "$RUNNER_TEMP" mcp-publisher
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+          "$RUNNER_TEMP/mcp-publisher" publish

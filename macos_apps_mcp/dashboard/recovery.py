@@ -19,7 +19,8 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 
 from .. import audit
-from ..adapters import mail_recover
+from ..adapters import mail_addressing, mail_recover
+from ..errors import NativeError
 from .html import Safe, h, join
 
 RECEIPT_RE = re.compile(
@@ -99,10 +100,21 @@ def outcomes(plan: dict | None, done: dict | None) -> list[tuple[dict, str]]:
     ]
 
 
-def _size(n: int) -> str:
+def size_label(n: int) -> str:
     if n < 1024:
         return f"{n} B"
     return f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1048576:.1f} MB"
+
+
+def facts(receipt: str) -> tuple[dict[str, int], bool]:
+    """The backup files on disk and whether ``mail_undo`` could still replay the
+    receipt (``find_receipt`` resolves its plan). Both are reads."""
+    try:
+        mail_recover.find_receipt(receipt)
+        resolves = True
+    except NativeError:
+        resolves = False
+    return backup_files(receipt), resolves
 
 
 def _fid_chip(fidelity) -> Safe:
@@ -121,7 +133,7 @@ def _file_line(t: dict, files: dict[str, int]) -> Safe:
     record but is only believed when the listing holds a file of that name."""
     name = PurePosixPath(str(t.get("backup") or "")).name
     if _EML.fullmatch(name) and name in files:
-        return h('<div class="faint mono">{} · {}</div>', name, _size(files[name]))
+        return h('<div class="faint mono">{} · {}</div>', name, size_label(files[name]))
     return Safe('<div class="faint mono">no file</div>')
 
 
@@ -132,7 +144,12 @@ def _target_row(t: dict, outcome: str, files: dict[str, int]) -> Safe:
         else h('<span class="chip danger">{}</span>', outcome)
     )
     folder = (
-        h('<div class="faint">from {}</div>', t["folder"]) if t.get("folder") else ""
+        h(
+            '<div class="faint">from {}</div>',
+            mail_addressing.mailbox_label(str(t["folder"])),
+        )
+        if t.get("folder")
+        else ""
     )
     return h(
         '<tr{}><td class="main"><span class="mono">{}</span>{}{}</td>'
@@ -175,9 +192,15 @@ def render_batch(
     ok = sum(o == "ok" for _, o in rows)
     full = sum(t.get("fidelity") == "full" for t, _ in rows)
     sources = ", ".join(
-        dict.fromkeys(str(t["folder"]) for t, _ in rows if t.get("folder"))
+        dict.fromkeys(
+            mail_addressing.mailbox_label(str(t["folder"]))
+            for t, _ in rows
+            if t.get("folder")
+        )
     )
     dest = plan.get("destination")
+    if isinstance(dest, str):
+        dest = mail_addressing.mailbox_label(dest)
     backup_dir = plan.get("backup_dir")
     kept = (
         f"{full} full backup{'' if full == 1 else 's'}, "

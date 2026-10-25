@@ -33,13 +33,22 @@ from mcp.types import (
     JSONRPCResponse,
 )
 
+from .text import sanitize_line
+
 log = logging.getLogger(__name__)
 
 DASHBOARD_HOST = "127.0.0.1"
 # Tests set this to 0 (an ephemeral port); no override exists for the daemon itself.
 DASHBOARD_PORT = 47632
-# `http://127.0.0.1:<port>` or `not bound: <reason>`, set by serve() and read by doctor.
+# `http://127.0.0.1:<port>`, `not bound: <reason>`, `not built: <reason>` or
+# KEY_UNUSABLE_STATE, set by serve() and read by doctor.
 dashboard_state: str | None = None
+# shortcut: 30 raw chars keep the worst-case doctor report under its 7000-char
+# budget even when every char JSON-escapes to two; raise it together with that budget.
+NOT_BUILT_MAX = 30
+KEY_UNUSABLE_STATE = (
+    "key unusable: pages answer 503; delete dashboard_key, restart daemon"
+)
 
 
 class AlreadyRunning(Exception):
@@ -322,19 +331,34 @@ def serve() -> None:
             tcp = bind_dashboard(DASHBOARD_HOST, DASHBOARD_PORT)  # read at call time
         except OSError as e:  # a taken port must not take MCP down (T-05-13)
             log.warning("dashboard not bound: %s", e)
-            dashboard_state = f"not bound: {e}"
+            dashboard_state = f"not bound: {sanitize_line(str(e))}"
         dash_app = None
         if tcp is not None:
             port = tcp.getsockname()[1]
-            dashboard_state = f"http://{DASHBOARD_HOST}:{port}"
-            from . import dashboard, deploy  # late: the stdio server never imports it
+            try:
+                # late: the stdio server never imports it
+                from . import dashboard, deploy
 
-            dash_app = dashboard.build_app(
-                port=port,
-                token=secrets.token_urlsafe(32),
-                key=deploy.dashboard_key(create=True),
-                restart=lambda: restart(server),  # `server` is assigned below
-            )
+                key = deploy.dashboard_key(create=True)
+                dash_app = dashboard.build_app(
+                    port=port,
+                    token=secrets.token_urlsafe(32),
+                    key=key,
+                    restart=lambda: restart(server),  # `server` is assigned below
+                )
+            except Exception as e:  # noqa: BLE001 — a dashboard fault must not take MCP down (WR-05)
+                log.warning("dashboard not built: %s", e, exc_info=True)
+                msg = (sanitize_line(str(e)) or type(e).__name__)[:NOT_BUILT_MAX]
+                dashboard_state = f"not built: {msg}"
+                tcp.close()
+                tcp = None
+            else:
+                # IN-04: with no usable key every page answers 503, so name no URL.
+                dashboard_state = (
+                    f"http://{DASHBOARD_HOST}:{port}"
+                    if key is not None
+                    else KEY_UNUSABLE_STATE
+                )
         # ws="none": streamable-http is POST/SSE only — skipping uvicorn's websocket
         # autodetection avoids importing the deprecated websockets.legacy stack.
         # One Server for both sockets: two Servers on one loop overwrite each other's

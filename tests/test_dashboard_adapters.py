@@ -5,16 +5,19 @@ Same harness as ``test_dashboard_guard.py``: ``httpx.ASGITransport`` inside
 dir at ``tmp_path``, so no test touches the developer's real files.
 """
 
+import concurrent.futures
 import json
 import os
 import re
 import stat
+import threading
 from urllib.parse import urlencode
 
 import pytest
 
 from macos_apps_mcp import audit, deploy, registry
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
+from macos_apps_mcp.dashboard import adapters
 from tests import _dashboard
 from tests._dashboard import ORIGIN, TOKEN
 
@@ -66,7 +69,9 @@ def test_adapters_page_lists_every_adapter_alphabetically_as_token_forms(state):
     r = _get()
     assert r.status_code == 200
     names = re.findall(
-        r'<button type="submit" class="switch"[^>]*aria-label="(\w+)"', r.text
+        r'<button type="submit" class="switch"[^>]*'
+        r'aria-label="(\w+) adapter, (?:on|off)"',
+        r.text,
     )
     assert names == [a.capitalize() for a in ADAPTERS] and len(names) == 10
     assert (
@@ -260,7 +265,7 @@ def test_unreadable_file_reads_every_switch_off_and_refuses_writes(state):
         assert page.count('aria-pressed="false"') == 10
         assert 'aria-pressed="true"' not in page
         assert "cannot be read" in page
-        assert ">*<" not in page and 'aria-label="*"' not in page
+        assert ">*<" not in page and 'aria-label="* adapter' not in page
         for r in (_toggle("photos", "0"), _post(action="discard")):
             assert r.status_code == 409 and "permissions" in r.text
         assert _records() == []
@@ -340,7 +345,9 @@ def test_grant_state_is_unknown_when_it_cannot_tell():
 
 def _row_html(page, label):
     (row,) = [
-        r for r in page.split('<div class="row">') if f'aria-label="{label}"' in r
+        r
+        for r in page.split('<div class="row">')
+        if f'aria-label="{label} adapter, ' in r
     ]
     return row
 
@@ -490,3 +497,165 @@ def test_the_row_counts_registered_tools_only(state, monkeypatch):
         rec = dataclasses.replace(registry.TOOLS[name], registered=False)
         monkeypatch.setitem(registry.TOOLS, name, rec)
     assert "Full Disk Access · 0 tools</div>" in _row_html(_get().text, "Photos")
+
+
+# --- refusals in the frame; Restart locks with the switches (#428) --------------------
+
+_BACK = '<a href="/adapters">Back to the switches</a>'
+_BAD = "Unknown action, adapter or value. Nothing changed."
+
+
+def _framed(r, status, needle):
+    assert r.status_code == status
+    assert r.headers["content-type"].startswith("text/html")
+    assert 'class="b-shell' in r.text and 'class="banner warn"' in r.text
+    assert _BACK in r.text
+    assert r.text.count(needle) == 1
+
+
+@pytest.mark.parametrize(
+    "case", ["env", "file", "discard", "unknown", "empty", "bad_value"]
+)
+def test_a_refused_toggle_renders_in_the_frame_with_a_way_back(
+    state, monkeypatch, case
+):
+    if case in ("env", "discard"):
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos")
+    if case == "file":
+        _file().parent.mkdir(parents=True)
+        _file().write_text("music")
+        _file().chmod(0)
+    try:
+        if case in ("env", "file"):
+            send, status = (lambda: _toggle("music", "0")), 409
+        elif case == "discard":
+            send, status = (lambda: _post(action="discard")), 409
+        elif case == "unknown":
+            send, status = (lambda: _toggle("nosuch", "0")), 400
+        elif case == "bad_value":
+            send, status = (lambda: _toggle("photos", "2")), 400
+        else:
+            send, status = (lambda: _post()), 400  # only the token
+        needle = {
+            "file": "permissions",
+            "env": "MACOS_APPS_ADAPTERS_OFF is set",
+            "discard": "MACOS_APPS_ADAPTERS_OFF is set",
+        }.get(case, _BAD)
+        for _ in range(2):  # a repeated refusal answers the same and writes nothing
+            _framed(send(), status, needle)
+    finally:
+        if case == "file":
+            _file().chmod(0o600)
+    if case == "file":
+        assert _file().read_text() == "music"  # the unreadable file's intent survived
+    elif case in ("unknown", "empty", "bad_value"):
+        assert not _file().exists()
+    assert _records() == []
+
+
+def test_a_bad_action_never_echoes_the_posted_value(state):
+    r = _post(action="toggle", adapter="<script>x</script>", on="1")
+    _framed(r, 400, _BAD)
+    assert "<script>x" not in r.text
+
+
+@pytest.mark.parametrize("lock", ["env", "file"])
+def test_restart_is_locked_with_the_switches(state, monkeypatch, lock):
+    if lock == "env":
+        monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "photos")
+    else:
+        _file().parent.mkdir(parents=True)
+        _file().write_text("music")
+        _file().chmod(0)
+    fake = _OneShot()
+    app = _restart_app(fake)
+    try:
+        # A pending change makes the bar show when nothing locks (the lock hides it).
+        monkeypatch.setattr(
+            registry,
+            "adapter_status",
+            lambda: {"registered": ADAPTERS, "configured": ADAPTERS[1:]},
+        )
+        page = _get(app=app).text
+        assert 'action="/restart"' not in page and 'class="restart-bar"' not in page
+        r = _post("/restart", app=app)
+        _framed(r, 409, "permissions" if lock == "file" else "is set for this daemon")
+    finally:
+        if lock == "file":
+            _file().chmod(0o600)
+    assert fake.calls == 0 and _records() == []
+
+
+def test_guard_refusals_stay_plain_text(state):
+    r = _call(
+        "POST", "/adapters", content=urlencode({"action": "discard"}), headers=FORM
+    )
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/plain")
+    assert "b-shell" not in r.text
+    r = _dashboard.request("GET", "/adapters", cookie=False)
+    assert r.status_code == 403 and r.headers["content-type"].startswith("text/plain")
+    assert "b-shell" not in r.text
+
+
+def test_the_switch_label_names_the_adapter_and_its_state(state):
+    assert 'aria-pressed="true" aria-label="Photos adapter, on"' in _get().text
+    _toggle("photos", "0")
+    assert 'aria-pressed="false" aria-label="Photos adapter, off"' in _get().text
+
+
+# --- a lost audit record is shown, never a silent 303 (#430 WR-06) --------------------
+
+LOST = "its audit record could not be written"
+
+
+def test_a_toggle_whose_audit_record_was_lost_says_so_on_the_next_page(
+    state, monkeypatch
+):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    real = audit.audit_write
+    monkeypatch.setattr(audit, "audit_write", lambda record: False)
+    r = _toggle("photos", "0")
+    assert r.status_code == 303 and r.headers["location"] == "/adapters"
+    assert _file().read_text() == "photos"
+    assert LOST in _get().text
+    assert _toggle("photos", "0").status_code == 303  # still failing: banner stays
+    assert LOST in _get().text
+    monkeypatch.setattr(audit, "audit_write", real)
+    assert _toggle("photos", "1").status_code == 303
+    assert LOST not in _get().text
+    (rec,) = _records()
+    assert rec["op"] == "toggle" and rec["args"] == {"adapter": "photos", "on": True}
+
+
+def test_a_restart_whose_audit_record_was_lost_says_so_on_the_restarting_page(
+    state, monkeypatch
+):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    monkeypatch.setattr(audit, "audit_write", lambda record: False)
+    fake = _OneShot()
+    r = _post("/restart", app=_restart_app(fake))
+    assert r.status_code == 200 and "Restarting the daemon…" in r.text
+    assert LOST in r.text
+    assert 'http-equiv="refresh"' not in r.text  # PM-26: the timer must not wipe it
+    assert fake.calls == 1
+
+
+def test_the_lost_audit_flag_follows_the_last_write_in_lock_order(state, monkeypatch):
+    monkeypatch.setattr(adapters, "_audit_lost", False)
+    guard, calls = threading.Lock(), []
+
+    def flaky(record):
+        with guard:
+            calls.append(record)
+            return len(calls) > 1  # the first write in lock order fails
+
+    monkeypatch.setattr(audit, "audit_write", flaky)
+    with concurrent.futures.ThreadPoolExecutor(2) as pool:
+        jobs = [
+            pool.submit(adapters._apply_toggle, name, False)
+            for name in ("music", "photos")
+        ]
+        for job in jobs:
+            job.result()
+    assert len(calls) == 2 and adapters._audit_lost is False
+    assert set(_file().read_text().split(",")) == {"music", "photos"}

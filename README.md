@@ -1,26 +1,45 @@
 # macos-apps-mcp
+<!-- mcp-name: io.github.elfensky/macos-apps-mcp -->
+<img alt="macos-apps-mcp logo" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/logo.png" width="96" align="right">
 
-One consolidated [MCP](https://modelcontextprotocol.io) server for native macOS apps —
-**Calendar & Reminders** read/write, **Messages & Notes** content search over the native
-stores, id-first **Mail** with draft-and-open replies, plus read-only context and a few
-actions across Contacts, Photos, Safari, and Shortcuts. Python +
-[FastMCP](https://github.com/PrefectHQ/fastmcp), managed with
-[uv](https://docs.astral.sh/uv/).
+One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
+Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an
+id, a one-line summary and a link that opens the item in its app. Bodies are a separate, capped fetch.
+Writes are tiered and audited; deletes, moves and sends preview first. macOS only. Python + [FastMCP](https://github.com/PrefectHQ/fastmcp) + [uv](https://docs.astral.sh/uv/). See
+[DESIGN.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/DESIGN.md) and [CHANGELOG.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/CHANGELOG.md).
 
-Replaces the pile of Apple MCP servers a life-cockpit otherwise juggles with a single modular
-adapter layer you own. Every read returns **pointers** (id + one-line summary + open-in-app
-deeplink), never full bodies — so it structurally avoids the context-bloat bug of the archived
-flagship server; bodies are a separate, bounded, opt-in fetch.
+## What you can ask
 
-macOS only. See [DESIGN.md](DESIGN.md) for the rationale and [CHANGELOG.md](CHANGELOG.md) for
-what's landed.
+- "What is on my calendar this week? When am I free on Thursday afternoon?" <br><sub>`events`, `free_busy`</sub>
+- "Which emails need a reply? Draft a reply to the first one." <br><sub>`mail_needs_response`, `mail_reply`. The reply opens as a draft in Mail. It is not sent.</sub>
+- "Move the newsletters in my inbox to Archive. Show me first." <br><sub>`mail_search`, `move_mail`, `mail_undo`. The move previews by default. `mail_undo` reverses it, within the known limits below.</sub>
 
-## Install
+## Safety and privacy
 
-Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`.
+- **Local.** No telemetry, and no network requests of its own: only a local unix socket (shim to daemon) and the
+  dashboard on 127.0.0.1. Three tools reach past the Mac through the apps, when called: the send tools (off by
+  default) send through Mail, `safari_open` opens a page, and `run_shortcut` runs a Shortcut that can call the web.
+- **Three tiers.** Read, write and outbound. Send tools are absent until you enable them per app:
+  `macos-apps-mcp allow-send mail` (daemon) or `MACOS_APPS_ALLOW_SEND=mail` (stdio). `MACOS_APPS_READ_ONLY=1`
+  registers reads only and wins over both.
+- **Dry run first.** `dry_run` defaults to true for `delete_draft`, `move_mail`, `trash_mail`, `mail_undo`,
+  `send_mail`, `reply_all`, `forward_mail`, `delete_reminder`, `delete_event`, `delete_note` and `update_note`.
+  Other writes act when called. `mail_reply` opens a draft only.
+- **Audit log.** Every write goes to `~/.local/state/macos-apps-mcp/audit.jsonl` (under `$XDG_STATE_HOME` when set).
+  An update or delete by id also records the item as it was. The `audit` tool reads the log back.
+- **Mail recovery.** Before a Mail move or delete, each message is copied as `.eml` under
+  `~/.local/state/macos-apps-mcp/backup/mail/`. `mail_undo` reverses the batch. No tool empties the Trash.
+- **Known limits.** A message Mail downloaded only in part is backed up without its attachments. Moves and trashes
+  through a Gmail label folder are refused, because Gmail reverts them about 2 minutes later. `sent: true` means
+  Mail accepted the message, not that it was delivered. [All Mail facts](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/mail-applescript-facts.md).
+- **Dashboard.** Under the signed `.app` daemon, a local page (127.0.0.1 only) shows every write, what it changed,
+  and the backup behind each Mail batch. Invented data below:
 
-The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so
-there is no clone and no venv path:
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch-dark.png"><img alt="The dashboard: three newsletters moved to Archive, each one backed up, and the prompt that undoes the batch" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch.png" width="800"></picture>
+
+## First 5 minutes
+
+Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`. The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so there is no clone and no venv path:
 
 ```json
 {
@@ -33,14 +52,29 @@ there is no clone and no venv path:
 }
 ```
 
+If Claude Desktop cannot find `uvx`, set `"command"` to its full path: run `which uvx` in Terminal (a default uv install prints `/Users/you/.local/bin/uvx`).
+
 For Claude Code:
 
 ```sh
 claude mcp add macos-apps --scope user -- uvx macos-apps-mcp
 ```
 
-The CLI commands further down (`allow-send`, `dedupe-mail`) run through the same package, for
-example `uvx macos-apps-mcp allow-send`.
+Or, instead of `claude mcp add`, install the Claude Code plugin. It starts the same server and adds a skill
+that teaches the dry-run workflow. In Claude Code, run `/plugin marketplace add elfensky/macos-apps-mcp`, then
+`/plugin install macos-apps@macos-apps-mcp`.
+
+The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `uvx macos-apps-mcp allow-send`.
+
+**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
+
+- **EventKit**: Calendar and Reminders.
+- **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
+- **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access, for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
+
+Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
+
+Load only the apps you use. `MACOS_APPS_ADAPTERS_OFF=photos,music` registers no tools for those apps, so your client holds fewer tools in its context. Under the daemon, see [turn adapters off](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
 
 **From source (development):** use this path to work on the server itself.
 
@@ -49,8 +83,7 @@ git clone https://github.com/elfensky/macos-apps-mcp && cd macos-apps-mcp
 uv sync
 ```
 
-Then point your MCP client at the project's own venv python — deterministic, and it carries the
-locked PyObjC wheels:
+Then point your MCP client at the project's own venv python — deterministic, and it carries the locked PyObjC wheels:
 
 ```json
 {
@@ -63,20 +96,13 @@ locked PyObjC wheels:
 }
 ```
 
-### Permissions (macOS TCC)
+## Why not apple-mcp?
 
-The server runs over stdio, so macOS gives each grant to the app that launches it (Claude Desktop,
-Terminal, VS Code). Each client needs its own grants. For one set of grants that every client
-shares, run the signed `.app` daemon: see [docs/DAEMON.md](docs/DAEMON.md).
+[apple-mcp](https://github.com/supermemoryai/apple-mcp) by Dhravya Shah pioneered one MCP server for all Apple apps. It is
+now archived. It returned full note and email bodies inline. This server returns pointers, fetches bodies only on
+request, and gates every write by tier. See [CREDITS.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/CREDITS.md).
 
-Grant access when macOS prompts — the first call to each app triggers its dialog:
-
-- **EventKit** — Calendar + Reminders (read/write).
-- **Automation** (per app) — Mail, Notes, Contacts, Safari, Messages actions/reads.
-- **Full Disk Access** — required for **Messages content** (`chat.db`), the **fast Notes**
-  path (`NoteStore.sqlite`) and the **Photos library**, which osxphotos reads at rest. Notes
-  degrades to Automation without it; Messages content and Photos raise a clear, typed error
-  telling you to grant it. Run the `doctor` tool to see what's granted.
+Something broke? Run `doctor` and paste its output into a [GitHub issue](https://github.com/elfensky/macos-apps-mcp/issues). The report shows process paths, so check them before you post.
 
 ## Tools
 
@@ -206,7 +232,11 @@ same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMO
 
 Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
 usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
-[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard).
+[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard). Both screenshots use invented data.
+
+<img alt="One calendar edit in the dashboard: the old time struck through, the new time beside it, and the exact tool call the model made" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-diff.png" width="800">
+
+<img alt="The adapter switches: each app with its permission, its tool count and how often it was called" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-adapters.png" width="800">
 
 ### Cleaning up duplicate mail
 

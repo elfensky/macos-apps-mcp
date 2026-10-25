@@ -159,3 +159,45 @@ def test_layering_closure_is_not_vacuous():
         f"{PACKAGE_NAME}.tiers",
     ):
         assert expected in closure, f"{expected} missing from server's import closure"
+
+
+def _is_private(name: str) -> bool:
+    return name.startswith("_") and not name.startswith("__")
+
+
+def test_dashboard_reaches_no_private_name_of_another_module():
+    """#430 IN-03: a dashboard module reads only public names of the modules it
+    imports, so a rename in `audit`, `doctor` or `deploy` cannot break a page
+    without a failing test. Docstrings and comments are not in the AST."""
+    reaches: list[str] = []
+    bound_names: set[str] = set()
+    files = sorted((PACKAGE_ROOT / "dashboard").glob("*.py"))
+    for path in files:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):  # PM-14: absolute `import a.b as x`
+                for alias in node.names:
+                    if alias.name.startswith("macos_apps_mcp."):
+                        imported.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom) and (
+                node.level > 0 or (node.module or "").split(".")[0] == "macos_apps_mcp"
+            ):
+                for alias in node.names:
+                    imported.add(alias.asname or alias.name)
+                    if _is_private(alias.name):
+                        reaches.append(f"{path.name}:{node.lineno} import {alias.name}")
+        bound_names |= imported
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in imported
+                and _is_private(node.attr)
+            ):
+                reaches.append(f"{path.name}:{node.lineno} {node.value.id}.{node.attr}")
+    assert len(files) >= 9, "dashboard scan found too few files"
+    assert {"audit", "deploy", "doctor"} <= bound_names, "scan bound too few names"
+    assert not reaches, "private cross-module reach in dashboard/: " + ", ".join(
+        reaches
+    )

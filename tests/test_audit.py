@@ -9,7 +9,7 @@ import macos_apps_mcp.audit as au
 
 def test_audit_write_appends(tmp_path, monkeypatch):
     monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
-    au.audit_write({"tool": "create_event", "op": "create"})
+    assert au.audit_write({"tool": "create_event", "op": "create"}) is True
     au.audit_write({"tool": "delete_note", "op": "delete"})
     lines = (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
@@ -29,7 +29,7 @@ def test_audit_write_swallows_errors(tmp_path, monkeypatch):
     # state_dir points at a path whose parent does not exist and is not created →
     # opening the file raises, and audit_write must swallow it (never break a write)
     monkeypatch.setattr(au, "state_dir", lambda: tmp_path / "missing" / "nested")
-    au.audit_write({"tool": "x"})  # must not raise
+    assert au.audit_write({"tool": "x"}) is False  # must not raise, reports the loss
 
 
 def test_audit_read_newest_first_and_since(tmp_path, monkeypatch):
@@ -195,3 +195,24 @@ def test_middleware_record_without_a_receipt_has_no_receipt_key(monkeypatch):
         rec = _mw_call(monkeypatch, structured)
         assert "receipt" not in rec
         assert {"ts", "tool", "op", "args", "dry_run", "caller"} <= set(rec)
+
+
+def test_unicode_line_separators_inside_a_record_never_split_it(tmp_path, monkeypatch):
+    # CR-01 (phase 5 close review): str.splitlines() also splits on U+2028, U+2029
+    # and U+0085, which a mail subject may carry; the record then vanished from
+    # every reader, and mail_undo could not find a batch whose plan held one.
+    # Built with chr(): a raw glyph in the source can be normalised away by an editor.
+    monkeypatch.setattr(au, "state_dir", lambda: tmp_path)
+    seps = chr(0x2028) + chr(0x2029) + chr(0x85)
+    rec = {"ts": "2026-10-22T10:00:00", "tool": "trash_mail", "op": "trash"}
+    rec["after"] = {"id": "m", "summary": f"line{seps}next"}
+    log = tmp_path / "audit.jsonl"
+    log.write_text(json.dumps(rec, ensure_ascii=False) + "\n", encoding="utf-8")
+    assert b"\xe2\x80\xa8" in log.read_bytes()  # the raw separator is in the file
+    assert au.audit_read() == [rec]
+    assert au.read_all() == [rec]
+    au._usage_path().write_text(
+        json.dumps({"ts": f"t{seps}s", "tool": "ping"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    assert au.usage_read()["ping"]["count"] == 1
