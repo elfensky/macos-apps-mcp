@@ -9,7 +9,7 @@ surface may still shift between minor versions.
 ### Changed
 
 - **Dependabot uses the `uv` ecosystem.** Python updates move only `uv.lock`
-  (`lockfile-only`, so the deliberate caps stay) after a 7-day cooldown; version updates
+  (`lockfile-only`, so the deliberate caps stay) after a 3-day cooldown; version updates
   and security updates each arrive as one grouped PR per ecosystem.
 - **The version gate runs only on release PRs.** It checks every PR into `main` that the
   version moved, and no longer fails ordinary PRs that touch `pyproject.toml`. It runs

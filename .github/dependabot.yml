@@ -4,7 +4,7 @@ updates:
     directory: "/"
     schedule: { interval: "weekly" }
     versioning-strategy: lockfile-only   # keep the deliberate caps (#286, #322); only uv.lock moves
-    cooldown: { default-days: 7 }
+    cooldown: { default-days: 3 }
     groups:
       uv:
         patterns: ["*"]
