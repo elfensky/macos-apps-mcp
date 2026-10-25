@@ -50,6 +50,12 @@ the question requires otherwise.
   store's predicate raises `NSNull backingObject`; re-fetch by identifier instead (003, 008).
 - **A timing test re-reads over time**, from a fresh store, at fixed steps (0/10/30/60/120 s),
   because a remote source can rewrite a saved item after the local read succeeds (008).
+- **A browser spike reports itself.** The page posts its results to its own origin, and the
+  server logs every request with the browser family from the User-Agent. Trust the log over
+  the label: run 1's "Chrome" was Zen (009, 010).
+- **A public https origin comes from a cloudflared quick tunnel**, carrying a throwaway page
+  and a throwaway key only. Stop it when the run ends and check that the URL answers `530`
+  (009-011, owner choice 2026-10-25).
 
 ## Tools & Libraries
 
@@ -63,3 +69,6 @@ the question requires otherwise.
   without the osascript start-up cost (006).
 - `runtime.run_osascript(..., timeout=…)` for a long script; raw `osascript -` via
   `subprocess` only when the probe must wait longer than one call (facts §2) (005, 006).
+- `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:<port>` prints a
+  `*.trycloudflare.com` URL within seconds, with no account and no `~/.cloudflared` config.
+  Python's `http.server` (`ThreadingHTTPServer`) is enough for loopback mocks (009).
