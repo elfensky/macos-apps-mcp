@@ -18,6 +18,7 @@ from macos_apps_mcp.errors import (
     FullDiskAccessDenied,
     SchemaDrift,
 )
+from tests._fakes import fake_automation
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +35,7 @@ def _no_live_process_probe(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, "", "")
 
     monkeypatch.setattr(runtime, "tracked_run", _fake_pgrep_or_ps)
+    fake_automation(monkeypatch)
 
 
 def _boom_osascript(*args, **kwargs):
@@ -90,20 +92,59 @@ def test_eventkit_request_routes_request_access_each_through_run_native(monkeypa
 # --- Automation surfaces (prompt-gated) ----------------------------------------------
 
 
-def test_automation_unprobed_when_request_false(monkeypatch):
+_APPS = ["mail", "notes", "contacts", "safari", "messages", "music"]
+
+
+@pytest.mark.parametrize(
+    ("rc", "ok", "status"),
+    [
+        (0, True, "granted"),
+        (-1743, False, "denied"),
+        (-1744, None, "not_asked"),
+        (-600, None, "not_running"),
+        (-1, None, "probe_error"),
+        (42, None, "probe_error"),
+    ],
+)
+def test_automation_live_status_table(monkeypatch, rc, ok, status):
+    fake_automation(monkeypatch, rc)
+    surfaces = doc._automation_surfaces(request=False)
+    assert [s["surface"] for s in surfaces] == _APPS
+    for s in surfaces:
+        assert s["ok"] is ok and s["status"] == status
+    if status == "granted":
+        assert all("remediation" not in s for s in surfaces)
+    if status == "not_running":
+        for s, app in zip(surfaces, doc._AUTOMATION_APPS, strict=True):
+            assert app in s["remediation"] and "Settings" not in s["remediation"]
+    if status == "probe_error":
+        assert all("OSStatus" in s["remediation"] for s in surfaces)
+        assert all(str(rc) in s["remediation"] for s in surfaces)
+
+
+def test_automation_live_check_sends_no_apple_event(monkeypatch):
     # The no-prompt guarantee: with request=False we never send an Apple event.
     monkeypatch.setattr(runtime, "run_osascript", _boom_osascript)
+    calls = fake_automation(monkeypatch, 0)
     surfaces = doc._automation_surfaces(request=False)
-    assert [s["surface"] for s in surfaces] == [
-        "mail",
-        "notes",
-        "contacts",
-        "safari",
-        "messages",
-        "music",
+    assert [s["surface"] for s in surfaces] == _APPS
+    assert calls == [
+        "com.apple.mail",
+        "com.apple.Notes",
+        "com.apple.AddressBook",
+        "com.apple.Safari",
+        "com.apple.MobileSMS",
+        "com.apple.Music",
     ]
-    assert all(s["ok"] is None and s["status"] == "unprobed" for s in surfaces)
-    assert all("request=True" in s["remediation"] for s in surfaces)
+    assert all(s["status"] != "unprobed" for s in surfaces)
+
+
+def test_automation_live_check_skips_off_adapters(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", ",".join(_APPS))
+    calls = fake_automation(monkeypatch, 0)
+    surfaces = doc._automation_surfaces(request=False)
+    assert calls == []
+    assert all(s["status"] == "adapter_off" for s in surfaces)
 
 
 def test_automation_surfaces_carry_process_line(monkeypatch):

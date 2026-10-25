@@ -6,6 +6,7 @@ from __future__ import annotations
 from itertools import count as _counter
 from types import SimpleNamespace
 
+from macos_apps_mcp import runtime
 from macos_apps_mcp.eventkit import to_nsdate
 from macos_apps_mcp.text import RS, US
 
@@ -224,3 +225,18 @@ class FakeMail:
             for mid in ids
             if mid
         )
+
+
+def fake_automation(monkeypatch, rc: int = -600) -> list[str]:
+    """The shared fake for the live Automation seam (``runtime.automation_permission``).
+
+    Returns the list the fake appends each bundle id to. ``-600`` reads as "not
+    running", the neutral default."""
+    calls: list[str] = []
+
+    def _fake(bundle_id: str) -> int:
+        calls.append(bundle_id)
+        return rc
+
+    monkeypatch.setattr(runtime, "automation_permission", _fake)
+    return calls

@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from macos_apps_mcp import doctor, registry, runtime, tiers
+from tests._fakes import fake_automation
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +17,7 @@ def _no_live_process_probe(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, "", "")
 
     monkeypatch.setattr(runtime, "tracked_run", _fake_pgrep_or_ps)
+    fake_automation(monkeypatch)
 
 
 # Four tests below assert "the import-time gate was off in this process" — false by

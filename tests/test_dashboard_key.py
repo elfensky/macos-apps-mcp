@@ -17,6 +17,7 @@ import pytest
 from macos_apps_mcp import audit, cli, daemon, deploy, doctor, runtime
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 from tests._dashboard import FORM, KEY, ORIGIN, TOKEN, build, get, request
+from tests._fakes import fake_automation
 
 SECURITY_HEADERS = (
     "content-security-policy",
@@ -346,6 +347,7 @@ def test_cli_dispatches_the_dashboard_role(monkeypatch):
 
 
 def _doctor(monkeypatch):
+    fake_automation(monkeypatch)
     monkeypatch.setattr(
         deploy,
         "grant_report",
