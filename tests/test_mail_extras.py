@@ -507,12 +507,107 @@ def test_export_refuses_the_whole_batch_when_a_later_id_exists(root, monkeypatch
 
 @pytest.mark.parametrize("pair", [("../x", "x"), ("X@y", "x@y")])
 def test_export_refuses_two_ids_that_derive_one_file_name(root, monkeypatch, pair):
-    """Exact (`../x` and `x`) and case-variant (APFS is case-insensitive) collisions."""
+    """Exact (`../x` and `x`) and case-variant (APFS is case-insensitive) collisions.
+    Nothing exists on disk, so the refusal must not claim a file "already exists"."""
     (root / "archive").mkdir()
     _fake_export_batch(monkeypatch, *pair)
-    with pytest.raises(WriteRefused, match="never overwrites"):
+    with pytest.raises(WriteRefused, match="nothing was written") as refused:
         mail.MailAdapter().export(",".join(f"<{m}>" for m in pair), "archive")
+    msg = str(refused.value)
+    assert "already exists" not in msg
+    assert all(m in msg for m in pair)
+    assert "separate calls" in msg
     assert list((root / "archive").iterdir()) == []
+
+
+def test_export_treats_canonically_equal_case_variants_as_one_file(root, monkeypatch):
+    """APFS folds `ß` + U+0307 and `s` + `ṡ` (U+1E61) to one name; casefold alone does
+    not, because the combining mark sits between the case fold and the decomposition."""
+    a, b = "\u00df\u0307@x", "s\u1e61@x"
+    assert (len(a), len(b)) == (4, 4)  # guards against an editor normalising the glyphs
+    (root / "archive").mkdir()
+    _fake_export_batch(monkeypatch, a, b)
+    with pytest.raises(WriteRefused, match="nothing was written"):
+        mail.MailAdapter().export(f"<{a}>,<{b}>", "archive")
+    assert list((root / "archive").iterdir()) == []
+
+
+def _fail_open_on_nth(monkeypatch, n, make_file):
+    """Route ``open`` in the mail module: call ``n`` goes through ``make_file(real)``."""
+    import builtins
+
+    calls = []
+
+    def fake_open(path, mode="r", *a, **k):
+        calls.append(path)
+        if len(calls) == n:
+            return make_file(path, mode)
+        return builtins.open(path, mode, *a, **k)
+
+    monkeypatch.setattr(mail, "open", fake_open, raising=False)
+
+
+def test_export_removes_the_partial_file_when_a_write_fails(root, monkeypatch):
+    """F1: the file was created, 3 bytes landed, then ENOSPC. The refusal names the
+    files written before it, the partial file is gone, and a retry of that id works."""
+    import builtins
+    import errno
+
+    class ShortWrite:
+        def __init__(self, path, mode):
+            self.f = builtins.open(path, mode)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.f.close()
+
+        def write(self, b):
+            self.f.write(b[:3])
+            self.f.flush()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    _fake_export_batch(monkeypatch, "a@x", "b@x", "c@x")
+    _fail_open_on_nth(monkeypatch, 2, ShortWrite)
+    with pytest.raises(WriteRefused, match="Already written by this call") as refused:
+        mail.MailAdapter().export("<a@x>,<b@x>,<c@x>", "archive")
+    d = root / "archive"
+    assert str(d / "a@x.eml") in str(refused.value)
+    assert sorted(p.name for p in d.iterdir()) == ["a@x.eml"]
+    monkeypatch.setattr(mail, "open", builtins.open, raising=False)
+    _fake_export_batch(monkeypatch, "b@x")
+    out = mail.MailAdapter().export("<b@x>", "archive")
+    assert out["written"] == 1
+    assert (d / "b@x.eml").read_bytes() == b"new-b@x"
+
+
+def test_export_reports_an_open_error_and_never_calls_the_id_absent(root, monkeypatch):
+    """F4: an `open` error other than FileExistsError (here PermissionError) refuses,
+    names the files already written, and does not turn the id into `absent`."""
+
+    def deny(path, mode):
+        raise PermissionError(13, "Permission denied")
+
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    _fail_open_on_nth(monkeypatch, 2, deny)
+    with pytest.raises(WriteRefused, match="Permission denied") as refused:
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    d = root / "archive"
+    assert f"Already written by this call: {d / 'a@x.eml'}" in str(refused.value)
+    assert not (d / "b@x.eml").exists()
+
+
+def test_export_refuses_a_dangling_symlink_at_a_target_name(root, monkeypatch):
+    """F3: a symlink already sitting at the name is not written through."""
+    d = root / "archive"
+    d.mkdir()
+    (d / "a@x.eml").symlink_to("planted.eml")  # dangling, points inside dest
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    with pytest.raises(WriteRefused, match="already exists"):
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    assert not (d / "planted.eml").exists()
+    assert not (d / "b@x.eml").exists()
 
 
 def _another_writer_after_check(monkeypatch, victim_index):
