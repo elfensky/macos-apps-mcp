@@ -176,6 +176,52 @@ def _process_line(app: str) -> str:
     )
 
 
+# Must equal the EVENTS targets of dashboard/grants.py ADAPTER_GRANTS, which doctor may
+# not import (pinned by test_automation_bundle_ids_match_the_grant_map).
+_AUTOMATION_BUNDLES = {
+    "mail": "com.apple.mail",
+    "notes": "com.apple.Notes",
+    "contacts": "com.apple.AddressBook",
+    "safari": "com.apple.Safari",
+    "messages": "com.apple.MobileSMS",
+    "music": "com.apple.Music",
+}
+
+# runtime.automation_permission OSStatus -> (status, ok); anything else is probe_error.
+_AE_STATUS = {
+    0: ("granted", True),
+    -1743: ("denied", False),
+    -1744: ("not_asked", None),
+    -600: ("not_running", None),
+}
+_AE_REMEDIATION = {
+    "denied": (
+        "Automation for {app} is off: switch it on in "
+        f"{PRIVACY_PANE} → Automation, then restart macos-apps-mcp."
+    ),
+    "not_asked": (
+        "{app} has not been asked yet: run doctor(request=True) with someone at the "
+        "screen (one-time dialog)."
+    ),
+    "not_running": (
+        "{app} is not running, so its Automation state cannot be told yet: open "
+        "{app}, then run doctor again."
+    ),
+    "probe_error": (
+        "Automation check returned OSStatus {rc}; run doctor(request=True) to probe "
+        "by Apple Event."
+    ),
+}
+
+
+def _live_automation(name: str, app: str) -> dict:
+    """One Automation surface from the live, non-prompting check (no Apple Event)."""
+    rc = runtime.automation_permission(_AUTOMATION_BUNDLES[name])
+    status, ok = _AE_STATUS.get(rc, ("probe_error", None))
+    remediation = _AE_REMEDIATION.get(status, "").format(app=app, rc=rc)
+    return _surface(name, "automation", ok, status, remediation or None)
+
+
 def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
@@ -184,16 +230,7 @@ def _automation_surfaces(request: bool) -> list[dict]:
             out.append(_surface(name, "automation", None, "adapter_off"))
             continue  # D-04: no Apple Event, no process line
         if not request:
-            out.append(
-                _surface(
-                    name,
-                    "automation",
-                    None,
-                    "unprobed",
-                    f"Run doctor(request=True) to probe Automation consent for {app} "
-                    "(a never-authorized app may show a one-time dialog).",
-                )
-            )
+            out.append(_live_automation(name, app))
         else:
             try:
                 runtime.run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
