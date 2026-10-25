@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: planning
 stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-25T01:02:22.558Z"
+last_updated: "2026-10-25T01:42:40.069Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.1 complete; Phase 05.2 inserted for the open bugs #455, #399, #348
-state_head: 8c15cd283353daa7c323f5ca2d7bbdae80cb4cbe
+state_head: 000308f24fb77afea2c58d096855b00d43584763
 progress:
   total_phases: 11
   completed_phases: 9
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 - Completed quick task 261025-2s7: the version gate runs only on release PRs, read-only (Phase 05.2 inserted for the open bugs #455, #399, #348)
+Last activity: 2026-10-25 - Completed quick task 261025-3kk: Dependabot alerts #21-#23 fixed, lock refreshed inside the limits, setup-uv v10.3.2 (Phase 05.2 inserted for the open bugs #455, #399, #348)
 
 Progress: [█████████░] 90%
 
@@ -166,6 +166,7 @@ Recent decisions affecting current work:
 | 261018-1sb | mail_overview re-reads the account map once (per minute) before labelling an unknown id; a failed re-read keeps the known names (#359) | 2026-10-18 | 3fbc3d0 | [261018-1sb-fix-359-one-map-re-read-before-the-label](./quick/261018-1sb-fix-359-one-map-re-read-before-the-label/) |
 | 261025-2fq | Dependabot on the uv ecosystem: lockfile-only, 7-day cooldown, one group per ecosystem incl. security (CI/security plan item 2) | 2026-10-25 | b4ced7e | [261025-2fq-move-dependabot-from-pip-to-uv-and-group](./quick/261025-2fq-move-dependabot-from-pip-to-uv-and-group/) |
 | 261025-2s7 | Version gate runs only on release PRs (no paths filter) with root permissions contents: read for CodeQL alert #1 (CI/security plan item 4) | 2026-10-25 | 8c15cd2 | [261025-2s7-version-gate-runs-only-on-release-prs-wi](./quick/261025-2s7-version-gate-runs-only-on-release-prs-wi/) |
+| 261025-3kk | Fix Dependabot alerts #21-#23 (fastmcp 3.4.11, opentelemetry-api 1.45.1), 29 other lock updates inside the limits with a 7-day cooldown, setup-uv v10.3.2 | 2026-10-25 | 000308f | [261025-3kk-fix-dependabot-alerts-21-23-and-refresh-](./quick/261025-3kk-fix-dependabot-alerts-21-23-and-refresh-/) |
 
 ### Roadmap Evolution
 
