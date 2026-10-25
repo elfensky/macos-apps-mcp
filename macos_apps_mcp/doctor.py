@@ -216,7 +216,19 @@ _AE_REMEDIATION = {
 
 def _live_automation(name: str, app: str) -> dict:
     """One Automation surface from the live, non-prompting check (no Apple Event)."""
-    rc = runtime.automation_permission(_AUTOMATION_BUNDLES[name])
+    try:
+        rc = runtime.automation_permission(_AUTOMATION_BUNDLES[name])
+    except (OSError, AttributeError) as e:
+        # A missing framework or symbol is reported, never raised — diagnosis is the
+        # one place a swallowed error is correct (module docstring).
+        return _surface(
+            name,
+            "automation",
+            None,
+            "probe_error",
+            f"Automation check failed ({type(e).__name__}); run "
+            "doctor(request=True) to probe by Apple Event.",
+        )
     status, ok = _AE_STATUS.get(rc, ("probe_error", None))
     remediation = _AE_REMEDIATION.get(status, "").format(app=app, rc=rc)
     return _surface(name, "automation", ok, status, remediation or None)
@@ -412,15 +424,13 @@ def diagnose(request: bool = False) -> dict:
             f"{len(needs)} of {len(probed)} surfaces need attention: "
             + ", ".join(needs)
         )
-    elif request:
+    else:
         # An unprobeable surface (ok=None) must not be counted as OK.
         summary = (
             f"all {len(probed)} surfaces OK"
             if not unknown
             else f"no denied surfaces; {len(unknown)} unverified: " + ", ".join(unknown)
         )
-    else:
-        summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
 
     grants = deploy.grant_report()
     ids = grants["identities"]
