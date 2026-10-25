@@ -43,6 +43,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
+- [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -456,6 +457,16 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.4 to break down)
+
+### Phase 05.5: Dashboard at a domain — the loader page (#483) (INSERTED)
+
+**Goal**: The operator dashboard opens at a domain: a static loader page on a public https origin fetches the daemon's pages from `127.0.0.1:47632` and shows them, local only, with the adapter switches and the restart (#483). The daemon answers CORS only for a paired origin and accepts the page key in `Authorization: Bearer`; Chrome and Firefox ask once for `loopback-network`, and Safari gets a "Safari is not supported" note with a link to the local page (spikes 009-011, design `docs/superpowers/specs/2026-10-25-dashboard-loader-design.md`)
+**Requirements**: TBD (planned from #483)
+**Depends on:** Phase 05.4
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.5 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 

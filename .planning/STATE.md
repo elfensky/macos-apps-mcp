@@ -5,12 +5,12 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T22:15:57.370Z"
+last_updated: "2026-10-25T22:33:45.059Z"
 last_activity: 2026-10-25
-last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: 3bf281b143e95295c39d107444c5c811ca087317
+last_activity_desc: "Phase 05.5 inserted for #483 (dashboard at a domain, the loader page; after Phase 05.4, before Phase 6)"
+state_head: 0a341dd0c38805581a7246accce6c7507d11e532
 progress:
-  total_phases: 13
+  total_phases: 14
   completed_phases: 9
   total_plans: 79
   completed_plans: 72
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-10-25 - Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); records PR docs/phase-05.2-records
+Last activity: 2026-10-25 - Phase 05.5 inserted after Phase 05.4 for #483 (dashboard at a domain: the loader page, before Phase 6)
 
 Progress: [█████████░] 90%
 
@@ -194,6 +194,7 @@ Recent decisions affecting current work:
 - Phase 05.2 edited: edited fields: title, goal, requirements — #399 and #348 added beside #455, so every open bug is fixed before Phase 6 (owner, 2026-10-25)
 - Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
 - Phase 05.4 inserted after Phase 05.3: Migration — mcp 2 and fastmcp 4 (#470); after Phase 05.3 and before Phase 6 (owner, 2026-10-25)
+- Phase 05.5 inserted after Phase 05.4: Dashboard at a domain — the loader page (#483); after Phase 05.4 and before Phase 6 (owner, 2026-10-25)
 
 ## Deferred Items
 
