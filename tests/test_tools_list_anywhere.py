@@ -1,9 +1,10 @@
 """The one test the Linux CI job runs: the server starts and lists its tools anywhere.
 
 Glama's build test starts the server in a Linux container and reads ``tools/list``. This
-test does the same: it launches a real ``python -m macos_apps_mcp`` subprocess over
-stdio, runs the MCP handshake and compares the listed names with the registered records
-of ``registry.TOOLS``. It passes unchanged on macOS and on Linux.
+test does the same: it launches the server as a subprocess over stdio, runs the MCP
+handshake and compares the listed names with the registered records of
+``registry.TOOLS``. On Linux the child is the plain ``python -m macos_apps_mcp``; on
+macOS it skips only the EventKit bootstrap, so a unit test never waits on a TCC prompt.
 """
 
 from __future__ import annotations
@@ -37,7 +38,8 @@ def _listed_by_a_real_start() -> set[str]:
         async with Client(transport) as c:
             return {t.name for t in await c.list_tools()}
 
-    return asyncio.run(_run())
+    # A server that hangs before it answers must fail the job, not stall it.
+    return asyncio.run(asyncio.wait_for(_run(), timeout=60))
 
 
 def test_tools_list_matches_the_registry():

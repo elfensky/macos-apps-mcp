@@ -47,10 +47,11 @@ AppleScript count there (#291).
   this machine, so it carries `openWorldHint` and defaults `dry_run=True` — and its dry-run path must
   make **no native call at all** (building a Mail `outgoing message` can strand an autosaved draft).
   A new send tool goes through `_send_tool` or `tests/test_tool_annotations.py` fails.
-- **Off macOS the server loads but never acts.** A macOS-only import at module load sits under
-  `if sys.platform == "darwin":` (else the name is `None`), never a try/except, and a native door
-  refuses through `runtime.require_macos()`. The `linux-tools-list` CI job fails on a load-time
-  macOS import, and Glama lists the server only after a Linux build test reads tools/list.
+- **Off macOS the server loads and lists its tools; every tool that needs the Mac refuses.** A
+  macOS-only import at module load sits under `if sys.platform == "darwin":` (else the name is
+  `None`), never a try/except, and a native door refuses through `runtime.require_macos()`. The
+  `linux-tools-list` CI job fails on a load-time macOS import on the server's import path, and
+  Glama lists the server only after a Linux build test reads tools/list.
 
 ## Dev
 
