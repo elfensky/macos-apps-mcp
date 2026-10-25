@@ -3,6 +3,15 @@
   "name": "io.github.elfensky/macos-apps-mcp",
   "title": "macOS Apps",
   "description": "Mail, Calendar, Reminders, Notes, Messages and more on macOS: cited pointers, previewed deletes",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/logo.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "512x512"
+      ]
+    }
+  ],
   "repository": {
     "url": "https://github.com/elfensky/macos-apps-mcp",
     "source": "github"
