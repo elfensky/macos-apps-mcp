@@ -51,7 +51,7 @@ Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provide
 }
 ```
 
-Claude Desktop does not read your shell's `PATH`. If it cannot start the server, set `"command"` to the full path that `which uvx` prints in Terminal (for example `/Users/you/.local/bin/uvx`).
+If Claude Desktop cannot find `uvx`, set `"command"` to its full path: run `which uvx` in Terminal (a default uv install prints `/Users/you/.local/bin/uvx`).
 
 For Claude Code:
 
