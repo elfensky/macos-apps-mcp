@@ -14,6 +14,9 @@ surface may still shift between minor versions.
 - **A Claude Code plugin ships in this repo.** Run `/plugin marketplace add
   elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp`. It adds the
   server and a skill that teaches the dry-run workflow.
+- **The app icon is the project logo** everywhere a listing shows one: the README, the
+  plugin (`plugin/.claude-plugin/icon.png`) and `server.json`'s `icons` for the registry.
+  It is exported from `packaging/AppIcon.icon` at 512 px with Icon Composer's `ictool`.
 
 ### Changed
 

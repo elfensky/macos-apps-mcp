@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T19:51:18.070Z"
+last_updated: "2026-10-25T20:43:32.250Z"
 last_activity: 2026-10-25
 last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: 9c5d4a65f61e8d69d90eb8f2eccbed3f150552c7
+state_head: e8b1ff5424a145cf42fe399cccea419a981a30a3
 progress:
   total_phases: 13
   completed_phases: 9
@@ -175,6 +175,7 @@ Recent decisions affecting current work:
 | 33 | AGENTS.md rule: clean a lane only after gh pr view <n> says MERGED (a cleanup after a failed merge deleted #474's branch and closed the PR, 2026-10-25) | 2026-10-25 | 4b1c9f3 | — |
 | 34 | README dashboard screenshots (invented data, served from a scratch state dir): batch detail (light/dark) in the first screen, word diff and adapter switches in the Dashboard section | 2026-10-25 | a8249a1 | — |
 | 35 | README: Claude Desktop needs the full uvx path (it does not read the shell PATH) — found while writing the tester brief | 2026-10-25 | 9c5d4a6 | — |
+| 36 | Logo (app icon exported at 512 px with ictool) in the README, the plugin icon and server.json icons, ahead of the 0.15.1 release | 2026-10-25 | e8b1ff5 | — |
 
 ### Roadmap Evolution
 
