@@ -483,6 +483,38 @@ def test_export_refuses_an_existing_file_before_writing(root, monkeypatch):
     assert (root / "archive" / "a@x.eml").read_bytes() == b"mine"
 
 
+def _fake_export_batch(monkeypatch, *mids):
+    monkeypatch.setattr(
+        mail_recover,
+        "locate",
+        lambda t: [_located(m, i + 1) for i, m in enumerate(mids)],
+    )
+    monkeypatch.setattr(
+        mail_recover, "read_payloads", lambda t: {m: b"new-" + m.encode() for m in mids}
+    )
+
+
+def test_export_refuses_the_whole_batch_when_a_later_id_exists(root, monkeypatch):
+    """#399: id 1 used to be written before id 2's collision refused the call."""
+    (root / "archive").mkdir()
+    (root / "archive" / "b@x.eml").write_bytes(b"mine")
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    with pytest.raises(WriteRefused, match="never overwrites"):
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    assert not (root / "archive" / "a@x.eml").exists()
+    assert (root / "archive" / "b@x.eml").read_bytes() == b"mine"
+
+
+@pytest.mark.parametrize("pair", [("../x", "x"), ("X@y", "x@y")])
+def test_export_refuses_two_ids_that_derive_one_file_name(root, monkeypatch, pair):
+    """Exact (`../x` and `x`) and case-variant (APFS is case-insensitive) collisions."""
+    (root / "archive").mkdir()
+    _fake_export_batch(monkeypatch, *pair)
+    with pytest.raises(WriteRefused, match="never overwrites"):
+        mail.MailAdapter().export(",".join(f"<{m}>" for m in pair), "archive")
+    assert list((root / "archive").iterdir()) == []
+
+
 @_write_gate_on_only
 def test_the_mail_write_tools_refuse_an_existing_file_as_a_typed_tool_error(
     root, resolved, monkeypatch
