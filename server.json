@@ -5,7 +5,7 @@
   "description": "Mail, Calendar, Reminders, Notes, Messages and more on macOS: cited pointers, previewed deletes",
   "icons": [
     {
-      "src": "https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/logo.png",
+      "src": "https://raw.githubusercontent.com/elfensky/macos-apps-mcp/main/docs/images/logo.png",
       "mimeType": "image/png",
       "sizes": [
         "512x512"
