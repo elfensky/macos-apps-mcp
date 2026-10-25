@@ -178,6 +178,7 @@ Recent decisions affecting current work:
 | 36 | Logo (app icon exported at 512 px with ictool) in the README, the plugin icon and server.json icons, ahead of the 0.15.1 release | 2026-10-25 | e8b1ff5 | — |
 | 37 | Release bump 0.15.1 (pyproject, Info.plist, server.json, uv.lock root line; CHANGELOG section Registry, plugin and dashboard fixes) | 2026-10-25 | 5f89921 | — |
 | 38 | docs/PROMOTION.md (listings, launch plan, X, Glama score, screenshot recipe), docs/tester-brief.md, scripts/dashboard_demo.py (dashboard on invented data); RELEASING step 5 points to the listings | 2026-10-25 | 3bf281b | — |
+| 261025-vuv | The server starts and lists its tools on Linux (Glama build test): macOS-only deps marked, load-time imports guarded, UnsupportedPlatform at every native door and CLI role, Linux CI job; multi-AI review after each task | 2026-10-26 | ee2163c | [261025-vuv-the-server-starts-and-lists-its-tools-on](./quick/261025-vuv-the-server-starts-and-lists-its-tools-on/) |
 
 ### Roadmap Evolution
 
