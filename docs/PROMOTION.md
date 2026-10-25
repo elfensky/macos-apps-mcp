@@ -13,6 +13,7 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 | GitHub releases | [Releases](https://github.com/elfensky/macos-apps-mcp/releases) | `gh release create`, then the notarized `.app` zip | Live, 0.15.1 |
 | Claude Code plugin | This repo (`.claude-plugin/marketplace.json`, `plugin/`) | Follows `develop`; the server is `uvx macos-apps-mcp`, unpinned | Live: `/plugin marketplace add elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp` |
 | Glama | [elfensky/macos-apps-mcp](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp) | Profile edited on Glama; `glama.json` names the maintainer | Claimed. No score yet: see [Glama score](#glama-score) |
+| X | [@macosappsmcp](https://x.com/macosappsmcp) | Posts by hand; see [X](#x) | Created 2026-10-25; reposts releases |
 | mcprepository.com | [elfensky/macos-apps-mcp](https://mcprepository.com/elfensky/macos-apps-mcp) | Crawls GitHub by itself | Live |
 | awesome-mcp-servers | [PR #17609](https://github.com/punkpeye/awesome-mcp-servers/pull/17609), OS Automation | One line with the Glama badge | Open: the list's bot asks for a Glama score |
 | lav.ren | `src/content/projects/macos-apps-mcp/` and `src/content/blog/2026-10-apple-mail-says-ok.mdx` in the site repo | `draft: true` → `false` publishes | Drafts. The project page goes live first; the blog link is added when the blog section opens |
@@ -61,9 +62,8 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 ## X
 
 Post from the maintainer's personal account until the server has users; a maker's voice reaches further
-than a new project account. Reserve a project handle now (`@macosappsmcp` or `@macos_apps_mcp`, both
-within X's 15-character limit) and use it later to repost releases. Create it with its own `lav.ren`
-alias, not `feedback@lav.ren`.
+than a new project account. The project account [@macosappsmcp](https://x.com/macosappsmcp) (created
+2026-10-25) reposts those posts and carries the release notes.
 
 | When | What | Time |
 |---|---|---|
