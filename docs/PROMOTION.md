@@ -9,7 +9,7 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 |---|---|---|---|
 | GitHub | [elfensky/macos-apps-mcp](https://github.com/elfensky/macos-apps-mcp) | README on `develop` (also the PyPI description at release) | Live; 12 topics, Discussions on |
 | PyPI | [macos-apps-mcp](https://pypi.org/project/macos-apps-mcp/) | `publish.yml`, `target=pypi`, dispatched on the release tag | Live, 0.15.1 |
-| Official MCP Registry | [`io.github.elfensky/macos-apps-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.elfensky/macos-apps-mcp) | `publish.yml` publishes `server.json` right after the PyPI upload | Live, 0.15.1, active, with the logo |
+| Official MCP Registry | [`io.github.elfensky/macos-apps-mcp`](https://registry.modelcontextprotocol.io/?q=io.github.elfensky/macos-apps-mcp) ([API](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.elfensky/macos-apps-mcp)) | `publish.yml` publishes `server.json` right after the PyPI upload | Live, 0.15.1, active, with the logo |
 | GitHub releases | [Releases](https://github.com/elfensky/macos-apps-mcp/releases) | `gh release create`, then the notarized `.app` zip | Live, 0.15.1 |
 | Claude Code plugin | This repo (`.claude-plugin/marketplace.json`, `plugin/`) | Follows `develop`; the server is `uvx macos-apps-mcp`, unpinned | Live: `/plugin marketplace add elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp` |
 | Glama | [elfensky/macos-apps-mcp](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp) | Profile edited on Glama; `glama.json` names the maintainer | Claimed. No score yet: see [Glama score](#glama-score) |
@@ -39,8 +39,8 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 - **The server is local, the conversation is not.** What Claude reads through the server goes to Claude
   like any other chat content.
 - **Invented data only** in screenshots and demos. `scripts/dashboard_demo.py` serves the real dashboard
-  on made-up writes. Keep its Health and Backups pages out of screenshots (they show this Mac's paths and
-  pids), and do not click its Adapters switches (they write the real `adapters_off` file).
+  on made-up writes and keeps every state file in its own folder. Keep its Health and Backups pages out of
+  screenshots: they show this Mac's paths and pids.
 - **Review before it goes out.** Every listing text and post gets a multi-model review against the code;
   a claim the code does not back is cut.
 - **No telemetry, ever.** Measure with GitHub Insights → Traffic (referrers such as `t.co`,
@@ -69,7 +69,7 @@ than a new project account. The project account [@macosappsmcp](https://x.com/ma
 |---|---|---|
 | Weeks 3–4 | 1–2 posts per week: one dashboard screenshot, one Mail trap per post | 15 min each |
 | Weeks 3–4 | Search X for "apple mail mcp", "calendar mcp", "claude code mac"; answer real questions, one link, no template replies | 10 min, twice a week |
-| Week 4 | Thread: the six Mail traps, linking the project page | 1 h |
+| Week 4 | Thread: the Mail traps from the post, linking the project page | 1 h |
 | Week 5 | Launch post with a native 30–60 s demo video; links in the first reply; stay for replies | 2 h |
 
 That X ranks posts with links lower is widely reported but not confirmed; links in the first reply avoid
@@ -83,7 +83,7 @@ Draft posts (under 280 characters each):
 
 ```text
 I let an AI agent move my mail. This is what it leaves behind: every message backed up
-before it moved, and one prompt that undoes the batch.
+before it moved, and a prompt that brings the batch back (Claude previews the undo first).
 Local MCP server for Mail, Calendar, Notes and more on macOS. Open source.
 [image: docs/images/dashboard-batch.png] (repo link in reply)
 ```
@@ -91,13 +91,13 @@ Local MCP server for Mail, Calendar, Notes and more on macOS. Open source.
 ```text
 Apple Mail trap: `delete` after `send` returns fine, deletes nothing, and the mail goes out
 anyway. So once a send starts, the only honest answer is "here's what's still in the Outbox".
-One of six I hit building a Mail server for AI agents.
+One of the Mail traps I hit building a Mail server for AI agents.
 ```
 
 ```text
 macos-apps-mcp: one local MCP server for Mail, Calendar, Reminders, Notes, Messages and five
 more Mac apps. Searches return ids, not bodies. Deletes, moves and sends preview first.
-Every write is logged.
+Every write it makes is logged.
 [60 s demo video] (links in reply)
 ```
 
@@ -112,7 +112,7 @@ release**, which is not a GitHub release:
 1. On the listing's Dockerfile admin page, set the build spec and click **Build**. Glama builds the server
    in a Linux container, starts it and reads `tools/list`.
 2. When the build test succeeds, click **Make Release**. Glama then runs its security checks and grades
-   the tool definitions (70 %) and the server's coherence (30 %).
+   the tool definitions and how the tools fit together.
 3. Auto-Release (on) rebuilds on every GitHub release after that.
 
 Step 1 fails today: on Linux `pip install macos-apps-mcp` cannot install PyObjC, and the server imports
