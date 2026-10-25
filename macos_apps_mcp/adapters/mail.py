@@ -2470,9 +2470,11 @@ class MailAdapter:
 
         Each file is named ``<sanitized-subject-or-id>.eml`` under ``dest_dir`` — inside
         the allowlisted root, derived not concatenated, never overwriting (see
-        ``files``). A message that cannot be located is reported per-id as
-        ``absent`` rather than failing the batch: 62% of local messages are
-        ``.partial``, and a message with no local file has no bytes here to write.
+        ``files``). Every path is checked before the first write, so a collision
+        refuses the whole batch and writes nothing. A message that cannot be located
+        is reported per-id as ``absent`` rather than failing the batch: 62% of local
+        messages are ``.partial``, and a message with no local file has no bytes here
+        to write.
         """
         mids = _split_ids(ids)
         if not mids:
@@ -2486,14 +2488,29 @@ class MailAdapter:
             [mail_recover.Target(id=m, folder="") for m in mids]
         )
         payloads = mail_recover.read_payloads(located)
-        out = []
+        # Plan every write first: one refusal (an existing file, or two ids that derive
+        # one name) leaves nothing written (#399).
+        plan = []
+        seen: set[str] = set()
         for t in located:
             payload = payloads.get(t.id)
             if payload is None:
-                out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
                 continue
             path = files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
+            # The default APFS volume is case-insensitive: A.eml and a.eml are one file.
+            if path.name.casefold() in seen:
+                raise files.exists_refusal(path)
+            seen.add(path.name.casefold())
+            plan.append((t, path, payload))
+        for _, path, payload in plan:
             path.write_bytes(payload)
+        planned = {t.id: (path, payload) for t, path, payload in plan}
+        out = []
+        for t in located:
+            if t.id not in planned:
+                out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
+                continue
+            path, payload = planned[t.id]
             out.append(
                 {
                     "id": t.id,
