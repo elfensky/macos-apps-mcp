@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T19:08:00.076Z"
+last_updated: "2026-10-25T19:13:43.041Z"
 last_activity: 2026-10-25
 last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: de5f2933fdbeccead1f62a13ba64ec78d8ab66b4
+state_head: 4b1c9f3b122ff9c809c08aa9f2ee53d43ab045b0
 progress:
   total_phases: 13
   completed_phases: 9
@@ -172,6 +172,7 @@ Recent decisions affecting current work:
 | 261025-5sy | README first screen for new visitors (pitch, safety and privacy, first 5 minutes, why not apple-mcp) and CREDITS provenance fix; multi-AI review after each step; #471 filed | 2026-10-25 | 21434d3 | [261025-5sy-launch-readiness-readme-first-screen-and](./quick/261025-5sy-launch-readiness-readme-first-screen-and/) |
 | 261025-h09 | server.json + glama.json + README mcp-name marker; CI publishes to the MCP Registry after PyPI (mcp-publisher v1.8.1 pinned, sha256-checked) behind a release-tag guard; in-repo Claude Code plugin marketplace (macos-apps + dry-run skill); multi-AI review after each step | 2026-10-25 | 6495e9a | [261025-h09-official-mcp-registry-metadata-and-an-in](./quick/261025-h09-official-mcp-registry-metadata-and-an-in/) |
 | 32 | README pitch: 'destructive ones preview first' overclaimed (update_event/update_reminder/update_mail_status act when called) — now 'deletes, moves and sends preview first' (found by the multi-AI review of the awesome-mcp-servers entry) | 2026-10-25 | de5f293 | — |
+| 33 | AGENTS.md rule: clean a lane only after gh pr view <n> says MERGED (a cleanup after a failed merge deleted #474's branch and closed the PR, 2026-10-25) | 2026-10-25 | 4b1c9f3 | — |
 
 ### Roadmap Evolution
 
