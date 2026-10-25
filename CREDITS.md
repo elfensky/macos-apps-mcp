@@ -1,7 +1,7 @@
 # Credits & prior art
 
 macos-apps-mcp stands on a lot of prior work. This file credits the projects it references, learns from,
-will build on, and depends on. Corrections welcome — open an issue.
+and depends on. Corrections welcome — open an issue.
 
 ## Prior art — referenced & learned from (no code reused)
 
@@ -15,18 +15,21 @@ will build on, and depends on. Corrections welcome — open an issue.
 - **[apple-mcp / per-app servers](https://github.com/griches/apple-mcp)** by **Gary Riches**
   (**no license declared**) — architectural inspiration for the modular *one-adapter-per-app* shape.
   Because no license is declared, **no code is copied** from it; the influence is pattern only.
-
-## Code we build on / will port
-
 - **[apple-mail-mcp](https://github.com/patrickfreyer/apple-mail-mcp)** by **Patrick Freyer** (MIT)
-  — the basis for macos-apps-mcp's Apple Mail adapter (**planned for v1.5**; `adapters/mail.py` is a stub
-  today). When that port lands, the ported files will retain Patrick Freyer's copyright and the MIT
-  notice. Our fork ([`elfensky/apple-mail-mcp`](https://github.com/elfensky/apple-mail-mcp),
-  `working` branch) also carries community contributions that are still open upstream and will be
-  credited in the ported files — each author holds copyright in their additions under the same MIT terms:
+  — the reference for the Apple Mail adapter. macos-apps-mcp learned three things from it: the
+  `message://` deeplink encoding (the Message-ID percent-encoded between uppercase `%3C` and `%3E`),
+  the needs-response and awaiting-reply triage ideas, and mailbox creation as a tool. Its issue #58
+  (an orphaned server and a hung Apple Event that pinned Mail) shaped the orphan watcher and the
+  child cleanup. The code is independent: the adapter reads Mail's Envelope Index and classifies in
+  pure Python, where apple-mail-mcp builds one AppleScript per account. No code reused. Our fork
+  ([`elfensky/apple-mail-mcp`](https://github.com/elfensky/apple-mail-mcp), `working` branch) also
+  carries community contributions that are still open upstream. They are credited here for the ideas
+  their pull requests carried:
   - **ahharvey** — raw RFC 822 source ([#66](https://github.com/patrickfreyer/apple-mail-mcp/pull/66))
   - **Brendan DeBeasi** — email attachments ([#51](https://github.com/patrickfreyer/apple-mail-mcp/pull/51)) and reply-by-id ([#49](https://github.com/patrickfreyer/apple-mail-mcp/pull/49))
   - **elfensky** — `message_id` / `mail_link` surfacing ([#76](https://github.com/patrickfreyer/apple-mail-mcp/pull/76))
+
+## Code we build on
 
 - **[osxphotos](https://github.com/RhetTbull/osxphotos)** by **Rhet Turnbull** (MIT) — a runtime
   dependency since Phase 4: Photos search, albums, per-photo metadata and export read the library
@@ -46,9 +49,7 @@ will build on, and depends on. Corrections welcome — open an issue.
 
 ## License notes
 
-macos-apps-mcp's only planned code port is the Apple Mail adapter (from `patrickfreyer/apple-mail-mcp`, MIT).
-When v1.5 lands, the ported files must retain the upstream MIT copyright + permission notice and credit
-the individual PR authors above. Everything else here is a reference, an architectural influence, or a
-runtime dependency — no source is copied. **`griches/apple-mcp` has no license, so nothing may be
+No source is copied from any project listed here: each one is a reference, an architectural influence, or a
+runtime dependency. **`griches/apple-mcp` has no license, so nothing may be
 copied from it.** FastMCP (Apache-2.0) and PyObjC (MIT) are normal dependencies; if their source is ever
 bundled, their `LICENSE`/`NOTICE` files travel with it.
