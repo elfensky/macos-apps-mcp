@@ -455,7 +455,9 @@ def _budget_cases():
 @pytest.mark.parametrize(("role", "state"), _budget_cases())
 def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
-    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
+    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The pinned worst
+    # case measures 7000 and a real `ps` executable name 7057, so 7500 keeps 500 chars
+    # of margin under the ceiling and absorbs a longer executable path.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).
@@ -495,6 +497,10 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
         "app_process_info",
         lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
     )
+    # #464: the unpinned field made the length depend on the runner's PIDs.
+    monkeypatch.setattr(
+        doc, "_responsible_process", lambda: "pid 99999 (this), launched by pid 99999"
+    )
     # deterministic grant map too: the machine's real TCC.db made this length depend
     # on the runner (#318). The daemon's own rows, every AppleEvents target denied by a
     # timed-out prompt — the longest entry the map can carry.
@@ -520,7 +526,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
         for k, v in report["deployment"].items()
     }
     largest = sorted(sizes.items(), key=lambda kv: -kv[1])[:8]
-    assert len(json.dumps(report, ensure_ascii=False)) < 7000, largest
+    assert len(json.dumps(report, ensure_ascii=False)) < 7500, largest
 
 
 def test_probe_carries_applescript_side_timeout():
