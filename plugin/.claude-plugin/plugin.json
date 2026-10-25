@@ -1,0 +1,11 @@
+{
+  "name": "macos-apps",
+  "description": "Mail, Calendar, Reminders, Notes, Messages and more on macOS: cited pointers, previewed deletes.",
+  "author": {
+    "name": "Andrei Lavrenov"
+  },
+  "homepage": "https://github.com/elfensky/macos-apps-mcp",
+  "repository": "https://github.com/elfensky/macos-apps-mcp",
+  "license": "MIT",
+  "keywords": ["mcp", "macos", "mail", "calendar", "reminders", "notes"]
+}

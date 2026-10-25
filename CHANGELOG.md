@@ -11,6 +11,9 @@ surface may still shift between minor versions.
 - **The server is listed in the official MCP Registry from the next PyPI release**, as
   `io.github.elfensky/macos-apps-mcp`. The publish workflow uploads `server.json` right
   after the PyPI upload, and `glama.json` lets the maintainer claim the Glama listing.
+- **A Claude Code plugin ships in this repo.** Run `/plugin marketplace add
+  elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp`. It adds the
+  server and a skill that teaches the dry-run workflow.
 
 ### Changed
 

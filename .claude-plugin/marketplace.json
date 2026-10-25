@@ -1,0 +1,16 @@
+{
+  "name": "macos-apps-mcp",
+  "owner": {
+    "name": "Andrei Lavrenov"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for the macos-apps-mcp server."
+  },
+  "plugins": [
+    {
+      "name": "macos-apps",
+      "source": "./plugin",
+      "description": "Mail, Calendar, Reminders, Notes, Messages and more on macOS, with a skill for the dry-run workflow."
+    }
+  ]
+}
