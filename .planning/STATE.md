@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)"
-last_updated: "2026-10-25T12:50:17.149Z"
+stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
+last_updated: "2026-10-25T19:08:00.076Z"
 last_activity: 2026-10-25
 last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: 12ed596ff85d9297297898bd1d5399ea2d9be4cd
+state_head: de5f2933fdbeccead1f62a13ba64ec78d8ab66b4
 progress:
   total_phases: 13
   completed_phases: 9
@@ -171,6 +171,7 @@ Recent decisions affecting current work:
 | 261025-64s | ruff 0.16.10 -> 0.17.1 (cap <0.18); docs/DAEMON.md records why cryptography stays at 48.0.1 (nothing imports it; Intel stays supported; arm64-only revisit 2028) | 2026-10-25 | 60885e2 | [261025-64s-upgrade-ruff-to-0-17-and-document-why-cr](./quick/261025-64s-upgrade-ruff-to-0-17-and-document-why-cr/) |
 | 261025-5sy | README first screen for new visitors (pitch, safety and privacy, first 5 minutes, why not apple-mcp) and CREDITS provenance fix; multi-AI review after each step; #471 filed | 2026-10-25 | 21434d3 | [261025-5sy-launch-readiness-readme-first-screen-and](./quick/261025-5sy-launch-readiness-readme-first-screen-and/) |
 | 261025-h09 | server.json + glama.json + README mcp-name marker; CI publishes to the MCP Registry after PyPI (mcp-publisher v1.8.1 pinned, sha256-checked) behind a release-tag guard; in-repo Claude Code plugin marketplace (macos-apps + dry-run skill); multi-AI review after each step | 2026-10-25 | 6495e9a | [261025-h09-official-mcp-registry-metadata-and-an-in](./quick/261025-h09-official-mcp-registry-metadata-and-an-in/) |
+| 32 | README pitch: 'destructive ones preview first' overclaimed (update_event/update_reminder/update_mail_status act when called) — now 'deletes, moves and sends preview first' (found by the multi-AI review of the awesome-mcp-servers entry) | 2026-10-25 | de5f293 | — |
 
 ### Roadmap Evolution
 
