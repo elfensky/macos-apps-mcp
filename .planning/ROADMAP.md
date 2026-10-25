@@ -410,8 +410,15 @@ Plans:
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
 **Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: TBD (planned from #455, #399, #348, #464)
+**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17
 **Depends on:** Phase 05.1
+**Success Criteria** (what must be TRUE):
+
+  1. On macOS 27, where no readable TCC database holds AppleEvents rows, the Health page and `doctor(request=False)` give each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs; the check sends no Apple Event, shows no prompt (D-14) and runs through `runtime.run_native()`; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam; a device check from the installed daemon shows the bundle's own grants on the Health page (#455).
+  2. `export_mail` never hides a written file: a collision on a later id either refuses the whole batch before the first write, or every id reports its own status (`written` / `exists` / `absent`) and the call returns the files it wrote, so a retry writes no duplicate; a unit test covers the later-id collision (#399).
+  3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
+  4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
+
 **Plans:** 0 plans
 
 Plans:

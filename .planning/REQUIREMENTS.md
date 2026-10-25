@@ -47,6 +47,10 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **FIX-11**: On the dashboard's write detail and recovery pages, a Mail mailbox renders as the account's name or address plus the decoded folder name (`Personal › INBOX`) — in the batch title, the `from` sources, the destination, the target rows and the undone banner — while the `imap://` URL stays internal; the name comes from the Mail adapter's process-local account cache through the existing seam, never a native call from a page load — the cache fills on the first Mail tool call after a daemon start, so until then the raw URL shows; every value is escaped (D-09) and an unknown account falls back to the raw URL (#427)
 - [x] **FIX-12**: The dashboard passes the Phase 5 UI review's actionable findings: the `:focus-visible` ring is a solid `--color-primary` outline; the faint, success, outbound and orange text tokens measure at least 4.5:1 for text and 3:1 for UI glyphs in light mode; a refused toggle (409, 400) renders inside the page frame with a `banner warn`, a way back and the same status code, and the Restart form locks with the switches when the adapters file is unreadable; banner glyphs are `aria-hidden`, the switch `aria-label` names the adapter and its state, the sidebar links sit in a `<nav>` landmark behind a skip link, raw font sizes map to the type tokens, switch and sidebar rows reach 44px targets on phone and the System pages stay reachable in the phone strip — all inside the CSP (D-08), the sketch copy (D-11) and escaping (D-09) (#428)
 - [x] **FIX-13**: The Phase 5 close review's deferred findings are closed: the test session patches `deploy._TCC_DB` and `deploy._TCC_SYSTEM_DB` to absent paths so no unit test opens the developer's TCC databases (WR-01); a `tool: "dashboard"` toggle or restart record renders on the write pages as an operator action with no `dry_run` row and no model chip (WR-03); a dashboard build or import failure in `daemon.serve()` is logged, sets `dashboard_state = "not built: …"` and MCP serves alone, with a test (WR-05); a toggle or restart whose audit record could not be written says so on the next page instead of a silent 303 (WR-06); and the adapter-name set and `_version` have one home, `dashboard/` modules import no underscore names across modules, `doctor` reports the dashboard URL only when a page can answer, and the deny-list is read once at import (IN-02..IN-05) (#430)
+- [ ] **FIX-14**: On a Mac where no readable TCC database holds AppleEvents rows (macOS 27), the dashboard Health page and `doctor(request=False)` report each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs, never a remediation to a setting that may already be on; the check sends no Apple Event and shows no prompt (D-14) and runs through `runtime.run_native()` on the single worker, so the Health page's `_WAIT` busy state still covers a worker held by a long Mail pass; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam with no real call; a device check from the installed daemon shows the bundle's own grants on the Health page (#455)
+- [ ] **FIX-15**: `export_mail` never hides a written file: either every target path is checked before the first write and a collision refuses the whole batch with nothing written, or each id reports its own status (`written` / `exists`, as `absent` does today) and the call returns the files it wrote — so a retry after a refusal writes no duplicate; a unit test covers a batch whose later id meets an existing file (#399)
+- [ ] **FIX-16**: A `mail_reply` or `reply_all` draft keeps Mail's native quote — quote bar, Mail's `On <date>, at <time>, <Name> <<addr>> wrote:` attribution, formatting and inline images, the whole original — with the reply text ahead of it, settled by a device probe whose finding lands in `docs/mail-applescript-facts.md`; if text cannot go ahead of the native quote without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the tool docstrings say the quote is plain text; verified on device by inspecting the resulting draft, with the Mail watchdog running (#348)
+- [ ] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
 
 ### Calendar
 
@@ -206,6 +210,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-11 | Phase 05.1 | Complete |
 | FIX-12 | Phase 05.1 | Complete |
 | FIX-13 | Phase 05.1 | Complete |
+| FIX-14 | Phase 05.2 | Pending |
+| FIX-15 | Phase 05.2 | Pending |
+| FIX-16 | Phase 05.2 | Pending |
+| FIX-17 | Phase 05.2 | Pending |
 | DIST-01 | Phase 6 | Pending |
 | DIST-02 | Phase 6 | Pending |
 | DIST-03 | Phase 6 | Pending |
@@ -215,14 +223,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 55 total
-- Mapped to phases: 55
+- v1 requirements: 59 total
+- Mapped to phases: 59
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.2: 4 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-10-05 — #229/#230 added as MAIL-05/06 (carried from Phase 02.1 into Phase 3); 42/42 mapped across 7 phases*
+*Last updated: 2026-10-25 — #455/#399/#348/#464 added as FIX-14..17 (Phase 05.2); 59/59 mapped*
