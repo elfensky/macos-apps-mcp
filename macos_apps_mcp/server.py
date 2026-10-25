@@ -11,7 +11,7 @@ import functools
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from . import notices, registry, tiers
+from . import notices, registry, runtime, tiers
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -70,11 +70,16 @@ def _guard(fn):
     ``ValueError`` — boundary validation (bad datetime/RRULE, unknown id) — takes the
     same channel: its message is already agent-directed, so it too becomes a
     ``ToolError`` instead of leaking through the protocol as a raw exception.
+
+    Off macOS every guarded tool answers ``UnsupportedPlatform`` before its body runs.
     """
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
+            # Mail and Reminders would otherwise answer from a store-path lookup
+            # ("no Mail data found") that names the wrong cause off macOS.
+            runtime.require_macos()
             return fn(*args, **kwargs)
         except (NativeError, ValueError) as e:
             raise ToolError(str(e)) from e

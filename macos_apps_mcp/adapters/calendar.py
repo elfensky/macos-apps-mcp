@@ -7,11 +7,17 @@ reached-into).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
 from ..contracts import (
     CalendarEventData,
@@ -264,10 +270,14 @@ Span = Literal["this-event", "future-events"]
 
 # EKSpanThisEvent == 0 (falsy!), EKSpanFutureEvents == 1 — so map via membership, never
 # a truthy test.
-_SPANS = {
-    "this-event": EK.EKSpanThisEvent,
-    "future-events": EK.EKSpanFutureEvents,
-}
+_SPANS = (
+    {
+        "this-event": EK.EKSpanThisEvent,
+        "future-events": EK.EKSpanFutureEvents,
+    }
+    if EK is not None
+    else {}
+)
 
 
 def _resolve_span(e, span: Span | None, *, adds_recurrence: bool = False) -> int:

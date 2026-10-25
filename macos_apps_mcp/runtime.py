@@ -21,6 +21,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -29,7 +30,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 
-import Foundation as F
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through require_macos().
+if sys.platform == "darwin":
+    import Foundation as F
+else:
+    F = None
 
 from .errors import (
     PRIVACY_PANE,
@@ -39,6 +45,7 @@ from .errors import (
     NativeError,
     NativeTimeout,
     SchemaDrift,
+    UnsupportedPlatform,
 )
 
 # ponytail: one process-wide native thread. If a future app needs a *second* isolated
@@ -47,13 +54,30 @@ from .errors import (
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mac-native")
 
 
+def require_macos() -> None:
+    """Raise ``UnsupportedPlatform`` unless this process runs on macOS.
+
+    Called first by ``run_native``, ``tracked_run``, ``mac_region``, ``doctor.diagnose``
+    and the server's ``_guard``. Reads ``sys.platform`` at call time.
+    """
+    if sys.platform != "darwin":
+        raise UnsupportedPlatform(
+            f"macos-apps-mcp runs only on macOS: this server is running on "
+            f"{sys.platform}, where Mail, Calendar, Reminders and the other Mac apps "
+            "do not exist. Use it on a Mac. Do not retry."
+        )
+
+
 def run_native[T](fn: Callable[[], T]) -> T:
     """Run a blocking native callable on the single dedicated worker thread and return
     its result.
 
     Adapters wrap every EventKit / osascript call in this so the work always lands on
-    one thread, regardless of which thread FastMCP invoked the tool from.
+    one thread, regardless of which thread FastMCP invoked the tool from. Off macOS it
+    refuses first; ``run_osascript``, ``read_via_sqlite`` and ``photos_db`` dispatch
+    through it off the worker, so they refuse too.
     """
+    require_macos()
     return _executor.submit(fn).result()
 
 
@@ -230,8 +254,10 @@ def tracked_run(
     escapes the exit-path cleanup — an orphaned server could leave e.g. a ``shortcuts
     run`` in flight forever. Adapters that shell out to a CLI use this instead. Raises
     ``subprocess.TimeoutExpired`` (the child is killed and reaped first) exactly like
-    ``run(timeout=...)`` so callers translate it to their own typed timeout.
+    ``run(timeout=...)`` so callers translate it to their own typed timeout. Refuses
+    off macOS.
     """
+    require_macos()
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE if input is not None else None,
@@ -565,7 +591,9 @@ def mac_region() -> str | None:
 
     A pure read of NSLocale: no EventKit thread affinity, no TCC — so it needs neither
     run_native nor a permission. Kept here so Foundation stays out of the adapters.
+    Refuses off macOS.
     """
+    require_macos()
     region = F.NSLocale.currentLocale().objectForKey_(F.NSLocaleCountryCode)
     return str(region) if region else None
 

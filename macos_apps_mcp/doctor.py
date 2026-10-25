@@ -21,9 +21,15 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; diagnose() refuses
+# through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
 from . import deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
@@ -94,8 +100,12 @@ _EK_STATUS = {
     4: "write_only",
 }
 _EK_ENTITIES = (
-    ("calendar", EK.EKEntityTypeEvent, "Calendars"),
-    ("reminders", EK.EKEntityTypeReminder, "Reminders"),
+    (
+        ("calendar", EK.EKEntityTypeEvent, "Calendars"),
+        ("reminders", EK.EKEntityTypeReminder, "Reminders"),
+    )
+    if EK is not None
+    else ()
 )
 
 
@@ -345,8 +355,10 @@ def diagnose(request: bool = False) -> dict:
     """Per-surface macOS permission + health report with exact remediation (#48).
 
     ``request=False`` (default) is read-only and prompt-free. ``request=True`` also
-    triggers the EventKit consent prompt and runs the Automation probes.
+    triggers the EventKit consent prompt and runs the Automation probes. Refuses off
+    macOS with ``UnsupportedPlatform``.
     """
+    runtime.require_macos()
     surfaces = [
         *_eventkit_surfaces(request),
         *_automation_surfaces(request),
