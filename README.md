@@ -4,7 +4,7 @@
 One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
 Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an
 id, a one-line summary and a link that opens the item in its app. Bodies are a separate, capped fetch.
-Writes are tiered and audited, and destructive ones preview first. macOS only. Python + [FastMCP](https://github.com/PrefectHQ/fastmcp) + [uv](https://docs.astral.sh/uv/). See
+Writes are tiered and audited; deletes, moves and sends preview first. macOS only. Python + [FastMCP](https://github.com/PrefectHQ/fastmcp) + [uv](https://docs.astral.sh/uv/). See
 [DESIGN.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/DESIGN.md) and [CHANGELOG.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/CHANGELOG.md).
 
 ## What you can ask
