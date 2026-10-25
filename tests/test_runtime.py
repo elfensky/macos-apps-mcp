@@ -19,6 +19,7 @@ from macos_apps_mcp.errors import (
     RecurrenceRequired,
     SchemaDrift,
     SpanRequired,
+    UnsupportedPlatform,
     VerificationFailed,
     WriteRefused,
     require_batch_within,
@@ -78,6 +79,7 @@ def test_taxonomy_all_subclass_native_error_and_runtime_error():
         RecurrenceRequired,
         BatchTooLarge,
         AmbiguousTarget,
+        UnsupportedPlatform,
     ):
         assert issubclass(cls, NativeError)
         assert issubclass(cls, RuntimeError)
@@ -101,6 +103,7 @@ def test_taxonomy_kinds_are_distinct_machine_codes():
             RecurrenceRequired,
             BatchTooLarge,
             AmbiguousTarget,
+            UnsupportedPlatform,
         )
     ]
     assert len(kinds) == len(set(kinds))
@@ -424,6 +427,7 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
             public.add(name)
     assert public == {
         "run_native",
+        "require_macos",
         "on_worker",
         "app_process_info",
         "terminate_children",

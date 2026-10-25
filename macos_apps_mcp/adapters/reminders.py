@@ -7,10 +7,16 @@ Reads return Pointers; writes take ``ReminderData``. All EventKit access goes th
 from __future__ import annotations
 
 import dataclasses
+import sys
 import unicodedata
 from datetime import datetime, timedelta
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
 from ..contracts import (
     Pointer,

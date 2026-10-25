@@ -116,6 +116,13 @@ class AmbiguousTarget(NativeError):
     kind = "ambiguous_target"
 
 
+class UnsupportedPlatform(NativeError):
+    """The server runs off macOS, where no Mac app exists, so every native call
+    refuses. ``str(e)`` says so and tells the caller not to retry."""
+
+    kind = "unsupported_platform"
+
+
 class FullDiskAccessDenied(NativeError):
     """A native sqlite store (chat.db, NoteStore.sqlite, …) couldn't be opened because
     Full Disk Access is not granted. ``str(e)`` is the remediation; doctor (#48) reports

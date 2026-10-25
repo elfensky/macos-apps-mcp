@@ -8,19 +8,27 @@ executor and dispatches only through ``runtime.run_native``. Never create a seco
 
 from __future__ import annotations
 
+import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime
 
-import EventKit as EK
-import Foundation as F
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+    import Foundation as F
+else:
+    EK = F = None
 
 from . import tiers
 from .contracts import CLEAR_RECURRENCE, Recurrence
 from .errors import PRIVACY_PANE, AccessDenied, NativeTimeout
 from .runtime import log, on_worker, run_native
 
-_FULL_ACCESS = EK.EKAuthorizationStatusFullAccess  # == 3 on macOS 14+
+_FULL_ACCESS = (
+    EK.EKAuthorizationStatusFullAccess if EK is not None else None
+)  # == 3 on macOS 14+
 
 # Generous (this wait blocks on the user answering a TCC prompt) but bounded: a callback
 # that never fires (headless/sandboxed, EventKit error) must not hang the sole worker —
@@ -95,11 +103,15 @@ def _request_one(s: EK.EKEventStore, entity: int) -> None:
 
 # EventKit TCC surfaces requested at startup. Adapters with their own permission
 # (Contacts, Photos) add a separate non-fatal bootstrap step following this pattern.
-_ENTITIES = (EK.EKEntityTypeEvent, EK.EKEntityTypeReminder)
+_ENTITIES = (EK.EKEntityTypeEvent, EK.EKEntityTypeReminder) if EK is not None else ()
 # The adapter each entity belongs to (PLAT-01, D-04): an OFF adapter is not requested.
 _ENTITY_ADAPTERS = (
-    ("calendar", EK.EKEntityTypeEvent),
-    ("reminders", EK.EKEntityTypeReminder),
+    (
+        ("calendar", EK.EKEntityTypeEvent),
+        ("reminders", EK.EKEntityTypeReminder),
+    )
+    if EK is not None
+    else ()
 )
 
 
@@ -129,6 +141,10 @@ def bootstrap() -> None:
     Each surface is requested independently and **non-fatally** — a denied permission
     disables only that adapter (which raises on use), never the server.
     """
+    if sys.platform != "darwin":
+        # Nothing to request off macOS; the server must still reach mcp.run() so
+        # tools/list answers.
+        return
     run_native(request_access_each)
 
 
@@ -190,12 +206,16 @@ def due_components(dt: datetime) -> F.NSDateComponents:
     return c
 
 
-_FREQUENCIES = {
-    "daily": EK.EKRecurrenceFrequencyDaily,
-    "weekly": EK.EKRecurrenceFrequencyWeekly,
-    "monthly": EK.EKRecurrenceFrequencyMonthly,
-    "yearly": EK.EKRecurrenceFrequencyYearly,
-}
+_FREQUENCIES = (
+    {
+        "daily": EK.EKRecurrenceFrequencyDaily,
+        "weekly": EK.EKRecurrenceFrequencyWeekly,
+        "monthly": EK.EKRecurrenceFrequencyMonthly,
+        "yearly": EK.EKRecurrenceFrequencyYearly,
+    }
+    if EK is not None
+    else {}
+)
 
 
 # EKWeekday numbers (SU=1 … SA=7) and back.
