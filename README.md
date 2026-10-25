@@ -1,33 +1,35 @@
 # macos-apps-mcp
 
 One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
-Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Reads return pointers: an id, a one-line
-summary and a link that opens the item in its app. Bodies are a separate, capped fetch. Writes are tiered,
-dry-runnable and audited. macOS only. Python + [FastMCP](https://github.com/PrefectHQ/fastmcp) + [uv](https://docs.astral.sh/uv/). See
+Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an
+id, a one-line summary and a link that opens the item in its app. Bodies are a separate, capped fetch.
+Writes are tiered and audited, and destructive ones preview first. macOS only. Python + [FastMCP](https://github.com/PrefectHQ/fastmcp) + [uv](https://docs.astral.sh/uv/). See
 [DESIGN.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/DESIGN.md) and [CHANGELOG.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/CHANGELOG.md).
 
 ## What you can ask
 
 - "What is on my calendar this week? When am I free on Thursday afternoon?" <br><sub>`events`, `free_busy`</sub>
 - "Which emails need a reply? Draft a reply to the first one." <br><sub>`mail_needs_response`, `mail_reply`. The reply opens as a draft in Mail. It is not sent.</sub>
-- "Move the newsletters in my inbox to Archive. Show me first." <br><sub>`mail_search`, `move_mail`, `mail_undo`. The move previews by default and can be reversed.</sub>
+- "Move the newsletters in my inbox to Archive. Show me first." <br><sub>`mail_search`, `move_mail`, `mail_undo`. The move previews by default. `mail_undo` reverses it, within the known limits below.</sub>
 
 ## Safety and privacy
 
-- **Local.** The server runs on your Mac. It has no telemetry and makes no network requests of its own. Its only sockets
-  are a local unix socket (shim to daemon) and the dashboard on 127.0.0.1. Mail and Safari send and open URLs on request.
+- **Local.** No telemetry, and no network requests of its own: only a local unix socket (shim to daemon) and the
+  dashboard on 127.0.0.1. Three tools reach past the Mac through the apps, when called: the send tools (off by
+  default) send through Mail, `safari_open` opens a page, and `run_shortcut` runs a Shortcut that can call the web.
 - **Three tiers.** Read, write and outbound. Send tools are absent until you enable them per app:
-  `macos-apps-mcp allow-send mail` (daemon) or `MACOS_APPS_ALLOW_SEND=mail` (stdio). `MACOS_APPS_READ_ONLY=1` registers reads only and wins over both.
-- **Dry run first.** `dry_run` defaults to true for `delete_draft`, `move_mail`, `trash_mail`, `mail_undo`, `send_mail`,
-  `reply_all`, `forward_mail`, `delete_reminder`, `delete_event`, `delete_note` and `update_note`. Other writes act when
-  called. `mail_reply` opens a draft only.
-- **Audit log.** Every write is logged with before and after pointers in `~/.local/state/macos-apps-mcp/audit.jsonl`
-  (`$XDG_STATE_HOME/macos-apps-mcp/` when set). The `audit` tool reads it back.
-- **Mail recovery.** Before a Mail move or delete, each message is copied as `.eml` under `~/.local/state/macos-apps-mcp/backup/mail/`.
-  `mail_undo` reverses the batch. No tool empties the Trash.
-- **Known limits.** A message Mail downloaded only in part is backed up without its attachments. A move out of a Gmail
-  label can read `ok`, then revert on the server about 2 minutes later. `sent: true` means Mail accepted the message,
-  not that it was delivered. Details: [Mail facts](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/mail-applescript-facts.md).
+  `macos-apps-mcp allow-send mail` (daemon) or `MACOS_APPS_ALLOW_SEND=mail` (stdio). `MACOS_APPS_READ_ONLY=1`
+  registers reads only and wins over both.
+- **Dry run first.** `dry_run` defaults to true for `delete_draft`, `move_mail`, `trash_mail`, `mail_undo`,
+  `send_mail`, `reply_all`, `forward_mail`, `delete_reminder`, `delete_event`, `delete_note` and `update_note`.
+  Other writes act when called. `mail_reply` opens a draft only.
+- **Audit log.** Every write goes to `~/.local/state/macos-apps-mcp/audit.jsonl` (under `$XDG_STATE_HOME` when set).
+  An update or delete by id also records the item as it was. The `audit` tool reads the log back.
+- **Mail recovery.** Before a Mail move or delete, each message is copied as `.eml` under
+  `~/.local/state/macos-apps-mcp/backup/mail/`. `mail_undo` reverses the batch. No tool empties the Trash.
+- **Known limits.** A message Mail downloaded only in part is backed up without its attachments. Moves and trashes
+  through a Gmail label folder are refused, because Gmail reverts them about 2 minutes later. `sent: true` means
+  Mail accepted the message, not that it was delivered. [All Mail facts](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/mail-applescript-facts.md).
 
 ## First 5 minutes
 
@@ -51,20 +53,19 @@ For Claude Code:
 claude mcp add macos-apps --scope user -- uvx macos-apps-mcp
 ```
 
-The CLI commands further down (`allow-send`, `dedupe-mail`) run through the same package, for
-example `uvx macos-apps-mcp allow-send`.
+The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `uvx macos-apps-mcp allow-send`.
 
-**Run `doctor` first.** Ask your client to run the `doctor` tool. It reports every permission and opens no dialog.
-`doctor(request=True)`, with you at the screen, opens the dialogs. macOS asks for:
+**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`).
+`doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
-- **Full Disk Access** (optional): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast
-  Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
+- **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access,
+  for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path.
+  Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
 
-Under stdio, macOS gives each grant to the app that launches the server (Claude Desktop, Terminal, VS Code), so each
-client needs its own grants. The signed `.app` daemon holds one grant set for every client: see
-[docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
+Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each
+client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
 
 Load only the apps you use. `MACOS_APPS_ADAPTERS_OFF=photos,music` registers no tools for those apps, so your client
 holds fewer tools in its context. Under the daemon, see [turn adapters off](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
@@ -76,8 +77,7 @@ git clone https://github.com/elfensky/macos-apps-mcp && cd macos-apps-mcp
 uv sync
 ```
 
-Then point your MCP client at the project's own venv python — deterministic, and it carries the
-locked PyObjC wheels:
+Then point your MCP client at the project's own venv python — deterministic, and it carries the locked PyObjC wheels:
 
 ```json
 {
