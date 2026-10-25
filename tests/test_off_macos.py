@@ -14,7 +14,7 @@ import sys
 import pytest
 from fastmcp.exceptions import ToolError
 
-from macos_apps_mcp import doctor, eventkit, runtime, server
+from macos_apps_mcp import cli, doctor, eventkit, runtime, server
 from macos_apps_mcp.errors import NativeError, UnsupportedPlatform
 
 # The real seam functions, bound before conftest's autouse fake replaces them.
@@ -40,8 +40,9 @@ def test_require_macos_is_silent_on_the_real_platform():
 def test_require_macos_names_the_platform(linux):
     with pytest.raises(UnsupportedPlatform) as ei:
         runtime.require_macos()
-    assert "runs only on macOS" in str(ei.value)
-    assert "running on linux" in str(ei.value)
+    msg = str(ei.value)
+    assert "runs only on macOS" in msg and "running on linux" in msg
+    assert "Use it on a Mac." in msg and "Do not retry." in msg  # the agent's directive
 
 
 def test_run_native_refuses_and_never_runs_the_callable(linux):
@@ -90,3 +91,14 @@ def test_guard_answers_with_the_platform_reason(linux):
 def test_ping_and_now_still_answer(linux):
     assert server.ping() == "macos-apps-mcp ok"
     assert "timezone" in server.now()
+
+
+@pytest.mark.parametrize("role", cli._ROLES)
+def test_every_cli_role_refuses_with_the_platform_reason(
+    linux, monkeypatch, capsys, role
+):
+    monkeypatch.setattr(sys, "argv", ["macos-apps-mcp", role])
+    with pytest.raises(SystemExit) as ei:
+        cli.main()
+    assert ei.value.code == 1
+    assert "runs only on macOS" in capsys.readouterr().err

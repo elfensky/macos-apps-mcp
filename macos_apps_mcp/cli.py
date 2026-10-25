@@ -28,6 +28,15 @@ def main() -> None:
         server.main()  # stdio — bootstrap + lifecycle guards, unchanged
         return
     role = args[0]
+    if role in _ROLES:  # every role needs macOS; off it, say so instead of a traceback
+        from . import runtime
+        from .errors import UnsupportedPlatform
+
+        try:
+            runtime.require_macos()
+        except UnsupportedPlatform as e:
+            print(e, file=sys.stderr)
+            raise SystemExit(1) from None
     if role == "daemon":
         from . import daemon
 
