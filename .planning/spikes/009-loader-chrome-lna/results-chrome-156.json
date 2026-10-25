@@ -1,0 +1,105 @@
+{
+  "at": "2026-10-25T22:06:27.498Z",
+  "secure": true,
+  "key_present": true,
+  "perm_before": {
+    "loopback": "granted",
+    "local": "prompt"
+  },
+  "steps": [
+    {
+      "id": "011-live-nocors",
+      "ok": true,
+      "status": 0,
+      "type": "opaque",
+      "error": null,
+      "message": null,
+      "ms": 33
+    },
+    {
+      "id": "011-live-cors",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Failed to fetch",
+      "ms": 8
+    },
+    {
+      "id": "009-paired-get",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 9
+    },
+    {
+      "id": "009-paired-nokey",
+      "ok": true,
+      "status": 401,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 4
+    },
+    {
+      "id": "009-paired-post",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 19
+    },
+    {
+      "id": "009-paired-tas",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 17
+    },
+    {
+      "id": "009-unpaired-get",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Failed to fetch",
+      "ms": 4
+    },
+    {
+      "id": "010-localhost-get",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 13
+    },
+    {
+      "id": "010-img-127",
+      "ok": true,
+      "status": 200,
+      "type": "img",
+      "error": null,
+      "message": null,
+      "ms": 4
+    },
+    {
+      "id": "010-img-localhost",
+      "ok": true,
+      "status": 200,
+      "type": "img",
+      "error": null,
+      "message": null,
+      "ms": 19
+    }
+  ],
+  "perm_after": {
+    "loopback": "granted",
+    "local": "prompt"
+  }
+}
