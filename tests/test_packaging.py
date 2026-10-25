@@ -103,6 +103,20 @@ def test_osxphotos_is_a_capped_base_dependency():
     assert str(uti.marker) == 'sys_platform == "darwin"'
 
 
+def test_macos_only_dependencies_install_on_macos_only():
+    """Glama's build test installs the package on Linux: every PyObjC framework and
+    osxphotos must carry exactly the darwin marker (never platform_release, which the
+    bundle install drops), so a Mac gets them all and Linux gets none."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    reqs = [Requirement(d) for d in project["dependencies"]]
+    mac_only = [r for r in reqs if r.name.startswith("pyobjc") or r.name == "osxphotos"]
+    assert len(mac_only) == 5
+    for r in mac_only:
+        assert str(r.marker) == 'sys_platform == "darwin"', r.name
+        assert r.marker.evaluate({"sys_platform": "darwin"})
+        assert not r.marker.evaluate({"sys_platform": "linux"})
+
+
 def test_ruff_targets_the_python_floor():
     """#384, D-16: the ruff target must track the requires-python floor."""
     cfg = tomllib.loads((ROOT / "pyproject.toml").read_text())
