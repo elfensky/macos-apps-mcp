@@ -84,8 +84,8 @@ def test_osxphotos_is_a_capped_base_dependency():
     """Photos (D-01) reads the library through osxphotos: a base dependency, capped
     below 0.78 (0.x, its export must never start a download). D-16: the Python 3.12
     floor is what lets it lock beside pyobjc 10+, and UniformTypeIdentifiers is a base
-    line with no marker, because the bundle install drops a platform_release marker
-    in silence."""
+    line whose only marker is the darwin platform, never platform_release, which the
+    bundle install drops in silence."""
     text = (ROOT / "pyproject.toml").read_text()
     project = tomllib.loads(text)["project"]
     reqs = [Requirement(d) for d in project["dependencies"]]
@@ -100,7 +100,7 @@ def test_osxphotos_is_a_capped_base_dependency():
     assert project["requires-python"] == ">=3.12"
     assert not any("3.11" in c for c in project["classifiers"])
     (uti,) = [r for r in reqs if r.name == "pyobjc-framework-uniformtypeidentifiers"]
-    assert uti.marker is None
+    assert str(uti.marker) == 'sys_platform == "darwin"'
 
 
 def test_ruff_targets_the_python_floor():
