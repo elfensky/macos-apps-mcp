@@ -10,13 +10,16 @@ steps.
 
 ## Read first, cite by id
 
-- Search or list first: `mail_search`, `events`, `reminders`, `notes`, `contacts`,
-  `messages_search`.
-- A result is a pointer: an id, a one-line summary and a deeplink. Cite the id. A later
-  write addresses the item by that id.
+- Search first: `mail_search`, `events`, `reminders`, `notes` (needs a title), `contacts`
+  (needs a name), `messages_search`. With no query, list: `notes_all`, `messages_chats`,
+  `calendars`, `reminder_lists`.
+- A result is a pointer: an id, a one-line summary and, where the app has one, a deeplink.
+  Notes has none: never invent one. Cite the id. A later write addresses the item by that id.
+  A Mail result also carries its `folder`: pass it back unchanged as `mailbox` (or as
+  `from_mailbox` for `move_mail`).
+- A list that comes back marked truncated hit its cap: more matches exist. Narrow the query.
 - Fetch a body only when the task needs the text: `mail_body`, `mail_bodies`, `note_bodies`,
-  `message_body`. Bodies are capped. A result that says truncated means more matches exist.
-  Narrow the query.
+  `message_body`. A body is capped in size; a cut body says so in its text.
 - Give the deeplink when the user wants to look at an item. It opens the item in its app.
   Do not paste whole bodies.
 
