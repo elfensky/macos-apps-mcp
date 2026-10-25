@@ -34,8 +34,7 @@ Writes are tiered and audited, and destructive ones preview first. macOS only. P
 
 ## First 5 minutes
 
-Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`. The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so
-there is no clone and no venv path:
+Requires macOS, Python ≥ 3.12 and [uv](https://docs.astral.sh/uv/). uv provides `uvx`. The package is on PyPI. Point your MCP client at `uvx`. It fetches the package and runs it, so there is no clone and no venv path:
 
 ```json
 {
@@ -54,22 +53,21 @@ For Claude Code:
 claude mcp add macos-apps --scope user -- uvx macos-apps-mcp
 ```
 
+Or, instead of `claude mcp add`, install the Claude Code plugin. It starts the same server and adds a skill
+that teaches the dry-run workflow. In Claude Code, run `/plugin marketplace add elfensky/macos-apps-mcp`, then
+`/plugin install macos-apps@macos-apps-mcp`.
+
 The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `uvx macos-apps-mcp allow-send`.
 
-**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`).
-`doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
+**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
-- **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access,
-  for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path.
-  Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
+- **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access, for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
 
-Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each
-client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
+Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
 
-Load only the apps you use. `MACOS_APPS_ADAPTERS_OFF=photos,music` registers no tools for those apps, so your client
-holds fewer tools in its context. Under the daemon, see [turn adapters off](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
+Load only the apps you use. `MACOS_APPS_ADAPTERS_OFF=photos,music` registers no tools for those apps, so your client holds fewer tools in its context. Under the daemon, see [turn adapters off](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md#6-turn-adapters-off-under-the-daemon).
 
 **From source (development):** use this path to work on the server itself.
 
