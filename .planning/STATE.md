@@ -170,6 +170,7 @@ Recent decisions affecting current work:
 | 261025-4qn | Dependabot uv cooldown 7 -> 3 days; uv.lock refreshed with a 3-day cutoff (12 updates inside the limits, python-dateutil 3.0.0 and starlette 1.9.0 among them) | 2026-10-25 | a038683 | [261025-4qn-set-the-dependabot-cooldown-to-3-days-an](./quick/261025-4qn-set-the-dependabot-cooldown-to-3-days-an/) |
 | 261025-64s | ruff 0.16.10 -> 0.17.1 (cap <0.18); docs/DAEMON.md records why cryptography stays at 48.0.1 (nothing imports it; Intel stays supported; arm64-only revisit 2028) | 2026-10-25 | 60885e2 | [261025-64s-upgrade-ruff-to-0-17-and-document-why-cr](./quick/261025-64s-upgrade-ruff-to-0-17-and-document-why-cr/) |
 | 261025-5sy | README first screen for new visitors (pitch, safety and privacy, first 5 minutes, why not apple-mcp) and CREDITS provenance fix; multi-AI review after each step; #471 filed | 2026-10-25 | 21434d3 | [261025-5sy-launch-readiness-readme-first-screen-and](./quick/261025-5sy-launch-readiness-readme-first-screen-and/) |
+| 261025-h09 | server.json + glama.json + README mcp-name marker; CI publishes to the MCP Registry after PyPI (mcp-publisher v1.8.1 pinned, sha256-checked) behind a release-tag guard; in-repo Claude Code plugin marketplace (macos-apps + dry-run skill); multi-AI review after each step | 2026-10-25 | 6495e9a | [261025-h09-official-mcp-registry-metadata-and-an-in](./quick/261025-h09-official-mcp-registry-metadata-and-an-in/) |
 
 ### Roadmap Evolution
 
