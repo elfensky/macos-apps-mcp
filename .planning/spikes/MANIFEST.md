@@ -62,8 +62,10 @@ server with a Bearer header, a CORS preflight and a POST, and what the daemon se
   a Terminal command (owner, 2026-10-25).
 - The loader is public, on own infrastructure behind cloudflared, and anyone can self-host
   the same file on their own domain (owner, 2026-10-25).
-- A hash check of the hosted loader by the daemon is optional hardening, a tripwire and not
-  a lock (owner, 2026-10-25).
+- A hash check of the hosted loader by the daemon is later hardening, a tripwire and not a
+  lock; it is not in the first version (owner, 2026-10-25).
+- Safari is not supported by the loader: when a loopback fetch fails before the network, the
+  loader says so and links to `http://127.0.0.1:47632` (owner, 2026-10-25, after spike 010).
 
 ## Spikes
 
