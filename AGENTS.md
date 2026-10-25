@@ -96,6 +96,8 @@ cd - && git pull --ff-only
 git worktree unlock .worktrees/<slug> && git worktree remove .worktrees/<slug> && git branch -D <type>/<slug>
 ```
 
+Clean a lane only after `gh pr view <n> --json state` reports `MERGED`: a cleanup run after a failed merge deletes an open PR's branch, and GitHub closes the PR.
+
 A new worktree has no dependencies installed: run `uv sync` in it first. A locked worktree
 you did not create belongs to another session — leave it. `.claude/worktrees/` is Claude Code's own
 subagent isolation and is managed by the harness.
