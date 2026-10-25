@@ -15,6 +15,13 @@ surface may still shift between minor versions.
   answers `unsupported_platform` ("macos-apps-mcp runs only on macOS"). Nothing changes on a
   Mac. A Linux CI job keeps it that way.
 
+### Fixed
+
+- **`export_mail` never hides a written file** (#399) — every target path is checked before
+  the first write, so a name that already exists, or two ids that derive one file name,
+  refuse the whole batch with nothing written. Files are created exclusively, and a refusal
+  after a write names the files already written, so a retry writes no duplicate.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added
