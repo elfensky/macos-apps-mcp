@@ -6,6 +6,15 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **The server starts and lists its tools on Linux.** Glama scores an MCP server only after
+  a build test in a Linux container that starts it and reads `tools/list`, and the
+  awesome-mcp-servers list requires a scored Glama listing. The PyObjC and osxphotos
+  dependencies now install only on macOS. On any other system every tool that needs a Mac
+  answers `unsupported_platform` ("macos-apps-mcp runs only on macOS"). Nothing changes on a
+  Mac. A Linux CI job keeps it that way.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added
