@@ -6,6 +6,12 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Added
+
+- **The server is listed in the official MCP Registry from the next PyPI release**, as
+  `io.github.elfensky/macos-apps-mcp`. The publish workflow uploads `server.json` right
+  after the PyPI upload, and `glama.json` lets the maintainer claim the Glama listing.
+
 ### Changed
 
 - **Dependabot uses the `uv` ecosystem.** Python updates move only `uv.lock`

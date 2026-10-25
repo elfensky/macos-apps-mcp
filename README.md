@@ -1,4 +1,5 @@
 # macos-apps-mcp
+<!-- mcp-name: io.github.elfensky/macos-apps-mcp -->
 
 One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
 Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an

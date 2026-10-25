@@ -65,7 +65,7 @@ uv run macos-apps-mcp            # run the server (stdio)
 
 **Branches & releases.** `develop` is the trunk — every PR **rebase-merged**, so it stays linear.
 `main` is release-only: nothing but `--no-ff` release cuts, each tagged `vX.Y.Z`. Full procedure,
-including the two-file version bump and the mandatory `doctor().version` proof, is in
+including the three-file version bump and the mandatory `doctor().version` proof, is in
 [docs/RELEASING.md](docs/RELEASING.md). **The repo is not the daemon** — merging changes nothing
 about what Claude Code sees until the `.app` is rebuilt and reinstalled.
 
