@@ -30,7 +30,7 @@ So the rules live here, once, and every writer routes through them:
   no module default, so no writer can forget it), and a file that lands empty is
   removed and reported as a failure rather than left looking like a successful save.
 
-``target_path`` checks existence and then hands back a path someone else writes to, so
+``target_path`` checks existence (any entry, a dangling symlink included) and then hands back a path someone else writes to, so
 there is a TOCTOU window between the check and the write: a file or a symlink another
 writer puts there is overwritten or written through. A writer that controls its own
 output closes it: it writes into ``staging(dest)``, a directory only that call owns, and
@@ -149,12 +149,13 @@ def target_path(dest_dir: str, name: str, fallback: str = _FALLBACK) -> Path:
     """The full path to write ``name`` to — sanitized, contained, and PROVEN not to
     exist yet. Raises ``WriteRefused`` rather than overwriting."""
     directory = resolve_dest(dest_dir)
-    path = (directory / safe_basename(name, fallback)).resolve()
+    # no resolve(): it would follow a symlink at the name; directory is already resolved
+    path = directory / safe_basename(name, fallback)
     # belt and braces: safe_basename cannot emit a separator, so this cannot fail —
     # which is exactly why it is cheap to assert rather than to reason about.
     if not path.is_relative_to(directory):
         raise ValueError(f"refusing to write outside {directory}")
-    if path.exists():
+    if os.path.lexists(path):  # a dangling symlink counts: writing would go through it
         raise exists_refusal(path)
     return path
 

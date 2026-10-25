@@ -20,7 +20,12 @@ surface may still shift between minor versions.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
   the first write, so a name that already exists, or two ids that derive one file name,
   refuse the whole batch with nothing written. Files are created exclusively, and a refusal
-  after a write names the files already written, so a retry writes no duplicate.
+  after a write names the files already written, so a retry writes no duplicate. A write that fails midway removes its partial file, and
+  two ids that derive one name get their own refusal (export them in separate calls).
+
+- **A name where a symlink already sits is refused before any write** — a dangling symlink
+  at the target name was written through. `export_mail`, `save_mail_attachment` and
+  `export_photo` now refuse any existing entry at the name.
 
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
