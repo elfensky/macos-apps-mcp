@@ -6,9 +6,11 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
+
 ### Added
 
-- **The server is listed in the official MCP Registry from the next PyPI release**, as
+- **The server is listed in the official MCP Registry**, as
   `io.github.elfensky/macos-apps-mcp`. The publish workflow uploads `server.json` right
   after the PyPI upload, and `glama.json` lets the maintainer claim the Glama listing.
 - **A Claude Code plugin ships in this repo.** Run `/plugin marketplace add
