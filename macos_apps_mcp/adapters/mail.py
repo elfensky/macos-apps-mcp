@@ -2502,8 +2502,25 @@ class MailAdapter:
                 raise files.exists_refusal(path)
             seen.add(path.name.casefold())
             plan.append((t, path, payload))
+        written: list[str] = []
         for _, path, payload in plan:
-            path.write_bytes(payload)
+            try:
+                # O_EXCL fails on any existing entry, a symlink included, so a file made
+                # after the check is never written through.
+                with open(path, "xb") as f:
+                    f.write(payload)
+            except FileExistsError as e:
+                raise WriteRefused(
+                    f"{files.exists_refusal(path)} Already written by this call: "
+                    f"{', '.join(written) or 'none'}."
+                ) from e
+            except OSError as e:
+                raise WriteRefused(
+                    f"cannot write {path.name} in {path.parent} ({e.strerror}). "
+                    f"Already written by this call: {', '.join(written) or 'none'}. "
+                    "Move those files or choose another dest_dir before a retry."
+                ) from e
+            written.append(str(path))
         planned = {t.id: (path, payload) for t, path, payload in plan}
         out = []
         for t in located:

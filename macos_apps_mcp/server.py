@@ -627,7 +627,9 @@ def export_mail(ids: str, dest_dir: str) -> dict:
     launches Mail and needs no Automation. `ids` are RFC822 message-ids from a mail
     read, comma-separated, max 25. `dest_dir` must be inside the allowed root
     (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
-    a path outside it is REFUSED. Filenames are derived, never overwritten.
+    a path outside it is REFUSED. Filenames are derived, never overwritten. A name that
+    already exists refuses the whole batch before any file is written; a refusal after
+    a write names the files already written.
 
     .eml is the only format — it is lossless and opens in Mail and everything else,
     and `mail_body` already covers "give me the text".

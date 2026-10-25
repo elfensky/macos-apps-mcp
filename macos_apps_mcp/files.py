@@ -35,8 +35,10 @@ there is a TOCTOU window between the check and the write: a file or a symlink an
 writer puts there is overwritten or written through. A writer that controls its own
 output closes it: it writes into ``staging(dest)``, a directory only that call owns, and
 ``publish`` links the result in, which fails on any existing entry. ``export_photo``
-does this. Mail's writers still accept the window: the Apple Event opens the file
-itself, the window is milliseconds and the root is the user's own Downloads directory.
+does this. ``export_mail`` closes it with an exclusive create (``open(path, "xb")``).
+The Apple-Event writers (attachment save) still accept the window: the Apple Event opens
+the file itself, the window is milliseconds and the root is the user's own Downloads
+directory.
 """
 
 from __future__ import annotations
