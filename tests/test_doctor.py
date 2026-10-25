@@ -20,6 +20,9 @@ from macos_apps_mcp.errors import (
 )
 from tests._fakes import fake_automation
 
+# Bound at import: the conftest seam lock replaces runtime.automation_permission.
+_REAL_AUTOMATION_PERMISSION = runtime.automation_permission
+
 
 @pytest.fixture(autouse=True)
 def _no_live_process_probe(monkeypatch):
@@ -145,6 +148,29 @@ def test_automation_live_check_skips_off_adapters(monkeypatch):
     surfaces = doc._automation_surfaces(request=False)
     assert calls == []
     assert all(s["status"] == "adapter_off" for s in surfaces)
+
+
+@pytest.mark.parametrize("exc", [OSError("dlopen"), AttributeError("no symbol")])
+def test_automation_live_check_survives_a_broken_seam(monkeypatch, tmp_path, exc):
+    def broken(bundle_id):
+        raise exc
+
+    monkeypatch.setattr(runtime, "automation_permission", broken)
+    surfaces = doc._automation_surfaces(request=False)
+    assert [s["surface"] for s in surfaces] == _APPS
+    for s in surfaces:
+        assert s["ok"] is None and s["status"] == "probe_error"
+        assert type(exc).__name__ in s["remediation"]
+    _all_granted(monkeypatch, tmp_path)
+    assert doc.diagnose(request=False)["surfaces"]
+
+
+def test_automation_bundle_ids_match_the_grant_map():
+    from macos_apps_mcp.dashboard.grants import ADAPTER_GRANTS, EVENTS
+
+    assert set(doc._AUTOMATION_BUNDLES) == {a.lower() for a in doc._AUTOMATION_APPS}
+    for name, bundle in doc._AUTOMATION_BUNDLES.items():
+        assert [t for svc, t in ADAPTER_GRANTS[name] if svc == EVENTS] == [bundle]
 
 
 def test_automation_surfaces_carry_process_line(monkeypatch):
@@ -445,11 +471,16 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     assert report["summary"].startswith("2 of 11 surfaces need attention")
 
 
-def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
+def test_default_summary_reads_live_automation(monkeypatch, tmp_path):
     _all_granted(monkeypatch, tmp_path)
+    fake_automation(monkeypatch, 0)
     report = doc.diagnose(request=False)
     assert report["probed_automation"] is False
-    assert "Automation unprobed" in report["summary"]
+    assert report["summary"] == "all 11 surfaces OK"
+    fake_automation(monkeypatch, -600)
+    report = doc.diagnose(request=False)
+    assert report["summary"].startswith("no denied surfaces; 6 unverified:")
+    assert "Automation unprobed" not in report["summary"]
 
 
 def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
@@ -493,8 +524,11 @@ def _budget_cases():
     ]
 
 
+@pytest.mark.parametrize(
+    "probes", [pytest.param(True, id="probed"), pytest.param(False, id="live")]
+)
 @pytest.mark.parametrize(("role", "state"), _budget_cases())
-def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, probes):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The pinned worst
     # case measures 7000 and a real `ps` executable name 7057, so 7500 keeps 500 chars
@@ -558,7 +592,9 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
     )
     monkeypatch.setattr(doc.deploy, "_TCC_DB", db)
     monkeypatch.setattr(doc.deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
-    report = doc.diagnose(request=True)
+    # O14: the live path (request=False) with every app denied, the longest live text.
+    fake_automation(monkeypatch, -1743)
+    report = doc.diagnose(request=probes)
     assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
     assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once
     sizes = {k: len(json.dumps(v, ensure_ascii=False)) for k, v in report.items()}
@@ -594,6 +630,13 @@ def test_doctor_integration_real():
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:
         assert {"surface", "kind", "ok", "status"} <= set(s)
+
+
+@pytest.mark.integration
+def test_automation_permission_real_is_non_prompting():
+    # Real CoreServices call, never prompts; run manually, never in CI.
+    assert isinstance(_REAL_AUTOMATION_PERMISSION("com.apple.finder"), int)
+    assert _REAL_AUTOMATION_PERMISSION("com.example.nope") == -600
 
 
 # --- #143: the build stamp — version alone cannot see a same-version rebuild ---------
