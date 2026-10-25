@@ -49,6 +49,21 @@
       "status": "complete"
     },
     {
+      "number": "05.2",
+      "name": "Bug Fixes — every open bug before Phase 6 (INSERTED)",
+      "status": "in_progress"
+    },
+    {
+      "number": "05.3",
+      "name": "Feedback — problem reports (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.4",
+      "name": "Migration — mcp 2 and fastmcp 4 (INSERTED)",
+      "status": "pending"
+    },
+    {
       "number": "6",
       "name": "Distribution",
       "status": "pending"
@@ -56,8 +71,8 @@
   ],
   "next": {
     "command": "/gsd-progress --next",
-    "label": "Advance to the next step (plan phase 05.2)",
-    "reason": "Phase 10 of 13 — needs a plan"
+    "label": "Advance to the next step",
+    "reason": "Phase 10 of 13 · executing"
   },
-  "updated_at": "2026-10-25T11:12:13.772Z"
+  "updated_at": "2026-10-25T12:50:17.168Z"
 }

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
-status: planning
-stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-25T11:13:08.808Z"
+status: executing
+stopped_at: "Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)"
+last_updated: "2026-10-25T12:50:17.149Z"
 last_activity: 2026-10-25
-last_activity_desc: "Phase 05.4 inserted for #470 (mcp 2 and fastmcp 4 migration, after Phase 05.3, before Phase 6)"
-state_head: 65dd2cf88045d0836bc2b0755f90f6690a1a0c57
+last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
+state_head: 12ed596ff85d9297297898bd1d5399ea2d9be4cd
 progress:
   total_phases: 13
   completed_phases: 9
-  total_plans: 72
+  total_plans: 79
   completed_plans: 72
   percent: 90
 ---
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 
 ## Current Position
 
-Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
+Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-25 - Phase 05.4 inserted after Phase 05.3 for #470 (migration to mcp 2 and fastmcp 4, before Phase 6)
+Status: Ready to execute
+Last activity: 2026-10-25 - Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); records PR docs/phase-05.2-records
 
 Progress: [█████████░] 90%
 
@@ -198,5 +198,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-24T23:03:30Z
-Stopped at: Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan
+Stopped at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
 Resume file: None
