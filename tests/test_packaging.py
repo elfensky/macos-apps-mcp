@@ -22,6 +22,22 @@ def test_bundle_version_tracks_pyproject():
     assert info["CFBundleShortVersionString"] == project["project"]["version"]
 
 
+def test_registry_metadata_tracks_pyproject():
+    """The MCP Registry lists the version server.json names and finds the owner by the
+    `mcp-name:` line in the PyPI description (README.md). A bump that misses server.json
+    lists a stale version, and a renamed server fails the ownership check at publish."""
+    server = json.loads((ROOT / "server.json").read_text())
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    assert server["version"] == project["version"]
+    packages = [
+        (p["registryType"], p["identifier"], p["version"]) for p in server["packages"]
+    ]
+    assert packages == [("pypi", project["name"], project["version"])]
+    readme = (ROOT / "README.md").read_text()
+    markers = re.findall(r"^<!-- mcp-name: (\S+) -->$", readme, re.MULTILINE)
+    assert markers == [server["name"]]
+
+
 def test_only_intel_macs_cap_cryptography():
     """cryptography 49+ ships no Intel macOS wheel, so a plain uvx on an Intel Mac built
     it from source and needed Rust (#322). The cap must stay Intel-only: Apple silicon

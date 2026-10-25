@@ -24,12 +24,13 @@ commits whose messages are written to stand alone.
 
 ## Cutting a release
 
-**1. Bump the version in BOTH files.** They must match; `tests/test_packaging.py` enforces it, and
+**1. Bump the version in all three files.** They must match; `tests/test_packaging.py` enforces it, and
 a mismatch ships an `.app` that lies about itself (this happened — 0.8.0 shipped for a whole cycle
-reporting the wrong version).
+reporting the wrong version). A missed `server.json` lists a stale version in the MCP Registry.
 
 - `pyproject.toml` → `version = "X.Y.Z"`
 - `packaging/Info.plist` → `CFBundleShortVersionString`
+- `server.json` → `version` and `packages[0].version`
 
 Make the bump in a worktree (`.worktrees/release-X.Y.Z`, branch `chore/release-X.Y.Z`) and land it
 on `develop` by PR like any other change:
@@ -82,6 +83,18 @@ The per-version URL is the proof; the project page's "latest" lags behind the CD
 is easy to skip — 0.9.0, 0.11.0 and 0.12.0 reached PyPI only on 2026-10-01. Never upload a tag
 before `v0.6.0`: those build `apple-mcp` (a PyPI name owned by someone else) or `mac-mcp`.
 
+The same run then publishes `server.json` to the official MCP Registry (mcp-publisher v1.8.1, GitHub
+OIDC). The registry checks that the PyPI version exists and finds the `mcp-name` line in the README.
+Check the listing:
+
+```sh
+curl -s "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.elfensky/macos-apps-mcp" \
+  | grep -q '"version":"X.Y.Z"' && echo "X.Y.Z is on the MCP Registry"
+```
+
+If the registry step fails after the PyPI upload, publish by hand from the tag checkout with
+`mcp-publisher login github`, then `mcp-publisher publish`.
+
 **5. Publish the GitHub release** with `gh release create vX.Y.Z`, and close the milestone if the
 release completes it. A release may ship without closing its milestone — see below.
 
@@ -111,12 +124,13 @@ not close a milestone just because a same-numbered release went out.
 
 ## Checklist
 
-- [ ] Version bumped in `pyproject.toml` **and** `packaging/Info.plist`
+- [ ] Version bumped in `pyproject.toml`, `packaging/Info.plist` **and** `server.json` (both fields)
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
 - [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed
 - [ ] PyPI upload **approved by the operator**, dispatched on the tag, and
       `https://pypi.org/pypi/macos-apps-mcp/X.Y.Z/json` returns 200
+- [ ] MCP Registry lists X.Y.Z (the `/v0.1` search check in step 4)
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
 - [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed the import and stream smokes (#205, #286)
