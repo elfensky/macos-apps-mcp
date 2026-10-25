@@ -66,6 +66,7 @@ the same statement.
 from __future__ import annotations
 
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime
@@ -2491,24 +2492,30 @@ class MailAdapter:
         # Plan every write first: one refusal (an existing file, or two ids that derive
         # one name) leaves nothing written (#399).
         plan = []
-        seen: set[str] = set()
+        seen: dict[str, str] = {}
         for t in located:
             payload = payloads.get(t.id)
             if payload is None:
                 continue
             path = files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
-            # The default APFS volume is case-insensitive: A.eml and a.eml are one file.
-            if path.name.casefold() in seen:
-                raise files.exists_refusal(path)
-            seen.add(path.name.casefold())
+            # APFS is case-insensitive and canonically caseless: fold, then decompose
+            key = unicodedata.normalize(
+                "NFD", unicodedata.normalize("NFD", path.name).casefold()
+            )
+            if key in seen:
+                raise WriteRefused(
+                    f"{seen[key]!r} and {t.id!r} both export to {path.name}, which is "
+                    "one file; nothing was written. Export them in separate calls "
+                    "into different dest_dirs. Do not retry the same batch."
+                )
+            seen[key] = t.id
             plan.append((t, path, payload))
         written: list[str] = []
         for _, path, payload in plan:
             try:
                 # O_EXCL fails on any existing entry, a symlink included, so a file made
                 # after the check is never written through.
-                with open(path, "xb") as f:
-                    f.write(payload)
+                f = open(path, "xb")
             except FileExistsError as e:
                 raise WriteRefused(
                     f"{files.exists_refusal(path)} Already written by this call: "
@@ -2518,6 +2525,18 @@ class MailAdapter:
                 raise WriteRefused(
                     f"cannot write {path.name} in {path.parent} ({e.strerror}). "
                     f"Already written by this call: {', '.join(written) or 'none'}. "
+                    "Move those files or choose another dest_dir before a retry."
+                ) from e
+            try:
+                with f:
+                    f.write(payload)
+            except OSError as e:
+                # our O_EXCL create made it, so no partial file may stay
+                path.unlink(missing_ok=True)
+                raise WriteRefused(
+                    f"cannot write {path.name} in {path.parent} ({e.strerror}); the "
+                    f"partial file was removed. Already written by this call: "
+                    f"{', '.join(written) or 'none'}. "
                     "Move those files or choose another dest_dir before a retry."
                 ) from e
             written.append(str(path))
