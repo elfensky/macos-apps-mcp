@@ -17,6 +17,9 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **Dependencies with known vulnerabilities are updated.** fastmcp 3.4.11
+  (GHSA-7xgj-8392-5q4r) and opentelemetry-api 1.45.1 (GHSA-xcq7-p3pf-p88h), plus 29 other
+  locked updates inside the existing limits.
 - **Mail mailboxes show as `Account › folder` on the dashboard** (#427) — the write list,
   the write detail, the recovery view and the Backups page name a Mail mailbox by its
   account name and decoded folder (`Personal › INBOX`) instead of the raw `imap://` URL.
