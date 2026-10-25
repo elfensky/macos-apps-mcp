@@ -34,7 +34,7 @@ Writes are tiered and audited; deletes, moves and sends preview first. macOS onl
 - **Dashboard.** Under the signed `.app` daemon, a local page (127.0.0.1 only) shows every write, what it changed,
   and the backup behind each Mail batch. Invented data below:
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch-dark.png"><img alt="The dashboard: three newsletters moved to Archive, each with a full backup, and the prompt that undoes the batch" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch.png" width="800"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch-dark.png"><img alt="The dashboard: three newsletters moved to Archive, each one backed up, and the prompt that undoes the batch" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch.png" width="800"></picture>
 
 ## First 5 minutes
 
@@ -229,7 +229,7 @@ same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMO
 
 Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
 usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
-[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard).
+[docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard). Both screenshots use invented data.
 
 <img alt="One calendar edit in the dashboard: the old time struck through, the new time beside it, and the exact tool call the model made" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-diff.png" width="800">
 
