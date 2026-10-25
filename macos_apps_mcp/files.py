@@ -30,7 +30,8 @@ So the rules live here, once, and every writer routes through them:
   no module default, so no writer can forget it), and a file that lands empty is
   removed and reported as a failure rather than left looking like a successful save.
 
-``target_path`` checks existence (any entry, a dangling symlink included) and then hands back a path someone else writes to, so
+``target_path`` checks existence (any entry, a dangling symlink included) and then
+hands back a path someone else writes to, so
 there is a TOCTOU window between the check and the write: a file or a symlink another
 writer puts there is overwritten or written through. A writer that controls its own
 output closes it: it writes into ``staging(dest)``, a directory only that call owns, and

@@ -2515,7 +2515,7 @@ class MailAdapter:
             try:
                 # O_EXCL fails on any existing entry, a symlink included, so a file made
                 # after the check is never written through.
-                f = open(path, "xb")
+                f = open(path, "xb")  # noqa: SIM115 - the write is a separate try
             except FileExistsError as e:
                 raise WriteRefused(
                     f"{files.exists_refusal(path)} Already written by this call: "
