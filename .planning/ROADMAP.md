@@ -419,10 +419,23 @@ Plans:
   3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
 
-**Plans:** 0 plans
+**Plans:** 0/7 plans complete
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.2 to break down)
+**Wave 1**
+- [ ] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05.2-02-PLAN.md — `export_mail` checks every target path before the first write, refuses the batch on any collision with nothing written, creates files exclusively and names the files already written on a late failure (FIX-15, closes #399)
+- [ ] 05.2-03-PLAN.md — `runtime.automation_permission` wraps `AEDeterminePermissionToAutomateTarget` through `run_native`; `doctor(request=False)` reports each Automation adapter as granted, denied, not asked, not running or probe error; the seam is locked in conftest with a shared fake (FIX-14 part 1, #455)
+- [ ] 05.2-05-PLAN.md — owner sitting: the draft-only reply-quote probe decides the FIX-16 route and the facts entry; the FIX-14 revoke pre-check settles the `-1743`/`-1744` wording (FIX-16, FIX-14; #348, #455)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 05.2-04-PLAN.md — the Health page shows the live Automation grants first, a grey "cannot be told until the app runs" row with no Settings button, the docs in `DAEMON.md`, and the O12 follow-up issue (FIX-14 part 2, #455)
+- [ ] 05.2-06-PLAN.md — reply drafts stop overwriting Mail's native quote on the proven route, or the hand-built quote takes Mail's attribution line with the whole original and honest docstrings (FIX-16, #348)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
 
 ### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
 
@@ -463,7 +476,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 6
+Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.3 → 05.4 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -476,4 +489,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 0/7 | Planned | - |
+| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
