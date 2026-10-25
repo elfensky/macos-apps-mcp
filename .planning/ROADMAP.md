@@ -40,7 +40,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
-- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The three open bugs (#455, #399, #348) are fixed before Phase 6
+- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
+- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -407,13 +408,23 @@ Plans:
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
-**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: TBD (planned from #455, #399, #348)
+**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: TBD (planned from #455, #399, #348, #464)
 **Depends on:** Phase 05.1
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.2 to break down)
+
+### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
+
+**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
+**Requirements**: TBD (planned from #465)
+**Depends on:** Phase 05.2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
