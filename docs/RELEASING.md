@@ -96,7 +96,8 @@ If the registry step fails after the PyPI upload, publish by hand from the tag c
 `mcp-publisher login github`, then `mcp-publisher publish`.
 
 **5. Publish the GitHub release** with `gh release create vX.Y.Z`, and close the milestone if the
-release completes it. A release may ship without closing its milestone — see below.
+release completes it. A release may ship without closing its milestone — see below. Then check the
+listings in [PROMOTION.md](PROMOTION.md): Glama's Auto-Release rebuilds from the GitHub release.
 
 ## Deploying to the daemon
 

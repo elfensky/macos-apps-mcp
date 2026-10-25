@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T20:51:38.083Z"
+last_updated: "2026-10-25T22:15:57.370Z"
 last_activity: 2026-10-25
 last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: 5f899213edfd2bc9fd63f0ca590e67967b9cac7b
+state_head: 3bf281b143e95295c39d107444c5c811ca087317
 progress:
   total_phases: 13
   completed_phases: 9
@@ -177,6 +177,7 @@ Recent decisions affecting current work:
 | 35 | README: Claude Desktop needs the full uvx path (it does not read the shell PATH) — found while writing the tester brief | 2026-10-25 | 9c5d4a6 | — |
 | 36 | Logo (app icon exported at 512 px with ictool) in the README, the plugin icon and server.json icons, ahead of the 0.15.1 release | 2026-10-25 | e8b1ff5 | — |
 | 37 | Release bump 0.15.1 (pyproject, Info.plist, server.json, uv.lock root line; CHANGELOG section Registry, plugin and dashboard fixes) | 2026-10-25 | 5f89921 | — |
+| 38 | docs/PROMOTION.md (listings, launch plan, X, Glama score, screenshot recipe), docs/tester-brief.md, scripts/dashboard_demo.py (dashboard on invented data); RELEASING step 5 points to the listings | 2026-10-25 | 3bf281b | — |
 
 ### Roadmap Evolution
 
