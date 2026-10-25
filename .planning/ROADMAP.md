@@ -420,11 +420,11 @@ Plans:
   3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
 
-**Plans:** 0/7 plans complete
+**Plans:** 1/7 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
+- [x] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 05.2-02-PLAN.md — `export_mail` checks every target path before the first write, refuses the batch on any collision with nothing written, creates files exclusively and names the files already written on a late failure (FIX-15, closes #399)
@@ -500,7 +500,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 0/7 | Planned | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 1/7 | In Progress | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
