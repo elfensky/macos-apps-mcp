@@ -1,6 +1,6 @@
 # Dashboard at a domain: the loader page — design
 
-**Date:** 2026-10-25 · **Tracker:** #483 · **Status:** approved design, not yet planned ·
+**Date:** 2026-10-25 · **Tracker:** #483 · **Status:** approved design, Phase 05.5, not yet planned ·
 **Spikes:** 009–011 (`.planning/spikes/`)
 
 ## Why
@@ -81,8 +81,9 @@ Two static files under an immutable versioned path: `/v1/index.html` and `/v1/lo
   `DOMParser`, and show its main part. Scripts in fetched HTML never run.
 - **Links and forms.** Intercept the daemon's own links and form posts, and send them by
   `fetch` with the key. The form token in the page stays in the body.
-- **Fallback.** When a loopback `fetch` fails before the network (Safari), show a link that
-  navigates to `http://127.0.0.1:47632`. The link opens today's local page.
+- **Safari.** When a loopback `fetch` fails before the network (Safari), say that Safari is
+  not supported and show a link that navigates to `http://127.0.0.1:47632`. The link opens
+  today's local page.
 - **CSP.** `default-src 'none'; script-src 'self'; connect-src http://127.0.0.1:47632;
   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, plus the style and image
   sources the dashboard needs. No third-party script.
@@ -142,7 +143,7 @@ says why. The `127.0.0.1` page keeps working.
 ## Not chosen
 
 - **A redirect from the domain to `127.0.0.1:47632`.** No code, but the address bar ends on
-  `127.0.0.1` and the cookie leak stays. It survives as the Safari fallback link.
+  `127.0.0.1` and the cookie leak stays. It survives as the Safari link.
 - **Per-install certificates (the `*.plex.direct` pattern).** It would make Safari work, but it
   needs a DNS zone and a service that issues and renews a certificate for every install.
 - **A relay, or cloudflared to a unix socket.** Dashboard data would leave the Mac.
@@ -151,13 +152,14 @@ says why. The `127.0.0.1` page keeps working.
 - **Rebuilding the dashboard as a JavaScript app.** The daemon already renders every page; the
   loader reuses them.
 
-## Open decisions
+## Decisions
 
-- **Safari.** The fallback link above, or per-install certificates later.
-- **Roadmap slot.** After Phase 05.2: open bugs go first.
-- **Hash tripwire.** In the first version or later.
-- **Styles.** Serve `/static/` without the key so the loader can link the daemon's stylesheet,
-  or inject the fetched CSS.
+- **Safari is not supported by the loader.** It gets the note and the link to the local page
+  (owner, 2026-10-25, after spike 010).
+- **Roadmap: Phase 05.5,** after Phase 05.4 and before Phase 6 (owner, 2026-10-25).
+- **The hash tripwire waits.** It is not in the first version (owner, 2026-10-25).
+- **Open for planning: styles.** Serve `/static/` without the key so the loader can link the
+  daemon's stylesheet, or inject the fetched CSS.
 
 ## Verification for the build
 
