@@ -36,9 +36,9 @@ on run argv
 	with timeout of 180 seconds
 		tell application "Mail"
 			set dm to drafts mailbox
-			set before to {}
+			set baseIds to {}
 			repeat with x in (messages of dm)
-				set before to before & {(id of x)}
+				set baseIds to baseIds & {(id of x)}
 			end repeat
 			set m to item 1 of (messages of inbox whose message id is mid)
 			set r to reply m opening window withWindow
@@ -68,7 +68,7 @@ on run argv
 			delay 25
 			set found to missing value
 			repeat with x in (messages of dm)
-				if (id of x) is not in before then
+				if (id of x) is not in baseIds then
 					set found to contents of x
 					exit repeat
 				end if
