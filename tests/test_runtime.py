@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import threading
+import types
 
 import pytest
 
@@ -31,6 +33,10 @@ from macos_apps_mcp.runtime import (
     body_file,
     run_osascript,
 )
+
+# The seam's own self-tests bind the real function at import time: the conftest lock
+# replaces ``runtime.automation_permission`` in every unit test.
+_REAL_AUTOMATION_PERMISSION = runtime.automation_permission
 
 
 def test_run_osascript_returns_output():
@@ -397,6 +403,79 @@ def test_body_file_deletes_on_exception():
     assert not os.path.exists(path)  # deleted even when the script raises
 
 
+# --- FIX-14 (#455): the live, non-prompting Automation check ------------------------
+
+
+def _fake_ae_lib(create_rc=0, determine_rc=-1743, threads=None):
+    """A fake CoreServices: three recording callables (no real AE call)."""
+    calls = []
+
+    def _record(name, rc):
+        def _fn(*args):
+            calls.append((name, args))
+            if threads is not None:
+                threads.append(threading.current_thread().name)
+            return rc
+
+        return _fn
+
+    lib = types.SimpleNamespace(
+        AECreateDesc=_record("create", create_rc),
+        AEDeterminePermissionToAutomateTarget=_record("determine", determine_rc),
+        AEDisposeDesc=_record("dispose", 0),
+    )
+    return lib, calls
+
+
+def test_automation_permission_binds_the_ae_calls(monkeypatch):
+    lib, calls = _fake_ae_lib(determine_rc=-1743)
+    monkeypatch.setattr(runtime, "_ae_lib", lambda: lib)
+    assert _REAL_AUTOMATION_PERMISSION("com.apple.Notes") == -1743
+    assert [c[0] for c in calls] == ["create", "determine", "dispose"]
+    create = calls[0][1]
+    assert create[0] == 0x62756E64 and create[1] == b"com.apple.Notes"
+    assert create[2] == 15
+    determine = calls[1][1]
+    # wildcard class and id, and askUserIfNeeded is the constant 0: never prompts.
+    assert determine[1:] == (0x2A2A2A2A, 0x2A2A2A2A, 0)
+
+
+def test_automation_permission_returns_a_create_error_without_a_determine(
+    monkeypatch,
+):
+    lib, calls = _fake_ae_lib(create_rc=-50)
+    monkeypatch.setattr(runtime, "_ae_lib", lambda: lib)
+    assert _REAL_AUTOMATION_PERMISSION("com.apple.Notes") == -50
+    assert [c[0] for c in calls] == ["create"]
+
+
+def test_automation_permission_runs_on_the_worker_and_waits_behind_it(monkeypatch):
+    threads: list[str] = []
+    lib, _ = _fake_ae_lib(determine_rc=0, threads=threads)
+    monkeypatch.setattr(runtime, "_ae_lib", lambda: lib)
+    release = threading.Event()
+    started = threading.Event()
+
+    def _hold():
+        started.set()
+        release.wait(10)
+
+    held = runtime._executor.submit(_hold)
+    assert started.wait(5)
+    result: list[int] = []
+    t = threading.Thread(
+        target=lambda: result.append(_REAL_AUTOMATION_PERMISSION("com.apple.mail"))
+    )
+    t.start()
+    t.join(0.2)
+    assert t.is_alive() and not result  # queued behind the held worker
+    release.set()
+    held.result(5)
+    t.join(5)
+    assert result == [0]
+    assert threads and all(n.startswith("mac-native") for n in threads)
+
+
 # --- GATE-02: runtime's public surface is exactly the native door -------------------
 
 
@@ -437,6 +516,7 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
         "verify_sqlite_schema",
         "read_via_sqlite",
         "photos_db",
+        "automation_permission",
         "mac_region",
         "log",
     }

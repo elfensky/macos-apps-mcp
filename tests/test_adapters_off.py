@@ -17,6 +17,7 @@ import pytest
 
 import macos_apps_mcp.server  # noqa: F401  (populates registry.TOOLS)
 from macos_apps_mcp import deploy, doctor, eventkit, registry, runtime, tiers
+from tests._fakes import fake_automation
 from tests.test_doctor_deploy import _gate_off_only, _mock_grants
 
 
@@ -160,6 +161,7 @@ def _quiet_diagnose(monkeypatch):
         "tracked_run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", ""),
     )
+    fake_automation(monkeypatch)
     _mock_grants(monkeypatch, None)
     monkeypatch.setattr(
         deploy, "agent_status", lambda: (_ for _ in ()).throw(Exception("no bundle"))

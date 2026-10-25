@@ -27,7 +27,9 @@ import pytest
 
 from macos_apps_mcp import runtime
 
-_SEAM = frozenset({"run_osascript", "body_file", "tracked_run", "photos_db"})
+_SEAM = frozenset(
+    {"run_osascript", "body_file", "tracked_run", "photos_db", "automation_permission"}
+)
 _SPAWNERS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
 _ADAPTERS_DIR = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters"
 _NATIVE_MODULES = sorted(
@@ -94,7 +96,16 @@ def test_the_tripwire_sees_the_native_modules():
 
 
 @pytest.mark.parametrize(
-    "seam", sorted(["run_osascript", "body_file", "tracked_run", "photos_db"])
+    "seam",
+    sorted(
+        [
+            "run_osascript",
+            "body_file",
+            "tracked_run",
+            "photos_db",
+            "automation_permission",
+        ]
+    ),
 )
 def test_unit_tests_cannot_reach_a_seam_unfaked(seam):
     # a unit test that forgets to fake a seam must fail closed, not spawn a real
