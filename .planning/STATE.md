@@ -5,12 +5,12 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: planning
 stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-25T01:42:40.069Z"
+last_updated: "2026-10-25T02:25:38.450Z"
 last_activity: 2026-10-25
-last_activity_desc: Phase 05.1 complete; Phase 05.2 inserted for the open bugs #455, #399, #348
-state_head: 000308f24fb77afea2c58d096855b00d43584763
+last_activity_desc: "Phase 05.3 inserted for #465 (feedback reports, before Phase 6); #464 added to Phase 05.2"
+state_head: ca819306607c2364b1f3c2cb307186645fafa949
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 9
   total_plans: 72
   completed_plans: 72
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 - Completed quick task 261025-3kk: Dependabot alerts #21-#23 fixed, lock refreshed inside the limits, setup-uv v10.3.2 (Phase 05.2 inserted for the open bugs #455, #399, #348)
+Last activity: 2026-10-25 - Phase 05.3 inserted after Phase 05.2 for #465 (problem reports and improvement suggestions, design in PR #463); #464 added to Phase 05.2
 
 Progress: [█████████░] 90%
 
@@ -181,6 +181,7 @@ Recent decisions affecting current work:
 - Phase 05.1 inserted after Phase 5: Bug fixes — dashboard follow-ups (#427, #428, #430) (URGENT)
 - Phase 05.2 inserted after Phase 5: Bug fixes — Automation grants unreadable on macOS 27 (#455) (URGENT)
 - Phase 05.2 edited: edited fields: title, goal, requirements — #399 and #348 added beside #455, so every open bug is fixed before Phase 6 (owner, 2026-10-25)
+- Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
 
 ## Deferred Items
 
