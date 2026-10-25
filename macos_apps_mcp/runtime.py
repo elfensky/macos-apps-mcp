@@ -16,6 +16,7 @@ below — this module owns the worker, not the store.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import logging
 import os
 import re
@@ -583,6 +584,64 @@ def photos_db():
             ) from e
 
     return work() if on_worker() else run_native(work)
+
+
+_TYPE_BUNDLE_ID = 0x62756E64  # 'bund' = typeApplicationBundleID
+_TYPE_WILD = 0x2A2A2A2A  # '****' = typeWildCard
+
+
+class _AEDesc(ctypes.Structure):
+    # struct AEDesc { DescType descriptorType; AEDataStorage dataHandle; }
+    _fields_ = [("descriptorType", ctypes.c_uint32), ("dataHandle", ctypes.c_void_p)]
+
+
+def _ae_lib():
+    """CoreServices with the three AppleEvent calls bound. Lazy, so nothing loads at
+    import time (the server must import off macOS), and a test replaces it."""
+    lib = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+    lib.AECreateDesc.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_long,
+        ctypes.POINTER(_AEDesc),
+    ]
+    lib.AECreateDesc.restype = ctypes.c_int16  # OSErr
+    lib.AEDisposeDesc.argtypes = [ctypes.POINTER(_AEDesc)]
+    lib.AEDisposeDesc.restype = ctypes.c_int16  # OSErr
+    determine = lib.AEDeterminePermissionToAutomateTarget
+    determine.argtypes = [
+        ctypes.POINTER(_AEDesc),
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_ubyte,  # Boolean askUserIfNeeded
+    ]
+    determine.restype = ctypes.c_int32  # OSStatus
+    return lib
+
+
+def automation_permission(bundle_id: str) -> int:
+    """The OSStatus of THIS process's Automation grant to ``bundle_id``: ``0`` granted,
+    ``-1743`` denied, ``-1744`` not asked yet, ``-600`` target not running or unknown.
+
+    Never prompts (askUserIfNeeded is the constant 0) and sends no Apple Event. Safe on
+    or off the worker; it dispatches itself, so it waits behind a job that holds the
+    one worker. A stalled call would hold that worker: a child process via
+    ``tracked_run`` is the upgrade if a device ever shows one.
+    """
+
+    def _probe() -> int:
+        lib, raw, desc = _ae_lib(), bundle_id.encode("utf-8"), _AEDesc()
+        err = lib.AECreateDesc(_TYPE_BUNDLE_ID, raw, len(raw), ctypes.byref(desc))
+        if err != 0:
+            return err
+        try:
+            return lib.AEDeterminePermissionToAutomateTarget(
+                ctypes.byref(desc), _TYPE_WILD, _TYPE_WILD, 0
+            )
+        finally:
+            lib.AEDisposeDesc(ctypes.byref(desc))
+
+    return _probe() if on_worker() else run_native(_probe)
 
 
 def mac_region() -> str | None:
