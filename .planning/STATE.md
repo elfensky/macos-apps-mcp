@@ -5,12 +5,12 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: planning
 stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-25T03:44:13.176Z"
+last_updated: "2026-10-25T11:13:08.808Z"
 last_activity: 2026-10-25
-last_activity_desc: "Phase 05.3 inserted for #465 (feedback reports, before Phase 6); #464 added to Phase 05.2"
-state_head: 21434d310a1d64b01b11237ae116066c65243164
+last_activity_desc: "Phase 05.4 inserted for #470 (mcp 2 and fastmcp 4 migration, after Phase 05.3, before Phase 6)"
+state_head: 65dd2cf88045d0836bc2b0755f90f6690a1a0c57
 progress:
-  total_phases: 12
+  total_phases: 13
   completed_phases: 9
   total_plans: 72
   completed_plans: 72
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 - Completed quick task 261025-5sy: README first screen for new visitors and CREDITS provenance fix (multi-AI review after each step); #471 filed (bundled .app lacks PyObjC and bpylist2 licence text)
+Last activity: 2026-10-25 - Phase 05.4 inserted after Phase 05.3 for #470 (migration to mcp 2 and fastmcp 4, before Phase 6)
 
 Progress: [█████████░] 90%
 
@@ -185,6 +185,7 @@ Recent decisions affecting current work:
 - Phase 05.2 inserted after Phase 5: Bug fixes — Automation grants unreadable on macOS 27 (#455) (URGENT)
 - Phase 05.2 edited: edited fields: title, goal, requirements — #399 and #348 added beside #455, so every open bug is fixed before Phase 6 (owner, 2026-10-25)
 - Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
+- Phase 05.4 inserted after Phase 05.3: Migration — mcp 2 and fastmcp 4 (#470); after Phase 05.3 and before Phase 6 (owner, 2026-10-25)
 
 ## Deferred Items
 

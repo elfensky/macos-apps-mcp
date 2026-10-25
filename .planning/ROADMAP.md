@@ -42,6 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
+- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -425,6 +426,16 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.3 to break down)
+
+### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
+
+**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed after Phase 05.3 and before Phase 6 (owner, 2026-10-25).
+**Requirements**: TBD (planned from #470)
+**Depends on:** Phase 05.3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
