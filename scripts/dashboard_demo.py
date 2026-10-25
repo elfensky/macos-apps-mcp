@@ -5,12 +5,12 @@
 Seeds <empty-dir> as XDG_STATE_HOME with made-up writes (example.com addresses, a
 calendar edit, a Mail batch with .eml backups, an undo preview, adapter toggles), then
 serves the dashboard on http://127.0.0.1:47699 with a throwaway page key and prints the
-URL that sets it. Nothing reads or writes the real audit log or backups.
+URL that sets it. The audit log, the backups, and the adapters_off and allow_send files
+all live under <empty-dir>: deploy pins the last two to the real home folder, so
+prepare() points them into the demo before the server loads. The adapter switches are
+safe to click.
 
-Two traps:
-* Do not click the Adapters switches: the adapters_off file sits at a fixed path in the
-  real home folder (deploy._ADAPTERS_OFF_FILE), not under XDG_STATE_HOME.
-* Keep Health and Backups out of screenshots: they show this Mac's paths and pids.
+Keep Health and Backups out of screenshots: they show this Mac's paths and pids.
 """
 
 from __future__ import annotations
@@ -209,23 +209,34 @@ def seed(root: Path) -> int:
     return len(records)
 
 
-def main() -> None:
-    if len(sys.argv) != 2:
-        sys.exit(__doc__)
-    root = Path(sys.argv[1]).expanduser().resolve()
+def prepare(root: Path):
+    """Seed root, keep every state file inside it, and return the dashboard app."""
     real = (Path.home() / ".local" / "state").resolve()
     if root == real or real in root.parents or (root.exists() and any(root.iterdir())):
         sys.exit(f"refusing {root}: give an EMPTY folder outside {real}")
     os.environ["XDG_STATE_HOME"] = str(root)  # before any macos_apps_mcp import
     assert seed(root) == 12
 
-    import uvicorn
+    from macos_apps_mcp import deploy
+
+    # deploy pins these to the real home folder; the switches would write there
+    deploy._ADAPTERS_OFF_FILE = root / "macos-apps-mcp" / "adapters_off"
+    deploy._ALLOW_SEND_FILE = root / "macos-apps-mcp" / "allow_send"
 
     from macos_apps_mcp import dashboard
     from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 
+    return dashboard.build_app(port=PORT, token="demo", key=KEY)
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    app = prepare(Path(sys.argv[1]).expanduser().resolve())
+
+    import uvicorn
+
     print(f"open http://127.0.0.1:{PORT}/key?k={KEY}", flush=True)
-    app = dashboard.build_app(port=PORT, token="demo", key=KEY)
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 

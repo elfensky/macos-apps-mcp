@@ -13,9 +13,9 @@ Mail, Calendar, Reminders, Notes, Messages and a few more. Before I announce it 
 people to try it and tell me where it breaks or confuses.
 
 Two things to know first:
-- The server runs on your Mac and has no tracking. But what Claude reads through it (event titles, email
+- The server runs on your Mac and adds no telemetry. But what Claude reads through it (event titles, email
   subjects) goes to Claude like anything else in your chat. Use a test account or calendar if you prefer.
-- Every change is logged on your Mac. Deletes, moves and sends show a preview first; other changes (a new
+- Every change made through the server is logged on your Mac. Deletes, moves and sends show a preview first; other changes (a new
   reminder, an edited event) happen when Claude makes them. Sending mail is off: the send tools do not exist
   unless you switch them on — please leave them off.
 
@@ -27,16 +27,18 @@ Two things to know first:
    - Claude Code: claude mcp add macos-apps --scope user -- uvx macos-apps-mcp
    - Claude Desktop: Settings → Developer → Edit Config, put this in the file, save, restart Claude:
      {"mcpServers": {"macos-apps": {"command": "/full/path/from/which/uvx", "args": ["macos-apps-mcp"]}}}
-     (Claude Desktop may not find uvx on its own; the full path always works.)
+     (Claude Desktop may not find uvx on its own; the path from `which uvx` works.)
 
 3. Ask Claude to "run the doctor tool". It shows what is granted. macOS asks for each permission the
-   first time Claude uses that app — allow the ones for the apps you want to test.
+   first time Claude uses that app — allow the ones for the apps you want to test. Mail search
+   and moves also need Full Disk Access, which has no prompt: System Settings → Privacy & Security
+   → Full Disk Access, add the app that runs Claude (Claude Desktop or your terminal), restart it.
 
 4. Try three things:
    - "What's on my calendar this week, and when am I free on Thursday afternoon?"
    - "Which emails need a reply? Draft a reply to the first one." (It only opens a draft in Mail.)
    - "Find two newsletters in my inbox and move them to a folder called Test. Show me first." Check the
-     preview, say "go ahead", then say "undo that move". If your mail is Gmail, skip this one: in Gmail
+     preview, say "go ahead", then say "undo that move" and confirm its preview too. If your mail is Gmail, skip this one: in Gmail
      every folder is a label, and the server refuses label moves on purpose (Gmail reverts them a few
      minutes later). iCloud and other IMAP accounts work.
 
