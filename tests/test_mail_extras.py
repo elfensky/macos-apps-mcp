@@ -533,7 +533,7 @@ def test_export_treats_canonically_equal_case_variants_as_one_file(root, monkeyp
 
 
 def _fail_open_on_nth(monkeypatch, n, make_file):
-    """Route ``open`` in the mail module: call ``n`` goes through ``make_file(real)``."""
+    """Route ``open`` in the mail module: call ``n`` goes through ``make_file``."""
     import builtins
 
     calls = []
@@ -555,7 +555,7 @@ def test_export_removes_the_partial_file_when_a_write_fails(root, monkeypatch):
 
     class ShortWrite:
         def __init__(self, path, mode):
-            self.f = builtins.open(path, mode)
+            self.f = builtins.open(path, mode)  # noqa: SIM115
 
         def __enter__(self):
             return self
