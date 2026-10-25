@@ -31,6 +31,10 @@ Writes are tiered and audited; deletes, moves and sends preview first. macOS onl
 - **Known limits.** A message Mail downloaded only in part is backed up without its attachments. Moves and trashes
   through a Gmail label folder are refused, because Gmail reverts them about 2 minutes later. `sent: true` means
   Mail accepted the message, not that it was delivered. [All Mail facts](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/mail-applescript-facts.md).
+- **Dashboard.** Under the signed `.app` daemon, a local page (127.0.0.1 only) shows every write, what it changed,
+  and the backup behind each Mail batch. Invented data below:
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch-dark.png"><img alt="The dashboard: three newsletters moved to Archive, each with a full backup, and the prompt that undoes the batch" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-batch.png" width="800"></picture>
 
 ## First 5 minutes
 
@@ -226,6 +230,10 @@ same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMO
 Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
 usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
 [docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard).
+
+<img alt="One calendar edit in the dashboard: the old time struck through, the new time beside it, and the exact tool call the model made" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-diff.png" width="800">
+
+<img alt="The adapter switches: each app with its permission, its tool count and how often it was called" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-adapters.png" width="800">
 
 ### Cleaning up duplicate mail
 
