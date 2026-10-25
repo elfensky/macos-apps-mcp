@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: planning
 stopped_at: "Phase 05.1 complete; Phase 05.2 (every open bug before Phase 6: #455, #399, #348) inserted, ready to plan"
-last_updated: "2026-10-25T03:30:11.596Z"
+last_updated: "2026-10-25T03:44:13.176Z"
 last_activity: 2026-10-25
 last_activity_desc: "Phase 05.3 inserted for #465 (feedback reports, before Phase 6); #464 added to Phase 05.2"
-state_head: 60885e29780fab8d629eea46f292444b06c15cf7
+state_head: 21434d310a1d64b01b11237ae116066c65243164
 progress:
   total_phases: 12
   completed_phases: 9
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-25 - Completed quick task 261025-64s: ruff 0.17.1, cryptography 48.0.1 rationale in docs/DAEMON.md; Phase 05.3 inserted after Phase 05.2 for #465 (problem reports and improvement suggestions, design in PR #463); #464 added to Phase 05.2
+Last activity: 2026-10-25 - Completed quick task 261025-5sy: README first screen for new visitors and CREDITS provenance fix (multi-AI review after each step); #471 filed (bundled .app lacks PyObjC and bpylist2 licence text)
 
 Progress: [█████████░] 90%
 
@@ -169,6 +169,7 @@ Recent decisions affecting current work:
 | 261025-3kk | Fix Dependabot alerts #21-#23 (fastmcp 3.4.11, opentelemetry-api 1.45.1), 29 other lock updates inside the limits with a 7-day cooldown, setup-uv v10.3.2 | 2026-10-25 | 000308f | [261025-3kk-fix-dependabot-alerts-21-23-and-refresh-](./quick/261025-3kk-fix-dependabot-alerts-21-23-and-refresh-/) |
 | 261025-4qn | Dependabot uv cooldown 7 -> 3 days; uv.lock refreshed with a 3-day cutoff (12 updates inside the limits, python-dateutil 3.0.0 and starlette 1.9.0 among them) | 2026-10-25 | a038683 | [261025-4qn-set-the-dependabot-cooldown-to-3-days-an](./quick/261025-4qn-set-the-dependabot-cooldown-to-3-days-an/) |
 | 261025-64s | ruff 0.16.10 -> 0.17.1 (cap <0.18); docs/DAEMON.md records why cryptography stays at 48.0.1 (nothing imports it; Intel stays supported; arm64-only revisit 2028) | 2026-10-25 | 60885e2 | [261025-64s-upgrade-ruff-to-0-17-and-document-why-cr](./quick/261025-64s-upgrade-ruff-to-0-17-and-document-why-cr/) |
+| 261025-5sy | README first screen for new visitors (pitch, safety and privacy, first 5 minutes, why not apple-mcp) and CREDITS provenance fix; multi-AI review after each step; #471 filed | 2026-10-25 | 21434d3 | [261025-5sy-launch-readiness-readme-first-screen-and](./quick/261025-5sy-launch-readiness-readme-first-screen-and/) |
 
 ### Roadmap Evolution
 
