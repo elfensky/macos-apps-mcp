@@ -18,16 +18,17 @@ and depends on. Corrections welcome — open an issue.
 - **[apple-mail-mcp](https://github.com/patrickfreyer/apple-mail-mcp)** by **Patrick Freyer** (MIT)
   — the reference for the Apple Mail adapter. macos-apps-mcp learned three things from it: the
   `message://` deeplink encoding (the Message-ID percent-encoded between uppercase `%3C` and `%3E`),
-  the needs-response and awaiting-reply triage ideas, and mailbox creation as a tool. Its issue #58
-  (an orphaned server and a hung Apple Event that pinned Mail) shaped the orphan watcher and the
-  child cleanup. The code is independent: the adapter reads Mail's Envelope Index and classifies in
-  pure Python, where apple-mail-mcp builds one AppleScript per account. No code reused. Our fork
-  ([`elfensky/apple-mail-mcp`](https://github.com/elfensky/apple-mail-mcp), `working` branch) also
-  carries community contributions that are still open upstream. They are credited here for the ideas
-  their pull requests carried:
-  - **ahharvey** — raw RFC 822 source ([#66](https://github.com/patrickfreyer/apple-mail-mcp/pull/66))
-  - **Brendan DeBeasi** — email attachments ([#51](https://github.com/patrickfreyer/apple-mail-mcp/pull/51)) and reply-by-id ([#49](https://github.com/patrickfreyer/apple-mail-mcp/pull/49))
-  - **elfensky** — `message_id` / `mail_link` surfacing ([#76](https://github.com/patrickfreyer/apple-mail-mcp/pull/76))
+  the needs-response and awaiting-reply triage ideas, and mailbox creation as a tool. Its
+  [issue #58](https://github.com/patrickfreyer/apple-mail-mcp/issues/58) (an orphaned server and a
+  hung Apple Event that pinned Mail) shaped the orphan watcher and the child cleanup. The code is
+  independent: the adapter reads Mail's Envelope Index and classifies in pure Python, where
+  apple-mail-mcp builds one AppleScript per account. A line-by-line comparison with our fork
+  ([`elfensky/apple-mail-mcp`](https://github.com/elfensky/apple-mail-mcp), `working` branch:
+  upstream plus the pull requests below) found no copied code. The fork carries these community
+  pull requests, credited for the ideas they carried:
+  - **ahharvey** — raw RFC 822 source ([#66](https://github.com/patrickfreyer/apple-mail-mcp/pull/66), merged upstream)
+  - **Brendan DeBeasi** — email attachments ([#51](https://github.com/patrickfreyer/apple-mail-mcp/pull/51)) and reply-by-id ([#49](https://github.com/patrickfreyer/apple-mail-mcp/pull/49)), both closed upstream without a merge
+  - **elfensky** — `message_id` / `mail_link` surfacing ([#76](https://github.com/patrickfreyer/apple-mail-mcp/pull/76), merged upstream)
 
 ## Code we build on
 
@@ -49,7 +50,8 @@ and depends on. Corrections welcome — open an issue.
 
 ## License notes
 
-No source is copied from any project listed here: each one is a reference, an architectural influence, or a
-runtime dependency. **`griches/apple-mcp` has no license, so nothing may be
-copied from it.** FastMCP (Apache-2.0) and PyObjC (MIT) are normal dependencies; if their source is ever
-bundled, their `LICENSE`/`NOTICE` files travel with it.
+No source from the prior-art projects above is copied into this repository: each one is a reference or an
+architectural influence. **`griches/apple-mcp` has no license, so nothing may be copied from it.** The
+dependencies are installed packages. The signed `.app` bundles them as installed, and each bundled package
+must carry its licence text: FastMCP and osxphotos do, PyObjC and bpylist2 do not yet
+([#471](https://github.com/elfensky/macos-apps-mcp/issues/471)).
