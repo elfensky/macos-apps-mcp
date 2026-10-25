@@ -515,6 +515,53 @@ def test_export_refuses_two_ids_that_derive_one_file_name(root, monkeypatch, pai
     assert list((root / "archive").iterdir()) == []
 
 
+def _another_writer_after_check(monkeypatch, victim_index):
+    """After the check of the 2nd path, another writer creates the file at path
+    ``victim_index`` (0 = first, 1 = second): the TOCTOU window of #399."""
+    real, paths = mail.files.target_path, []
+
+    def target_path(*a, **k):
+        paths.append(real(*a, **k))
+        if len(paths) == 2:
+            paths[victim_index].write_bytes(b"theirs")
+        return paths[-1]
+
+    monkeypatch.setattr(mail.files, "target_path", target_path)
+    return paths
+
+
+def test_export_never_overwrites_a_file_made_after_the_check(root, monkeypatch):
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    paths = _another_writer_after_check(monkeypatch, 1)
+    with pytest.raises(WriteRefused, match="never overwrites") as refused:
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    assert f"Already written by this call: {paths[0]}" in str(refused.value)
+    assert paths[0].read_bytes() == b"new-a@x"
+    assert paths[1].read_bytes() == b"theirs"
+
+
+def test_export_names_none_when_the_first_write_fails(root, monkeypatch):
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    paths = _another_writer_after_check(monkeypatch, 0)
+    with pytest.raises(WriteRefused, match="Already written by this call: none"):
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    assert paths[0].read_bytes() == b"theirs"
+    assert not paths[1].exists()
+
+
+def test_export_twice_into_one_dest_dir_writes_nothing_the_second_time(
+    root, monkeypatch
+):
+    _fake_export_batch(monkeypatch, "a@x", "b@x")
+    mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    files_ = sorted((root / "archive").iterdir())
+    before = [(f.read_bytes(), f.stat().st_mtime_ns) for f in files_]
+    with pytest.raises(WriteRefused, match="never overwrites"):
+        mail.MailAdapter().export("<a@x>,<b@x>", "archive")
+    assert sorted((root / "archive").iterdir()) == files_
+    assert [(f.read_bytes(), f.stat().st_mtime_ns) for f in files_] == before
+
+
 @_write_gate_on_only
 def test_the_mail_write_tools_refuse_an_existing_file_as_a_typed_tool_error(
     root, resolved, monkeypatch
