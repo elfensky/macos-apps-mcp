@@ -281,6 +281,11 @@ def test_build_quote_keeps_the_whole_original():
     assert "truncated" not in q
 
 
+def test_build_quote_adds_no_empty_line_for_a_trailing_newline():
+    q = _build_quote("Jane", None, "one\ntwo\n")
+    assert q == "Jane wrote:\n> one\n> two"
+
+
 def test_reply_quote_keeps_a_huge_original(monkeypatch):
     # The quote reaches the draft by tempfile, never the model's context: a huge
     # original is not cut and does not abort the reply.

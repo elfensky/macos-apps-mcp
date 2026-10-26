@@ -658,7 +658,7 @@ def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) 
     `> `-prefixed. No cap: the quote reaches the draft by tempfile and never the
     model's context, so a cap protects nothing and only cuts the reply's tail."""
     quoted = "\n".join(
-        "> " + line for line in sanitize_block(original_body).split("\n")
+        "> " + line for line in sanitize_block(original_body).splitlines()
     )
     when = f"On {stamp[0]}, at {stamp[1]}, " if stamp else ""
     return f"{when}{sender} wrote:\n{quoted}"
@@ -695,7 +695,7 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     sender, *date_parts, original = parts
     try:
         stamp = runtime.mail_attribution_stamp(datetime(*map(int, date_parts)))
-    except ValueError:  # a missing or impossible date: the header drops it
+    except (ValueError, OverflowError, OSError):  # unreadable date: no date in header
         stamp = None
     quote = build_quote(sanitize_line(sender), stamp, original)
     return body + "\n\n" + quote
