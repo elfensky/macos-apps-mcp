@@ -717,9 +717,11 @@ def mail_reply(
     NEVER sends. message_id: the RFC822 id from a mail read. mailbox is REQUIRED: the
     `folder` value from the SAME search result, passed back VERBATIM (an opaque
     `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
-    threading headers natively; include_quote appends the quoted original. Returns a
-    locator dict — save the draft to Drafts and `drafts()` resolves it by a stable
-    message-id.
+    threading headers natively. include_quote adds a plain-text quote below your
+    text: Mail's `On <date>, at <time>, <sender> wrote:` line, then the whole original
+    with `> ` prefixes. Formatting, inline images and Mail's quote bar are not kept.
+    Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
+    stable message-id.
 
     THE AUTOSAVE WINDOW: that message-id is stamped only when Mail autosaves the draft,
     ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
@@ -1009,6 +1011,9 @@ def reply_all(
     value from the SAME search result, passed back VERBATIM (an opaque
     `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
     threading headers natively and the sending account is inherited from the original.
+    include_quote adds a plain-text quote below your text: Mail's
+    `On <date>, at <time>, <sender> wrote:` line, then the whole original with `> `
+    prefixes. Formatting, inline images and Mail's quote bar are not kept.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
     Automation access for Mail."""
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
