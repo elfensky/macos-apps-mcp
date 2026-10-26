@@ -66,7 +66,7 @@ that teaches the dry-run workflow. In Claude Code, run `/plugin marketplace add 
 
 The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `uvx macos-apps-mcp allow-send`.
 
-**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
+**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (each Automation grant is read live; an app that is not running shows `not_running`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.

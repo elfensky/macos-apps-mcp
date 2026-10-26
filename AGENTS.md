@@ -31,7 +31,8 @@ AppleScript count there (#291).
   threads, and never widen the executor past `max_workers=1`.
 - **One adapter module per app** under `macos_apps_mcp/adapters/`. Adding an app = add a module + mount its
   tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
-  `doctor._AUTOMATION_APPS` so `doctor` probes it; it must not reach into another adapter. This is
+  `doctor._AUTOMATION_APPS` and its bundle id to `doctor._AUTOMATION_BUNDLES` so `doctor`
+  checks it (a pin test fails when they disagree); it must not reach into another adapter. This is
   what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
 - **The shim↔daemon hop has NO read deadline** (`daemon._uds_client_factory`, `Timeout(None,
   connect=10.0)`). A call's duration is the daemon's business — a bulk Mail pass runs HOURS —

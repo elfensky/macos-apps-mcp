@@ -399,6 +399,26 @@ build:
     it's `[]` and you expected sending to be on.
   - If `deployment.agent` shows `requires-approval`, open Login Items (above) and approve it.
 
+- **Automation grants (macOS 27, #455).** macOS 27 keeps no readable per-user grant database,
+  so `doctor` and the dashboard Health page read each Automation grant live with
+  `AEDeterminePermissionToAutomateTarget`. The call sends no Apple Event and opens no dialog.
+  Both read the same check, so they agree. The OSStatus maps to a status:
+
+  | Code | Status | Meaning |
+  |------|--------|---------|
+  | `0` | `granted` | Automation is on for this app |
+  | `-1743` | `denied` | switched off in System Settings → Privacy & Security → Automation |
+  | `-1744` | `not_asked` | never asked: run `doctor(request=True)` with someone at the screen |
+  | `-600` | `not_running` | the app is quit or unknown, so its state cannot be told yet |
+  | other | `probe_error` | the check failed; `doctor(request=True)` probes by Apple Event |
+
+  The grant belongs to the bundle's own identity, which differs from a terminal's: on
+  2026-10-25 Finder answered `0` to a terminal and `-1744` to the bundle. Check it from the
+  daemon, never from a terminal. Switching Notes off under the bundle's Automation list
+  changed the answer from `0` to `-1743`, and switching it back on returned `0`
+  (installed bundle, 2026-10-26). An app that is not running cannot be checked: open it and
+  run `doctor` again, or reload the Health page.
+
 - **Log locations.**
   - Audit log and usage log live under `~/.local/state/macos-apps-mcp/` (or
     `$XDG_STATE_HOME/macos-apps-mcp` if set). The daemon's socket does **not** follow
