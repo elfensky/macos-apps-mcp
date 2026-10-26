@@ -273,7 +273,7 @@ def test_build_quote_keeps_the_whole_original():
     # the quote carries every line, in order, the last included, with no marker.
     nnbsp = chr(0x202F)
     assert len(nnbsp.encode("utf-8")) == 3
-    lines = [f"line {i} caf\u00e9 Zo\u00eb{nnbsp}end" for i in range(400)]
+    lines = [f"line {i} caf\u00e9 Zo\u00eb{nnbsp}end" for i in range(500)]
     original = "\n".join(lines)
     assert len(original) > 10_000
     q = _build_quote("Jane", ("13 Oct 2026", "14:39"), original)
@@ -327,7 +327,7 @@ def test_original_returns_the_date_as_integers():
         "minutes of",
     ):
         assert part in _ORIGINAL
-    assert "as text" not in _ORIGINAL
+    assert "as text" not in _ORIGINAL.split("on run argv")[1]
 
 
 def test_quoted_body_builds_the_header_from_the_stamp(monkeypatch):

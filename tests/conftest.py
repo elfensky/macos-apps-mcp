@@ -239,3 +239,11 @@ def _no_real_osascript(request, monkeypatch):
             )
 
         monkeypatch.setattr(runtime, seam, _refuse)
+
+    # A pure formatter, not a native door to refuse: a deterministic stand-in so a
+    # quote test needs no Foundation (tests/test_runtime.py binds the real one).
+    monkeypatch.setattr(
+        runtime,
+        "mail_attribution_stamp",
+        lambda when: (f"{when.day} {when:%b} {when.year}", f"{when:%H:%M}"),
+    )
