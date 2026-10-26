@@ -945,9 +945,8 @@ def test_reply_all_quote_uses_mails_attribution_format(monkeypatch):
     _patch_run(monkeypatch, fake)
     _patch_body_file(monkeypatch, fake_body_file)
     mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good", dry_run=False)
-    assert bodies["text"].startswith(
-        "Sounds good\n\nOn 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> Original text"
-    )
+    header = "On 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:"
+    assert bodies["text"].startswith(f"Sounds good\n\n{header}\n> Original text")
 
 
 def test_reply_all_reads_body_through_shared_handler():

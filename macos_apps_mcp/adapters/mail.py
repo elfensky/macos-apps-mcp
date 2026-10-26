@@ -1316,8 +1316,9 @@ class MailAdapter:
         dry_run: bool = True,
     ) -> dict:
         """Reply-all to a message and SEND it. Mail's native reply verb sets the
-        threading headers; ``include_quote`` appends the `On <date>, <sender> wrote:`
-        block, built in Python exactly as ``reply`` builds it. The sending account is
+        threading headers; ``include_quote`` appends a plain-text quote (Mail's
+        `On <date>, at <time>, <sender> wrote:` line and the whole original), built in
+        Python exactly as ``reply`` builds it (#348). The sending account is
         inherited from the original message — the correct identity for a thread.
 
         ``dry_run=True`` (default) reads the original's ACTUAL to/cc recipients and
@@ -1378,7 +1379,8 @@ class MailAdapter:
         """Reply to a message by its RFC822 message-id: opens a threaded draft
         for the human to review/send — NEVER sends. Uses Mail's native reply verb so
         In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
-        include_quote appends `On <date>, <sender> wrote:` + the `> `-quoted original.
+        include_quote appends a plain-text quote (#348): Mail's `On <date>, at <time>,
+        <sender> wrote:` line + the whole original, `> `-prefixed.
         Keystroke-free (#46); atomic (#44). Returns the same locator dict as
         create_draft — save it to Drafts and it gets a stable message-id, addressable
         via drafts()/delete_draft().
