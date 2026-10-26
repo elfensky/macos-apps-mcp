@@ -41,9 +41,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
+- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page
+- [ ] **Phase 05.7: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504)** (INSERTED) - Agents get fixed error codes, server instructions and per-app skills from the server
+- [ ] **Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506)** (INSERTED) - Notes take Markdown and expose their attachments
+- [ ] **Phase 05.9: CLI and paged reads — tools from the shell, pages past the cap (#507, #508)** (INSERTED) - Any tool runs from the shell through the daemon; a capped read continues with a cursor
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -438,11 +442,21 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
 
+### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501) (INSERTED)
+
+**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26).
+**Requirements**: TBD (planned from #500, #501)
+**Depends on:** Phase 05.2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.6 to break down)
+
 ### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
 
 **Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
 **Requirements**: TBD (planned from #465)
-**Depends on:** Phase 05.2
+**Depends on:** Phase 05.6
 **Plans:** 0 plans
 
 Plans:
@@ -467,6 +481,36 @@ Plans:
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.5 to break down)
+
+### Phase 05.7: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504) (INSERTED)
+
+**Goal**: Agents get the house rules and fixed error codes from the server itself. Every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The server sends a short `instructions` text built from the registry, under a tested size budget (#503). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed after Phase 05.5 and before Phase 6 (owner, 2026-10-26).
+**Requirements**: TBD (planned from #502, #503, #504)
+**Depends on:** Phase 05.5
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.7 to break down)
+
+### Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506) (INSERTED)
+
+**Goal**: Notes take Markdown and expose their attachments. `create_note` and `update_note` accept `format: "markdown"`, rendered by `markdown-it-py` with raw HTML off and a link-scheme allowlist (#505). `note_attachments`, `save_note_attachment` and `add_note_attachment` list, save and add files through `files.py`, and refuse locked and shared notes (#506). Builds on the Phase 05.6 Notes guards. Placed after Phase 05.7 and before Phase 6 (owner, 2026-10-26).
+**Requirements**: TBD (planned from #505, #506)
+**Depends on:** Phase 05.7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.8 to break down)
+
+### Phase 05.9: CLI and paged reads — tools from the shell, pages past the cap (#507, #508) (INSERTED)
+
+**Goal**: Any tool can be called from the shell, and a capped read can continue. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). A truncated bounded read returns a stateless `next_cursor` (a keyset position plus a query signature); a mismatched cursor answers `invalid_argument` (#508). Placed after Phase 05.8 and before Phase 6 (owner, 2026-10-26).
+**Requirements**: TBD (planned from #507, #508)
+**Depends on:** Phase 05.8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.9 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 

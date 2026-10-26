@@ -5,15 +5,15 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-26T12:09:51.715Z"
+last_updated: "2026-10-26T13:01:53.752Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.2 execution started
-state_head: 7e23de17a7bd9c444e847de10d5a3fd4a5619a06
+state_head: 741b4ab1383b4279a936558b686b837e9dc5e936
 progress:
-  total_phases: 14
+  total_phases: 18
   completed_phases: 9
   total_plans: 79
-  completed_plans: 72
+  completed_plans: 78
 ---
 
 # Project State
@@ -197,6 +197,10 @@ Recent decisions affecting current work:
 - Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
 - Phase 05.4 inserted after Phase 05.3: Migration — mcp 2 and fastmcp 4 (#470); after Phase 05.3 and before Phase 6 (owner, 2026-10-25)
 - Phase 05.5 inserted after Phase 05.4: Dashboard at a domain — the loader page (#483); after Phase 05.4 and before Phase 6 (owner, 2026-10-25)
+- Phase 05.6 inserted after Phase 05.2: Bug fixes — Notes write safety and system folders in any language (#500, #501); before Phase 05.3, bugs before features (owner, 2026-10-26)
+- Phase 05.7 inserted after Phase 05.5: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504); before Phase 6 (owner, 2026-10-26)
+- Phase 05.8 inserted after Phase 05.7: Notes depth — Markdown input and note attachments (#505, #506); before Phase 6 (owner, 2026-10-26)
+- Phase 05.9 inserted after Phase 05.8: CLI and paged reads — tools from the shell, pages past the cap (#507, #508); before Phase 6 (owner, 2026-10-26)
 
 ## Deferred Items
 
