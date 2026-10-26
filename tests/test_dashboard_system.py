@@ -335,6 +335,71 @@ def test_automation_row_not_asked_has_an_accent_dot_and_a_settings_link(doc):
     assert f'href="{SETTINGS}Privacy_Automation">Open Settings</a>' in row
 
 
+def live_report(ids=None, **status):
+    """A report whose Automation surfaces come from the live check (#455): every
+    adapter ``granted`` except the ones named in ``status`` (a status string)."""
+    names = ("mail", "notes", "contacts", "safari", "messages", "music")
+    kw = {}
+    for n in names:
+        st = status.get(n, "granted")
+        ok = {"granted": True, "denied": False}.get(st)
+        kw[n] = ("automation", ok, st)
+    return make_report(ids, **kw)
+
+
+def test_live_granted_automation_needs_no_tcc_row(doc):
+    doc.report = live_report()
+    doc.reasons = {"user": "absent", "system": None}  # macOS 27: no per-user TCC.db
+    text = get("/health").text
+    assert "Could not be read" not in text and "Automation →" not in text
+
+
+def test_live_denied_automation_is_a_row_and_a_banner_entry(doc):
+    doc.report = live_report(notes="denied")
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    row = row_of(text, "Automation → Notes")
+    assert "dot bad" in row and ">Denied<" in row and "Open Settings" in row
+    assert banner(text)[1].startswith("Notes (denied).")
+    assert health.last_dot() == "bad"
+
+
+def test_live_not_asked_automation_has_an_accent_dot(doc):
+    doc.report = live_report(music="not_asked")
+    doc.reasons = {"user": "absent", "system": None}
+    row = row_of(get("/health").text, "Automation → Music")
+    assert "dot warn" in row and ">Not asked yet<" in row
+
+
+def test_not_running_automation_says_the_state_cannot_be_told(doc):
+    doc.report = live_report(
+        **dict.fromkeys(
+            ("notes", "contacts", "safari", "messages", "music"), "not_running"
+        )
+    )
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    assert sub_of(text, "Automation") == (
+        "Cannot be told until the app is running: Contacts, Messages, Music, Notes, "
+        "Safari. Open the app, then reload this page."
+    )
+    assert "Open Settings" not in row_of(text, "Automation")
+    assert "Could not be read" not in text and "Automation →" not in text
+
+
+def test_tcc_rows_still_answer_when_the_live_check_cannot(doc):
+    # (a) the live check cannot tell: the readable TCC map answers, so no row
+    doc.report = live_report(
+        make_ids(skip=()), notes="not_running", contacts="probe_error"
+    )
+    text = get("/health").text
+    assert "Automation" not in titles(text) and "Automation →" not in text
+    # (b) a live granted beats a TCC denial (O1): no row and no banner
+    doc.report = live_report(make_ids(skip=(), denied=("notes",)))
+    text = get("/health").text
+    assert "Automation → Notes" not in text and "banner bad" not in text
+
+
 def test_an_off_adapter_raises_no_banner_and_says_it_does_not_matter(doc, monkeypatch):
     only_active(monkeypatch, [a for a in EVERYONE if a != "music"])
     text = get("/health").text
@@ -605,6 +670,7 @@ def test_an_absent_user_grant_db_is_a_note_not_a_warning(doc):
     text = get("/health").text
     assert "did not answer" not in text and 'class="banner warn"' not in text
     assert "keeps no per-user grant database" in text
+    assert "an app that is not running cannot be checked" in text
     assert "not asked" not in text
 
 
