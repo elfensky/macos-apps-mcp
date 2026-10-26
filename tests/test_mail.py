@@ -922,6 +922,34 @@ def test_reply_all_sends_with_quote(monkeypatch):
     assert seen[mail_outgoing._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
+def test_reply_all_quote_uses_mails_attribution_format(monkeypatch):
+    # #348: reply_all reaches the same quote as mail_reply, through quoted_body.
+    bodies = {}
+
+    def fake(script, *argv, **kw):
+        if script is mail_outgoing._ORIGINAL:
+            return _original_reply("Original text", "Jane <j@x.com>")
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            return f"to{US}alice@corp.com{RS}sender{US}jane@x.com{RS}"
+        if script is mail_outgoing._OUTBOX_COUNT:
+            return "0"
+        return "sent"
+
+    def fake_body_file(text):
+        bodies["text"] = text
+        return nullcontext("/tmp/fake-body")
+
+    monkeypatch.setattr(
+        runtime, "mail_attribution_stamp", lambda when: ("13 Oct 2026", "14:39")
+    )
+    _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, fake_body_file)
+    mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good", dry_run=False)
+    assert bodies["text"].startswith(
+        "Sounds good\n\nOn 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> Original text"
+    )
+
+
 def test_reply_all_reads_body_through_shared_handler():
     # Bug 1: same -39-on-empty-file hazard — _REPLY_ALL must compose the shared
     # readBody handler rather than reading the tempfile directly.
