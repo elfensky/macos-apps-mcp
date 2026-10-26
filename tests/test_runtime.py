@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import threading
 import types
+from datetime import datetime
 
 import pytest
 
@@ -37,6 +39,8 @@ from macos_apps_mcp.runtime import (
 # The seam's own self-tests bind the real function at import time: the conftest lock
 # replaces ``runtime.automation_permission`` in every unit test.
 _REAL_AUTOMATION_PERMISSION = runtime.automation_permission
+# Same for the attribution formatter: conftest swaps it for a deterministic fake.
+_REAL_MAIL_ATTRIBUTION_STAMP = getattr(runtime, "mail_attribution_stamp", None)
 
 
 def test_run_osascript_returns_output():
@@ -427,6 +431,25 @@ def _fake_ae_lib(create_rc=0, determine_rc=-1743, threads=None):
     return lib, calls
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="NSDateFormatter is macOS-only")
+def test_mail_attribution_stamp_formats_date_and_time_apart(monkeypatch):
+    # #348: Mail's `On <date>, at <time>, <sender> wrote:` has the date and the time
+    # formatted apart; the combined style gives a different line.
+    calls = []
+    real_run_native = runtime.run_native
+
+    def recording(fn):
+        calls.append(fn)
+        return real_run_native(fn)
+
+    monkeypatch.setattr(runtime, "run_native", recording)
+    date, time = _REAL_MAIL_ATTRIBUTION_STAMP(datetime(2026, 10, 13, 14, 39))
+    assert "2026" in date and "13" in date
+    assert "39" in time
+    assert " at " not in date and " at " not in time
+    assert len(calls) == 1  # off the worker, so it went through run_native once
+
+
 def test_automation_permission_binds_the_ae_calls(monkeypatch):
     lib, calls = _fake_ae_lib(determine_rc=-1743)
     monkeypatch.setattr(runtime, "_ae_lib", lambda: lib)
@@ -518,6 +541,7 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
         "photos_db",
         "automation_permission",
         "mac_region",
+        "mail_attribution_stamp",
         "log",
     }
     assert not hasattr(runtime, "EK")

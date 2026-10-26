@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from datetime import datetime
 
 import pytest
 
@@ -250,42 +251,107 @@ def _is_reply_script(script: str) -> bool:
     return "reply (item 1 of matches)" in script
 
 
-def test_build_quote_prefixes_and_headers():
-    q = _build_quote("Jane <j@x.com>", "2026-07-01", "line one\nline two")
-    assert "On 2026-07-01, Jane <j@x.com> wrote:" in q
-    assert "> line one" in q and "> line two" in q
+def _original_reply(body="original body", sender="Jane <j@x.com>"):
+    """What ``_ORIGINAL`` returns: the stripped sender, the date as five integers
+    (2026-07-01 14:39), then the content, US-framed — seven fields."""
+    return US.join([sender, "2026", "7", "1", "14", "39", body])
 
 
-def test_reply_quote_truncates_huge_original(monkeypatch):
-    # HIGH fix: _build_quote must TRUNCATE a huge original, not crash the whole reply
-    # (clean_body's default hard=BODY_HARD_MAX would raise OutputOverflow here).
+def test_build_quote_uses_mails_attribution_format():
+    q = _build_quote("Jane <j@x.com>", ("13 Oct 2026", "14:39"), "line one\nline two")
+    assert q.startswith(
+        "On 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> line one\n> line two"
+    )
+    # no stamp (unreadable date): the header says who wrote, with no date
+    assert _build_quote("Jane <j@x.com>", None, "x").startswith(
+        "Jane <j@x.com> wrote:\n> x"
+    )
+
+
+def test_build_quote_keeps_the_whole_original():
+    # 10,000+ chars with non-ASCII lines (U+202F built with chr, never a raw glyph):
+    # the quote carries every line, in order, the last included, with no marker.
+    nnbsp = chr(0x202F)
+    assert len(nnbsp.encode("utf-8")) == 3
+    lines = [f"line {i} caf\u00e9 Zo\u00eb{nnbsp}end" for i in range(400)]
+    original = "\n".join(lines)
+    assert len(original) > 10_000
+    q = _build_quote("Jane", ("13 Oct 2026", "14:39"), original)
+    assert q.splitlines()[1:] == ["> " + line for line in lines]
+    assert "truncated" not in q
+
+
+def test_reply_quote_keeps_a_huge_original(monkeypatch):
+    # The quote reaches the draft by tempfile, never the model's context: a huge
+    # original is not cut and does not abort the reply.
     import macos_apps_mcp.adapters.mail as mail
     from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 100)
+    bodies = []
 
     def fake(script, *args, **kw):
         if _is_reply_script(script):
+            with open(args[1], encoding="utf-8") as f:
+                bodies.append(f.read())
             return ""
-        # _ORIGINAL: sender, date, then a body over the hard cap
-        return f"Jane <j@x.com>\x1f2026-07-01\x1f{huge}"
+        return _original_reply(huge)
 
     _patch_run(monkeypatch, fake)
     _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
     out = mail.MailAdapter().reply("<abc@x>", "inbox", "thanks", include_quote=True)
     assert out["created"] is True
+    assert bodies[0].endswith("> " + huge)
 
 
 # --- _ORIGINAL sender/date framing hazard (#42/#46 review) ---------------------------
 
 
-def test_original_strips_framing_from_sender_and_date():
+def test_original_strips_framing_from_sender():
     # MEDIUM fix: _ORIGINAL must apply the SAME stripFraming handler _ATTACHMENTS uses
-    # to the sender and date fields, so a display name containing a literal US/RS char
-    # can't desync reply()'s raw.partition("\x1f") parsing.
+    # to the sender, so a display name containing a literal US/RS char can't desync
+    # the seven-field split in quoted_body.
     assert "my stripFraming(snd)" in _ORIGINAL
-    assert "my stripFraming(dt)" in _ORIGINAL
     assert "on stripFraming" in _ORIGINAL
+
+
+def test_original_returns_the_date_as_integers():
+    # #348: Mail's attribution needs the date in the Mac's own format, which only
+    # Foundation gives; AppleScript hands over integers, never a locale string.
+    for part in (
+        "year of",
+        "month of",
+        "as integer",
+        "day of",
+        "hours of",
+        "minutes of",
+    ):
+        assert part in _ORIGINAL
+    assert "as text" not in _ORIGINAL
+
+
+def test_quoted_body_builds_the_header_from_the_stamp(monkeypatch):
+    seen = []
+
+    def stamp(when):
+        seen.append(when)
+        return ("13 Oct 2026", "14:39")
+
+    monkeypatch.setattr(runtime, "mail_attribution_stamp", stamp)
+    _patch_run(monkeypatch, lambda script, *a, **kw: _original_reply("hello"))
+    out = mail_outgoing.quoted_body("my reply", "a@b", ("ACCT", "inbox"))
+    assert seen == [datetime(2026, 7, 1, 14, 39)]
+    assert out == "my reply\n\nOn 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> hello"
+
+
+def test_quoted_body_without_a_readable_date_says_who_wrote(monkeypatch):
+    monkeypatch.setattr(
+        runtime, "mail_attribution_stamp", lambda when: pytest.fail("no stamp")
+    )
+    raw = US.join(["Jane <j@x.com>", "", "", "", "", "", "hello"])
+    _patch_run(monkeypatch, lambda script, *a, **kw: raw)
+    out = mail_outgoing.quoted_body("my reply", "a@b", ("ACCT", "inbox"))
+    assert out == "my reply\n\nJane <j@x.com> wrote:\n> hello"
 
 
 # --- US/RS framing contract (#68) -----------------------------------------------------
@@ -382,7 +448,7 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
                 bodies.append(f.read())
             return ""
         # sender carries a stray control char the AppleScript strip doesn't remove
-        return "Jane\x07 <j@x.com>\x1f2026-07-01\x1foriginal body"
+        return _original_reply(sender="Jane\x07 <j@x.com>")
 
     _patch_run(monkeypatch, fake)
     _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
@@ -402,8 +468,8 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
     def fake(script, *args, **kw):
         calls.append((script, args))
         if not _is_reply_script(script):
-            # _ORIGINAL: return a US-framed sender/date/body triple
-            return "Jane <j@x.com>\x1f2026-07-01\x1foriginal body"
+            # _ORIGINAL: return the US-framed sender, date integers and body
+            return _original_reply()
         # _REPLY: the tempfile is deleted right after this call returns, so read it
         # now (while it still exists) rather than after reply() has returned.
         with open(args[1], encoding="utf-8") as f:
@@ -423,7 +489,7 @@ def test_reply_composes_body_and_targets_id(monkeypatch):
     body_on_disk = bodies[0]
     assert "my reply" in body_on_disk
     assert "> original body" in body_on_disk
-    assert "On 2026-07-01, Jane <j@x.com> wrote:" in body_on_disk
+    assert "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:" in body_on_disk
 
 
 def test_reply_without_quote_omits_original(monkeypatch):
@@ -814,7 +880,7 @@ def test_reply_all_sends_with_quote(monkeypatch):
     def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
-            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+            return _original_reply("Original text", "Boss <boss@corp.com>")
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             # #160: the envelope is resolved for the REAL send too, so the result
             # reports who it actually reached rather than echoing the caller.
@@ -1427,7 +1493,7 @@ def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
     def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
-            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+            return _original_reply("Original text", "Boss <boss@corp.com>")
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             # #160: the envelope is resolved for the REAL send too, so the result
             # reports who it actually reached rather than echoing the caller.
@@ -1467,7 +1533,7 @@ def test_reply_all_send_passes_the_mailbox(monkeypatch):
     def fake(script, *argv, **kw):
         seen[script] = argv
         if script is mail_outgoing._ORIGINAL:
-            return f"Boss <boss@corp.com>{US}Tue, 1 Jul 2026{US}Original text"
+            return _original_reply("Original text", "Boss <boss@corp.com>")
         if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
             # #160: the envelope is resolved for the REAL send too, so the result
             # reports who it actually reached rather than echoing the caller.

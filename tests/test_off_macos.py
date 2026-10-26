@@ -10,6 +10,7 @@ earlier breaks ``sysconfig``.
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 
 import pytest
 from fastmcp.exceptions import ToolError
@@ -20,6 +21,7 @@ from macos_apps_mcp.errors import NativeError, UnsupportedPlatform
 # The real seam functions, bound before conftest's autouse fake replaces them.
 _REAL_RUN_OSASCRIPT = runtime.run_osascript
 _REAL_TRACKED_RUN = runtime.tracked_run
+_REAL_MAIL_ATTRIBUTION_STAMP = getattr(runtime, "mail_attribution_stamp", None)
 
 
 @pytest.fixture
@@ -66,6 +68,12 @@ def test_tracked_run_refuses(linux):
 def test_mac_region_refuses(linux):
     with pytest.raises(UnsupportedPlatform):
         runtime.mac_region()
+
+
+def test_mail_attribution_stamp_refuses(linux):
+    # Foundation is None off macOS; run_native refuses before the formatter runs.
+    with pytest.raises(UnsupportedPlatform):
+        _REAL_MAIL_ATTRIBUTION_STAMP(datetime(2026, 10, 13, 14, 39))
 
 
 def test_diagnose_refuses(linux, monkeypatch):
