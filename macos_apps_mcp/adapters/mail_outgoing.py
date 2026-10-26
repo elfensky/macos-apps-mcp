@@ -658,7 +658,7 @@ def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) 
     `> `-prefixed. No cap: the quote reaches the draft by tempfile and never the
     model's context, so a cap protects nothing and only cuts the reply's tail."""
     quoted = "\n".join(
-        "> " + line for line in sanitize_block(original_body).splitlines()
+        "> " + line for line in sanitize_block(original_body).rstrip().splitlines()
     )
     when = f"On {stamp[0]}, at {stamp[1]}, " if stamp else ""
     return f"{when}{sender} wrote:\n{quoted}"
@@ -680,10 +680,10 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     the quote). The date arrives as integers and is formatted by
     ``runtime.mail_attribution_stamp`` (#348).
 
-    Defense in depth: the script already strips raw framing bytes from the sender, but
-    ``sanitize_line`` ALSO strips any other control char a display name could carry, so
-    the quote header stays clean even when the script side is bypassed (a mocked
-    ``_ORIGINAL`` in tests). An original that cannot be read degrades to an unquoted
+    The script strips raw framing bytes from the sender, so the seven-field split holds;
+    this side only re-sanitizes: ``sanitize_line`` strips any other control char a
+    display name could carry. The split stops after six fields, so a US char inside the
+    original stays in the quote. An original that cannot be read degrades to an unquoted
     body, and a date that cannot be read to a header without one — the reply is the
     deliverable, the quote is decoration."""
     raw = runtime.run_osascript(

@@ -449,6 +449,16 @@ def test_mail_attribution_stamp_formats_date_and_time_apart(monkeypatch):
     assert " at " not in date and " at " not in time
     # PM-15: formatted apart, not one combined string split afterwards
     assert ":" not in date and "2026" not in time
+    # and the date is exactly Foundation's date-only string (no leftover "at"/comma)
+    import Foundation as F
+
+    nsdate = F.NSDate.dateWithTimeIntervalSince1970_(1_791_902_340)  # 2026-10-13 14:39Z
+    utc = F.NSDateFormatter.alloc().init()
+    utc.setTimeZone_(F.NSTimeZone.timeZoneWithAbbreviation_("UTC"))
+    utc.setLocale_(F.NSLocale.currentLocale())
+    utc.setDateStyle_(F.NSDateFormatterMediumStyle)
+    utc.setTimeStyle_(F.NSDateFormatterNoStyle)
+    assert date == str(utc.stringFromDate_(nsdate))
     assert len(calls) == 1  # off the worker, so it went through run_native once
 
 

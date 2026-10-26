@@ -21,7 +21,7 @@ surface may still shift between minor versions.
   `mail_reply` and `reply_all` wrote `On <date>, <sender> wrote:` with a date in another
   format and cut the original after 4,000 characters. The quote now starts with Mail's
   `On <date>, at <time>, <sender> wrote:` (date and time in the Mac's own format) and
-  carries every line of the original. It is still plain text: a probe on a real Mac showed
+  carries every line of the original, with no empty `>` lines after it. It is still plain text: a probe on a real Mac showed
   that Mail's own quote cannot be kept once the reply text is written, so formatting,
   inline images and the quote bar are not rebuilt. The tool descriptions say so.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
@@ -36,7 +36,7 @@ surface may still shift between minor versions.
 
 - **Automation grants show on macOS 27** (#455) — `doctor` and the dashboard Health page
   read each Automation adapter's grant live, with no prompt and no Apple Event: granted,
-  denied or not asked yet, and `not_running` when the app is quit, because its state cannot
+  denied or not asked yet (the Health row says to run `doctor(request=True)`), and `not_running` when the app is quit, because its state cannot
   be told until it runs. Both read the same check, so they agree. macOS 27 keeps no readable
   database of these grants.
 
