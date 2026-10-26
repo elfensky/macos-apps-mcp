@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import threading
@@ -476,9 +477,9 @@ def test_mail_attribution_stamp_keeps_the_wall_clock(monkeypatch):
     finally:
         monkeypatch.delenv("TZ")
         _time.tzset()
-    assert "02" in gap and "30" in gap
-    assert "01" in clock and "36" in clock
-    if "Oct" in date:  # English locale
+    assert re.search(r"(?<!\d)0?2\D30", gap)  # 12-hour locales print 2:30
+    assert re.search(r"(?<!\d)0?1\D36", clock)
+    if date.startswith("26 Oct"):  # en_GB-style locale
         assert (date, clock) == ("26 Oct 2026", "01:36")
 
 
