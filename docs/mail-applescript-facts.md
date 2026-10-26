@@ -201,6 +201,59 @@ Two store facts the probe surfaced, both refining "the attachment *payload* is n
 - **`save` materialises the payload as a SIDECAR, not in the `.emlx`**: the fetched bytes land in `Attachments/<rowid>/<part-id>/<name>` next to the message file, and the `.partial.emlx` keeps its stubs forever. So `save` is a reliable per-attachment fetch **for the caller** — 10/10, with the sidecar as a local cache making repeats instant (0.3 s vs 16–20 s) — but it never upgrades the store file.
 - **`.partial` does NOT mean the payload is absent**: 8 of 10 untouched control partials already had complete payload sidecars (weeks old — Mail parks earlier fetches there and still never converts the `.emlx`). So "is this message's content fully local?" is a question about `Attachments/<rowid>/`, not about the `.partial` suffix — and `downloaded of <attachment>` reading `true` tells you about the sidecar, not the `.emlx`. An export that stamps `fidelity` by filename alone is CONSERVATIVE (it may call a fully-recoverable message partial), which is the safe direction — but the sidecar is where a future lossless export would look.
 
+### 4d. A reply's native quote and the reply text (#348)
+
+Question: can reply text go ahead of the native quote that Mail's `reply` verb builds, with no
+read-and-rewrite of the body? Probed on 2026-10-26 (macOS build 26A434, Mail 3901.100.1.1.12) with
+the draft-only probe in `05.2-proto/`, one mode at a time, the Mail watchdog running, nothing sent.
+Each stored draft was judged by the inspector against a hand-made reference, never by a return
+value.
+
+Test original: an HTML mail from the owner's own Gmail to `andrei@lav.ren`, in the INBOX. It had
+about 9,200 characters of text, bold, a link, two inline images (`cid:`) and a unique last
+sentence. Reference: the owner's own reply in Mail (Reply, type a marker, Cmd-S, close). The stored
+reference has the quote bar (`<blockquote type="cite">`), Mail's attribution line
+(`On 26 Oct 2026, at 01:36, <Name> <<sender>> wrote:`), both `cid` references, the last words and
+the marker ahead of the quote. It carries the two `cid` references but no image MIME part.
+
+| Mode | Window | Delay | Write | Quote bar | Attribution | Image refs | Last words | Marker |
+|---|---|---|---|---|---|---|---|---|
+| reference (by hand) | yes | - | - | yes | yes | 2 | yes | before quote |
+| P0 (no write) | yes | 0 | none | yes | yes | 2 | yes | none written |
+| P0 (no write) | yes | 3 | none | yes | yes | 2 | yes | none written |
+| P3 `set content` | yes | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P3 `set content` | yes | 3 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1a insert at beginning | yes | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1a insert at beginning | yes | 3 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1a insert at beginning | no | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1b insert at beginning | yes | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1b insert at beginning | yes | 3 | ok | wrapper only | no | 0 | no | in wrapper |
+| P1b insert at beginning | no | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P2 insert at beginning | yes | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P2 insert at beginning | yes | 3 | ok | wrapper only | no | 0 | no | in wrapper |
+| P5 insert at end | yes | 0 | ok | wrapper only | no | 0 | no | in wrapper |
+| P5 insert at end | yes | 3 | ok | wrapper only | no | 0 | no | in wrapper |
+
+| Fact | Detail |
+|---|---|
+| **Every write mode destroys the native quote.** P3 (`set content`) and P1a, P1b, P2 (insert at the beginning) and P5 (insert at the end) leave a 25-27 character body: the marker alone inside an `Apple-Mail-URLShareWrapperClass` blockquote. The attribution line, both `cid` references and the last words are gone. Delay 0 or 3, with or without a compose window: the same. | 14 runs, 2026-10-26 |
+| **`write=ok` proved nothing.** Every write reported `ok`; only the stored draft showed the loss. | same runs |
+| **The control keeps the quote.** P0 (a reply with no write) matches the reference at delay 0 and 3: quote bar, attribution, both `cid` references, last words. So the loss comes from the write, not from the reply verb. The control ran with a compose window only; a windowless reply with no write was not run. | same runs |
+| **`delete` of the reply answered `-1728` (dead) on every run, windowless ones included.** Section 3c says a windowless outgoing message can survive `delete` until Mail restarts; on this run it did not. No probe draft was left at +20 s after any run. | same runs |
+| **Autosave landed after 25 s on the first run.** The probe read the Drafts mailbox at 25 s and found nothing; the draft appeared afterwards. The probe waited 45 s for every later run, and each later draft was found. Section 2's "~15 s" is the lower end, not a bound. | P3 first run |
+| **One `delete_draft` call timed out at 30 s** with no audit row and the draft still present. One retry a minute later deleted it. | 2026-10-26 |
+
+Route: **`option2-both`**. No insert mode keeps the native quote, so the quote cannot be kept
+without reading it and writing it back into the new body. The winning mode and delay are `none`.
+For the same reason no insert phrase is recorded here, and the encoding re-run (a two-line marker
+with non-ASCII text) was not run: it applies to a winning insert mode only.
+
+Two notes for anyone who repeats this probe:
+
+- The Drafts mailbox spans every account on the Mac. Take a new draft only when its subject
+  matches the probe's own subject prefix, or the probe deletes someone else's draft.
+- `drafts()` caps at 25 across all accounts. Baseline by subject in the Envelope Index instead.
+
 ## 5. Addressing a mailbox by name
 
 Verified 2026-07-31 (#146), probing every branch against real accounts.
