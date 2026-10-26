@@ -4,9 +4,11 @@ EventKit, osascript, or TCC is touched. One @integration test exercises the real
 
 from __future__ import annotations
 
+import ctypes
 import json
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -530,9 +532,11 @@ def _budget_cases():
 @pytest.mark.parametrize(("role", "state"), _budget_cases())
 def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, probes):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
-    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The pinned worst
-    # case measures 7000 and a real `ps` executable name 7057, so 7500 keeps 500 chars
-    # of margin under the ceiling and absorbs a longer executable path.
+    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
+    # request=False live report (daemon, not-built state) measures, per status of the
+    # six Automation surfaces: denied 7301, not_running 7138, not_asked 7120,
+    # probe_error 7072 (OSStatus -1708). Denied is the worst case, so 7500 keeps 199
+    # chars of margin; a `ps` executable name longer by 199 chars would fail it.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).
@@ -604,6 +608,32 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, pro
     }
     largest = sorted(sizes.items(), key=lambda kv: -kv[1])[:8]
     assert len(json.dumps(report, ensure_ascii=False)) < 7500, largest
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="loads CoreServices")
+def test_ae_lib_binds_the_three_calls_with_exact_types():
+    # PM-07: the fakes in test_runtime.py never reach the real ctypes bindings, and a
+    # wrong restype (an unsigned OSStatus) turns -1743 into 4294965553. Loads the real
+    # CoreServices and calls no Apple Event function.
+    lib = runtime._ae_lib()
+    desc = ctypes.POINTER(runtime._AEDesc)
+    create = lib.AECreateDesc
+    assert create.restype is ctypes.c_int16
+    assert create.argtypes == [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_long,
+        desc,
+    ]
+    assert lib.AEDisposeDesc.restype is ctypes.c_int16
+    determine = lib.AEDeterminePermissionToAutomateTarget
+    assert determine.restype is ctypes.c_int32
+    assert determine.argtypes == [
+        desc,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_ubyte,
+    ]
 
 
 def test_probe_carries_applescript_side_timeout():
