@@ -2,6 +2,8 @@
 <!-- mcp-name: io.github.elfensky/macos-apps-mcp -->
 <img alt="macos-apps-mcp logo" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/logo.png" width="96" align="right">
 
+[![elfensky/macos-apps-mcp MCP server](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/badges/score.svg)](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp)
+
 One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
 Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an
 id, a one-line summary and a link that opens the item in its app. Bodies are a separate, capped fetch.

@@ -12,10 +12,10 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 | Official MCP Registry | [`io.github.elfensky/macos-apps-mcp`](https://registry.modelcontextprotocol.io/?q=io.github.elfensky/macos-apps-mcp) ([API](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.elfensky/macos-apps-mcp)) | `publish.yml` publishes `server.json` right after the PyPI upload | Live, 0.15.1, active, with the logo |
 | GitHub releases | [Releases](https://github.com/elfensky/macos-apps-mcp/releases) | `gh release create`, then the notarized `.app` zip | Live, 0.15.1 |
 | Claude Code plugin | This repo (`.claude-plugin/marketplace.json`, `plugin/`) | Follows `develop`; the server is `uvx macos-apps-mcp`, unpinned | Live: `/plugin marketplace add elfensky/macos-apps-mcp`, then `/plugin install macos-apps@macos-apps-mcp` |
-| Glama | [elfensky/macos-apps-mcp](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp) | Profile edited on Glama; `glama.json` names the maintainer | Claimed. No score yet: see [Glama score](#glama-score) |
+| Glama | [elfensky/macos-apps-mcp](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp) | Profile edited on Glama; `glama.json` names the maintainer | Claimed; scored 2026-10-26, badge in the README: see [Glama score](#glama-score) |
 | X | [@macosappsmcp](https://x.com/macosappsmcp) | Posts by hand; see [X](#x) | Created 2026-10-25; reposts releases |
 | mcprepository.com | [elfensky/macos-apps-mcp](https://mcprepository.com/elfensky/macos-apps-mcp) | Crawls GitHub by itself | Live |
-| awesome-mcp-servers | [PR #17609](https://github.com/punkpeye/awesome-mcp-servers/pull/17609), OS Automation | One line with the Glama badge | Open: the list's bot asks for a Glama score |
+| awesome-mcp-servers | [PR #17609](https://github.com/punkpeye/awesome-mcp-servers/pull/17609), OS Automation | One line with the Glama badge | Open; the Glama score its bot asks for exists since 2026-10-26 |
 | lav.ren | `src/content/projects/macos-apps-mcp/` and `src/content/blog/2026-10-apple-mail-says-ok.mdx` in the site repo | `draft: true` → `false` publishes | Drafts. The project page goes live first; the blog link is added when the blog section opens |
 | PulseMCP, mcp.directory | — | Both copy from the official registry | Not yet picked up (PulseMCP pauses submissions) |
 
@@ -115,10 +115,10 @@ release**, which is not a GitHub release:
    the tool definitions and how the tools fit together.
 3. Auto-Release (on) rebuilds on every GitHub release after that.
 
-Step 1 fails today: on Linux `pip install macos-apps-mcp` cannot install PyObjC, and the server imports
-`Foundation` at load time. The fix makes the server start and list its tools on Linux while every tool
-call there fails with a clear "macOS only" error; macOS behaviour does not change. The question is also
-open on Glama's Discord (asked 2026-10-25).
+Off macOS the server starts and lists its tools, and every tool call refuses with a "macOS only" error;
+the `linux-tools-list` CI job keeps that build test green. Glama scored the server on 2026-10-26: overall
+3.7 (A), tool definition quality 4.1 (A), coherence 2.8 (C), over the 68 tools listed without
+`MACOS_APPS_ALLOW_SEND`. The breakdown is on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score).
 
 ## Screenshots
 
