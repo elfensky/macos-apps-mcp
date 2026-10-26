@@ -5,10 +5,10 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T22:57:53.703Z"
+last_updated: "2026-10-26T12:09:51.715Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.2 execution started
-state_head: 27473f76181e9f694e1b7ab74258ddba85e0f16c
+state_head: 7e23de17a7bd9c444e847de10d5a3fd4a5619a06
 progress:
   total_phases: 14
   completed_phases: 9
@@ -179,6 +179,7 @@ Recent decisions affecting current work:
 | 38 | docs/PROMOTION.md (listings, launch plan, X, Glama score, screenshot recipe), docs/tester-brief.md, scripts/dashboard_demo.py (dashboard on invented data); RELEASING step 5 points to the listings | 2026-10-25 | 3bf281b | — |
 | 261025-vuv | The server starts and lists its tools on Linux (Glama build test): macOS-only deps marked, load-time imports guarded, UnsupportedPlatform at every native door and CLI role, Linux CI job; multi-AI review after each task | 2026-10-26 | ee2163c | [261025-vuv-the-server-starts-and-lists-its-tools-on](./quick/261025-vuv-the-server-starts-and-lists-its-tools-on/) |
 | 40 | Glama score badge in the README; PROMOTION.md records the 2026-10-26 score | 2026-10-26 | f7a648c | — |
+| 41 | docs/PROMOTION.md: Next steps — start here (handoff for a fresh session), Glama build spec + pinned-commit trap, review method, X banner + release post; AGENTS.md points to it | 2026-10-26 | 7e23de1 | — |
 
 ### Roadmap Evolution
 

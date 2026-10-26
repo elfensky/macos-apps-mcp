@@ -108,6 +108,11 @@ A new worktree has no dependencies installed: run `uv sync` in it first. A locke
 you did not create belongs to another session — leave it. `.claude/worktrees/` is Claude Code's own
 subagent isolation and is managed by the harness.
 
+## Promotion
+
+Listings, the launch plan, X and the next steps live in [docs/PROMOTION.md](docs/PROMOTION.md); a
+session on promotion work starts at its "Next steps — start here" section.
+
 ## Life cockpit
 
 Tracked in the life-cockpit vault under `#personal` (tracker: `elfensky/macos-apps-mcp`). The cockpit is

@@ -1,7 +1,35 @@
 # Promotion and listings
 
 Where macos-apps-mcp is listed, how each listing stays current, the launch plan, and the rules for
-every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASING.md](RELEASING.md).
+every post. Status as of 2026-10-26 (v0.15.1). Release mechanics are in [RELEASING.md](RELEASING.md).
+A session that picks up promotion work starts at [Next steps](#next-steps--start-here).
+
+## Next steps — start here
+
+State on 2026-10-26: the server is live on PyPI, the official MCP Registry, GitHub releases, Glama
+(scored, A) and as a Claude Code plugin. The X account exists. The lav.ren entries are merged as drafts.
+Weeks 1–2 of the [launch plan](#launch-plan) are done.
+
+| # | Step | Who | Done when |
+|---|---|---|---|
+| 1 | Send [the tester brief](tester-brief.md) to 3–5 Mac users; collect answers in Discussions; fix every setup blocker they hit | Owner sends; a session fixes | ≥ 3 testers finish a first task without help |
+| 2 | Set up [@macosappsmcp](https://x.com/macosappsmcp): avatar `sips -Z 400 docs/images/logo.png --out avatar.png`, banner `docs/images/x-banner.png`, bio from [X](#x); first post = the release post there | Owner | Profile complete, one post |
+| 3 | Glama: replace the stale short description on the Listing admin page with the text below; if the awesome-mcp-servers PR sits two more days now that the score exists, comment once that the score is live | Owner | Description current; PR merged |
+| 4 | Raise Glama's coherence grade (2.8, C): read the breakdown on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score) and fix the naming, overlap or description issues it names in `server.py` | Session | Coherence ≥ 3.0 after the next Glama build |
+| 5 | Submit to the Cline MCP Marketplace (issue with a 400×400 logo from `sips -Z 400 docs/images/logo.png`) and awesome-claude-code (issue form); fill in mcpservers.org (form) | Session drafts, owner approves | Three submissions open |
+| 6 | Demo kit: a seed script for a separate macOS test user (calendar, reminders, notes, an iCloud or IMAP test mailbox) and a 60 s shot list | Session, then owner records | Video on fake data |
+| 7 | Week 4: publish the lav.ren project page (`draft: false`, following lav.ren's own AGENTS.md); add its blog link when the blog section opens | Session in lav.ren | Page live |
+| 8 | Week 5: Show HN, Reddit, X launch post | Owner | Objections answered the same day |
+| 9 | Week 6: `.mcpb`, Smithery, Anthropic plugin directory | Session | Listed |
+| 10 | Next release (0.15.2) ships the Linux install to PyPI; afterwards clear or move Glama's pinned commit so Auto-Release builds new versions | Release session | Pin cleared |
+
+Glama short description (step 3):
+
+> One local MCP server for Mail, Calendar, Reminders, Notes, Messages and five more macOS apps.
+> Searches return pointers, not full bodies; deletes, moves and sends preview first; sending is off by
+> default.
+
+Waiting on others: PulseMCP and mcp.directory copy from the official registry by themselves.
 
 ## Listings
 
@@ -41,8 +69,10 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 - **Invented data only** in screenshots and demos. `scripts/dashboard_demo.py` serves the real dashboard
   on made-up writes and keeps every state file in its own folder. Keep its Health and Backups pages out of
   screenshots: they show this Mac's paths and pids.
-- **Review before it goes out.** Every listing text and post gets a multi-model review against the code;
-  a claim the code does not back is cut.
+- **Review before it goes out.** Every listing text, post and change gets a multi-model review (Claude
+  Octopus `orchestrate.sh spawn`, run from an empty folder with the diff pasted in). Each finding is checked
+  against the code before it is taken: reviewers have cited stale branches as fact. A claim the code does
+  not back is cut.
 - **No telemetry, ever.** Measure with GitHub Insights → Traffic (referrers such as `t.co`,
   `news.ycombinator.com`), stars, Discussions, issues with `doctor` output, the PyPI download trend, and
   the Usage tab of the Anthropic directory once listed.
@@ -52,7 +82,7 @@ every post. Status as of 2026-10-25 (v0.15.1). Release mechanics are in [RELEASI
 | Week | Work | Done when |
 |---|---|---|
 | 1 | README first screen, CREDITS provenance, topics, Discussions | Done (#472) |
-| 2 | Registry metadata, Glama claim, awesome-list PR, plugin marketplace | Done (#474, #480, release 0.15.1); Glama score open |
+| 2 | Registry metadata, Glama claim and score, awesome-list PR, plugin marketplace | Done (#474, #480, #487, release 0.15.1); awesome PR open |
 | 3 | 3–5 testers with [the tester brief](tester-brief.md); fix every setup blocker; record a 60 s demo on fake data | ≥ 3 testers finish a first task without help |
 | 4 | Publish the lav.ren project page; the Mail post when the blog opens; an X thread | Strangers ask questions or open issues |
 | 5 | Show HN (link the repo, not a post), r/ClaudeAI, r/mcp, r/macapps (check each sidebar), X launch post | Actionable objections answered the same day |
@@ -75,8 +105,8 @@ than a new project account. The project account [@macosappsmcp](https://x.com/ma
 That X ranks posts with links lower is widely reported but not confirmed; links in the first reply avoid
 the question.
 
-Profile kit for the project account: avatar = `docs/images/logo.png` at 400×400; banner 1500×500 = the
-logo plus a dashboard screenshot; bio "Local MCP server for Mail, Calendar, Reminders, Notes and more on
+Profile kit for the project account: avatar = `docs/images/logo.png` at 400×400; banner =
+`docs/images/x-banner.png` (1500×500, the logo plus the dark dashboard on invented data); bio "Local MCP server for Mail, Calendar, Reminders, Notes and more on
 macOS. Open source."; link = the repo.
 
 Draft posts (under 280 characters each):
@@ -101,6 +131,17 @@ Every write it makes is logged.
 [60 s demo video] (links in reply)
 ```
 
+Release post for the project account (0.15.1):
+
+```text
+v0.15.1 is out.
+· Listed in the official MCP Registry: io.github.elfensky/macos-apps-mcp
+· A Claude Code plugin: /plugin marketplace add elfensky/macos-apps-mcp
+· Dashboard fixes, security updates
+Local MCP server for Mail, Calendar, Notes and more on macOS.
+(links in reply)
+```
+
 The demo video needs fake data in the real apps: record it in a separate macOS user account with a test
 calendar and a test mail account (iCloud or IMAP; Gmail label moves are refused).
 
@@ -114,6 +155,21 @@ release**, which is not a GitHub release:
 2. When the build test succeeds, click **Make Release**. Glama then runs its security checks and grades
    the tool definitions and how the tools fit together.
 3. Auto-Release (on) rebuilds on every GitHub release after that.
+
+Build spec on the Dockerfile admin page (base image `debian:trixie-slim`, Python 3.12, Node 24 — Glama's
+defaults):
+
+| Field | Value |
+|---|---|
+| Build steps | `["uv sync --locked --no-dev"]` |
+| CMD arguments | `["mcp-proxy", "--", "uv", "run", "--no-sync", "macos-apps-mcp"]` |
+| Env var JSON schema | empty |
+| Pinned commit | `bedeb025d07bb04a8eb7f42656f12f8cc0eb1d44` (a `develop` commit that has the Linux start) |
+
+With no pinned commit, Glama builds the commit it last indexed, which can predate a fix: an unpinned build
+on 2026-10-26 checked out an older commit and failed on PyObjC. Glama's own advice for an OS-specific
+server (Discord, 2026-10-26) matches what the server does: environment markers on the macOS-only
+dependencies, and a clear "macOS only" error on every call.
 
 Off macOS the server starts and lists its tools, and every tool call refuses with a "macOS only" error;
 the `linux-tools-list` CI job keeps that build test green. Glama scored the server on 2026-10-26: overall
