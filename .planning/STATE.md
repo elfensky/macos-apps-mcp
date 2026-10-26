@@ -178,6 +178,7 @@ Recent decisions affecting current work:
 | 37 | Release bump 0.15.1 (pyproject, Info.plist, server.json, uv.lock root line; CHANGELOG section Registry, plugin and dashboard fixes) | 2026-10-25 | 5f89921 | — |
 | 38 | docs/PROMOTION.md (listings, launch plan, X, Glama score, screenshot recipe), docs/tester-brief.md, scripts/dashboard_demo.py (dashboard on invented data); RELEASING step 5 points to the listings | 2026-10-25 | 3bf281b | — |
 | 261025-vuv | The server starts and lists its tools on Linux (Glama build test): macOS-only deps marked, load-time imports guarded, UnsupportedPlatform at every native door and CLI role, Linux CI job; multi-AI review after each task | 2026-10-26 | ee2163c | [261025-vuv-the-server-starts-and-lists-its-tools-on](./quick/261025-vuv-the-server-starts-and-lists-its-tools-on/) |
+| 40 | Glama score badge in the README; PROMOTION.md records the 2026-10-26 score | 2026-10-26 | f7a648c | — |
 
 ### Roadmap Evolution
 
