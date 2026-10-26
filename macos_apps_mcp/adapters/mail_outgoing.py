@@ -47,6 +47,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .. import runtime
 from ..errors import NativeError
@@ -55,13 +56,11 @@ from ..text import (
     RS,
     STRIP_FRAMING,
     US,
-    clean_body,
+    sanitize_block,
     sanitize_line,
 )
 from . import mail_addressing
 from .mail_addressing import bare_id
-
-_MISSING_VALUE = "missing value"
 
 # The default-account placeholder a preview reports instead of guessing: Mail's default
 # sender is NOT predictable from account order (device-verified), so naming one would be
@@ -408,13 +407,17 @@ on run argv
 end run"""
 )
 
-# reply (#42/#46): fetch the original's sender/date/plaintext by message-id (US-framed),
-# so Python can build the quoted block deterministically (Mail's auto-quote is NOT
-# visible via the content property — spike 2026-07-11). sender/date are stripped of raw
-# framing bytes (the shared STRIP_FRAMING handler) before being joined, so a sender
-# display name that happens to contain a literal US/RS char can't desync the two
-# partitions below. The body `c` is the LAST field and needs no stripping for
-# parse-safety (clean_body strips control chars from it in build_quote).
+# reply (#42/#46): fetch the original's sender, received date and plaintext by
+# message-id (US-framed, seven fields), so Python can build the quoted block
+# deterministically (Mail's auto-quote is NOT visible via the content property — spike
+# 2026-07-11). The date travels as five integers (#348): Mail's attribution line wants
+# the Mac's own date and time format, which only Foundation gives (runtime.
+# mail_attribution_stamp), and a locale string cannot be parsed back. The sender is
+# stripped of raw framing bytes (the shared STRIP_FRAMING handler) before being joined,
+# so a display name that happens to contain a literal US/RS char can't desync the split
+# in quoted_body. The body `c` is the LAST field and needs no stripping for parse-safety
+# (sanitize_block strips control chars from it in build_quote). A missing date leaves
+# its five fields empty; quoted_body then writes the header without a date.
 _ORIGINAL = (
     STRIP_FRAMING
     + "\n\n"
@@ -432,10 +435,16 @@ on run argv
       "no message with that message id in " & (item 3 of argv)
     set m to item 1 of matches
     set snd to sender of m
-    set dt to (date received of m) as text
+    set d to date received of m
+    if d is missing value then
+      set dp to us & us & us & us
+    else
+      set dp to "" & (year of d) & us & ((month of d) as integer) & us & (day of d) ¬
+        & us & (hours of d) & us & (minutes of d)
+    end if
     set c to content of m
     if c is missing value then set c to ""
-    return (my stripFraming(snd)) & us & (my stripFraming(dt)) & us & c
+    return (my stripFraming(snd)) & us & dp & us & c
   end tell
   end timeout
 end run"""
@@ -643,14 +652,16 @@ def split_addrs(value) -> list[str]:
     return [s for a in items if (s := sanitize_line(a))]
 
 
-def build_quote(sender: str, date_str: str, original_body: str) -> str:
-    """Standard reply quote: `On <date>, <sender> wrote:` then the original body, each
-    line `> `-prefixed. Bounded via clean_body (hard=None: always truncate, never raise
-    — the quote is supplementary text, not the primary deliverable, so a huge original
-    must not abort the whole reply)."""
-    bounded = clean_body(original_body, hard=None)
-    quoted = "\n".join("> " + line for line in bounded.splitlines())
-    return f"On {date_str}, {sender} wrote:\n{quoted}"
+def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) -> str:
+    """Mail's reply quote as plain text (#348): `On <date>, at <time>, <sender> wrote:`
+    (`<sender> wrote:` when the date is unknown), then the whole original, each line
+    `> `-prefixed. No cap: the quote reaches the draft by tempfile and never the
+    model's context, so a cap protects nothing and only cuts the reply's tail."""
+    quoted = "\n".join(
+        "> " + line for line in sanitize_block(original_body).split("\n")
+    )
+    when = f"On {stamp[0]}, at {stamp[1]}, " if stamp else ""
+    return f"{when}{sender} wrote:\n{quoted}"
 
 
 # #230: every script that acts on the ORIGINAL message (read it, reply to it, forward
@@ -664,23 +675,29 @@ ORIGINAL_TIMEOUT = 120.0
 
 
 def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> str:
-    """``body`` plus the quoted original — the 10-line preamble ``reply`` and
-    ``reply_all`` each carried their own copy of (fetch, guard missing value, partition
-    on US twice, sanitize both halves, build the quote).
+    """``body`` plus the quoted original — the preamble ``reply`` and ``reply_all`` each
+    carried their own copy of (fetch, guard missing value, split on US, sanitize, build
+    the quote). The date arrives as integers and is formatted by
+    ``runtime.mail_attribution_stamp`` (#348).
 
-    Defense in depth: the script already strips raw framing bytes from sender/date, but
-    ``sanitize_line`` ALSO strips any other control char a display name or date could
-    carry, so the quote header stays clean even when the script side is bypassed (a
-    mocked ``_ORIGINAL`` in tests). An original that cannot be read degrades to an
-    unquoted body — the reply is the deliverable, the quote is decoration."""
+    Defense in depth: the script already strips raw framing bytes from the sender, but
+    ``sanitize_line`` ALSO strips any other control char a display name could carry, so
+    the quote header stays clean even when the script side is bypassed (a mocked
+    ``_ORIGINAL`` in tests). An original that cannot be read degrades to an unquoted
+    body, and a date that cannot be read to a header without one — the reply is the
+    deliverable, the quote is decoration."""
     raw = runtime.run_osascript(
         _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
     )
-    if not raw.strip() or raw.strip() == _MISSING_VALUE:
+    parts = raw.split(US, 6)
+    if len(parts) != 7:  # "missing value", empty: nothing readable to quote
         return body
-    sender, _, rest = raw.partition(US)
-    date_str, _, original = rest.partition(US)
-    quote = build_quote(sanitize_line(sender), sanitize_line(date_str), original)
+    sender, *date_parts, original = parts
+    try:
+        stamp = runtime.mail_attribution_stamp(datetime(*map(int, date_parts)))
+    except ValueError:  # a missing or impossible date: the header drops it
+        stamp = None
+    quote = build_quote(sanitize_line(sender), stamp, original)
     return body + "\n\n" + quote
 
 

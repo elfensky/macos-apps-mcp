@@ -28,6 +28,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -655,6 +656,27 @@ def mac_region() -> str | None:
     require_macos()
     region = F.NSLocale.currentLocale().objectForKey_(F.NSLocaleCountryCode)
     return str(region) if region else None
+
+
+def mail_attribution_stamp(when: datetime) -> tuple[str, str]:
+    """``(date, time)`` of a naive local ``when`` in the Mac's own region, the two
+    pieces of Mail's reply attribution ``On <date>, at <time>, <sender> wrote:`` (#348).
+
+    The date (medium style) and the time (short style) are formatted apart: the
+    combined style is not Mail's line. A Foundation read: no TCC. It runs on the worker
+    like every native call and takes microseconds. Kept here so Foundation stays out of
+    the adapters. Refuses off macOS (through ``run_native``).
+    """
+
+    def work() -> tuple[str, str]:
+        nsdate = F.NSDate.dateWithTimeIntervalSince1970_(when.timestamp())
+        fmt = F.NSDateFormatter.localizedStringFromDate_dateStyle_timeStyle_
+        return (
+            str(fmt(nsdate, F.NSDateFormatterMediumStyle, F.NSDateFormatterNoStyle)),
+            str(fmt(nsdate, F.NSDateFormatterNoStyle, F.NSDateFormatterShortStyle)),
+        )
+
+    return work() if on_worker() else run_native(work)
 
 
 log = logging.getLogger("macos_apps_mcp")
