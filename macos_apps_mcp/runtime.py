@@ -15,6 +15,7 @@ below — this module owns the worker, not the store.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import ctypes
 import logging
@@ -669,11 +670,22 @@ def mail_attribution_stamp(when: datetime) -> tuple[str, str]:
     """
 
     def work() -> tuple[str, str]:
-        nsdate = F.NSDate.dateWithTimeIntervalSince1970_(when.timestamp())
-        fmt = F.NSDateFormatter.localizedStringFromDate_dateStyle_timeStyle_
+        # the wall clock passes through unchanged: read it as UTC, format it as UTC
+        nsdate = F.NSDate.dateWithTimeIntervalSince1970_(
+            calendar.timegm(when.timetuple())
+        )
+
+        def fmt(date_style, time_style) -> str:
+            f = F.NSDateFormatter.alloc().init()
+            f.setLocale_(F.NSLocale.currentLocale())
+            f.setTimeZone_(F.NSTimeZone.timeZoneWithAbbreviation_("UTC"))
+            f.setDateStyle_(date_style)
+            f.setTimeStyle_(time_style)
+            return str(f.stringFromDate_(nsdate))
+
         return (
-            str(fmt(nsdate, F.NSDateFormatterMediumStyle, F.NSDateFormatterNoStyle)),
-            str(fmt(nsdate, F.NSDateFormatterNoStyle, F.NSDateFormatterShortStyle)),
+            fmt(F.NSDateFormatterMediumStyle, F.NSDateFormatterNoStyle),
+            fmt(F.NSDateFormatterNoStyle, F.NSDateFormatterShortStyle),
         )
 
     return work() if on_worker() else run_native(work)

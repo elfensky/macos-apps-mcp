@@ -214,7 +214,7 @@ def _automation_state(got: dict, adapter: str) -> str | None:
 
 
 def _refused_by_probe(report: dict) -> set[str]:
-    """Adapters whose own live probe was refused: an EventKit or Automation surface
+    """Adapters whose own live probe was refused: an EventKit surface
     with status ``denied`` and every adapter that needs Full Disk Access when that probe
     is denied. The probes run in the daemon, so they answer when TCC cannot be read."""
     surfaces = _surfaces(report)
@@ -222,11 +222,6 @@ def _refused_by_probe(report: dict) -> set[str]:
         n
         for n in ("calendar", "reminders")
         if surfaces.get(n, {}).get("status") == "denied"
-    }
-    out |= {
-        n
-        for n, s in surfaces.items()
-        if s.get("kind") == "automation" and s.get("status") == "denied"
     }
     if surfaces.get("full_disk_access", {}).get("ok") is False:
         out |= {
@@ -271,7 +266,12 @@ def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
                 unreadable.append(adapter.capitalize())
         elif state != "granted":
             dot = ("bad" if state == "denied" else "warn") if on else ""
-            sub = "Denied" if state == "denied" else "Not asked yet"
+            sub = (
+                "Denied"
+                if state == "denied"
+                else "Not asked yet: run doctor(request=True) so the app asks, "
+                "then switch it on in the Automation pane"
+            )
             if not on:
                 sub += " · adapter is off, so this does not matter"
             rows.append(
