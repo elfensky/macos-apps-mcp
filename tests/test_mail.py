@@ -286,6 +286,21 @@ def test_build_quote_adds_no_empty_line_for_a_trailing_newline():
     assert q == "Jane wrote:\n> one\n> two"
 
 
+def test_build_quote_drops_every_trailing_blank_line():
+    # PM-16: two or more trailing breaks must not leave empty `> ` lines
+    for original in ("one\ntwo\n\n", "one\r\n\r\n"):
+        want = "> one\n> two" if "two" in original else "> one"
+        assert _build_quote("Jane", None, original) == "Jane wrote:\n" + want
+
+
+def test_quoted_body_keeps_a_us_char_inside_the_original(monkeypatch):
+    # PM-19: only the first six US split, so a US inside the original keeps the quote
+    _patch_run(monkeypatch, lambda *a, **k: _original_reply(f"a{US}b"))
+    out = mail_outgoing.quoted_body("hi", "<abc@x>", ("ACCT", "inbox"))
+    assert out.startswith("hi\n\nOn ") and "Jane <j@x.com> wrote:\n> a" in out
+    assert out.rstrip().endswith("b")
+
+
 def test_reply_quote_keeps_a_huge_original(monkeypatch):
     # The quote reaches the draft by tempfile, never the model's context: a huge
     # original is not cut and does not abort the reply.
