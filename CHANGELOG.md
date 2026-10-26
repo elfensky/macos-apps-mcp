@@ -27,6 +27,12 @@ surface may still shift between minor versions.
   at the target name was written through. `export_mail`, `save_mail_attachment` and
   `export_photo` now refuse any existing entry at the name.
 
+- **Automation grants show on macOS 27** (#455) — `doctor` and the dashboard Health page
+  read each Automation adapter's grant live, with no prompt and no Apple Event: granted,
+  denied or not asked yet, and `not_running` when the app is quit, because its state cannot
+  be told until it runs. Both read the same check, so they agree. macOS 27 keeps no readable
+  database of these grants.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added
