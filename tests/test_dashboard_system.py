@@ -368,10 +368,12 @@ def test_live_not_asked_automation_has_an_accent_dot(doc):
     doc.report = live_report(music="not_asked")
     doc.reasons = {"user": "absent", "system": None}
     row = row_of(get("/health").text, "Automation → Music")
-    assert "dot warn" in row and ">Not asked yet<" in row
+    assert "dot warn" in row and ">Not asked yet" in row
+    # PM-13: a never-asked app has no entry in the Automation pane to switch
+    assert "doctor(request=True)" in sub_of(get("/health").text, "Automation → Music")
 
 
-def test_not_running_automation_says_the_state_cannot_be_told(doc):
+def test_not_running_automation_says_the_state_cannot_be_told(doc, monkeypatch):
     doc.report = live_report(
         **dict.fromkeys(
             ("notes", "contacts", "safari", "messages", "music"), "not_running"
@@ -385,6 +387,9 @@ def test_not_running_automation_says_the_state_cannot_be_told(doc):
     )
     assert "Open Settings" not in row_of(text, "Automation")
     assert "Could not be read" not in text and "Automation →" not in text
+    # PM-11: an OFF adapter is left out of the grey row
+    only_active(monkeypatch, [a for a in EVERYONE if a != "music"])
+    assert "Music" not in sub_of(get("/health").text, "Automation")
 
 
 def test_tcc_rows_still_answer_when_the_live_check_cannot(doc):

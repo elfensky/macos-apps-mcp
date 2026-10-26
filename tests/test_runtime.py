@@ -447,7 +447,29 @@ def test_mail_attribution_stamp_formats_date_and_time_apart(monkeypatch):
     assert "2026" in date and "13" in date
     assert "39" in time
     assert " at " not in date and " at " not in time
+    # PM-15: formatted apart, not one combined string split afterwards
+    assert ":" not in date and "2026" not in time
     assert len(calls) == 1  # off the worker, so it went through run_native once
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="NSDateFormatter is macOS-only")
+def test_mail_attribution_stamp_keeps_the_wall_clock(monkeypatch):
+    # PM-17: the wall clock passes through unchanged, whatever the zone: 02:30 is
+    # inside Europe/Brussels' 2026-03-29 DST gap and must not move to 01:30 or 03:30.
+    import time as _time
+
+    monkeypatch.setenv("TZ", "Europe/Brussels")
+    _time.tzset()
+    try:
+        _, gap = _REAL_MAIL_ATTRIBUTION_STAMP(datetime(2026, 3, 29, 2, 30))
+        date, clock = _REAL_MAIL_ATTRIBUTION_STAMP(datetime(2026, 10, 26, 1, 36))
+    finally:
+        monkeypatch.delenv("TZ")
+        _time.tzset()
+    assert "02" in gap and "30" in gap
+    assert "01" in clock and "36" in clock
+    if "Oct" in date:  # English locale
+        assert (date, clock) == ("26 Oct 2026", "01:36")
 
 
 def test_automation_permission_binds_the_ae_calls(monkeypatch):
