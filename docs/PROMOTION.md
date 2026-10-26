@@ -14,14 +14,14 @@ Weeks 1–2 of the [launch plan](#launch-plan) are done.
 |---|---|---|---|
 | 1 | Send [the tester brief](tester-brief.md) to 3–5 Mac users; collect answers in Discussions; fix every setup blocker they hit | Owner sends; a session fixes | ≥ 3 testers finish a first task without help |
 | 2 | Set up [@macosappsmcp](https://x.com/macosappsmcp): avatar `sips -Z 400 docs/images/logo.png --out avatar.png`, banner `docs/images/x-banner.png`, bio from [X](#x); first post = the release post there | Owner | Profile complete, one post |
-| 3 | Glama: replace the stale short description on the Listing admin page with the text below; if the awesome-mcp-servers PR sits two more days now that the score exists, comment once that the score is live | Owner | Description current; PR merged |
-| 4 | Raise Glama's coherence grade (2.8, C): read the breakdown on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score) and fix the naming, overlap or description issues it names in `server.py` | Session | Coherence ≥ 3.0 after the next Glama build |
-| 5 | Submit to the Cline MCP Marketplace (issue with a 400×400 logo from `sips -Z 400 docs/images/logo.png`) and awesome-claude-code (issue form); fill in mcpservers.org (form) | Session drafts, owner approves | Three submissions open |
+| 3 | Glama: on the [admin pages](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/admin/profile), check the short description and set it to the text below if it differs; if [the awesome-mcp-servers PR](https://github.com/punkpeye/awesome-mcp-servers/pull/17609) is still open on 2026-10-29, comment once that the Glama score is live | Owner | Description current; PR merged |
+| 4 | Raise Glama's coherence grade (2.8, C): read the breakdown on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score) and fix each issue it names where it lives (tool names and docstrings in `server.py`, or the listing) | Session | Coherence ≥ 3.0 after the next Glama build |
+| 5 | Submit to the [Cline MCP Marketplace](https://github.com/cline/mcp-marketplace) (an issue with the repo URL, a reason and a 400×400 logo: `sips -Z 400 docs/images/logo.png --out logo-400.png`) and [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) (its issue form); fill in [mcpservers.org](https://mcpservers.org/submit) | Session drafts, owner approves | Three submissions open |
 | 6 | Demo kit: a seed script for a separate macOS test user (calendar, reminders, notes, an iCloud or IMAP test mailbox) and a 60 s shot list | Session, then owner records | Video on fake data |
-| 7 | Week 4: publish the lav.ren project page (`draft: false`, following lav.ren's own AGENTS.md); add its blog link when the blog section opens | Session in lav.ren | Page live |
+| 7 | Week 4: publish the project page in the [lav.ren repo](https://github.com/elfensky/lav.ren) (private; local checkout `~/Developer/lav.ren`; `src/content/projects/macos-apps-mcp/index.mdx`, `draft: false`, following that repo's AGENTS.md); add its blog link when the blog section opens | Session in lav.ren | Page live |
 | 8 | Week 5: Show HN, Reddit, X launch post | Owner | Objections answered the same day |
 | 9 | Week 6: `.mcpb`, Smithery, Anthropic plugin directory | Session | Listed |
-| 10 | Next release (0.15.2) ships the Linux install to PyPI; afterwards clear or move Glama's pinned commit so Auto-Release builds new versions | Release session | Pin cleared |
+| 10 | The next release (0.15.2, not yet scheduled) ships the Linux install to PyPI; afterwards clear Glama's pinned commit so Auto-Release builds each release | Release session | Glama builds the release commit unpinned |
 
 Glama short description (step 3):
 
@@ -136,7 +136,7 @@ Release post for the project account (0.15.1):
 ```text
 v0.15.1 is out.
 · Listed in the official MCP Registry: io.github.elfensky/macos-apps-mcp
-· A Claude Code plugin: /plugin marketplace add elfensky/macos-apps-mcp
+· A Claude Code plugin: two commands, in the README
 · Dashboard fixes, security updates
 Local MCP server for Mail, Calendar, Notes and more on macOS.
 (links in reply)
@@ -169,9 +169,10 @@ defaults):
 With no pinned commit, Glama builds the commit it last indexed, which can predate a fix: an unpinned build
 on 2026-10-26 checked out an older commit and failed on PyObjC. Glama's own advice for an OS-specific
 server (Discord, 2026-10-26) matches what the server does: environment markers on the macOS-only
-dependencies, and a clear "macOS only" error on every call.
+dependencies, and a clear "macOS only" error from every tool that needs a Mac.
 
-Off macOS the server starts and lists its tools, and every tool call refuses with a "macOS only" error;
+Off macOS the server starts and lists its tools, and every tool that needs a Mac refuses with a "macOS
+only" error (`ping`, `now` and `usage` still answer);
 the `linux-tools-list` CI job keeps that build test green. Glama scored the server on 2026-10-26: overall
 3.7 (A), tool definition quality 4.1 (A), coherence 2.8 (C), over the 68 tools listed without
 `MACOS_APPS_ALLOW_SEND`. The breakdown is on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score).
