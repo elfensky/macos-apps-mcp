@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-27T17:09:19.501Z"
+stopped_at: "Phase 05.2: 7/7 plans executed; #455 closed on device; FIX-16 gap — the owner rejected the plain-text reply quote (#348 open); next: /gsd-execute-phase 05.2 (phase gates, verifier) then /gsd-plan-phase 05.2 --gaps"
+last_updated: "2026-10-27T21:35:41.634Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.2 execution started
-state_head: 566e67bf758cdeab8bb716a1ebece79ba4d8ea25
+state_head: e539ef2afad22726fca431aea010746e42521006
 progress:
   total_phases: 19
   completed_phases: 9
@@ -214,5 +214,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-24T23:03:30Z
-Stopped at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
+Stopped at: Phase 05.2: 7/7 plans executed; #455 closed on device; FIX-16 gap — the owner rejected the plain-text reply quote (#348 open); next: /gsd-execute-phase 05.2 (phase gates, verifier) then /gsd-plan-phase 05.2 --gaps
 Resume file: None
