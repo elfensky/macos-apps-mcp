@@ -49,8 +49,9 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **FIX-13**: The Phase 5 close review's deferred findings are closed: the test session patches `deploy._TCC_DB` and `deploy._TCC_SYSTEM_DB` to absent paths so no unit test opens the developer's TCC databases (WR-01); a `tool: "dashboard"` toggle or restart record renders on the write pages as an operator action with no `dry_run` row and no model chip (WR-03); a dashboard build or import failure in `daemon.serve()` is logged, sets `dashboard_state = "not built: …"` and MCP serves alone, with a test (WR-05); a toggle or restart whose audit record could not be written says so on the next page instead of a silent 303 (WR-06); and the adapter-name set and `_version` have one home, `dashboard/` modules import no underscore names across modules, `doctor` reports the dashboard URL only when a page can answer, and the deny-list is read once at import (IN-02..IN-05) (#430)
 - [ ] **FIX-14**: On a Mac where no readable TCC database holds AppleEvents rows (macOS 27), the dashboard Health page and `doctor(request=False)` report each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs, never a remediation to a setting that may already be on; the check sends no Apple Event and shows no prompt (D-14) and runs through `runtime.run_native()` on the single worker, so the Health page's `_WAIT` busy state still covers a worker held by a long Mail pass; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam with no real call; a device check from the installed daemon shows the bundle's own grants on the Health page (#455)
 - [ ] **FIX-15**: `export_mail` never hides a written file: either every target path is checked before the first write and a collision refuses the whole batch with nothing written, or each id reports its own status (`written` / `exists`, as `absent` does today) and the call returns the files it wrote — so a retry after a refusal writes no duplicate; a unit test covers a batch whose later id meets an existing file (#399)
-- [ ] **FIX-16**: A `mail_reply` or `reply_all` draft keeps Mail's native quote — quote bar, Mail's `On <date>, at <time>, <Name> <<addr>> wrote:` attribution, formatting and inline images, the whole original — with the reply text ahead of it, settled by a device probe whose finding lands in `docs/mail-applescript-facts.md`; if text cannot go ahead of the native quote without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the tool docstrings say the quote is plain text; verified on device by inspecting the resulting draft, with the Mail watchdog running (#348)
+- [ ] **FIX-16**: A `mail_reply` or `reply_all` reply keeps Mail's native quote — quote bar, Mail's own attribution line, formatting and inline images, the whole original — with the reply text ahead of it. The plain-text `> ` quote failed the owner's look test on device (2026-10-27) and is removed. A device probe settles the route, and its finding lands in `docs/mail-applescript-facts.md`: (a) first, Mail's untouched native reply with the reply text pasted on top through the Accessibility API, never a write to the reply's `content` (every such write destroys the native quote, facts §4d); (b) only if (a) fails, a self-built styled HTML quote opened as the draft. When the proven route cannot run — its permission is off, the compose window is not the one the tool opened, or the reply text cannot be confirmed in place — the tool refuses, leaves no draft and sends nothing, and the error names the setting to change (owner, 2026-10-27). `doctor()` and the Health page report any new permission the route needs. Verified on device by inspecting the resulting draft and one delivered `reply_all`, with the Mail watchdog running (#348)
 - [ ] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
+- [ ] **FIX-18**: `reply_all(dry_run=True)` previews the reply's own recipients, not the original's header: `to` is the original's sender (its Reply-To when present), `cc` is the original's to + cc, minus every address of the sending account, without duplicates — the set Mail's reply-all addresses; the original's header, if still returned, sits under a separate key; the dry run still builds no outgoing message; a unit test with an original addressed to the account itself pins it (#516)
 
 ### Calendar
 
@@ -214,6 +215,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-15 | Phase 05.2 | Pending |
 | FIX-16 | Phase 05.2 | Pending |
 | FIX-17 | Phase 05.2 | Pending |
+| FIX-18 | Phase 05.2 | Pending |
 | DIST-01 | Phase 6 | Pending |
 | DIST-02 | Phase 6 | Pending |
 | DIST-03 | Phase 6 | Pending |
@@ -223,14 +225,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 59 total
-- Mapped to phases: 59
+- v1 requirements: 60 total
+- Mapped to phases: 60
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.2: 4 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.2: 5 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-10-25 — #455/#399/#348/#464 added as FIX-14..17 (Phase 05.2); 59/59 mapped*
+*Last updated: 2026-10-27 — FIX-16 rewritten after the device verdict (native quote or refuse); #516 added as FIX-18 (Phase 05.2); 60/60 mapped*
