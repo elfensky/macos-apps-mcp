@@ -425,7 +425,7 @@ Plans:
   3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
 
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -441,7 +441,7 @@ Plans:
 - [x] 05.2-06-PLAN.md — reply drafts stop overwriting Mail's native quote on the proven route, or the hand-built quote takes Mail's attribution line with the whole original and honest docstrings (FIX-16, #348)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
+- [x] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501) (INSERTED)
 
@@ -555,7 +555,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 6/7 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 7/7 | In Progress | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
