@@ -42,6 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language
+- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page
@@ -452,11 +453,21 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.6 to break down)
 
+### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514) (INSERTED)
+
+**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts gains `update_contact` and `delete_contact` (dry run, audit, snapshot). One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. Placed after the open bug phases and before Phase 05.3: the rename lands before the testers and before Phases 05.7–05.9 add skills and tools (owner, 2026-10-26).
+**Requirements**: TBD (planned from #514)
+**Depends on:** Phase 05.6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.10 to break down)
+
 ### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
 
 **Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
 **Requirements**: TBD (planned from #465)
-**Depends on:** Phase 05.6
+**Depends on:** Phase 05.10
 **Plans:** 0 plans
 
 Plans:

@@ -5,12 +5,12 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-26T13:01:53.752Z"
+last_updated: "2026-10-27T17:09:19.501Z"
 last_activity: 2026-10-25
 last_activity_desc: Phase 05.2 execution started
-state_head: 741b4ab1383b4279a936558b686b837e9dc5e936
+state_head: 566e67bf758cdeab8bb716a1ebece79ba4d8ea25
 progress:
-  total_phases: 18
+  total_phases: 19
   completed_phases: 9
   total_plans: 79
   completed_plans: 78
@@ -201,6 +201,7 @@ Recent decisions affecting current work:
 - Phase 05.7 inserted after Phase 05.5: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504); before Phase 6 (owner, 2026-10-26)
 - Phase 05.8 inserted after Phase 05.7: Notes depth — Markdown input and note attachments (#505, #506); before Phase 6 (owner, 2026-10-26)
 - Phase 05.9 inserted after Phase 05.8: CLI and paged reads — tools from the shell, pages past the cap (#507, #508); before Phase 6 (owner, 2026-10-26)
+- Phase 05.10 inserted after Phase 05.6: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514); before Phase 05.3, so the breaking rename lands before the testers and before Phases 05.7–05.9 add skills and tools (owner, 2026-10-26)
 
 ## Deferred Items
 
