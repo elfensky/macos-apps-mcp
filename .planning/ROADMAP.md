@@ -40,7 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
-- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
+- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
@@ -415,17 +415,18 @@ Plans:
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
-**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17
+**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464); `reply_all`'s dry-run preview lists the original's header, not the reply's recipients (#516, found at the 05.2-07 device sitting). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17, FIX-18
 **Depends on:** Phase 05.1
 **Success Criteria** (what must be TRUE):
 
   1. On macOS 27, where no readable TCC database holds AppleEvents rows, the Health page and `doctor(request=False)` give each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs; the check sends no Apple Event, shows no prompt (D-14) and runs through `runtime.run_native()`; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam; a device check from the installed daemon shows the bundle's own grants on the Health page (#455).
   2. `export_mail` never hides a written file: a collision on a later id either refuses the whole batch before the first write, or every id reports its own status (`written` / `exists` / `absent`) and the call returns the files it wrote, so a retry writes no duplicate; a unit test covers the later-id collision (#399).
-  3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
+  3. A `mail_reply` or `reply_all` reply keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, on a route settled by a device probe recorded in `docs/mail-applescript-facts.md` — (a) the reply text pasted on top of Mail's untouched native reply through the Accessibility API, tested first; (b) a self-built styled HTML quote only if (a) fails. The plain-text `> ` quote is removed (owner verdict, 2026-10-27). When the route cannot run, the tool refuses, leaves no draft and sends nothing, and names the setting; `doctor()` and the Health page report the route's permission. The resulting draft and one delivered `reply_all` are inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
+  5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
 
-**Plans:** 7/7 plans executed
+**Plans:** 7/13 plans executed
 
 Plans:
 **Wave 1**
@@ -442,6 +443,22 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
+
+**Gap closure** (from the 05.2-07 device sitting: the owner rejected the plain-text quote; #516)
+
+**Gap Wave 1**
+- [ ] 05.2-08-PLAN.md — `reply_all(dry_run=True)` lists the reply's own `to`/`cc` (Reply-To or sender; the original's to + cc minus the account's addresses) and labels it as the computed reply set; the denied-Automation text stops asking for a restart (FIX-18, FIX-14; #516)
+- [ ] 05.2-09-PLAN.md — owner sitting, run as the installed bundle: route (a) first — an AX write at the caret (M1), then Cmd-V to Mail's process only from a borrowed, restored clipboard (M2), then System Events (M3) only with the owner's OK; route (b) only if all fail; the finding lands as facts §4e and four handoff lines (FIX-16, #348)
+
+**Gap Wave 2** *(blocked on Gap Wave 1 completion)*
+- [ ] 05.2-10-PLAN.md — `runtime.accessibility_trusted()` and `runtime.compose_insert()` seams; `mail_reply` keeps Mail's native quote on the proven route, or refuses and discards the reply, leaving nothing (FIX-16, #348)
+
+**Gap Wave 3** *(blocked on Gap Wave 2 completion)*
+- [ ] 05.2-11-PLAN.md — `reply_all` sends Mail's native reply-all only after the inserted text is confirmed, or refuses and sends nothing; the plain-text quote code and its tests are deleted (FIX-16, #348)
+- [ ] 05.2-12-PLAN.md — `doctor()` reports the Accessibility grant without a prompt; the Health page shows it in one row; DAEMON.md and the README say how to grant it (FIX-16, #348)
+
+**Gap Wave 4** *(blocked on Gap Wave 3 completion)*
+- [ ] 05.2-13-PLAN.md — device acceptance on the rebuilt `.app`: an inspected `mail_reply` draft, one delivered `reply_all`, the refusals, the preview and the wording; closes #348 and #516 with evidence or records the gaps (FIX-16, FIX-18, FIX-14)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501) (INSERTED)
 
@@ -555,7 +572,7 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 7/7 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 7/13 | In Progress | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |
