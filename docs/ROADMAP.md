@@ -5,6 +5,10 @@ High-level direction for macos-apps-mcp, grounded in a full landscape survey of 
 map, not the territory. Issues here are **candidates**: filing ≠ commitment; refinement happens per
 milestone.
 
+**Status in plain language:** the [progress guide](../.planning/reports/progress-guide.html)
+(published copy: <https://artifacts.static.lav.ren/macos-apps-mcp-progress/>) shows every GSD phase,
+the gates before the beta test, the public launch and the one-click install, and the reason for each.
+
 **Where we sit.** The 3.1k★ category leader ([supermemoryai/apple-mcp](https://github.com/supermemoryai/apple-mcp))
 is archived; [mattt/iMCP](https://github.com/mattt/iMCP) is the only maintained multi-app suite with
 traction and ships **no Mail, no Notes, no Photos, no Safari** (its two most-requested issues). No

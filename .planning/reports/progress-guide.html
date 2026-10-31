@@ -1,0 +1,1283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macos-apps-mcp — progress guide (2026-11-01)</title>
+<meta name="description" content="Where macos-apps-mcp stands on 2026-11-01: the phases done and to come, what is still needed before the beta test, the public launch and the one-click install, and the reason for each step.">
+<!--
+  Source of https://artifacts.static.lav.ren/macos-apps-mcp-progress/
+  One self-contained file. Diagrams load Mermaid 12.2.0 from jsDelivr at view time.
+  Data: .planning/ROADMAP.md, STATE.md, REQUIREMENTS.md, PROJECT.md, docs/PROMOTION.md,
+  docs/tester-brief.md, CHANGELOG.md, git tags and GitHub counts, all read at develop 8378ab8.
+  Republish after each change: ~/vault/meta/scripts/publish <main-checkout path> macos-apps-mcp-progress
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --surface-2: #f4f3ef;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --s1: #2a78d6;
+    --s1-wash: #e8f1fc;
+    --s1-track: #cde2fb;
+    --s2: #eb6834;
+    --s2-wash: #fdeee6;
+    --s3: #1baf7a;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --good-text: #006300;
+    --link: #1c5cab;
+    --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --surface-2: #222220;
+      --ink: #f0efec;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --s1: #3987e5;
+      --s1-wash: #17263a;
+      --s1-track: #0d366b;
+      --s2: #d95926;
+      --s2-wash: #3a2016;
+      --s3: #199e70;
+      --good-text: #0ca30c;
+      --link: #86b6ef;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 16px/1.55 var(--font);
+  }
+  a { color: var(--link); }
+  a:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--s1);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  .skip { position: absolute; left: -999px; top: 0; }
+  .skip:focus { left: 8px; top: 8px; background: var(--surface); padding: 8px 12px; z-index: 10; }
+  header.top {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  header.top .wrap { padding-top: 36px; padding-bottom: 28px; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.5rem; line-height: 1.25; margin: 0 0 6px; }
+  h3 { font-size: 1.15rem; margin: 0 0 4px; }
+  h4 { font-size: 1rem; margin: 16px 0 6px; }
+  p { margin: 0 0 12px; }
+  .lede { font-size: 1.1rem; color: var(--ink-2); max-width: 780px; }
+  .meta { color: var(--ink-2); font-size: 0.9rem; }
+  nav.toc {
+    position: sticky; top: 0; z-index: 5;
+    background: color-mix(in srgb, var(--page) 92%, transparent);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.toc ul { list-style: none; margin: 0 auto; padding: 8px 20px; max-width: 1120px;
+    display: flex; gap: 4px 18px; flex-wrap: wrap; font-size: 0.92rem; }
+  @media (max-width: 760px) { nav.toc ul { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; } }
+  nav.toc a { text-decoration: none; color: var(--ink-2); padding: 6px 0; display: inline-block; }
+  nav.toc a:hover { color: var(--ink); text-decoration: underline; }
+  section.block { padding: 44px 0 8px; scroll-margin-top: 48px; }
+  .sub { color: var(--ink-2); margin-bottom: 20px; max-width: 820px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  .card { min-width: 0; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); }
+
+  /* Hero and stat tiles */
+  .glance { display: grid; gap: 16px; grid-template-columns: minmax(260px, 1.1fr) 2fr; }
+  @media (max-width: 760px) { .glance { grid-template-columns: 1fr; } }
+  .hero .label, .tile .label { font-size: 0.9rem; color: var(--ink-2); }
+  .hero .value { font-size: 3.5rem; font-weight: 600; line-height: 1.05; margin: 6px 0; }
+  .hero .value small { font-size: 1.4rem; font-weight: 500; color: var(--ink-2); }
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 1000px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile .value { font-size: 1.75rem; font-weight: 600; line-height: 1.2; margin-top: 2px; }
+  .tile .note { font-size: 0.82rem; color: var(--ink-2); }
+  .meter { height: 10px; border-radius: 5px; background: var(--s1-track); overflow: hidden; margin: 10px 0 6px; }
+  .meter > span { display: block; height: 100%; background: var(--s1); border-radius: 5px 0 0 5px; }
+
+  /* Analogy box */
+  .eli { border-left: 4px solid var(--s2); background: var(--s2-wash); border-radius: 0 10px 10px 0; padding: 14px 18px; }
+  .eli .tag, .kitchen .tag { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); }
+  .kitchen { font-size: 0.92rem; color: var(--ink-2); border-left: 3px solid var(--s2); padding: 2px 0 2px 10px; margin: 10px 0 4px; }
+
+  /* Status chips: icon + label, never colour alone */
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600;
+    padding: 2px 10px 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2);
+    white-space: nowrap; color: var(--ink); }
+  .chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .chip.done .dot { background: var(--good); }
+  .chip.active .dot { background: var(--warning); }
+  .chip.next .dot { background: transparent; border: 2px solid var(--muted); }
+  .chip.optional .dot { background: transparent; border: 2px dotted var(--muted); }
+  .chip.ready .dot { background: var(--good); }
+  .chip.todo .dot { background: transparent; border: 2px solid var(--muted); }
+
+  /* Phase track */
+  ol.track { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  ol.track li { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 0.86rem; }
+  ol.track li b { display: block; font-size: 0.95rem; }
+  ol.track li .chip { margin-top: 6px; }
+  ol.track li.is-active { border: 2px solid var(--warning); }
+  ol.track li a { color: inherit; text-decoration: none; }
+  ol.track li a:hover b { text-decoration: underline; }
+
+  /* Gate cards */
+  .gate h3 { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .gate .when { font-size: 0.9rem; color: var(--ink-2); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  th { font-weight: 600; color: var(--ink-2); font-size: 0.82rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .done-when { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--s1-wash); font-size: 0.92rem; }
+
+  /* Phase cards */
+  .phase { display: grid; gap: 4px; align-content: start; }
+  .phase header { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: baseline; margin-bottom: 6px; }
+  .phase .num { font-weight: 700; font-size: 0.85rem; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 8px; font-variant-numeric: tabular-nums; }
+  /* The title fills the first line, so the status chip and dates always wrap to line 2. */
+  .phase h3 { margin: 0; flex: 1 0 calc(100% - 90px); }
+  .phase .dates { font-size: 0.82rem; color: var(--ink-2); }
+  .phase dl { margin: 0; display: grid; grid-template-columns: 52px 1fr; gap: 4px 12px; font-size: 0.94rem; }
+  .phase dt { font-weight: 600; color: var(--ink-2); }
+  .phase dd { margin: 0; }
+  details { margin-top: 10px; border-top: 1px solid var(--grid); padding-top: 8px; }
+  details > summary { cursor: pointer; font-size: 0.88rem; font-weight: 600; color: var(--ink-2); padding: 4px 0; }
+  details[open] > summary { margin-bottom: 6px; }
+  details .tech { font-size: 0.88rem; color: var(--ink-2); }
+  details .tech ul { margin: 4px 0 8px; padding-left: 18px; }
+  code { font: 0.86em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+
+  /* Charts */
+  .chart-title { font-weight: 600; margin: 0 0 2px; }
+  .chart-sub { font-size: 0.86rem; color: var(--ink-2); margin: 0 0 10px; }
+  svg.viz { width: 100%; height: auto; display: block; overflow: visible; }
+  svg.viz text { font-family: var(--font); fill: var(--ink-2); font-size: 12px; }
+  svg.viz .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  svg.viz .val { fill: var(--ink); font-size: 12px; font-weight: 600; }
+  svg.viz .lbl { fill: var(--ink); font-size: 12px; }
+  svg.viz .grid { stroke: var(--grid); stroke-width: 1; }
+  svg.viz .axis { stroke: var(--axis); stroke-width: 1; }
+  svg.viz .ref { stroke: var(--muted); stroke-width: 1; }
+  svg.viz .mark { fill: var(--s1); transition: opacity 0.12s; }
+  svg.viz .hit { fill: transparent; }
+  svg.viz g.item:hover .mark, svg.viz g.item:focus .mark { opacity: 0.75; }
+  svg.viz .ring { stroke: var(--surface); stroke-width: 2; }
+  svg.viz .leader { stroke: var(--axis); stroke-width: 1; }
+  svg.viz .annot { stroke: var(--muted); stroke-width: 1; }
+  svg.viz .today { stroke: var(--critical); stroke-width: 1.5; }
+  .req-row { display: grid; grid-template-columns: 120px 1fr 78px; gap: 12px; align-items: center; font-size: 0.9rem; padding: 5px 0; }
+  .req-row .meter { margin: 0; }
+  .req-row .count { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+  #tip { position: fixed; pointer-events: none; z-index: 20; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.85rem;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.14); max-width: 260px; display: none; }
+  #tip strong { display: block; font-size: 1rem; }
+  #tip .k { display: inline-block; width: 12px; height: 2px; background: var(--s1); vertical-align: middle; margin-right: 6px; }
+
+  /* Mermaid */
+  .diagram { overflow-x: auto; }
+  pre.mermaid { margin: 0; font: 12px/1.4 ui-monospace, Menlo, monospace; color: var(--ink-2); white-space: pre; }
+  pre.mermaid[data-processed] { font: inherit; color: inherit; white-space: normal; }
+  pre.mermaid svg { max-width: 100%; height: auto; }
+  .diagram .node.gate rect, .diagram .node.gate polygon, .diagram .node.gate path { fill: var(--s2-wash) !important; stroke: var(--s2) !important; stroke-width: 2px !important; }
+  .diagram .node.done rect, .diagram .node.done polygon, .diagram .node.done path { fill: var(--surface-2) !important; stroke: var(--good) !important; }
+  .diagram .node.now rect, .diagram .node.now polygon, .diagram .node.now path { stroke: var(--warning) !important; stroke-width: 3px !important; }
+  .diagram .node.opt rect, .diagram .node.opt polygon, .diagram .node.opt path { stroke-dasharray: 4 3 !important; }
+  .diagram .grid .tick line { stroke: var(--grid) !important; opacity: 1 !important; }
+  .diagram .grid .tick text { fill: var(--ink-2) !important; }
+  .legend { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 0.85rem; color: var(--ink-2); margin-top: 10px; }
+  .legend .sw { display: inline-block; width: 14px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; border: 1px solid var(--s1); }
+  .mm-error { font-size: 0.85rem; color: var(--ink-2); margin-top: 6px; }
+
+  .two { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 760px) {
+    .two { grid-template-columns: minmax(0, 1fr); }
+    .req-row { grid-template-columns: 96px 1fr 64px; }
+    .gate table, .gate thead, .gate tbody, .gate tr, .gate td { display: block; }
+    .gate thead { display: none; }
+    .gate tr { padding: 8px 0; border-bottom: 1px solid var(--grid); }
+    .gate td { border: 0; padding: 2px 0; }
+  }
+  .decision h3 { margin-bottom: 8px; }
+  .decision .rec { background: var(--s1-wash); border-radius: 8px; padding: 10px 12px; margin: 8px 0; font-size: 0.92rem; }
+  .decision .grade { display: grid; grid-template-columns: 64px 1fr; gap: 4px 10px; font-size: 0.9rem; margin-top: 8px; }
+  .decision .grade b { color: var(--ink-2); }
+  ul.plain { margin: 6px 0 0; padding-left: 18px; }
+  ul.plain li { margin: 3px 0; }
+  footer { margin: 56px 0 0; padding: 24px 0 48px; border-top: 1px solid var(--border); color: var(--ink-2); font-size: 0.88rem; }
+  @media print { nav.toc { position: static; } details { display: block; } }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the content</a>
+
+<header class="top">
+  <div class="wrap">
+    <h1>macos-apps-mcp — progress guide</h1>
+    <p class="lede">Where the project stands, what comes next, and why. This guide covers the plan
+      from the first release to the one-click install, and the steps still needed before the beta
+      test and the public launch.</p>
+    <p class="meta">Status on 2026-11-01 · branch <code>develop</code> at <code>8378ab8</code> ·
+      source: the GSD planning files of the repository (list at the end). Technical detail sits in the
+      fold-out sections marked “Technical detail”.</p>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <ul>
+    <li><a href="#glance">At a glance</a></li>
+    <li><a href="#gates">Beta, launch, install</a></li>
+    <li><a href="#history">Timeline</a></li>
+    <li><a href="#schedule">Schedule</a></li>
+    <li><a href="#phases">Phase by phase</a></li>
+    <li><a href="#later">After v1</a></li>
+    <li><a href="#decisions">Open decisions</a></li>
+    <li><a href="#method">Pace and method</a></li>
+  </ul>
+</nav>
+
+<main id="main" class="wrap">
+
+<!-- ============================================================ AT A GLANCE -->
+<section class="block" id="glance" aria-labelledby="glance-h">
+  <h2 id="glance-h">At a glance</h2>
+  <p class="sub">macos-apps-mcp lets Claude work with the apps on a Mac: Mail, Calendar,
+    Reminders, Notes, Messages, Contacts, Photos, Safari, Music and Shortcuts. It runs on the Mac
+    itself. Its main rule is <b>safe writes</b>: a delete, move or send shows a preview first, every
+    change goes into a log, and moved mail can come back with one undo.</p>
+
+  <div class="glance">
+    <div class="card hero">
+      <div class="label">Phases complete in the current plan (milestone v1)</div>
+      <div class="value">9 <small>of 19</small></div>
+      <div class="meter" role="img" aria-label="9 of 19 phases complete"><span style="width:47.4%"></span></div>
+      <div class="meta">1 phase in progress (9 of its 13 steps done). 9 phases to go, and 1 of
+        them is optional. The plan started on 2026-08-28.</div>
+    </div>
+    <div class="tiles">
+      <div class="card tile"><div class="label">Releases shipped</div><div class="value">22</div>
+        <div class="note">v0.1.0 (2026-06-27) to v0.15.1 (2026-10-25)</div></div>
+      <div class="card tile"><div class="label">Requirements met</div><div class="value">52 of 60</div>
+        <div class="note">8 phases still get their requirements when they are planned</div></div>
+      <div class="card tile"><div class="label">Plan steps done</div><div class="value">79</div>
+        <div class="note">of 85 written so far</div></div>
+      <div class="card tile"><div class="label">Pull requests merged</div><div class="value">321</div>
+        <div class="note">231 of them in October 2026</div></div>
+      <div class="card tile"><div class="label">Apps covered</div><div class="value">10</div>
+        <div class="note">68 tools with sending switched off</div></div>
+      <div class="card tile"><div class="label">Automated test functions</div><div class="value">2,026</div>
+        <div class="note">plus an on-device test sweep</div></div>
+    </div>
+  </div>
+
+  <div class="card eli" style="margin-top:16px">
+    <div class="tag">In plain words</div>
+    <p style="margin:6px 0 0">Think of the project as a restaurant kitchen. Claude is the chef, and the
+      apps on the Mac are the pantry. The house rule is safe cooking: the chef shows each plate before
+      it goes out, keeps every receipt, and keeps a copy of anything it moves. The plan is a
+      renovation in order: first the wiring, then each dish to the same standard, then a window for
+      the owner. Next come a soft opening for a few friends (the <b>beta test</b>), the grand opening
+      (the <b>public launch</b>) and a delivery service (the <b>one-click install</b>).</p>
+  </div>
+
+  <h3 style="margin-top:28px">Where every phase stands</h3>
+  <p class="sub" style="margin-bottom:12px">In the order the phases run. Numbers with a dot (05.2)
+    are phases added to the plan later, mostly for bug fixes. Select a phase to read about it.</p>
+  <ol class="track">
+    <li><a href="#p1"><b>1 · Foundation</b>Rebuild the base</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p2"><b>2 · Honest tests</b>Prove the base</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p021"><b>02.1 · Mail fixes</b>Big moves, right sender</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p3"><b>3 · Calendar, Reminders</b>Alarms, repeats, lists</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p031"><b>03.1 · Bug fixes</b>Intel iMac report</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p4"><b>4 · Notes, Photos</b>Test first, then build</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p041"><b>04.1 · Bug fixes</b>Phase 4 follow-ups</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p5"><b>5 · Dashboard</b>Owner's window, app switches</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li><a href="#p051"><b>05.1 · Bug fixes</b>Dashboard follow-ups</a><br><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span></li>
+    <li class="is-active"><a href="#p052"><b>05.2 · Bug fixes</b>Replies keep Mail's quote</a><br><span class="chip active"><span class="dot" aria-hidden="true"></span>In progress · 9 of 13</span></li>
+    <li><a href="#p056"><b>05.6 · Bug fixes</b>Safe Notes edits, any language</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>Next</span></li>
+    <li><a href="#p054"><b>05.4 · Upgrade</b>New core libraries</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p0510"><b>05.10 · Tool menu</b>Clear names, clear errors</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p059"><b>05.9 · Terminal</b>Tools from the shell</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p058"><b>05.8 · Notes depth</b>Markdown, attachments</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p053"><b>05.3 · Feedback</b>One-click problem reports</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p057"><b>05.7 · Guidance</b>House rules, app guides</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></li>
+    <li><a href="#p055"><b>05.5 · Web address</b>Dashboard at a domain</a><br><span class="chip optional"><span class="dot" aria-hidden="true"></span>Optional</span></li>
+    <li><a href="#p6"><b>6 · Distribution</b>One-click install</a><br><span class="chip next"><span class="dot" aria-hidden="true"></span>To do · 3 of 6 early</span></li>
+  </ol>
+</section>
+
+<!-- ============================================================ GATES -->
+<section class="block" id="gates" aria-labelledby="gates-h">
+  <h2 id="gates-h">The road to the beta test, the launch and the one-click install</h2>
+  <p class="sub">Three events matter to people outside the project. Each one has a gate: a list of
+    things that must be true first. The diagram shows the order. The cards below list each item and
+    the reason for it.</p>
+
+  <div class="card diagram">
+<pre class="mermaid" id="mm-road">
+flowchart TB
+  NOW["05.2 · Replies keep Mail's own quote<br>(in progress)"]:::now
+  subgraph BB["Before the beta test"]
+    direction LR
+    P56["05.6 · Safe Notes edits,<br>folders in any language"] --> P54["05.4 · New versions of<br>the core libraries"] --> P510["05.10 · Clear tool names,<br>error kinds, paging"] --> REL(["New release<br>on PyPI"])
+  end
+  subgraph BL["Before the public launch"]
+    direction LR
+    P59["05.9 · Tools from<br>the Terminal"] --> P58["05.8 · Markdown notes,<br>note attachments"] --> P53["05.3 · One-click<br>problem reports"]
+  end
+  subgraph BI["Before the one-click install"]
+    direction LR
+    P57["05.7 · House rules<br>and app guides"] --> P6["6 · .mcpb, Homebrew,<br>plugin, directories"]
+    P57 -.-> P55["05.5 · Dashboard at a<br>web address (optional)"]:::opt
+  end
+  BETA{{"Beta test<br>3–5 Mac users"}}:::gate
+  LIVE{{"Public launch<br>project page, Show HN, Reddit, X"}}:::gate
+  DONE(["Milestone v1 complete"]):::gate
+  V2["v2 · Contacts, Messages, Safari, Maps, menu bar"]
+  NOW --> BB
+  BB --> BETA
+  BB --> BL
+  BETA -- "3 or more testers finish<br>a task without help" --> LIVE
+  BL --> LIVE
+  BL --> BI
+  BI --> DONE
+  DONE --> V2
+  classDef gate stroke-width:2px
+  classDef now stroke-width:3px
+  classDef opt stroke-width:1px
+</pre>
+    <div class="legend">
+      <span><span class="sw" style="border-color:var(--warning);border-width:3px"></span>In progress now</span>
+      <span><span class="sw" style="background:var(--s2-wash);border-color:var(--s2)"></span>Gate: an event for people outside the project</span>
+      <span><span class="sw" style="border-style:dashed"></span>Optional</span>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:16px">
+
+    <article class="card gate" id="gate-beta">
+      <h3>1 · Beta test <span class="chip todo"><span class="dot" aria-hidden="true"></span>4 phases and 1 release to go</span></h3>
+      <p class="when">Estimate: it can start between 2026-11-13 and 2026-11-24 (see <a href="#method">Pace and method</a>).</p>
+      <p>Three to five Mac users follow the <b>tester brief</b>: about 20 minutes of setup, then
+        three tasks (a calendar question, a reply draft, a mail move with its undo). They report where
+        setup stalls, what looks wrong and what feels unsafe.</p>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>The soft opening: a few friends eat
+        before the doors open, and their comments fix the menu while changes are still cheap.</p>
+      <table>
+        <thead><tr><th scope="col">Needed first</th><th scope="col">State</th><th scope="col">Why it is needed</th></tr></thead>
+        <tbody>
+          <tr><td>Phase 05.2 — replies keep Mail's own quote</td><td><span class="chip active"><span class="dot" aria-hidden="true"></span>9 of 13</span></td>
+            <td>The tester brief asks Claude to draft a reply. A reply that lost the original's formatting failed the owner's look test (2026-10-27).</td></tr>
+          <tr><td>Phase 05.6 — safe Notes edits, folders in any language</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>Next</span></td>
+            <td>Today an edit can overwrite a locked or shared note. A tester's Mac may not use English, and a folder like “Trash” has another name there. Bugs come before features (owner, 2026-10-11).</td></tr>
+          <tr><td>Phase 05.4 — new versions of the two core libraries</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>The old line gets security fixes only. Every later phase builds on the parts this upgrade changes, so a later upgrade means doing that work twice.</td></tr>
+          <tr><td>Phase 05.10 — final tool names, error kinds, paging</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>The rename breaks the old names on purpose. The recorded rule puts it before the testers, so they learn one set of names only.</td></tr>
+          <tr><td>A new release on PyPI</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>After 05.10</span></td>
+            <td>Testers install with <code>uvx macos-apps-mcp</code>, which installs the newest release from PyPI (the Python package index). PyPI holds 0.15.1.</td></tr>
+          <tr><td>Tester brief</td><td><span class="chip ready"><span class="dot" aria-hidden="true"></span>Written</span></td>
+            <td>Setup, three tasks and four questions are ready. It should be read again against the new release before it goes out.</td></tr>
+          <tr><td>A place for answers</td><td><span class="chip ready"><span class="dot" aria-hidden="true"></span>Ready</span></td>
+            <td>Testers reply by mail or post in GitHub Discussions, which are on.</td></tr>
+        </tbody>
+      </table>
+      <div class="done-when"><b>Done when</b> at least 3 testers finish a first task without help, and every setup blocker they hit is fixed.</div>
+      <details><summary>Technical detail</summary>
+        <div class="tech">
+          <ul>
+            <li>Source of the rule: Phase 05.10 goal — “one breaking release, before the testers (owner, 2026-10-26)”; issue #514 — “the <code>verb_noun</code> rename is one breaking release before the testers”.</li>
+            <li>Brief: <code>docs/tester-brief.md</code>. Launch plan: <code>docs/PROMOTION.md</code> § Launch plan, week 3 and Next steps row 1.</li>
+            <li>A <code>uvx</code> install has no dashboard: the dashboard needs the signed <code>.app</code> background app (PROMOTION rules).</li>
+            <li>Sending stays off for testers: the send tools do not exist unless <code>MACOS_APPS_ALLOW_SEND</code> names Mail.</li>
+            <li>Phase 05.3 (problem reports) is not on this list: the brief already gives testers a way to report.</li>
+          </ul>
+        </div>
+      </details>
+    </article>
+
+    <article class="card gate" id="gate-live">
+      <h3>2 · Public launch <span class="chip todo"><span class="dot" aria-hidden="true"></span>beta pass and 3 more phases</span></h3>
+      <p class="when">Estimate: possible between 2026-11-21 and 2026-12-11.</p>
+      <p>The project page goes live on lav.ren. A week later come the public posts: Show HN, the Claude,
+        MCP and Mac app communities on Reddit, and a launch post on X with a 60-second demo on invented
+        data.</p>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>The grand opening: strangers walk in,
+        so the menu must be final, the staff must know the rules, and a guest needs a simple way to say
+        that something is wrong.</p>
+      <table>
+        <thead><tr><th scope="col">Needed first</th><th scope="col">State</th><th scope="col">Why it is needed</th></tr></thead>
+        <tbody>
+          <tr><td>Beta test passed</td><td><span class="chip todo"><span class="dot" aria-hidden="true"></span>Gate 1</span></td>
+            <td>Strangers get the setup that the testers already fixed.</td></tr>
+          <tr><td>Phase 05.9 — tools from the Terminal</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>It comes before 05.3 in the dependency order: it must speak the new tool names first.</td></tr>
+          <tr><td>Phase 05.8 — Markdown notes, note attachments</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>It comes before 05.3: its tools must exist before the feedback and guidance phases describe them.</td></tr>
+          <tr><td>Phase 05.3 — one-click problem reports</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>Recorded reason: “so the first outside users can report problems”. The person reads the report and sends it with their own click.</td></tr>
+          <tr><td>Demo kit and 60-second video on invented data</td><td><span class="chip todo"><span class="dot" aria-hidden="true"></span>Not started</span></td>
+            <td>The launch post needs a video. Only invented data appears in demos and screenshots.</td></tr>
+          <tr><td>Listing grade on Glama of 4.3 or more</td><td><span class="chip todo"><span class="dot" aria-hidden="true"></span>3.7 today</span></td>
+            <td>Directories show the grade. Phase 05.10 sets the target: 4.3 overall and 3.5 for coherence (2.8 today).</td></tr>
+          <tr><td>Project page on lav.ren</td><td><span class="chip ready"><span class="dot" aria-hidden="true"></span>Draft merged</span></td>
+            <td>The page goes live first, so the posts can link to it.</td></tr>
+        </tbody>
+      </table>
+      <div class="done-when"><b>Done when</b> every actionable objection in the launch threads gets an answer on the same day.</div>
+      <details><summary>Technical detail</summary>
+        <div class="tech">
+          <ul>
+            <li>Order in <code>.planning/ROADMAP.md</code> (owner, 2026-10-31): 05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6.</li>
+            <li>05.3 placement: “after the surface and tool phases, so <code>report_problem</code> and <code>suggest_improvement</code> follow the <code>verb_noun</code> names and the error codes, and before Phase 6 so the first outside users can report problems”.</li>
+            <li>Launch plan weeks 4 and 5 in <code>docs/PROMOTION.md</code>; demo kit is Next steps row 6; Glama is row 4.</li>
+            <li>Rules for every post: mechanisms, never guarantees; the server is local, the conversation is not; a multi-model review before anything goes out.</li>
+          </ul>
+        </div>
+      </details>
+    </article>
+
+    <article class="card gate" id="gate-install">
+      <h3>3 · One-click install — milestone v1 complete <span class="chip todo"><span class="dot" aria-hidden="true"></span>2 phases, 1 optional</span></h3>
+      <p class="when">Estimate: between 2026-11-27 and 2026-12-23.</p>
+      <p>A person who is not the author installs the server, its background app and its companion
+        guide without the source code: one click in Claude Desktop, one Homebrew command for the signed
+        app, one plugin install in Claude Code.</p>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>The delivery service: the food
+        reaches people at home, with the same rules as in the dining room.</p>
+      <table>
+        <thead><tr><th scope="col">Needed first</th><th scope="col">State</th><th scope="col">Why it is needed</th></tr></thead>
+        <tbody>
+          <tr><td>Phase 05.7 — house rules and per-app guides</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span></td>
+            <td>The plugin ships these guides. They are written once, after the last tool exists.</td></tr>
+          <tr><td>Phase 6 — the install packages</td><td><span class="chip next"><span class="dot" aria-hidden="true"></span>3 of 6 done early</span></td>
+            <td>A Claude Desktop bundle (<code>.mcpb</code>), a Homebrew cask and the plugin with its guide. Then the Smithery and Anthropic directory listings, which need the bundle.</td></tr>
+          <tr><td>Phase 05.5 — dashboard at a web address</td><td><span class="chip optional"><span class="dot" aria-hidden="true"></span>Optional</span></td>
+            <td>Nothing depends on it. It may move to v2.</td></tr>
+        </tbody>
+      </table>
+      <div class="done-when"><b>Done when</b> a Claude Desktop install takes less than 2 minutes. Then the milestone gets its audit and closes.</div>
+      <details><summary>Technical detail</summary>
+        <div class="tech">
+          <ul>
+            <li>Done early as quick tasks: DIST-01 (README leads with <code>uvx</code>, #113), DIST-02 (<code>[project.urls]</code>, #111), DIST-06 (Intel build, #205).</li>
+            <li>Open: DIST-03 <code>.mcpb</code> per release (#107), DIST-04 Homebrew cask with the staple-then-zip order (#107), DIST-05 companion skill and plugin, also installable with <code>npx skills add elfensky/macos-apps-mcp</code> (#106).</li>
+            <li>Already live: PyPI, the official MCP Registry (<code>io.github.elfensky/macos-apps-mcp</code>), GitHub releases with the notarized <code>.app</code>, Glama (scored), the in-repo Claude Code plugin marketplace.</li>
+          </ul>
+        </div>
+      </details>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ HISTORY -->
+<section class="block" id="history" aria-labelledby="history-h">
+  <h2 id="history-h">Timeline: from the first release to the plan ahead</h2>
+  <p class="sub">The project shipped its first release on 2026-06-27. The current plan (GSD
+    milestone v1) was written on 2026-08-28, after an architecture review. Months after
+    November 2026 are estimates.</p>
+
+  <div class="grid">
+    <div class="card diagram">
+      <p class="chart-title">Before the plan: June to August 2026</p>
+<pre class="mermaid" id="mm-timeline-a">
+timeline
+  section Before the plan
+    June 2026 : v0.1 Calendar and Reminders
+              : v0.2 new name
+    July 2026 : v0.3 and v0.4 previews, undo, batch limits
+              : v0.5 reads from the apps' own databases
+              : v0.6 renamed macos-apps-mcp
+              : v0.7 change log and Mail triage
+              : v0.8 one permission for every client
+              : v0.9 sending mail behind a switch
+    August 2026 : v0.10 Mail complete
+                : Architecture review
+                : Plan v1 written (28 Aug)
+</pre>
+    </div>
+    <div class="card diagram">
+      <p class="chart-title">Milestone v1 and after: September 2026 onwards</p>
+<pre class="mermaid" id="mm-timeline-b">
+timeline
+  section Milestone v1
+    September 2026 : v0.11 Mail on macOS 15
+                   : Phases 1 and 2 rebuild and test the base
+    October 2026 : Mail, Calendar, Reminders, Notes, Photos
+                 : The owner's dashboard
+                 : v0.12 to v0.15.1, first listings
+    Nov – Dec 2026 (estimate) : Replies keep Mail's quote
+                              : Bug fixes, upgrade, new tool names
+                              : Beta test, then public launch
+                              : One-click install
+  section After v1
+    Next milestone : v2 Contacts, Messages, Safari, Maps, menu bar
+</pre>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <p class="chart-title">Every release, by date</p>
+    <p class="chart-sub">22 releases. A large dot is a release with a new theme (x.y.0). A small dot is
+      a fix release. Point at a dot, or move to it with the Tab key, to see its name.</p>
+    <div id="chart-releases"></div>
+    <details><summary>Show the data as a table</summary>
+      <table id="tbl-releases"><thead><tr><th scope="col">Version</th><th scope="col">Date (tag)</th><th scope="col">Theme</th></tr></thead><tbody></tbody></table>
+    </details>
+  </div>
+
+  <div class="two" style="margin-top:16px">
+    <div class="card">
+      <p class="chart-title">Commits per month</p>
+      <p class="chart-sub">On <code>develop</code>, June to October 2026.</p>
+      <div id="chart-commits"></div>
+      <details><summary>Show the data as a table</summary><table id="tbl-commits"><thead><tr><th scope="col">Month</th><th class="num" scope="col">Commits</th></tr></thead><tbody></tbody></table></details>
+    </div>
+    <div class="card">
+      <p class="chart-title">Pull requests merged per month</p>
+      <p class="chart-sub">From late September, every plan step lands as its own pull request.</p>
+      <div id="chart-prs"></div>
+      <details><summary>Show the data as a table</summary><table id="tbl-prs"><thead><tr><th scope="col">Month</th><th class="num" scope="col">Merged</th></tr></thead><tbody></tbody></table></details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ SCHEDULE -->
+<section class="block" id="schedule" aria-labelledby="schedule-h">
+  <h2 id="schedule-h">Schedule of milestone v1</h2>
+  <p class="sub">Bars up to 2026-11-01 show real dates. Later bars are estimates at 4 days per phase,
+    the mean pace of the nine phases that are complete. The red line marks the day the page is
+    viewed. The three gates are diamonds. The dates do not count the optional Phase 05.5: if it
+    stays, it runs before Phase 6 and adds 3 to 6 days.</p>
+  <div class="card diagram">
+<pre class="mermaid" id="mm-gantt">
+gantt
+  dateFormat YYYY-MM-DD
+  axisFormat %d %b
+  tickInterval 1week
+  weekday monday
+  section Base
+  1 Rebuild the base            :done, p1, 2026-09-25, 2026-09-26
+  2 Prove the base              :done, p2, 2026-09-28, 2026-10-01
+  section App depth
+  02.1 Mail fixes               :done, p021, 2026-10-01, 2026-10-05
+  3 Calendar and Reminders      :done, p3, 2026-10-05, 2026-10-11
+  03.1 Bug fixes                :done, p031, 2026-10-11, 2026-10-16
+  4 Notes and Photos            :done, p4, 2026-10-09, 2026-10-20
+  04.1 Bug fixes                :done, p041, 2026-10-20, 2026-10-21
+  section Owner's window
+  5 Dashboard and switches      :done, p5, 2026-10-21, 2026-10-22
+  05.1 Bug fixes                :done, p051, 2026-10-23, 2026-10-25
+  section Before the beta
+  05.2 Replies keep the quote   :active, p052, 2026-10-25, 2026-11-04
+  05.6 Notes safety, languages  :p056, after p052, 4d
+  05.4 Core library upgrade     :p054, after p056, 4d
+  05.10 Tool names and errors   :p0510, after p054, 4d
+  Beta test can start           :milestone, gbeta, after p0510, 0d
+  Testers (1 week)              :crit, beta, after p0510, 7d
+  section Before the launch
+  05.9 Terminal command         :p059, after p0510, 4d
+  05.8 Notes depth              :p058, after p059, 4d
+  05.3 Problem reports          :p053, after p058, 4d
+  Public launch possible        :milestone, glive, after p053, 0d
+  section One-click install
+  05.7 House rules and guides   :p057, after p053, 4d
+  05.5 Web address (optional)   :p055, after p057, 4d
+  6 Install packages            :p6, after p057, 4d
+  Milestone v1 complete         :milestone, gdone, after p6, 0d
+</pre>
+    <div class="legend">
+      <span><span class="sw" id="lg-done"></span>Done</span>
+      <span><span class="sw" id="lg-active"></span>In progress</span>
+      <span><span class="sw" id="lg-todo"></span>Estimate</span>
+      <span><span class="sw" id="lg-crit"></span>Beta test</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ PHASES -->
+<section class="block" id="phases" aria-labelledby="phases-h">
+  <h2 id="phases-h">Phase by phase: what, why, and what is left</h2>
+  <p class="sub">Every phase has the same parts: what it changes, the reason for it, and the kitchen
+    picture. The fold-out holds the requirement codes, issue numbers and the device facts.</p>
+
+  <div class="two" style="margin-bottom:16px">
+    <div class="card">
+      <p class="chart-title">Requirements met, by area</p>
+      <p class="chart-sub">60 written requirements for milestone v1. Phases 05.3 to 05.10 get their
+        requirements when they are planned.</p>
+      <div id="req-meters"></div>
+    </div>
+    <div class="card eli">
+      <div class="tag">Three house rules that shape the order</div>
+      <ul class="plain">
+        <li><b>Email first</b> (owner, 2026-09-24): Mail work goes ahead of every new feature. Mail is
+          the app used most, and its mistakes cost the most.</li>
+        <li><b>Bugs first</b> (owner, 2026-10-11): an open bug goes into its own phase before the next
+          feature phase. Five bug phases came from this rule.</li>
+        <li><b>Test on the device first</b>: a probe on a real Mac settles how an app behaves before
+          code is written. Ten releases in a row had their premise changed by such a probe.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="margin:24px 0 10px">Done</h3>
+  <div class="grid g2">
+
+    <article class="card phase" id="p1">
+      <header><span class="num">1</span><h3>Rebuild the base</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-09-26 · 14 steps</span></header>
+      <dl><dt>What</dt><dd>The inside of the server got a clean structure. A test that forgets its stand-in for an app now stops, instead of touching the real app. Every tool takes its safety settings from one record.</dd>
+        <dt>Why</dt><dd>Every later phase changes the same core files. A clean base makes each later change smaller and safer. A test that can reach a real app proves nothing.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Rewire the kitchen and fit the fire alarms before cooking more dishes.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>GATE-01..06, 08, 09, 10, 13. The 2026-08-28 spiked review re-landed as cards 1 → 7 → 5 → 2, Mail cards 3, 4 and 9 in parallel.</li>
+        <li>Native seam fails closed: <code>run_osascript</code>, <code>body_file</code>, <code>tracked_run</code> locked in conftest. <code>runtime.py</code> is an 11-name native door; EventKit moved to <code>eventkit.py</code>; <code>tiers.py</code> and <code>notices.py</code> own policy.</li>
+        <li>One <code>ToolRecord</code> per tool drives tier, audit verb, notice and snapshot. Every content-removing tool defaults <code>dry_run=True</code>, enforced by a registry test.</li>
+        <li>v0.11.0 was cut first as the baseline.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p2">
+      <header><span class="num">2</span><h3>Prove the base</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-01 · 6 steps</span></header>
+      <dl><dt>What</dt><dd>The test suite passes in every setup: read-only, normal, and on a real Mac. The full device sweep of 80 tests passed on macOS 27.</dd>
+        <dt>Why</dt><dd>Every later phase trusts the tests to catch mistakes, so the tests had to be honest first.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Test every alarm, in every room, before anyone relies on it.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>GATE-07, 11, 12. <code>MACOS_APPS_READ_ONLY=1 uv run pytest</code> green (12 failures before); CI runs it as a second step.</li>
+        <li><code>doctor</code> process probes go through <code>tracked_run</code>, held by an AST tripwire.</li>
+        <li>Released and installed as v0.12.0.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p021">
+      <header><span class="num">02.1</span><h3>Mail fixes: big moves, the right sender</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-05 · 8 steps</span></header>
+      <dl><dt>What</dt><dd>Moving or trashing 25 mails at once now finishes on a large mailbox and always leaves a receipt for the undo. A draft starts from the account the user names. An address that no account owns is refused.</dd>
+        <dt>Why</dt><dd>Email first. These were broken promises of tools that already existed. Mail sends from the default account without a warning when the address is unknown, so the server must refuse first.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Fix the most popular dish before adding new ones.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>MAIL-01..04 (#206, #208). By-ID acts from one bulk read; host timeouts scale with the batch; worst device ratio 0.092 of the cap on a 9k+ IMAP mailbox.</li>
+        <li>A timeout receipt marks its targets <code>unknown</code>; <code>mail_undo</code> replays them. <code>owned_addresses()</code> fails closed (spike 005).</li>
+        <li>v0.13.0; the sweep findings #229 and #230 were settled in v0.13.1.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p3">
+      <header><span class="num">3</span><h3>Calendar and Reminders: alarms, repeats, lists</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-11 · 10 steps</span></header>
+      <dl><dt>What</dt><dd>Events get alarms and full repeat rules, for example “every second Tuesday”. Reminders can be deleted, lists can be made, and subtasks and tags are visible.</dd>
+        <dt>Why</dt><dd>The plan wants every app as complete as Mail. Calendar and Reminders share one Apple system, so they move together. Apple gives no public way to write subtasks or tags, so they stay read-only.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Bring the calendar and reminder dishes to the standard of the mail dish.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>CAL-01..04, REM-01..04, REM-06; MAIL-05/06 confirmed from 0.13.1.</li>
+        <li>Alarms: at most 5, all-day counted from local midnight. BYDAY, BYMONTHDAY, BYMONTH with a six-month RFC 5545 expansion test; shapes EventKit cannot hold are refused by name.</li>
+        <li><code>delete_reminder</code> previews by default, checks the reminder is gone, and guards subtasks. Tags and parents come read-only from the Reminders SQLite store (spike 002: <code>parentReminder</code> is not public API).</li>
+        <li>Container ids in <code>Pointer.folder</code> (#207). v0.14.0.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p031">
+      <header><span class="num">03.1</span><h3>Bug fixes from the Intel iMac report</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-16 · 7 steps</span></header>
+      <dl><dt>What</dt><dd>A second, older Mac found faults: a slow Contacts search, a wrong Notes count and mail accounts with codes for names. Each log entry now also says if it was a preview or a real change.</dd>
+        <dt>Why</dt><dd>Bugs first. A second Mac shows faults that the main Mac hides.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>A guest at a second branch found faults. Fix them before any new dish.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>FIX-01..06 (#222, #317, #333–#337). Audit records carry <code>dry_run</code> and <code>caller</code>.</li>
+        <li>Contacts reads each property with one Apple event over the match list (5 scans, 9 s). The Notes count premise was wrong: the rows sat in Recently Deleted.</li>
+        <li><code>mail_overview</code> labels a removed account <code>(account not in Mail)</code>.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p4">
+      <header><span class="num">4</span><h3>Notes and Photos: test first, then build</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-20 · 6 steps</span></header>
+      <dl><dt>What</dt><dd>Photos can be searched, read and exported by id. Notes search looks inside the text of each note. A search by meaning for Notes was tested and not adopted.</dd>
+        <dt>Why</dt><dd>For both apps the way in was an open question. A test on the device answered it before feature code. The gain of a search by meaning was too small for a model, an index and its upkeep. A written “no” is also a result.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Taste two new ingredients before they go on the menu. One did not make it.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>NOTE-01/02, PHO-01..04 (#93, #96). osxphotos 0.77 proven inside the signed bundle on both chip types; Python 3.12 floor (D-16).</li>
+        <li>Hidden photos stay locked (D-17). Export never downloads and never overwrites.</li>
+        <li>In-memory FTS5 body search; semantic search rejected (spike 004).</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p041">
+      <header><span class="num">04.1</span><h3>Bug fixes after Phase 4</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-21 · 5 steps</span></header>
+      <dl><dt>What</dt><dd>Four small faults from the Phase 4 reviews: the app build, the message for a file that exists, a code-style setting and temporary photo copies left behind.</dd>
+        <dt>Why</dt><dd>Bugs first. The build fault was a supply-chain risk: build tools came unchecked from the internet.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Clean the small faults the tasting found.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>FIX-07..10 (#373, #383, #384, #387). Hash-locked build environment, <code>--no-deps</code> wheel install.</li>
+        <li>Typed <code>WriteRefused</code> for an existing target; ruff on py312; pid-tagged staging with a dead-pid sweep.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p5">
+      <header><span class="num">5</span><h3>The owner's window: dashboard and app switches</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-22 · 9 steps</span></header>
+      <dl><dt>What</dt><dd>A local web page shows the permissions, the usage, every change with its before and after, and the mail backups. The owner can switch an app off, for example Photos.</dd>
+        <dt>Why</dt><dd>A user who wants Mail but not Photos gets exactly that. Nobody has to read log files by hand. The page answers only on the Mac itself.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>A window into the kitchen: what was cooked and by whom, and a switch to close a station.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>PLAT-01/02 (#126). Deny-list read at daemon start; a switched-off app's tools are absent, not erroring.</li>
+        <li>Loopback only, page key on every request, no single-page framework. v0.15.0.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p051">
+      <header><span class="num">05.1</span><h3>Bug fixes after the dashboard</h3><span class="chip done"><span class="dot" aria-hidden="true"></span>Done</span><span class="dates">to 2026-10-25 · 7 steps</span></header>
+      <dl><dt>What</dt><dd>The dashboard shows account names instead of codes, passes the contrast and keyboard checks, and the server stays up when the page fails.</dd>
+        <dt>Why</dt><dd>Bugs first, and an accessibility fault is a bug.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Make the window readable for everyone, and keep the kitchen open if the window breaks.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>FIX-11..13 (#427, #428, #430). Seven plan PRs plus three review-fix PRs; a 50-row security register with no open threat.</li>
+        <li>Follow-ups outside any phase: #447 (small accessibility items), #450 (keep account names after a restart).</li></ul></div></details>
+    </article>
+  </div>
+
+  <h3 style="margin:28px 0 10px">In progress</h3>
+  <div class="grid">
+    <article class="card phase" id="p052">
+      <header><span class="num">05.2</span><h3>Bug fixes before the next feature — replies keep Mail's own quote</h3><span class="chip active"><span class="dot" aria-hidden="true"></span>In progress · 9 of 13 steps</span><span class="dates">since 2026-10-25</span></header>
+      <dl><dt>What</dt><dd>Permissions show correctly on macOS 27. A mail export never hides a file it wrote. A reply-all preview shows the real recipients. A reply keeps Mail's own quoted original, with its formatting and images.</dd>
+        <dt>Why</dt><dd>Every known bug is fixed before the next feature. A reply in plain text with “&gt;” quotes failed the owner's look test (2026-10-27).</dd>
+        <dt>Left</dt><dd>4 steps: build the proven method into the reply tools, report the one new permission it needs, then test on the real Mac and inspect a real draft and one delivered reply-all.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Serve the reply on the original plate, with its garnish, not on a paper copy.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>FIX-14..18 (#455, #399, #348, #464, #516). Done: FIX-17, FIX-15, FIX-14 parts 1 and 2, FIX-18 (PR #520), the route probe (PR #523, facts §4e).</li>
+        <li>Proven route: route a, mechanism M2 — one Cmd-V posted to Mail's process from a borrowed and restored clipboard puts the reply text above Mail's untouched native quote (5 of 5 runs, settle 80–133 ms). An Accessibility write (M1) failed.</li>
+        <li>It needs the Accessibility grant. If the route cannot run, the tool refuses, leaves no draft and sends nothing. Clean-up is rollback plus a sweep, because Mail's autosave can land 5 s after a window opens.</li>
+        <li>Left: 05.2-10 (<code>accessibility_trusted()</code>, <code>compose_insert()</code> seams in <code>mail_reply</code>), 05.2-11 (<code>reply_all</code>; the plain-text quote code is deleted), 05.2-12 (<code>doctor()</code> and Health page report the grant), 05.2-13 (device acceptance).</li>
+        <li>Side finding #521: <code>delete_draft</code> walks Drafts one Apple Event per message (3 timeouts at 30 s with 287 drafts). It is in no phase yet — see <a href="#decisions">Open decisions</a>.</li></ul></div></details>
+    </article>
+  </div>
+
+  <h3 style="margin:28px 0 10px">Still to do, in order</h3>
+  <div class="grid g2">
+
+    <article class="card phase" id="p056">
+      <header><span class="num">05.6</span><h3>Bug fixes: safe Notes edits, folders in any language</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>Next</span><span class="dates">before the beta</span></header>
+      <dl><dt>What</dt><dd>A Notes edit keeps the note's content or refuses before it touches the note. Locked and shared notes are refused. System folders such as Trash, Junk and Recently Deleted are found on a Mac in any language. The app carries every licence text it must.</dd>
+        <dt>Why</dt><dd>Today an edit can overwrite a locked or shared note, or a note with attachments, and keeps only the title as its “before” copy. That breaks the safe-writes rule. Many users do not run their Mac in English.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Never cook over a locked or shared recipe card, and read the labels in any language.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#500 (<code>update_note</code>/<code>delete_note</code> refuse locked and shared notes; attachment or non-text content refused or fully backed up first, as a device probe decides; the full body is the before-state).</li>
+        <li>#501 (Notes Recently Deleted by <code>ZFOLDERTYPE</code>; Mail Trash, Junk, Sent, Archive by a language-free signal or a name table in <code>mailbox_url.py</code>).</li>
+        <li>#497 (Adapters page grant chips on macOS 27), #471 (MIT notices of PyObjC and bpylist2 in the <code>.app</code>, with a build check).</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p054">
+      <header><span class="num">05.4</span><h3>Upgrade: new versions of the two core libraries</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the beta</span></header>
+      <dl><dt>What</dt><dd>The server moves to the new main versions of the two libraries that speak MCP, the standard way an AI app connects to tools.</dd>
+        <dt>Why</dt><dd>The old line gets security fixes only. The upgrade changes the parts that the next three feature phases build on, so it goes first and nothing is built twice. A broken connection must still answer with an error, never with silence.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Install the new oven before the new dishes, so nothing is cooked twice.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#470: mcp 1.x (maintenance) → mcp 2; fastmcp 3 → fastmcp 4; the two caps of #286 lift together.</li>
+        <li>Must hold: <code>fail_loud_on_dead_stream</code> (#170); no read deadline on the shim↔daemon socket on the httpx2 stack; proxy, <code>AuditMiddleware</code> and notices unchanged; streamed-call smoke on both <code>.app</code> slices.</li>
+        <li>cryptography stays as <code>docs/DAEMON.md</code> records (mcp 2 still requires <code>pyjwt[crypto]</code>).</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p0510">
+      <header><span class="num">05.10</span><h3>The tool menu: clear names, clear errors, paging</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the beta</span></header>
+      <dl><dt>What</dt><dd>Every tool explains each of its fields and names the tool to use instead when one is close. All names follow one pattern: verb, then noun. Duplicate tools merge. Every error starts with its kind. A long result continues on a next page.</dd>
+        <dt>Why</dt><dd>An AI picks the right tool more often when names and descriptions are clear. The rename breaks the old names, so it happens once, in one release, before the testers. The listing grade on Glama should rise from 3.7 to 4.3 or more.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Rewrite the menu once, with clear names, before the first guests read it.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#514 (Glama rubric TDQS 1.3; every parameter described; no description names an unregistered tool; index builders stay read tier), #502 (error <code>kind</code> prefix, e.g. <code>write_refused:</code>), #508 (stateless <code>next_cursor</code>; a mismatched cursor answers <code>invalid_argument</code>).</li>
+        <li>Merges within one tier only: <code>mail</code> into <code>mail_search</code>, <code>mail_body</code> with <code>mail_bodies</code>, <code>notes</code> with <code>notes_all</code>, the index builders, <code>messages_with</code> with <code>messages_search</code>, the four Music setters. No aliases; a CHANGELOG rename table.</li>
+        <li>CI: an in-repo test and a pinned <code>tdqs lint</code> in <code>linux-tools-list</code>. Glama build spec sets <code>MACOS_APPS_ALLOW_SEND=mail</code>. Contacts update and delete stay v2.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p059">
+      <header><span class="num">05.9</span><h3>Tools from the Terminal</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the launch</span></header>
+      <dl><dt>What</dt><dd>Any tool runs from the Terminal with one command.</dd>
+        <dt>Why</dt><dd>Scripts and quick checks need no chat. The command goes through the same background app as Claude, so the same permissions, switches and change log apply. It comes after the rename, so it speaks the new names.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>A staff door: order from the kitchen without a waiter, under the same rules.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#507: <code>macos-apps-mcp call &lt;tool&gt;</code> over the shim's unix-socket transport; tiers, permissions and audit stay the daemon's.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p058">
+      <header><span class="num">05.8</span><h3>Notes depth: Markdown and attachments</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the launch</span></header>
+      <dl><dt>What</dt><dd>New and edited notes can be written in Markdown. Attachments in a note can be listed, saved and added.</dd>
+        <dt>Why</dt><dd>An AI writes Markdown by default, and attachments are the largest gap in Notes. It builds on the safety checks of 05.6, and its tools must exist before the app guides are written.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Write recipes in a familiar shorthand, and keep the photos clipped to the card.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#505: <code>format: "markdown"</code> rendered by <code>markdown-it-py</code>, raw HTML off, a link-scheme allowlist.</li>
+        <li>#506: <code>note_attachments</code>, <code>save_note_attachment</code>, <code>add_note_attachment</code> through <code>files.py</code>; locked and shared notes refused.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p053">
+      <header><span class="num">05.3</span><h3>Feedback: one-click problem reports</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the launch</span></header>
+      <dl><dt>What</dt><dd>When the server fails, one command builds a report with private data removed. The person reads it and sends it with their own click. An AI can also add problems and improvement ideas to the same report.</dd>
+        <dt>Why</dt><dd>The first outside users need a simple way to report. The project has no telemetry and never will: nothing leaves the Mac without the person's click.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>A suggestion box and a “something is wrong” button. The guest decides what goes in.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#465; design <code>docs/superpowers/specs/2026-10-25-feedback-reports-design.md</code>.</li>
+        <li>Failures recorded without agent help (middleware, shim, daemon, stdio start-up). <code>macos-apps-mcp report</code> works with the daemon down and opens <code>gh issue create --web</code> or a mail draft.</li>
+        <li>Tools <code>report_problem</code> and <code>suggest_improvement</code>; a nudge in error results points to the command.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p057">
+      <header><span class="num">05.7</span><h3>Guidance: house rules and app guides</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do</span><span class="dates">before the install</span></header>
+      <dl><dt>What</dt><dd>The server tells each AI app its house rules when it connects. Each app family gets a short guide with decision rules and the known traps.</dd>
+        <dt>Why</dt><dd>The guides are written once, after the last tool exists, so they match the real tools. A test keeps them and the tool list in step. Phase 6 ships them in the plugin.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>A handbook for every new chef: the house rules and the known traps.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#503: a short <code>instructions</code> text built from the registry, under a tested size budget.</li>
+        <li>#504: one skill per app family, held to <code>registry.TOOLS</code> by a parity test (#106 packages them).</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p055">
+      <header><span class="num">05.5</span><h3>Dashboard at a web address</h3><span class="chip optional"><span class="dot" aria-hidden="true"></span>Optional</span><span class="dates">may move to v2</span></header>
+      <dl><dt>What</dt><dd>The dashboard opens at a normal web address through a static loader page. The data still comes only from the Mac itself.</dd>
+        <dt>Why</dt><dd>An address is easier to find than a local port number. Nothing depends on it, and Safari cannot use it, so it may move to v2.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>An optional street sign that points to the kitchen window.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>#483; design <code>docs/superpowers/specs/2026-10-25-dashboard-loader-design.md</code>; spikes 009–011.</li>
+        <li>CORS only for a paired origin; page key in <code>Authorization: Bearer</code>; Chrome and Firefox ask once for <code>loopback-network</code>; Safari gets a link to the local page.</li></ul></div></details>
+    </article>
+
+    <article class="card phase" id="p6">
+      <header><span class="num">6</span><h3>Distribution: the one-click install</h3><span class="chip next"><span class="dot" aria-hidden="true"></span>To do · 3 of 6 done early</span><span class="dates">closes milestone v1</span></header>
+      <dl><dt>What</dt><dd>A person who is not the author installs the server, the background app and the companion guide without the source code.</dd>
+        <dt>Why</dt><dd>This is the aim of the milestone: other people can run it safely. Three parts are already done: the simple install command, the links on PyPI and the build for Intel Macs.</dd></dl>
+      <p class="kitchen"><span class="tag">In the kitchen</span><br>Takeaway and delivery: the food reaches people at home in one click.</p>
+      <details><summary>Technical detail</summary><div class="tech"><ul>
+        <li>Done: DIST-01 (#113), DIST-02 (#111), DIST-06 (#205; <code>cryptography&lt;49</code> on x86_64 only).</li>
+        <li>Open: DIST-03 <code>.mcpb</code> (#107), DIST-04 Homebrew cask (#107), DIST-05 plugin and skills (#106). The plugin and marketplace exist (quick task 261025-h09); the skill content comes from 05.7.</li>
+        <li>The companion skill teaches triage reads, pointer citation and draft review.</li></ul></div></details>
+    </article>
+  </div>
+</section>
+
+<!-- ============================================================ AFTER V1 -->
+<section class="block" id="later" aria-labelledby="later-h">
+  <h2 id="later-h">After v1: the next milestone and what is not planned</h2>
+  <p class="sub">Milestone v2 has requirements but no phases and no dates yet. The owner moved
+    these items out of v1 at the 2026-08-28 review: “make sure the ones we have now are all working,
+    stable, and as fully featured as possible” before new areas.</p>
+  <p class="kitchen" style="max-width:820px"><span class="tag">In the kitchen</span><br>New menu sections come after the dining room is full and the current dishes are right.</p>
+
+  <div class="grid g3" style="margin-top:12px">
+    <article class="card"><h3>Contacts depth</h3>
+      <p>Full contact cards, the user's own card, edits by id, and a fast search from the Contacts database.</p>
+      <p class="meta">Why later: v1 depth went to Calendar, Reminders, Notes and Photos.</p>
+      <details><summary>Technical detail</summary><div class="tech">CON-01..04 (#94, #95). The notes field is excluded by design: its entitlement is unobtainable outside App Store review, and touching it crashes updates.</div></details></article>
+    <article class="card"><h3>Messages depth</h3>
+      <p>Filters by date and unread, attachments, and sending an iMessage or SMS behind the same send switch as Mail.</p>
+      <p class="meta">Why later: owner's call at the 2026-08-28 review. Sending to people needs the same care as Mail sending.</p>
+      <details><summary>Technical detail</summary><div class="tech">MSG-01..07 (#86–#88). Recipient by id-addressed handle or <code>chat_id</code>, never a fuzzy pick; preview makes no native call.</div></details></article>
+    <article class="card"><h3>Safari library</h3>
+      <p>Bookmarks, the reading list and a history search.</p>
+      <p class="meta">Why later: a new area, not depth for an existing one.</p>
+      <details><summary>Technical detail</summary><div class="tech">SAF-01/02 (#97). Reading list and history need Full Disk Access.</div></details></article>
+    <article class="card"><h3>New areas (low priority)</h3>
+      <p>Maps search and directions, addresses to places and back, the current position, and the weather.</p>
+      <p class="meta">Why later: lowest priority; the current position needs a probe first.</p>
+      <details><summary>Technical detail</summary><div class="tech">MAP-01, LOC-01/02, WX-01 (#98–#100). Weather through keyless Open-Meteo: WeatherKit needs a paid entitlement.</div></details></article>
+    <article class="card"><h3>Platform</h3>
+      <p>A menu bar app, access from other devices such as Home Assistant, user preferences in the house rules, and alarms on reminders.</p>
+      <p class="meta">Why later: the dashboard came first, and it builds the parts a menu bar app would use.</p>
+      <details><summary>Technical detail</summary><div class="tech">PLAT-03 (#105), PLAT-04 (Swift <code>MenuBarExtra</code>, a pure client of the daemon), PLAT-05 (#127: Tailscale-bound listener, bearer auth and an SSE bridge), REM-05.</div></details></article>
+    <article class="card"><h3>Faster Mail previews</h3>
+      <p>Move and trash previews answered from Mail's own index, with no request to the Mail app.</p>
+      <p class="meta">Why later: the index can lag Mail, so the extra check exists for a reason.</p>
+      <details><summary>Technical detail</summary><div class="tech">v2 MAIL-05 (#206 follow-up).</div></details></article>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Not planned, and why</h3>
+    <table>
+      <thead><tr><th scope="col">Item</th><th scope="col">Reason</th></tr></thead>
+      <tbody>
+        <tr><td>Screenshots, camera, audio, system utilities</td><td>“An apps MCP, not a Mac-control MCP” (owner, 2026-08-28). The AI app already has a shell and screenshots.</td></tr>
+        <tr><td>A general AppleScript door</td><td>It goes around the typed safety design. Another server can run beside this one.</td></tr>
+        <tr><td>Journal</td><td>Apple gives no way in.</td></tr>
+        <tr><td>Writes through private Apple interfaces</td><td>They can break without warning on the next macOS update, which breaks the safe-writes rule.</td></tr>
+        <tr><td>Whole files in answers (photo bytes, full mail bodies in lists)</td><td>Answers carry pointers, not payload. That is the reason the project exists.</td></tr>
+        <tr><td>Picking a recipient by a guess</td><td>An earlier design sent an iMessage to the wrong person that way.</td></tr>
+        <tr><td>Permanent delete in Mail, bulk download of bodies or attachments</td><td>Probes on the device proved that Mail has no such mechanism.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ DECISIONS -->
+<section class="block" id="decisions" aria-labelledby="decisions-h">
+  <h2 id="decisions-h">Open decisions</h2>
+  <p class="sub">Four choices that are not recorded yet. Each has a proposal and its trade-off. A
+    proposal stays a proposal until the owner confirms it.</p>
+  <div class="grid two">
+    <article class="card decision"><h3>1 · When does the beta test start?</h3>
+      <p>Right after the release that follows 05.10, as recorded — or later, after 05.3, so testers also get the report command.</p>
+      <div class="rec"><b>Proposed:</b> right after the 05.10 release. Testers see the final names, and their answers arrive about 12 days earlier at the mean pace. The brief already gives them a way to report.</div>
+      <div class="grade"><b>Today</b><span>No code changes. Only the date of the first outside answers moves.</span>
+        <b>Later</b><span>An earlier start leaves more time to fix setup blockers before the launch. The cost: reports are written by hand, without the tool's redaction.</span></div>
+      <p class="meta">With no decision: the recorded order applies, and the beta waits for the 05.10 release.</p></article>
+    <article class="card decision"><h3>2 · Does the launch wait for the one-click install?</h3>
+      <p>The launch plan puts the public posts one week before the Claude Desktop bundle. The roadmap now puts two phases (05.7 and 6) between 05.3 and the bundle.</p>
+      <div class="rec"><b>Proposed:</b> launch after 05.3 and the beta pass, and ship the one-click install as the next news.</div>
+      <div class="grade"><b>Today</b><span>No effect.</span>
+        <b>Later</b><span>Early visitors use the Terminal setup of about 20 minutes, and some may leave. Waiting for Phase 6 moves the launch by about 8 days at the mean pace, 12 days at the slow pace.</span></div>
+      <p class="meta">With no decision: the launch plan order applies (posts first, bundle a week later).</p></article>
+    <article class="card decision"><h3>3 · Where does bug #521 go?</h3>
+      <p>Deleting a draft can time out on a Mac with many drafts: 3 timeouts at 30 s with 287 drafts. It is in no phase.</p>
+      <div class="rec"><b>Proposed:</b> add it to Phase 05.6, the next bug phase, as the bugs-first rule asks.</div>
+      <div class="grade"><b>Today</b><span>A <code>delete_draft</code> call can fail on a busy Mail.</span>
+        <b>Later</b><span>Testers who clean drafts may meet it. Fixing it in 05.6 adds a little to that phase.</span></div>
+      <p class="meta">With no decision: the bug stays open and needs its own inserted phase before the next feature phase.</p></article>
+    <article class="card decision"><h3>4 · Keep Phase 05.5 in v1?</h3>
+      <p>The dashboard at a web address is optional (owner, 2026-10-31). It may be skipped or moved to v2.</p>
+      <div class="rec"><b>Proposed:</b> move it to v2. Nothing depends on it, Safari cannot use it, and the one-click install comes 3 to 6 days sooner.</div>
+      <div class="grade"><b>Today</b><span>No effect.</span>
+        <b>Later</b><span>The dashboard keeps its local address in v1.</span></div>
+      <p class="meta">With no decision: it stays optional and runs after 05.7, beside Phase 6.</p></article>
+  </div>
+</section>
+
+<!-- ============================================================ METHOD -->
+<section class="block" id="method" aria-labelledby="method-h">
+  <h2 id="method-h">Pace and method</h2>
+  <p class="sub">The estimates come from the measured pace of the nine phases that are complete. They
+    assume one phase at a time and no new bug phase. Each new bug phase adds its own days.</p>
+
+  <div class="two">
+    <div class="card">
+      <p class="chart-title">Days per complete phase</p>
+      <p class="chart-sub">From the first commit in the phase folder to the completion date. Mean 3.8
+        days, median 3. Phase 05.2 has run 7 days so far.</p>
+      <div id="chart-days"></div>
+      <details><summary>Show the data as a table</summary><table id="tbl-days"><thead><tr><th scope="col">Phase</th><th class="num" scope="col">Days</th></tr></thead><tbody></tbody></table></details>
+    </div>
+    <div class="card">
+      <p class="chart-title">Estimated dates at three paces</p>
+      <p class="chart-sub">05.2 needs 2 to 4 more days. A release takes 1 day. The beta takes 1 week
+        and runs beside 05.9 and 05.8.</p>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th scope="col">Event</th><th class="num" scope="col">3 days per phase</th><th class="num" scope="col">4 days</th><th class="num" scope="col">6 days</th></tr></thead>
+        <tbody>
+          <tr><td>Phase 05.2 complete</td><td class="num">2026-11-03</td><td class="num">2026-11-04</td><td class="num">2026-11-05</td></tr>
+          <tr><td>Beta test can start</td><td class="num">2026-11-13</td><td class="num">2026-11-17</td><td class="num">2026-11-24</td></tr>
+          <tr><td>Public launch possible</td><td class="num">2026-11-21</td><td class="num">2026-11-28</td><td class="num">2026-12-11</td></tr>
+          <tr><td>Milestone v1 complete</td><td class="num">2026-11-27</td><td class="num">2026-12-06</td><td class="num">2026-12-23</td></tr>
+        </tbody>
+      </table></div>
+      <p class="meta" style="margin-top:10px">3 days is the median pace, 4 days the mean, and 6 days the
+        pace of the slowest third. The optional Phase 05.5 adds 3 to 6 days if it stays.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>How every phase runs, and why</h3>
+    <p class="sub" style="margin-bottom:10px">Each phase follows the same path. The device test can send
+      a phase back to its plan: on a real Mac, an app often behaves differently from its documentation.</p>
+    <div class="diagram">
+<pre class="mermaid" id="mm-process">
+flowchart LR
+  D["Discuss<br>what, why"] --> P["Plan<br>small steps"] --> B["Build<br>1 PR a step"] --> R["Review<br>by another"] --> T["Test on<br>a real Mac"] --> V["Check<br>the goal"] --> S["Release<br>and install"]
+  T -- "the device overturns<br>the premise" --> P
+</pre>
+    </div>
+    <details><summary>Technical detail</summary><div class="tech"><ul>
+      <li>GSD workflow: <code>/gsd-discuss-phase</code> → <code>/gsd-plan-phase</code> → <code>/gsd-execute-phase</code> (wave-ordered plans, one rebase-merged PR each) → probe review of every merged PR in a scratch copy → device UAT → <code>/gsd-verify-work</code>.</li>
+      <li>Releases: <code>develop</code> is the trunk; <code>main</code> takes only <code>--no-ff</code> release cuts tagged <code>vX.Y.Z</code>; the <code>doctor().version</code> proof follows every install (<code>docs/RELEASING.md</code>). Merging changes nothing for a client until the <code>.app</code> is rebuilt and reinstalled.</li>
+      <li>Every Mail write is verified by running it and inspecting the result, with the Mail watchdog running.</li>
+    </ul></div></details>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>What can move the dates</h3>
+    <ul class="plain">
+      <li>A new bug goes into its own phase ahead of the next feature phase. Five bug phases came from this rule so far.</li>
+      <li>Device tests need the owner at the Mac. The last step of 05.2 is such a sitting.</li>
+      <li>Phase 05.4 changes the connection under every call. The rule that a broken stream must answer, never stay silent, has to hold on the new libraries.</li>
+      <li>Phase 05.10 is one breaking release with no old-name aliases. Any saved prompt with an old tool name stops working, by design.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <p><b>Sources</b> (all at <code>develop</code> 8378ab8, 2026-11-01): <code>.planning/ROADMAP.md</code>,
+    <code>.planning/STATE.md</code>, <code>.planning/REQUIREMENTS.md</code>, <code>.planning/PROJECT.md</code>,
+    <code>.planning/phases/05.2-*/05.2-09-SUMMARY.md</code>, <code>docs/PROMOTION.md</code>,
+    <code>docs/tester-brief.md</code>, <code>docs/ROADMAP.md</code>, <code>CHANGELOG.md</code>, the git tags,
+    and GitHub counts of merged pull requests and issues on 2026-11-01.</p>
+  <p>Repository: <a href="https://github.com/elfensky/macos-apps-mcp">github.com/elfensky/macos-apps-mcp</a>.
+    Diagrams: Mermaid 12.2.0. Without network access the diagrams show as text.</p>
+</footer>
+</main>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+// Chart data, read from git and GitHub on 2026-11-01 (see the footer).
+const RELEASES = [
+  ["v0.1.0", "2026-06-27", "First release: Calendar and Reminders"],
+  ["v0.1.1", "2026-06-28", "Fixes"],
+  ["v0.1.2", "2026-06-28", "Fixes"],
+  ["v0.3.0", "2026-07-10", "Reliability, safety and depth"],
+  ["v0.4.0", "2026-07-10", "Safety rails"],
+  ["v0.5.0", "2026-07-13", "Native data planes"],
+  ["v0.6.0", "2026-07-16", "Renamed to macos-apps-mcp"],
+  ["v0.7.0", "2026-07-22", "Differentiators"],
+  ["v0.8.0", "2026-07-25", "New adapters and the background app"],
+  ["v0.9.0", "2026-07-29", "Outbound mail, gated"],
+  ["v0.10.0", "2026-08-20", "Mail complete"],
+  ["v0.10.1", "2026-08-23", "Awaiting-reply on the index"],
+  ["v0.11.0", "2026-09-25", "Mail on macOS 15 (Sequoia)"],
+  ["v0.12.0", "2026-10-01", "Architecture gate"],
+  ["v0.13.0", "2026-10-04", "Mail fixes"],
+  ["v0.13.1", "2026-10-05", "Mail sweep fixes"],
+  ["v0.14.0", "2026-10-07", "Calendar and Reminders depth"],
+  ["v0.14.1", "2026-10-07", "Gmail label fixes"],
+  ["v0.14.2", "2026-10-08", "Universal app (Intel and Apple silicon)"],
+  ["v0.14.3", "2026-10-11", "Local reminders"],
+  ["v0.15.0", "2026-10-22", "Photos and the dashboard"],
+  ["v0.15.1", "2026-10-25", "Registry, plugin and dashboard fixes"],
+];
+const LABELLED = { "v0.1.0": "first release", "v0.6.0": "new name", "v0.9.0": "sending mail",
+  "v0.10.0": "Mail complete", "v0.12.0": "base tested", "v0.15.0": "dashboard" };
+const COMMITS = [["Jun 2026", 92], ["Jul 2026", 209], ["Aug 2026", 65], ["Sep 2026", 118], ["Oct 2026", 605]];
+const PRS = [["Jun 2026", 19], ["Jul 2026", 24], ["Aug 2026", 19], ["Sep 2026", 28], ["Oct 2026", 231]];
+const DAYS = [["1", 1], ["2", 3], ["02.1", 4], ["3", 6], ["03.1", 5], ["4", 11], ["04.1", 1], ["5", 1], ["05.1", 2]];
+const REQS = [["Base", 13, 13], ["Mail", 6, 6], ["Bug fixes", 13, 18], ["Calendar", 4, 4], ["Reminders", 5, 5],
+  ["Notes", 2, 2], ["Photos", 4, 4], ["Dashboard", 2, 2], ["Distribution", 3, 6]];
+
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function text(parent, x, y, s, cls, anchor) {
+  const t = el("text", { x, y, class: cls || "", "text-anchor": anchor || "start" }, parent);
+  t.textContent = s;
+  return t;
+}
+const tip = document.getElementById("tip");
+function showTip(target, value, label) {
+  tip.replaceChildren();
+  const s = document.createElement("strong");
+  s.textContent = value;
+  const l = document.createElement("span");
+  const k = document.createElement("span");
+  k.className = "k";
+  l.append(k, document.createTextNode(label));
+  tip.append(s, l);
+  tip.style.display = "block";
+  const r = target.getBoundingClientRect();
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = r.left + r.width / 2 - w / 2, y = r.top - h - 8;
+  x = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+  if (y < 8) y = r.bottom + 8;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+function hover(g, value, label) {
+  g.setAttribute("tabindex", "0");
+  g.setAttribute("class", "item");
+  g.setAttribute("aria-label", value + ", " + label);
+  g.addEventListener("pointerenter", () => showTip(g, value, label));
+  g.addEventListener("pointerleave", hideTip);
+  g.addEventListener("focus", () => showTip(g, value, label));
+  g.addEventListener("blur", hideTip);
+}
+function fillTable(id, rows) {
+  const body = document.querySelector("#" + id + " tbody");
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    r.forEach((c, i) => {
+      const td = document.createElement("td");
+      td.textContent = typeof c === "number" ? c.toLocaleString("en") : c;
+      if (typeof c === "number") td.className = "num";
+      tr.appendChild(td);
+      if (i === 0) td.setAttribute("scope", "row");
+    });
+    body.appendChild(tr);
+  }
+}
+function niceStep(max, n) {
+  const raw = max / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), norm = raw / mag;
+  return (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+}
+// Column with a 4px rounded data end, square at the baseline.
+function colPath(x, y, w, base) {
+  const r = Math.min(4, (base - y) / 2, w / 2);
+  return `M${x},${base}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${base}Z`;
+}
+function columns(hostId, rows, unit, opts = {}) {
+  const host = document.getElementById(hostId);
+  const W = 460, H = 230, m = { t: 22, r: 8, b: 30, l: 40 };
+  const max = Math.max(...rows.map(r => r[1]));
+  const step = niceStep(max, 4), top = Math.ceil(max / step) * step;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "viz", role: "img",
+    "aria-label": opts.aria || unit }, host);
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, base = m.t + ih;
+  const y = v => m.t + ih - (v / top) * ih;
+  for (let v = 0; v <= top; v += step) {
+    el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? "axis" : "grid" }, svg);
+    text(svg, m.l - 6, y(v) + 4, v >= 1000 ? (v / 1000) + "K" : String(v), "tick", "end");
+  }
+  if (opts.ref != null) {
+    el("line", { x1: m.l, x2: W - m.r, y1: y(opts.ref), y2: y(opts.ref), class: "ref" }, svg);
+    text(svg, W - m.r, y(opts.ref) - 5, opts.refLabel, "tick", "end");
+  }
+  const band = iw / rows.length, bw = Math.min(24, band * 0.6);
+  rows.forEach(([k, v], i) => {
+    const g = el("g", {}, svg);
+    const cx = m.l + band * i + band / 2;
+    el("rect", { x: m.l + band * i, y: m.t, width: band, height: ih, class: "hit" }, g);
+    el("path", { d: colPath(cx - bw / 2, y(v), bw, base), class: "mark" }, g);
+    text(g, cx, y(v) - 6, v.toLocaleString("en"), "val", "middle");
+    text(g, cx, base + 18, opts.short ? opts.short(k) : k, "lbl", "middle");
+    hover(g, v.toLocaleString("en") + " " + unit, opts.tipLabel ? opts.tipLabel(k) : k);
+  });
+}
+function releases() {
+  const host = document.getElementById("chart-releases");
+  const W = 960, H = 170, m = { l: 24, r: 24 }, base = 128;
+  const day = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+  const x0 = day("2026-06-20"), x1 = day("2026-11-08");
+  const x = s => m.l + ((day(s) - x0) / (x1 - x0)) * (W - m.l - m.r);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "viz", role: "img",
+    "aria-label": "22 releases between 27 June and 25 October 2026" }, host);
+  el("line", { x1: m.l, x2: W - m.r, y1: base, y2: base, class: "axis" }, svg);
+  for (const [s, lab] of [["2026-07-01", "Jul"], ["2026-08-01", "Aug"], ["2026-09-01", "Sep"], ["2026-10-01", "Oct"], ["2026-11-01", "Nov"]]) {
+    el("line", { x1: x(s), x2: x(s), y1: base, y2: base + 5, class: "axis" }, svg);
+    text(svg, x(s) + 4, base + 22, lab, "tick");
+  }
+  text(svg, m.l, base + 22, "Jun", "tick");
+  el("line", { x1: x("2026-08-28"), x2: x("2026-08-28"), y1: 8, y2: base, class: "annot" }, svg);
+  text(svg, x("2026-08-28") + 5, 16, "plan v1 written", "tick");
+  el("line", { x1: x("2026-11-01"), x2: x("2026-11-01"), y1: 8, y2: base, class: "today" }, svg);
+  text(svg, x("2026-11-01") - 5, 16, "status date", "tick", "end");
+  const seen = {};
+  let row = 0;
+  for (const [v, d, title] of RELEASES) {
+    const i = (seen[d] = (seen[d] || 0) + 1) - 1;
+    const minor = v.endsWith(".0");
+    const cx = x(d), cy = base - 10 - i * 14, r = minor ? 6 : 4;
+    if (LABELLED[v]) {
+      const ly = row++ % 2 ? 56 : 38;
+      el("line", { x1: cx, x2: cx, y1: ly + 5, y2: cy - r - 2, class: "leader" }, svg);
+      // v0.10.0 sits just left of the plan line: end-anchor keeps its label clear of it.
+      text(svg, cx, ly, v + " " + LABELLED[v], "lbl", v === "v0.10.0" ? "end" : "middle");
+    }
+    const g = el("g", {}, svg);
+    el("circle", { cx, cy, r: 12, class: "hit" }, g);
+    el("circle", { cx, cy, r, class: "mark ring" }, g);
+    hover(g, v, d + " · " + title);
+  }
+  fillTable("tbl-releases", RELEASES);
+}
+function meters() {
+  const host = document.getElementById("req-meters");
+  for (const [area, done, total] of REQS) {
+    const row = document.createElement("div");
+    row.className = "req-row";
+    const a = document.createElement("span");
+    a.textContent = area;
+    const m = document.createElement("div");
+    m.className = "meter";
+    m.setAttribute("role", "img");
+    m.setAttribute("aria-label", `${area}: ${done} of ${total} met`);
+    const f = document.createElement("span");
+    f.style.width = (100 * done / total) + "%";
+    if (done === total) f.style.borderRadius = "5px";
+    m.appendChild(f);
+    const c = document.createElement("span");
+    c.className = "count";
+    c.textContent = `${done} of ${total}`;
+    row.append(a, m, c);
+    host.appendChild(row);
+  }
+}
+releases();
+meters();
+columns("chart-commits", COMMITS, "commits", { short: k => k.slice(0, 3), aria: "Commits per month: June 92, July 209, August 65, September 118, October 605" });
+columns("chart-prs", PRS, "pull requests merged", { short: k => k.slice(0, 3), aria: "Merged pull requests per month: June 19, July 24, August 19, September 28, October 231" });
+columns("chart-days", DAYS, "days", { ref: 3.8, refLabel: "mean 3.8", tipLabel: k => "Phase " + k, aria: "Days per complete phase, mean 3.8" });
+fillTable("tbl-commits", COMMITS);
+fillTable("tbl-prs", PRS);
+fillTable("tbl-days", DAYS.map(([k, v]) => ["Phase " + k, v]));
+</script>
+
+<script type="module">
+// Mermaid themes: the page palette, light and dark steps chosen separately.
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const font = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+const T = dark ? {
+  background: "#1a1a19", primaryColor: "#17263a", primaryTextColor: "#f0efec", primaryBorderColor: "#3987e5",
+  secondaryColor: "#222220", tertiaryColor: "#222220", lineColor: "#898781", textColor: "#f0efec",
+  clusterBkg: "#151514", clusterBorder: "#383835", edgeLabelBackground: "#1a1a19", titleColor: "#f0efec",
+  sectionBkgColor: "#222220", altSectionBkgColor: "#1a1a19", sectionBkgColor2: "#222220", gridColor: "#2c2c2a",
+  doneTaskBkgColor: "#184f95", doneTaskBorderColor: "#3987e5", activeTaskBkgColor: "#2a78d6", activeTaskBorderColor: "#86b6ef",
+  taskBkgColor: "#1a1a19", taskBorderColor: "#3987e5", critBkgColor: "#d95926", critBorderColor: "#eb6834",
+  taskTextColor: "#f0efec", taskTextDarkColor: "#f0efec", taskTextLightColor: "#f0efec", taskTextOutsideColor: "#f0efec",
+  todayLineColor: "#d03b3b",
+  cScale0: "#3987e5", cScale1: "#d95926", cScale2: "#199e70",
+  cScaleLabel0: "#0b0b0b", cScaleLabel1: "#0b0b0b", cScaleLabel2: "#0b0b0b",
+} : {
+  background: "#fcfcfb", primaryColor: "#e8f1fc", primaryTextColor: "#0b0b0b", primaryBorderColor: "#2a78d6",
+  secondaryColor: "#f4f3ef", tertiaryColor: "#f4f3ef", lineColor: "#898781", textColor: "#0b0b0b",
+  clusterBkg: "#f9f9f7", clusterBorder: "#c3c2b7", edgeLabelBackground: "#fcfcfb", titleColor: "#0b0b0b",
+  sectionBkgColor: "#f4f3ef", altSectionBkgColor: "#fcfcfb", sectionBkgColor2: "#f4f3ef", gridColor: "#e1e0d9",
+  doneTaskBkgColor: "#b7d3f6", doneTaskBorderColor: "#2a78d6", activeTaskBkgColor: "#5598e7", activeTaskBorderColor: "#1c5cab",
+  taskBkgColor: "#fcfcfb", taskBorderColor: "#2a78d6", critBkgColor: "#eb6834", critBorderColor: "#c4521f",
+  taskTextColor: "#0b0b0b", taskTextDarkColor: "#0b0b0b", taskTextLightColor: "#0b0b0b", taskTextOutsideColor: "#0b0b0b",
+  todayLineColor: "#d03b3b",
+  cScale0: "#2a78d6", cScale1: "#eb6834", cScale2: "#1baf7a",
+  cScaleLabel0: "#ffffff", cScaleLabel1: "#0b0b0b", cScaleLabel2: "#0b0b0b",
+};
+for (const [id, bg, bd] of [["lg-done", T.doneTaskBkgColor, T.doneTaskBorderColor], ["lg-active", T.activeTaskBkgColor, T.activeTaskBorderColor],
+  ["lg-todo", T.taskBkgColor, T.taskBorderColor], ["lg-crit", T.critBkgColor, T.critBorderColor]]) {
+  const s = document.getElementById(id);
+  s.style.background = bg;
+  s.style.borderColor = bd;
+}
+try {
+  const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@12.2.0/dist/mermaid.esm.min.mjs");
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: "strict", theme: "base",
+    themeVariables: { ...T, fontFamily: font, fontSize: "14px" },
+    flowchart: { curve: "basis", htmlLabels: true, padding: 12 },
+    gantt: { barHeight: 22, barGap: 6, topPadding: 40, leftPadding: 190, fontSize: 12, sectionFontSize: 13, useWidth: 1080 },
+    timeline: { disableMulticolor: false, leftMargin: 30 },
+  });
+  await mermaid.run({ querySelector: "pre.mermaid" });
+} catch (e) {
+  for (const p of document.querySelectorAll("pre.mermaid:not([data-processed])")) {
+    const n = document.createElement("p");
+    n.className = "mm-error";
+    n.textContent = "The diagram could not load (it needs network access). Its source shows above.";
+    p.after(n);
+  }
+  console.warn("mermaid", e);
+}
+</script>
+</body>
+</html>
