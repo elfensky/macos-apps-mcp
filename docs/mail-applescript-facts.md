@@ -254,6 +254,96 @@ Two notes for anyone who repeats this probe:
   matches the probe's own subject prefix, or the probe deletes someone else's draft.
 - `drafts()` caps at 25 across all accounts. Baseline by subject in the Envelope Index instead.
 
+### 4e. Reply text above Mail's native quote through Accessibility (#348)
+
+Question: section 4d showed that no scripted write keeps Mail's native quote. Can the reply text go
+on top of Mail's own, untouched reply through the Accessibility (AX) API, and which identity,
+window check, key event and cleanup does that need? Probed on 2026-10-31 (macOS 27, build 26A434;
+Mail 3901.100.1.1.12; bundle version 0.15.1) at one owner sitting, with the Mail watchdog loaded.
+The probe is `05.2-proto/reply_gui_probe.py`, run as the installed bundle (`open -n`). Every stored
+draft was judged by `05.2-proto/inspect_draft.py` against the owner's hand-made reply on the same
+original, after the autosave wait, never by a return value. The original is the section 4d kind: an
+HTML mail with about 9,200 characters, a link, two inline `cid:` images and a unique last sentence.
+
+Identity that held the grant: the installed bundle `ren.lav.macos-apps-mcp`. macOS 27 names the
+Settings pane "Privacy & Security → Device Control and Data Access" (the Accessibility list). The
+owner switched the bundle on there; the only prompt was the system password for the settings
+change, and no app prompt appeared. No terminal or agent host got a grant.
+
+Route: **(a) with mechanism M2**: Mail builds its normal reply, and one Cmd-V posted to Mail's pid
+pastes the reply text from a borrowed and restored clipboard. M1 failed. M3 was not needed and not
+run. Route (b) was not run. Handoff: `gap-route: a`, `gap-mechanism: M2`,
+`gap-no-quote: gui-replace`, `gap-cleanup: rollback-sweep`.
+
+| Run | Mechanism | Window | Insert result | Confirmation | Quote bar | Attribution | Image refs | Last words | Marker position | Wrapper | Clipboard |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| hand Reply, Cmd-S (reference) | - | yes | - | - | yes | yes | 2 | yes | before quote | 0 | - |
+| hand Reply All, sent to the owner's Gmail address | - | yes | - | - | yes | yes | 2 | yes | before quote | 0 | - |
+| 1 | M1 (AX write) | yes | `AXSelectedText` set returned 0, nothing landed | marker not found | yes (autosave copy) | yes | 2 | yes | none written | 0 | untouched |
+| 2 | M2 | yes | settle 92 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 3 | M2 | yes | settle 133 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 4 | M2 | yes | settle 80 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 5 | M2 | yes | settle 128 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 6 (empty clipboard) | M2 | yes | settle 90 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal (empty to empty) |
+| 7 two-line non-ASCII marker | M2 | yes | settle 123 ms | squashed compare equal | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 8 beside a hand reply, `--activate` | M2 | yes | settle 92 ms | marker first | - | - | - | - | - | - | restored, equal |
+| 9 another app in front | M2 | yes | refused without `--activate`; with it, a late paste (see below) | not settled | - | - | - | - | - | - | restored, equal |
+| 10 "Quote the text of the original message" off | M2 | yes | settle 122 ms | quote missing, exit 4 | no | no | 0 | no | before (alone) | 0 | restored, equal |
+| 11 stray viewer selection | M2 | yes | settle 119 ms | quote missing, not sent | no | no | 0 | no | before (alone) | 0 | restored, equal |
+| 12 Reply All, sent | M2 | yes | settle 138 ms | marker first, quote follows | yes | yes | 2 | yes | before quote | 0 | restored, equal |
+| 13 whole-body replace | M2 `--replace-all` | yes | settle 157 ms | marker first, nothing follows | no | no | 0 | no | alone | 0 | restored, equal |
+| 14 `set content` | windowed reply | yes | ok | - | wrapper only | no | 0 | no | in wrapper | 1 | untouched |
+
+Runs 2 to 6 are the five M2 runs of the pass. Every restore was hash-equal to the run's own
+snapshot (SHA-256 per item and per type, never the content). The owner's clipboard changed between
+runs several times, so the baseline was taken again each time.
+
+Findings that shaped the recipe:
+
+- **A scripted `reply … opening window yes` on a tiled Mail viewer opens two new windows**: the
+  closeable compose window and a 13-pixel non-closeable divider window that Mail owns. "Exactly one
+  new window id" refuses there. Count only closeable new windows.
+- **A fresh reply's body takes AX focus late.** An insert straight after the reply refused (no
+  focused element); the focus check now waits up to 3 s for it.
+- **"Starts with the marker" is not proof that the paste landed.** The marker of run 9 was a prefix
+  of the marker already in the window, so the check read "settled" at 4 ms, the clipboard was
+  restored, and Mail (still activating from TextEdit) ran the queued Cmd-V and pasted the owner's
+  own clipboard into the reply. The settle check now also needs the body to differ from the body
+  just before the key event. Nothing reached TextEdit or the hand reply.
+- **A text selection left in Mail's viewer removes the quote.** With "Include selected text, if any;
+  otherwise include all text" on, a scripted reply came out without a quote although "Quote the text
+  of the original message" was on. Runs 10 and 11 show the two triggers. The confirmation caught
+  both, so the call must refuse when the quote does not follow.
+- **Mail leaves an autosave copy of every scripted reply in Drafts.** It landed 5 s to 70 s after the
+  window opened and stayed after a discard (runs 1 to 6, 10, 13, 14), after the send (run 12), and
+  after a hand reply was closed. A discard that beats the autosave leaves nothing (5 of 5 below).
+- **`delete_draft` walks the unified Drafts mailbox one Apple Event per message.** With 287 drafts and
+  a busy Mail it timed out three times at 30 s, while a `messages of <account Drafts> whose message
+  id is` query took 0.3 s. Filed as #521.
+- **The Mail 16 layout differs from section 4d's.** See the `Layout` row.
+
+Proven recipe (what the sitting proved; 05.2-10 to 05.2-13 build exactly this):
+
+| Row | What worked |
+|---|---|
+| `Identity` | The installed bundle `ren.lav.macos-apps-mcp`, launched with `open -n`, so only that bundle holds the grant. macOS 27 pane: "Privacy & Security → Device Control and Data Access" (the Accessibility list). The only prompt was the system password for the settings change. A terminal was never granted. |
+| `Accessibility check` | `AXIsProcessTrusted()`, never the prompting `…WithOptions` form. Off: it returns False with no prompt, and insert refuses ("Accessibility is off for this process") before any key event, the clipboard untouched. Back on: True with no restart of anything (each probe call is a fresh process; a long-running process seeing the change live is untested, so check `doctor()` in the daemon). |
+| `Window identity` | B1: the window ids before and after `reply (item 1 of matches) opening window yes [reply to all doAll]`, counting only closeable new windows (a tiled viewer adds a 13-pixel divider). B2 (`document of window` equal to the reply) never read. `id of window 1` alone never binds. A hand-opened reply in front, or opened first, was never chosen; the probe's reply can open BEHIND a hand reply. |
+| `Activation` | The window check needs Mail active and the reply at index 1 (`index of window id N` is 1). With another app (TextEdit, the agent host) or another Mail window in front, activate Mail and set the reply window's index to 1 first, then check again. TextEdit received nothing. |
+| `Insert` | M2: borrow the general pasteboard (a complete snapshot or refuse; an emptied pasteboard is complete), write the marker with the `org.nspasteboard.TransientType` and `ConcealedType` types, then `CGEventPostToPid` a Cmd-V to Mail's pid right after the window and focus checks (check to event 2 to 6 ms). Focus passes when Mail's `AXFocusedUIElement` is an `AXWebArea` whose window (`_AXUIElementGetWindow`) is the bound id, waiting up to 3 s for a fresh reply's body. M1 fails: `AXSelectedText` is not settable on Mail's compose `AXWebArea` (the set returns 0 and writes nothing). M3 was not run. |
+| `Confirm` | Read the body back through AX (walk the `AXStaticText` parts). Compare whitespace-squashed, because the walk drops empty lines. Settled only when the body starts with the text AND changed since just before the key event. `quote_follows` must be true (the original's tail follows) or the call refuses. Triggers seen: "Quote the text of the original message" off, and a text selection left in Mail's viewer. |
+| `Pasteboard` | paste settle: 133 ms over 5 runs; bound 1 s. Restore only after the settle, and every restore was hash-equal to its own snapshot. When the text did not settle, roll the reply back BEFORE the restore. |
+| `Send after insert` | send by outgoing message id: works. The send ran in a later osascript than the one that opened the reply, addressed by `outgoing message id`; the outbox was empty within 20 s (Undo send delay 10 s). The delivered message went to the owner's Gmail address only. |
+| `No-quote reply` | gui-replace: Cmd-A to Mail's pid, focus checked again, then the paste. The result is the marker alone, wrapper 0, threading kept (`In-Reply-To` and `References` = the original). `set content` puts the text inside the cite wrapper (wrapper 1), which delivers the stray `i` line and the self-quote of 05.2-05. The owner chose gui-replace on 2026-10-31. |
+| `Refusal cleanup` | discard by outgoing message id: works (a later osascript runs `delete (outgoing message id N)`; the next read answers -1728 and the window closes). A rollback that beats the autosave leaves nothing (5 of 5, each open to discard in 1.9 to 3.2 s, Drafts clean at +45 s and +2 min). The autosave landed 5 s after a window opened and survived later discards AND the send, so a refusal after the window opened needs rollback + sweep: delete the leftover by `In-Reply-To` = the original among drafts new since the call's own baseline. |
+| `Id-free discard` | id-free discard: works. With the outgoing ids taken before the reply, the call finds the new outgoing message and discards it (-1728, window gone, Drafts clean at +45 s and +2 min). It spares a Cmd-N window, which is not a scripting object. |
+| `Layout` | Mail 16 has no "Include original message text". The switch is Settings → Composing → Responding → "Quote the text of the original message". The account's signature ("place above quoted text") did not appear in hand or probe replies, and the probe text lands at the owner's own typing offset (marker at HTML offset 154 in both). |
+| `Delivered text/plain` | The delivered Reply All (run 12): the `text/plain` part starts with the marker, has no stray `i` line, no quoted marker, and 0 U+FFFC, equal to the hand reference. The HTML route checks (marker before the quote, wrapper 0, marker outside the blockquote, attribution, both `cid` references) equal the owner's own hand Reply All. |
+
+Two sends left the Mac, both approved by the owner and both to the owner's Gmail address only:
+the hand Reply All and the probe's run 12. Every other reply was discarded and its autosave copy
+swept. At the end Drafts held nothing new, no compose window was open, and Accessibility was on.
+
 ## 5. Addressing a mailbox by name
 
 Verified 2026-07-31 (#146), probing every branch against real accounts.
