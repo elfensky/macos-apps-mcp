@@ -866,23 +866,26 @@ def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
             return (
                 f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
                 f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
-                f"subject{US}Quarterly numbers{RS}"
+                f"subject{US}Quarterly numbers{RS}self{US}bob@corp.com{RS}"
             )
         raise AssertionError(f"dry run must not call {script!r} (the send script)")
 
     _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good")
-    # #160: the SAME would_send keys `send` and `forward` report — the original's
-    # sender/subject fill the from/subject slots, and `source` names the message being
-    # replied to (what `reply_to`/`reply_all: True` used to say in a bespoke shape).
+    # #160: the SAME would_send keys `send` and `forward` report, plus #516's
+    # `recipients_note`. to/cc are the REPLY's (the sender; everyone else on the
+    # original minus this account's own address), `from` is a label, and `source` names
+    # the message being replied to.
+    note = out["would_send"].pop("recipients_note")
+    assert "Mail's own reply-all decides" in note
     assert out == {
         "dry_run": True,
         "would_send": {
             "action": "reply_all",
-            "to": ["alice@corp.com", "bob@corp.com"],
-            "cc": ["carol@corp.com"],
+            "to": ["orig-sender@corp.com"],
+            "cc": ["alice@corp.com", "carol@corp.com"],
             "bcc": [],
-            "from": "orig-sender@corp.com",
+            "from": mail_outgoing.REPLY_SENDER,
             "subject": "Quarterly numbers",
             "source": "<orig@x>",
             "body_chars": 11,
@@ -907,7 +910,7 @@ def test_reply_all_sends_with_quote(monkeypatch):
             return (
                 f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
                 f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
-                f"subject{US}Quarterly numbers{RS}"
+                f"subject{US}Quarterly numbers{RS}self{US}bob@corp.com{RS}"
             )
         # #134: reply_all now also runs the outbox truth-check (_OUTBOX_COUNT)
         # after _REPLY_ALL — return a real count for it, "sent" for _REPLY_ALL.
@@ -924,13 +927,14 @@ def test_reply_all_sends_with_quote(monkeypatch):
     out = mail.MailAdapter().reply_all(
         "<orig@x>", "inbox", "Sounds good", dry_run=False
     )
+    assert "Mail's own reply-all decides" in out.pop("recipients_note")
     assert out == {
         "sent": True,
         "action": "reply_all",
-        "to": ["alice@corp.com", "bob@corp.com"],
-        "cc": ["carol@corp.com"],
+        "to": ["orig-sender@corp.com"],
+        "cc": ["alice@corp.com", "carol@corp.com"],
         "bcc": [],
-        "from": "orig-sender@corp.com",
+        "from": mail_outgoing.REPLY_SENDER,
         "subject": "Quarterly numbers",
         "source": "<orig@x>",
         "outbox_pending": 0,
@@ -1716,7 +1720,8 @@ def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
 
     _patch_run(monkeypatch, fake)
     out = mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "Sounds good")
-    assert out["would_send"]["to"] == ["alice@corp.com"]
+    assert out["would_send"]["to"] == ["orig@corp.com"]
+    assert out["would_send"]["cc"] == ["alice@corp.com"]
 
 
 def test_reply_all_send_passes_the_mailbox(monkeypatch):

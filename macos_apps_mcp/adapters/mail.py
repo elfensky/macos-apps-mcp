@@ -1321,11 +1321,14 @@ class MailAdapter:
         Python exactly as ``reply`` builds it (#348). The sending account is
         inherited from the original message — the correct identity for a thread.
 
-        ``dry_run=True`` (default) reads the original's ACTUAL to/cc recipients and
-        reports them — not merely what the caller typed — because reply-all's recipient
-        set is exactly the surprising one (a long cc list). That read is safe where
-        CONSTRUCTING a message is not; the rule and its rationale live once at
-        ``mail_outgoing``'s module docstring (rule 2), not here.
+        ``dry_run=True`` (default) reads the original and reports the reply's own ``to``
+        (the sender, or its Reply-To) and ``cc`` (everyone else on the original minus
+        this account's addresses) — the set Mail's reply-all reaches, not the original's
+        header (#516) — because that set is exactly the surprising one (a long cc list).
+        The lists are computed; Mail's reply-all decides delivery. ``from`` reads "(the
+        account that holds the original)": Mail picks the sending address itself. That
+        read is safe where CONSTRUCTING a message is not; the rule and its rationale
+        live once at ``mail_outgoing``'s module docstring (rule 2), not here.
 
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
         produced ``message_id``, verbatim.

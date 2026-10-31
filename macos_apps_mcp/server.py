@@ -1014,6 +1014,9 @@ def reply_all(
     include_quote adds a plain-text quote below your text: Mail's
     `On <date>, at <time>, <sender> wrote:` line, then the whole original with `> `
     prefixes. Formatting, inline images and Mail's quote bar are not kept.
+    The dry run lists the reply's own `to` and `cc` (computed; Mail's reply-all decides
+    delivery), so check them before `dry_run=False`; `from` reads "(the account that
+    holds the original)" because Mail picks the sending address itself.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
     Automation access for Mail."""
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)

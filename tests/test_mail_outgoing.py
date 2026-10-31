@@ -88,7 +88,11 @@ def test_every_send_path_previews_the_same_keys(monkeypatch):
     ]
     for p in previews:
         assert p["dry_run"] is True
-        assert set(p["would_send"]) == _PREVIEW_KEYS
+        # reply_all alone adds `recipients_note`: its to/cc are computed (#516)
+        extra = (
+            {"recipients_note"} if p["would_send"]["action"] == "reply_all" else set()
+        )
+        assert set(p["would_send"]) == _PREVIEW_KEYS | extra
     assert [p["would_send"]["action"] for p in previews] == [
         "send",
         "reply_all",
