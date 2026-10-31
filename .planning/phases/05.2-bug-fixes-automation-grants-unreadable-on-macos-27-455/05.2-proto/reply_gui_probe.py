@@ -312,11 +312,26 @@ _OPEN_REPLY = (
     + _MAILBOX_REF
     + """
 
-on newIds(idsBefore, idsAfter)
+on rawNewIds(idsBefore, idsAfter)
   set found to {}
   repeat with w in idsAfter
     set wi to contents of w
     if wi is not in idsBefore then set end of found to wi
+  end repeat
+  return found
+end rawNewIds
+
+-- A tiled Mail viewer gets a non-closeable 13-px divider window beside a new compose
+-- window (macOS 27, 2026-10-31): it is not a compose window, so B1 skips it. An
+-- unreadable closeable property keeps the id (more candidates fail, never mis-bind).
+on newIds(idsBefore, idsAfter)
+  set found to {}
+  repeat with wi in my rawNewIds(idsBefore, idsAfter)
+    set cl to true
+    try
+      tell application "Mail" to set cl to closeable of window id (contents of wi)
+    end try
+    if cl then set end of found to (contents of wi)
   end repeat
   return found
 end newIds
@@ -369,7 +384,7 @@ on run argv
           set rolled to "alive"
         end if
       end if
-      return "outgoing_id=" & outId & lf & "b1_new_ids=" & my joinIds(found) & lf & "b1_retried=" & retried & lf & "b2=" & b2 & lf & "win1_id=" & win1 & lf & "rolled_back=" & rolled
+      return "outgoing_id=" & outId & lf & "b1_new_ids=" & my joinIds(found) & lf & "b1_raw_new_ids=" & my joinIds(my rawNewIds(idsBefore, idsAfter)) & lf & "b1_retried=" & retried & lf & "b2=" & b2 & lf & "win1_id=" & win1 & lf & "rolled_back=" & rolled
     end tell
   end timeout
 end run
