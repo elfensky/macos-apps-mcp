@@ -17,13 +17,14 @@ surface may still shift between minor versions.
 
 ### Fixed
 
-- **Reply drafts quote the whole original with Mail's own attribution line** (#348) —
-  `mail_reply` and `reply_all` wrote `On <date>, <sender> wrote:` with a date in another
-  format and cut the original after 4,000 characters. The quote now starts with Mail's
-  `On <date>, at <time>, <sender> wrote:` (date and time in the Mac's own format) and
-  carries every line of the original, with no empty `>` lines after it. It is still plain text: a probe on a real Mac showed
-  that Mail's own quote cannot be kept once the reply text is written, so formatting,
-  inline images and the quote bar are not rebuilt. The tool descriptions say so.
+- **`mail_reply` keeps Mail's own quote** (#348) — Mail builds its normal reply and
+  macos-apps-mcp puts your text on top through Accessibility, so the quote bar, Mail's
+  attribution line, formatting, inline images and the whole original stay. Without
+  Accessibility, or when Mail's reply window or its quote cannot be confirmed, the call
+  refuses and leaves no draft. A refusal after the reply window opened waits 45 seconds
+  for Mail's autosave and deletes that Drafts copy, and the error says if anything may be
+  left. `include_quote=False` replaces the whole body with your text. `reply_all` still
+  sends a plain-text quote.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
   the first write, so a name that already exists, or two ids that derive one file name,
   refuse the whole batch with nothing written. Files are created exclusively, and a refusal

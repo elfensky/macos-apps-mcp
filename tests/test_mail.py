@@ -2324,6 +2324,9 @@ def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch)
 # Facts section 4e is the contract. The flow runs in ONE run_native closure; every seam
 # below is faked, so no AX, CoreGraphics, pasteboard, osascript or Mail call is made.
 
+from types import SimpleNamespace  # noqa: E402
+
+from macos_apps_mcp.adapters import mail_reply_cleanup  # noqa: E402
 from macos_apps_mcp.errors import (  # noqa: E402
     AccessibilityDenied,
     ComposeRefused,
@@ -2351,10 +2354,28 @@ class _ReplyRig:
         self.trusted = kw.pop("trusted", True)
         self.insert_error = kw.pop("insert_error", None)
         self.insert_hook = kw.pop("insert_hook", None)
+        # the Drafts sweep: a baseline, a fake clock and wait, a fake Drafts reader
+        baseline = kw.pop("baseline", frozenset({1}))
+        found = kw.pop("found", None) or mail_reply_cleanup.Draft("none")
         assert not kw, kw
+        self.waits: list[float] = []
+        self.found_args: list = []
         monkeypatch.setattr(runtime, "accessibility_trusted", self._trusted)
         monkeypatch.setattr(runtime, "compose_insert", self._insert)
         _patch_run(monkeypatch, self._osa)
+        monkeypatch.setattr(mail_outgoing, "_wait_until", self.waits.append)
+        monkeypatch.setattr(
+            mail_outgoing, "time", SimpleNamespace(monotonic=lambda: 100.0)
+        )
+        monkeypatch.setattr(mail_reply_cleanup, "drafts_baseline", lambda: baseline)
+
+        def find(base, mid, text):
+            self.found_args.append((base, mid, text))
+            if isinstance(found, Exception):
+                raise found
+            return found
+
+        monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", find)
 
     def _trusted(self):
         self.calls.append(("accessibility_trusted",))
@@ -2526,34 +2547,18 @@ def test_reply_without_quote_replaces_the_whole_body(monkeypatch):
 
 # --- rollback-sweep: the autosaved Drafts copy of a refused reply (facts 4e) --
 
-from types import SimpleNamespace  # noqa: E402
-
-from macos_apps_mcp.adapters import mail_reply_cleanup  # noqa: E402
-
 _DRAFTS_URL = f"imap://{_GMAIL_UUID}/Drafts"
 
 
 class _SweepRig(_ReplyRig):
-    """The reply rig plus a fake clock, a fake wait and a fake Drafts reader."""
+    """The reply rig, whose Drafts sweep finds one proven copy by default."""
 
-    def __init__(self, monkeypatch, *, baseline=frozenset({1}), found=None, **kw):
-        super().__init__(monkeypatch, **kw)
-        self.waits: list[float] = []
-        self.found_args: list = []
-        found = found or mail_reply_cleanup.Draft("one", _DRAFTS_URL, "<d@x>")
-        monkeypatch.setattr(mail_outgoing, "_wait_until", self.waits.append)
-        monkeypatch.setattr(
-            mail_outgoing, "time", SimpleNamespace(monotonic=lambda: 100.0)
+    def __init__(self, monkeypatch, found=None, **kw):
+        super().__init__(
+            monkeypatch,
+            found=found or mail_reply_cleanup.Draft("one", _DRAFTS_URL, "<d@x>"),
+            **kw,
         )
-        monkeypatch.setattr(mail_reply_cleanup, "drafts_baseline", lambda: baseline)
-
-        def find(base, mid, text):
-            self.found_args.append((base, mid, text))
-            if isinstance(found, Exception):
-                raise found
-            return found
-
-        monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", find)
 
 
 def _refused_reply(monkeypatch, **kw):

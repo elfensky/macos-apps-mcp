@@ -300,7 +300,9 @@ def test_grants_cover_every_adapter_with_the_permissions_its_records_name():
             for r in registry.TOOLS.values()
             if r.adapter == adapter
             for p in r.permission
-        } - {"Shortcuts CLI"}  # the CLI needs no TCC grant
+        } - {"Shortcuts CLI", "Accessibility"}
+        # Shortcuts CLI needs no TCC grant; Accessibility has no grant row in
+        # grants.ADAPTER_GRANTS (doctor reads it live, 05.2-12)
         listed = {_KIND[svc] for svc, _target in grants.ADAPTER_GRANTS[adapter]}
         assert listed == named, adapter
         for svc, target in grants.ADAPTER_GRANTS[adapter]:
@@ -370,7 +372,7 @@ def test_grant_chips_and_the_row_sub_with_tool_and_call_counts(state, monkeypatc
     assert '<span class="chip danger">denied</span>' in _row_html(page, "Calendar")
     mail = _row_html(page, "Mail")
     assert '<span class="chip">not asked</span>' in mail
-    assert "Automation · Full Disk Access · " in mail
+    assert "Accessibility · Automation · Full Disk Access · " in mail
     n = sum(registry.TOOLS[t].registered for t in registry.by_adapter("photos"))
     assert f'<div class="sub">Full Disk Access · {n} tools · 3 calls</div>' in page
     photos = _row_html(page, "Photos")  # granted: no grant chip before the switch

@@ -1382,15 +1382,23 @@ class MailAdapter:
         """Reply to a message by its RFC822 message-id: opens a threaded draft
         for the human to review/send — NEVER sends. Uses Mail's native reply verb so
         In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
-        include_quote appends a plain-text quote (#348): Mail's `On <date>, at <time>,
-        <sender> wrote:` line + the whole original, `> `-prefixed.
-        Keystroke-free (#46); atomic (#44). Returns the same locator dict as
+
+        ``include_quote`` (the default) keeps Mail's OWN quote of the original (quote
+        bar, attribution line, formatting, inline images) and puts the text on top of
+        it through Accessibility (#348, FIX-16, facts §4e); ``include_quote=False``
+        replaces the whole body with the text, also through Accessibility. Accessibility
+        must be on for macos-apps-mcp; Mail comes to the front for about a second and
+        the clipboard is borrowed and restored. Without Accessibility, or when the
+        reply window, the text or Mail's quote cannot be confirmed, the call raises and
+        leaves no draft (``AccessibilityDenied`` / ``ComposeRefused``): there is no
+        plain-text fallback. Atomic (#44). Returns the same locator dict as
         create_draft — save it to Drafts and it gets a stable message-id, addressable
         via drafts()/delete_draft().
 
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
-        produced ``message_id``, verbatim. It scopes BOTH native calls — the quote read
-        and the draft build — so a filed original can't reply with an empty quote."""
+        produced ``message_id``, verbatim. It scopes every native call of the flow — the
+        quote-tail read, the reply and the cleanup — so a filed original can't reply
+        against the wrong mailbox."""
         return mail_drafts.reply(
             message_id, mailbox, reply_body, include_quote=include_quote
         )
