@@ -4,9 +4,9 @@ Everything here opens or removes a draft for the HUMAN; nothing here sends (the 
 plane is ``mail_outgoing``, and ``send_mail(draft_id=…)`` lives there because a send is
 what it is). The two live at arm's length on purpose: this module composes
 ``mail_outgoing.ROLLBACK`` (the one verifying delete for a partial outgoing message)
-and ``quoted_body`` (the one quote preamble), and exports ``_DELETE_DRAFT`` so the send
-path can drop a draft whose content just went out — the constant crosses, the policy
-does not.
+and ``open_reply_with_text`` (the one native-reply flow, #348), and exports
+``_DELETE_DRAFT`` so the send path can drop a draft whose content just went out — the
+constant crosses, the policy does not.
 
 Bounds are PASSED IN (``limit``) rather than imported: the cap is the adapter's policy
 (``mail.MAX_MAILS``), this module is the mechanism — and the parameter is what keeps
@@ -35,7 +35,6 @@ from ..text import (
 from . import mail_addressing, mail_outgoing
 from .mail_addressing import _norm_mid, bare_id
 from .mail_index import _deeplink
-from .mail_outgoing import ORIGINAL_TIMEOUT
 
 # create_draft: draft-and-open, NEVER send. `make new outgoing message … visible:true`
 # opens a compose window for the HUMAN to review/send; there is deliberately no `send`
@@ -150,46 +149,6 @@ _DELETE_DRAFT = """on run argv
   end timeout
 end run"""
 
-# reply builds a real reply via Mail's NATIVE reply verb (Mail owns In-Reply-To/
-# References threading — the only mechanism that threads; make-new-outgoing can't set
-# headers, spike 2026-07-11). The body (reply text + our quote) is set on the returned
-# outgoing message — keystroke-free (#46; no .eml). A window opens for the HUMAN to
-# review/send. NEVER sends. Atomic (#44): roll back the draft on any post-creation
-# failure — subject to #133's limit, i.e. Mail's async autosave can still leave a stray
-# Drafts copy. body via tempfile through the shared readBody handler, never a bare
-# `read` (an empty reply_body would otherwise crash -39, #READ_BODY); id via argv.
-_REPLY = (
-    READ_BODY
-    + "\n\n"
-    + mail_outgoing.ROLLBACK
-    + "\n\n"
-    + mail_addressing.MAILBOX_REF
-    + """
-
-on run argv
-  set mid to item 1 of argv
-  set bodyText to my readBody(item 2 of argv)
-  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
-  with timeout of 120 seconds
-  tell application "Mail"
-    set matches to (messages of mb whose message id is mid)
-    if (count of matches) is 0 then error ¬
-      "no message with that message id in " & (item 4 of argv)
-    set r to reply (item 1 of matches) opening window yes
-    try
-      set content of r to bodyText
-    on error errMsg
-      if my rollback(r) then
-        error errMsg
-      else
-        error errMsg & my draftLeftover()
-      end if
-    end try
-  end tell
-  end timeout
-end run"""
-)
-
 
 def _parse_draft_records(raw: str) -> list[dict]:
     """Parse the _DRAFTS payload: US-framed (message id, subject, first recipient)
@@ -301,24 +260,31 @@ def reply(
     message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
 ) -> dict:
     """The body of ``MailAdapter.reply`` — see that docstring for the caller-facing
-    contract (opens a threaded draft, NEVER sends)."""
+    contract (opens a threaded draft, NEVER sends).
+
+    Mail builds its own reply (``reply … opening window yes``, the only mechanism that
+    threads and keeps Mail's native quote) and ``mail_outgoing.open_reply_with_text``
+    puts the text on top through Accessibility (FIX-16, #348, facts §4e). With
+    ``include_quote=False`` the whole body is replaced by the text instead."""
     mid = bare_id(message_id)
     if not mid:
         raise ValueError("reply needs the original message's id")
     if not reply_body.strip():
         raise ValueError("reply needs a non-empty reply_body")
     mb = mail_addressing.mailbox_args(mailbox)
-    # the quote preamble lives ONCE, in mail_outgoing (#160) — reply and reply_all
-    # each carried a copy of the fetch/guard/partition/sanitize/build sequence.
-    body = (
-        mail_outgoing.quoted_body(reply_body, mid, mb) if include_quote else reply_body
+    mail_outgoing.open_reply_with_text(
+        mid, mb, reply_body, reply_all=False, replace_all=not include_quote
     )
-    with runtime.body_file(body) as path:
-        runtime.run_osascript(_REPLY, mid, path, *mb, timeout=ORIGINAL_TIMEOUT)
     return {
         "created": True,
         "subject": "(reply)",
         "mailbox": "Drafts",
-        "note": "reply draft opened for review; save it to keep it in Drafts, "
-        "where it gets a stable message-id (see drafts())",
+        "note": "reply draft opened for review"
+        + (
+            "; your text sits above Mail's own quote of the original"
+            if include_quote
+            else "; your text replaced the whole body (no quote)"
+        )
+        + "; save it to keep it in Drafts, where it gets a stable message-id "
+        "(see drafts())",
     }

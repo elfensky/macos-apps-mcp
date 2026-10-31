@@ -51,7 +51,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .. import runtime
-from ..errors import NativeError
+from ..errors import (
+    ACCESSIBILITY_PANE,
+    AccessibilityDenied,
+    ComposeRefused,
+    NativeError,
+)
 from ..text import (
     READ_BODY,
     RS,
@@ -59,6 +64,7 @@ from ..text import (
     US,
     sanitize_block,
     sanitize_line,
+    squash_text,
 )
 from . import mail_addressing
 from .mail_addressing import bare_id
@@ -472,6 +478,160 @@ on run argv
 end run"""
 )
 
+# --- the native reply (FIX-16, #348; facts section 4e) -------------------------------
+#
+# `mail_reply` lets Mail build its own reply (`reply … opening window yes`, NO write to
+# `content`: any scripted body loses the native quote, facts 4d) and puts the reply text
+# on top through `runtime.compose_insert`. These four scripts are that flow's Mail side.
+# Each wraps its Mail block in `with timeout of 120 seconds` and every call passes
+# `timeout=ORIGINAL_TIMEOUT`, so the host never gives up on a step Mail is still doing.
+_JOIN_IDS = """on joinIds(xs)
+  set tid to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to ","
+  set s to (xs as text)
+  set AppleScript's text item delimiters to tid
+  return s
+end joinIds"""
+
+# The ids of every outgoing message BEFORE the reply opens: the baseline `_DISCARD_NEW_
+# REPLY` needs when a failure leaves the reply's own id unknown. Reads ids only; it does
+# not touch the original.
+_OUTGOING_IDS = (
+    _JOIN_IDS
+    + """
+
+on run argv
+  with timeout of 120 seconds
+    tell application "Mail"
+      set xs to id of every outgoing message
+    end tell
+  end timeout
+  return my joinIds(xs)
+end run"""
+)
+
+# Open Mail's native reply and bind its window by the id set that is NEW across the
+# `reply` verb (facts 4e `Window identity`, B1). Only CLOSEABLE new windows count: a
+# tiled Mail viewer adds a non-closeable 13-pixel divider window beside the compose
+# window. Never `window 1`, never a title. An unreadable `closeable` keeps the id (more
+# candidates fail, never mis-bind). Zero or several candidates is an error, and the
+# error path rolls the reply back (verified, only -1728 counts). Returns
+# `outgoing-id US window-id`.
+_REPLY_OPEN = (
+    ROLLBACK
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on newWindowIds(idsBefore, idsAfter)
+  set found to {}
+  repeat with w in idsAfter
+    set wi to contents of w
+    if wi is not in idsBefore then
+      set cl to true
+      try
+        tell application "Mail" to set cl to closeable of window id wi
+      end try
+      if cl then set end of found to wi
+    end if
+  end repeat
+  return found
+end newWindowIds
+
+on run argv
+  set mid to item 1 of argv
+  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
+  set doAll to ((item 4 of argv) is "1")
+  set us to character id 31
+  with timeout of 120 seconds
+  tell application "Mail"
+    set matches to (messages of mb whose message id is mid)
+    if (count of matches) is 0 then error ¬
+      "no message with that message id in " & (item 3 of argv)
+    set idsBefore to id of every window
+    set r to reply (item 1 of matches) opening window yes reply to all doAll
+    try
+      set found to my newWindowIds(idsBefore, id of every window)
+      if (count of found) is 0 then
+        delay 1
+        set found to my newWindowIds(idsBefore, id of every window)
+      end if
+      if (count of found) is not 1 then error ¬
+        "could not tell which window is the reply (" & (count of found) & ¬
+        " new windows)"
+      return ((id of r) as text) & us & ((item 1 of found) as text)
+    on error errMsg
+      if my rollback(r) then
+        error errMsg
+      else
+        error errMsg & my draftLeftover()
+      end if
+    end try
+  end tell
+  end timeout
+end run"""
+)
+
+# Discard the reply by its outgoing message id: `dead` only when the verifying rollback
+# got -1728; `alive` otherwise. Addressing by id works from a later osascript process
+# than the one that opened the reply (facts 4e `Refusal cleanup`). Safe to run twice: a
+# dead reference answers -1728 again.
+_DISCARD_OUTGOING = (
+    ROLLBACK
+    + """
+
+on run argv
+  set oid to (item 1 of argv) as integer
+  with timeout of 120 seconds
+    tell application "Mail"
+      if my rollback(outgoing message id oid) then return "dead"
+      return "alive"
+    end tell
+  end timeout
+end run"""
+)
+
+# The id-free discard (facts 4e `Id-free discard`): the reply's own id is unknown (the
+# open timed out, say). Candidates are the outgoing messages that are NEW since the
+# baseline and whose subject ends with the original's subject; an empty subject matches
+# nothing. Exactly one candidate is discarded; zero is `none`, several is `several` and
+# deletes nothing. A Cmd-N window or a hand reply is not a scripting object, and a hand
+# reply scripted in the meantime makes two candidates, so neither is ever deleted.
+_DISCARD_NEW_REPLY = (
+    ROLLBACK
+    + "\n\n"
+    + mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set known to "," & (item 1 of argv) & ","
+  set mid to item 2 of argv
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
+  with timeout of 120 seconds
+    tell application "Mail"
+      set matches to (messages of mb whose message id is mid)
+      if (count of matches) is 0 then return "original-missing"
+      set subj to subject of (item 1 of matches)
+      if subj is "" then return "none"
+      set cands to {}
+      repeat with om in outgoing messages
+        try
+          set oi to id of om
+          if known does not contain ("," & oi & ",") then
+            if (subject of om) ends with subj then set end of cands to oi
+          end if
+        end try
+      end repeat
+      if (count of cands) is 0 then return "none"
+      if (count of cands) > 1 then return "several"
+      if my rollback(outgoing message id (item 1 of cands)) then return "dead"
+      return "alive"
+    end tell
+  end timeout
+end run"""
+)
+
+
 # read a saved draft's envelope (#157). Mail CANNOT script-send a stored draft — `send`
 # is declared on `outgoing message` only and a `message` in the Drafts mailbox raises
 # -1708 ("doesn't understand the send message"); `open`ing the draft does produce a real
@@ -725,6 +885,157 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
         stamp = None
     quote = build_quote(sanitize_line(sender), stamp, original)
     return body + "\n\n" + quote
+
+
+# --- the native reply flow (FIX-16, #348) --------------------------------------------
+
+# How many of the original's last words must follow the reply text (facts 4e `Confirm`:
+# the tail comes from the original's own text, folded and squashed the same way).
+_TAIL_WORDS = 6
+
+
+def _quote_tail(message_id: str, mailbox_args: tuple[str, str]) -> str:
+    """The last words of the original, squashed: what must follow the reply text for
+    Mail's quote to count as confirmed. An original with no readable text has no tail,
+    and the flow refuses before it creates anything."""
+    raw = runtime.run_osascript(
+        _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
+    )
+    parts = raw.split(US, 6)
+    original = parts[6] if len(parts) == 7 else ""
+    words = squash_text(sanitize_block(original).replace("￼", "")).split()
+    if not words:
+        raise ComposeRefused(
+            "mail_reply cannot confirm Mail's quote: the original has no readable "
+            "text, so there is nothing to check the quote against. Nothing was "
+            "created and nothing was sent. To reply without the quote, call "
+            "mail_reply with include_quote=False."
+        )
+    return " ".join(words[-_TAIL_WORDS:])
+
+
+def _parse_open(raw: str) -> tuple[int, int]:
+    """``(outgoing id, window id)`` from ``_REPLY_OPEN``; ValueError otherwise."""
+    outgoing, window = raw.strip().split(US)
+    return int(outgoing), int(window)
+
+
+_LEFT_OVER = (
+    " The reply may NOT be fully removed: a reply window or a Drafts copy may be "
+    "left. Look for the open reply window to that message and in Mail's Drafts "
+    "mailbox (delete_draft removes a draft). Nothing was sent."
+)
+
+
+class _ReplyFlow:
+    """What one native reply has created, and how to take it away (THE DISCARD RULE).
+
+    By the outgoing id when the flow knows it; when it does not (the open itself failed
+    or timed out), the id-free discard against the baseline taken before the open. Only
+    a ``dead`` answer (the -1728 proof) lets the refusal say nothing was created."""
+
+    def __init__(self, message_id: str, mailbox_args: tuple[str, str], baseline: str):
+        self.message_id, self.mailbox_args, self.baseline = (
+            message_id,
+            mailbox_args,
+            baseline,
+        )
+        self.outgoing_id: int | None = None
+        self.stage = "open"
+        self._discarded: str | None = None
+
+    def discard(self) -> str:
+        """Run the discard once; later calls return the first answer. Never raises:
+        a failing discard script is an ``unknown`` answer, reported loudly."""
+        if self._discarded is None:
+            try:
+                if self.outgoing_id is not None:
+                    raw = runtime.run_osascript(
+                        _DISCARD_OUTGOING,
+                        str(self.outgoing_id),
+                        timeout=ORIGINAL_TIMEOUT,
+                    )
+                else:
+                    raw = runtime.run_osascript(
+                        _DISCARD_NEW_REPLY,
+                        self.baseline,
+                        self.message_id,
+                        *self.mailbox_args,
+                        timeout=ORIGINAL_TIMEOUT,
+                    )
+                answer = raw.strip()
+            except Exception:  # noqa: BLE001 - reported as unproven, never raised
+                answer = "unknown"
+            self._discarded = answer
+        return self._discarded
+
+    def refusal(self, cause: Exception) -> ComposeRefused:
+        """The error for a failure after the flow started: discard, then word it."""
+        discarded = self.discard()
+        if isinstance(cause, ComposeRefused):
+            said = str(cause)
+        elif isinstance(cause, NativeError):  # agent-directed text, no reply text in it
+            said = f"{self.stage}: {cause}"
+        else:  # never echo a foreign exception's text: it could carry the reply text
+            said = f"{self.stage}: {type(cause).__name__}"
+        if discarded == "dead":
+            end = " The reply was discarded: nothing was created and nothing was sent."
+        else:
+            end = _LEFT_OVER
+        return ComposeRefused(f"mail_reply did not complete ({said}).{end}")
+
+
+def open_reply_with_text(
+    message_id: str,
+    mailbox_args: tuple[str, str],
+    text: str,
+    *,
+    reply_all: bool,
+    replace_all: bool = False,
+) -> int:
+    """Open Mail's native reply to ``message_id`` and put ``text`` on top of it; return
+    the reply's outgoing message id. Shared by ``reply`` and (05.2-11) ``reply_all``.
+
+    The whole flow runs in ONE ``run_native`` closure, so no other native call
+    interleaves. Accessibility is checked before any Mail call. Every failure after the
+    flow started applies THE DISCARD RULE (``_ReplyFlow``), then raises
+    ``ComposeRefused``; the reply text never reaches a script, an argv or a file.
+    ``replace_all`` is the no-quote reply: the whole body is replaced by ``text``.
+    """
+
+    def work() -> int:
+        if not runtime.accessibility_trusted():
+            raise AccessibilityDenied(
+                "mail_reply needs Accessibility for macos-apps-mcp, to put your text "
+                "above Mail's own quote, and it is off. Tell the user to switch it on "
+                f"in {ACCESSIBILITY_PANE}. Nothing was created and nothing was sent. "
+                "Do not retry until the next user message."
+            )
+        tail = None if replace_all else _quote_tail(message_id, mailbox_args)
+        baseline = runtime.run_osascript(_OUTGOING_IDS, timeout=ORIGINAL_TIMEOUT)
+        flow = _ReplyFlow(message_id, mailbox_args, baseline.strip())
+        try:
+            raw = runtime.run_osascript(
+                _REPLY_OPEN,
+                message_id,
+                *mailbox_args,
+                "1" if reply_all else "0",
+                timeout=ORIGINAL_TIMEOUT,
+            )
+            outgoing_id, window_id = _parse_open(raw)
+            flow.outgoing_id, flow.stage = outgoing_id, "insert"
+            runtime.compose_insert(
+                window_id,
+                text,
+                replace_all=replace_all,
+                quote_tail=tail,
+                rollback=flow.discard,
+            )
+        except Exception as exc:
+            raise flow.refusal(exc) from exc
+        return outgoing_id
+
+    return work() if runtime.on_worker() else runtime.run_native(work)
 
 
 # --- the four builders ---------------------------------------------------------------

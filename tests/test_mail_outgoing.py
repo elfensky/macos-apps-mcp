@@ -113,8 +113,9 @@ def test_forward_builder_has_no_body_parameter():
 
 def test_the_quote_preamble_exists_once(monkeypatch):
     """reply and reply_all each carried a copy of fetch/guard/partition/sanitize/build.
-    Both go through ``quoted_body`` now — proved by patching that one function and
-    seeing both paths change."""
+    ``reply_all`` goes through ``quoted_body`` — proved by patching that one function
+    and seeing the path change. ``reply`` no longer builds a plain-text quote at all
+    (#348: Mail's own quote stays); 05.2-11 moves ``reply_all`` off it too."""
     seen = []
     monkeypatch.setattr(
         mail_outgoing,
@@ -142,10 +143,9 @@ def test_the_quote_preamble_exists_once(monkeypatch):
 
     _patch_run(monkeypatch, fake)
     monkeypatch.setattr(runtime, "body_file", _FakeFile)
-    mail.MailAdapter().reply("<a@x>", "inbox", "hello")
     mail.MailAdapter().reply_all("<b@x>", "inbox", "hello", dry_run=False)
-    assert seen == ["a@x", "b@x"]
-    assert bodies == ["hello [QUOTE]", "hello [QUOTE]"]
+    assert seen == ["b@x"]
+    assert bodies == ["hello [QUOTE]"]
 
 
 def test_quoted_body_reads_the_original_with_a_120s_cap(monkeypatch):
@@ -488,9 +488,9 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
 def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
     """#230: a reply, reply-all or forward acts on the ORIGINAL message, whose body may
     still be on the IMAP server. On device the fetch ran past the 30s default with Mail
-    idle — first in `_ORIGINAL` (fixed in 0.13.0), then in `_REPLY`. Every such call
-    must carry the 120s cap that equals its script's own backstop."""
-    acting = {"_ORIGINAL", "_REPLY", "_REPLY_ALL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
+    idle — first in `_ORIGINAL` (fixed in 0.13.0), then in the reply script. Every such
+    call must carry the 120s cap that equals its script's own backstop."""
+    acting = {"_ORIGINAL", "_REPLY_ALL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
     found = set()
     for module in (mail_outgoing, mail_drafts):
         for node in ast.walk(ast.parse(inspect.getsource(module))):
@@ -511,7 +511,7 @@ def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
     assert mail_outgoing.ORIGINAL_TIMEOUT == 120.0
 
 
-# --- FIX-16 (#348): the native-reply scripts (facts section 4e) ------------------------
+# --- FIX-16 (#348): the native-reply scripts (facts section 4e) ------------------
 
 _REPLY_FLOW = (
     "_OUTGOING_IDS",
