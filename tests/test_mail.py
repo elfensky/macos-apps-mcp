@@ -2345,6 +2345,7 @@ class _ReplyRig:
             "_REPLY_OPEN": _OPEN_OK,
             "_DISCARD_OUTGOING": "dead",
             "_DISCARD_NEW_REPLY": "dead",
+            "_SWEEP_DELETE": "deleted",
         }
         self.answers.update(kw.pop("answers", {}))
         self.trusted = kw.pop("trusted", True)
@@ -2368,6 +2369,7 @@ class _ReplyRig:
                 "_REPLY_OPEN",
                 "_DISCARD_OUTGOING",
                 "_DISCARD_NEW_REPLY",
+                "_SWEEP_DELETE",
             )
         }
 
@@ -2520,3 +2522,116 @@ def test_reply_without_quote_replaces_the_whole_body(monkeypatch):
     _, _, text, ikw = rig.call("compose_insert")
     assert text == "Just this" and ikw["replace_all"] is True
     assert ikw["quote_tail"] is None
+
+
+# --- rollback-sweep: the autosaved Drafts copy of a refused reply (facts 4e) --
+
+from types import SimpleNamespace  # noqa: E402
+
+from macos_apps_mcp.adapters import mail_reply_cleanup  # noqa: E402
+
+_DRAFTS_URL = f"imap://{_GMAIL_UUID}/Drafts"
+
+
+class _SweepRig(_ReplyRig):
+    """The reply rig plus a fake clock, a fake wait and a fake Drafts reader."""
+
+    def __init__(self, monkeypatch, *, baseline=frozenset({1}), found=None, **kw):
+        super().__init__(monkeypatch, **kw)
+        self.waits: list[float] = []
+        self.found_args: list = []
+        found = found or mail_reply_cleanup.Draft("one", _DRAFTS_URL, "<d@x>")
+        monkeypatch.setattr(mail_outgoing, "_wait_until", self.waits.append)
+        monkeypatch.setattr(
+            mail_outgoing, "time", SimpleNamespace(monotonic=lambda: 100.0)
+        )
+        monkeypatch.setattr(mail_reply_cleanup, "drafts_baseline", lambda: baseline)
+
+        def find(base, mid, text):
+            self.found_args.append((base, mid, text))
+            if isinstance(found, Exception):
+                raise found
+            return found
+
+        monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", find)
+
+
+def _refused_reply(monkeypatch, **kw):
+    rig = _SweepRig(
+        monkeypatch, insert_error=ComposeRefused("confirmation: not there"), **kw
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    return rig, str(exc.value)
+
+
+def test_reply_sweeps_its_own_autosaved_copy_after_a_refusal(monkeypatch):
+    rig, msg = _refused_reply(monkeypatch)
+    # owner decision 2026-11-01: one bounded wait until 45 s after the window opened
+    assert rig.waits == [145.0]
+    assert rig.found_args == [(frozenset({1}), "abc@x", "Hi")]
+    _, argv, kw = rig.call("_SWEEP_DELETE")
+    assert argv == ("d@x", _GMAIL_UUID, "Drafts")  # the reply account's Drafts
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    names = rig.names()
+    assert names.index("_DISCARD_OUTGOING") < names.index("_SWEEP_DELETE")
+    assert "nothing was created" in msg and "deleted" in msg
+
+
+def test_reply_sweep_that_finds_nothing_says_when_it_looked(monkeypatch):
+    rig, msg = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft("none"))
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" in msg and "45 s" in msg
+
+
+@pytest.mark.parametrize("kind", ["unproven"])
+def test_reply_sweep_that_cannot_prove_the_copy_is_its_own_deletes_nothing(
+    monkeypatch, kind
+):
+    rig, msg = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft(kind))
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg
+    assert "Drafts" in msg and "reply window" in msg
+
+
+def test_reply_sweep_whose_delete_is_not_confirmed_is_loud(monkeypatch):
+    _, msg = _refused_reply(monkeypatch, answers={"_SWEEP_DELETE": "alive"})
+    assert "nothing was created" not in msg and "Drafts" in msg
+
+
+def test_reply_sweep_is_unavailable_without_a_drafts_baseline(monkeypatch):
+    rig, msg = _refused_reply(monkeypatch, baseline=None)
+    assert rig.waits == [] and rig.found_args == []  # no point waiting
+    assert "nothing was created" not in msg and "Drafts" in msg
+
+
+def test_reply_sweep_that_cannot_read_the_index_afterwards_is_loud(monkeypatch):
+    rig, msg = _refused_reply(monkeypatch, found=NativeTimeout("gone"))
+    assert "nothing was created" not in msg and "Drafts" in msg
+
+
+def test_reply_sweep_waits_from_the_failed_open_when_the_window_time_is_unknown(
+    monkeypatch,
+):
+    rig = _SweepRig(monkeypatch, answers={"_REPLY_OPEN": NativeTimeout("no answer")})
+    with pytest.raises(ComposeRefused):
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    assert rig.waits == [145.0]
+
+
+def test_a_successful_reply_keeps_its_window_and_runs_no_sweep(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    assert rig.waits == [] and rig.found_args == []
+    assert "_SWEEP_DELETE" not in rig.names() and "_DISCARD_OUTGOING" not in rig.names()
+
+
+def test_sweep_delete_script_takes_one_message_from_the_named_mailbox():
+    script = mail_outgoing._SWEEP_DELETE
+    assert "on mailboxFor(" in script and "with timeout of 120 seconds" in script
+    assert "messages of mb whose message id is mid" in script
+    assert "unified" not in script and "drafts mailbox" not in script.replace(
+        mail_addressing.MAILBOX_REF, ""
+    )
+    assert '(count of matches) > 1 then return "several"' in script
+    assert script.count("delete ") == 1
