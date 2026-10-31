@@ -196,8 +196,7 @@ _AE_STATUS = {
 }
 _AE_REMEDIATION = {
     "denied": (
-        "Automation for {app} is off: switch it on in "
-        f"{PRIVACY_PANE} → Automation, then restart macos-apps-mcp."
+        f"Automation for {{app}} is off: switch it on in {PRIVACY_PANE} → Automation."
     ),
     "not_asked": (
         "{app} has not been asked yet: run doctor(request=True) with someone at the "

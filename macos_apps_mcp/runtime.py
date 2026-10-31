@@ -189,8 +189,8 @@ def _classify_osascript_failure(stderr: str, script: str = "") -> NativeError:
         return AutomationDenied(
             "macOS blocked macos-apps-mcp from controlling the app (Automation consent "
             f"not granted). Tell the user to enable it in {PRIVACY_PANE} → "
-            "Automation, for whichever app launched macos-apps-mcp, then "
-            "restart macos-apps-mcp. Do not retry until the next user message. "
+            "Automation, for whichever app launched macos-apps-mcp. "
+            "Do not retry until the next user message. "
             f"[{detail}]"
         )
     if any(code in stderr for code in _APP_NOT_RUNNING):
