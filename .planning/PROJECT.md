@@ -116,6 +116,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Owner defaults O3/O4/O5 of Phase 05.1 confirmed; O1 overturned (2026-10-24) | A lost dashboard audit line is a sticky in-memory banner (O3); a preview row is muted by colour, not opacity (O4); Restart locks with the switches (O5); the Mail account-name cache SHOULD survive a restart — a file beside the Mail backups, refreshed at start only when Mail already runs (#450) | O3–O5 shipped in Phase 05.1; #450 open |
 | A phase that changes UI files carries a pointer UI-SPEC (the sketches plus the plans' truths), never a second design source | `ui.safety-gate` halts a wave without one; the owner chose the pointer form for Phase 5 (2026-10-22) and it held for 05.1 | 05-UI-SPEC.md, 05.1-UI-SPEC.md |
 | Every merged PR gets an independent probe review in a scratch copy before the phase closes | Executors' self-reviews passed real defects in Phase 5 (6 of 7 PRs) and 05.1 (2 of 7); the ledger (`*-POSTMERGE-REVIEW.md`) feeds the security register and the close review | PM-01..28 in 05.1; fix PRs #441, #448 |
+| Pending phases run in dependency order, not insertion order (2026-10-31) | The mcp 2/fastmcp 4 migration changes the middleware, proxy and registration every later phase builds on, so it goes first; the rename, error codes and cursors ship in one breaking release; the skills and instructions are written once, after the last tool; the domain loader blocks nothing and goes last | — Pending (05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6) |
 
 ## Evolution
 

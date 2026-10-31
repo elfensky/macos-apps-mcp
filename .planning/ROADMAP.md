@@ -41,14 +41,14 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
-- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language
-- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier
-- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
+- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
-- [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page
-- [ ] **Phase 05.7: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504)** (INSERTED) - Agents get fixed error codes, server instructions and per-app skills from the server
+- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates, error codes and cursors (#514, #502, #508)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; a capped read continues with a cursor
+- [ ] **Phase 05.9: CLI — tools from the shell (#507)** (INSERTED) - Any tool runs from the shell through the daemon
 - [ ] **Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506)** (INSERTED) - Notes take Markdown and expose their attachments
-- [ ] **Phase 05.9: CLI and paged reads — tools from the shell, pages past the cap (#507, #508)** (INSERTED) - Any tool runs from the shell through the daemon; a capped read continues with a cursor
+- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
+- [ ] **Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504)** (INSERTED) - Agents get server instructions and per-app skills from the server, written once after the last tool lands
+- [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page — optional, nothing depends on it
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -460,106 +460,106 @@ Plans:
 **Gap Wave 4** *(blocked on Gap Wave 3 completion)*
 - [ ] 05.2-13-PLAN.md — device acceptance on the rebuilt `.app`: an inspected `mail_reply` draft, one delivered `reply_all`, the refusals, the preview and the wording; closes #348 and #516 with evidence or records the gaps (FIX-16, FIX-18, FIX-14)
 
-### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501) (INSERTED)
+### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471) (INSERTED)
 
-**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26).
-**Requirements**: TBD (planned from #500, #501)
+**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). The Adapters page shows the live Automation grants on macOS 27, where the TCC-only chips cannot — from the last Health report or behind a `_WAIT` guard, as the plan decides (#497). The signed `.app` carries the licence text of every bundled package whose wheel ships none (PyObjC, bpylist2), and a build check fails when one is missing (#471). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26; #497 and #471 added at the 2026-10-31 roadmap audit).
+**Requirements**: TBD (planned from #500, #501, #497, #471)
 **Depends on:** Phase 05.2
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.6 to break down)
 
-### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514) (INSERTED)
-
-**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts gains `update_contact` and `delete_contact` (dry run, audit, snapshot). One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. Placed after the open bug phases and before Phase 05.3: the rename lands before the testers and before Phases 05.7–05.9 add skills and tools (owner, 2026-10-26).
-**Requirements**: TBD (planned from #514)
-**Depends on:** Phase 05.6
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.10 to break down)
-
-### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
-
-**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
-**Requirements**: TBD (planned from #465)
-**Depends on:** Phase 05.10
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
-
 ### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
 
-**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed after Phase 05.3 and before Phase 6 (owner, 2026-10-25).
+**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed right after the bug phases and before every phase built on the middleware, proxy and registration it changes (05.10, 05.3, 05.7), so nothing is built on fastmcp 3 and migrated after (owner, 2026-10-31; first slot 2026-10-25).
 **Requirements**: TBD (planned from #470)
-**Depends on:** Phase 05.3
+**Depends on:** Phase 05.6
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.4 to break down)
 
-### Phase 05.5: Dashboard at a domain — the loader page (#483) (INSERTED)
+### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates, error codes and cursors (#514, #502, #508) (INSERTED)
 
-**Goal**: The operator dashboard opens at a domain: a static loader page on a public https origin fetches the daemon's pages from `127.0.0.1:47632` and shows them, local only, with the adapter switches and the restart (#483). The daemon answers CORS only for a paired origin and accepts the page key in `Authorization: Bearer`; Chrome and Firefox ask once for `loopback-network`, and Safari gets a "Safari is not supported" note with a link to the local page (spikes 009-011, design `docs/superpowers/specs/2026-10-25-dashboard-loader-design.md`)
-**Requirements**: TBD (planned from #483)
+**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502), and a truncated bounded read returns a stateless `next_cursor` (a keyset position plus a query signature); a mismatched cursor answers `invalid_argument` (#508). One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.9, 05.8, 05.3, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #514, #502, #508)
 **Depends on:** Phase 05.4
 **Plans:** 0 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.5 to break down)
+- [ ] TBD (run /gsd-plan-phase 05.10 to break down)
 
-### Phase 05.7: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504) (INSERTED)
+### Phase 05.9: CLI — tools from the shell (#507) (INSERTED)
 
-**Goal**: Agents get the house rules and fixed error codes from the server itself. Every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The server sends a short `instructions` text built from the registry, under a tested size budget (#503). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed after Phase 05.5 and before Phase 6 (owner, 2026-10-26).
-**Requirements**: TBD (planned from #502, #503, #504)
-**Depends on:** Phase 05.5
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.7 to break down)
-
-### Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506) (INSERTED)
-
-**Goal**: Notes take Markdown and expose their attachments. `create_note` and `update_note` accept `format: "markdown"`, rendered by `markdown-it-py` with raw HTML off and a link-scheme allowlist (#505). `note_attachments`, `save_note_attachment` and `add_note_attachment` list, save and add files through `files.py`, and refuse locked and shared notes (#506). Builds on the Phase 05.6 Notes guards. Placed after Phase 05.7 and before Phase 6 (owner, 2026-10-26).
-**Requirements**: TBD (planned from #505, #506)
-**Depends on:** Phase 05.7
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.8 to break down)
-
-### Phase 05.9: CLI and paged reads — tools from the shell, pages past the cap (#507, #508) (INSERTED)
-
-**Goal**: Any tool can be called from the shell, and a capped read can continue. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). A truncated bounded read returns a stateless `next_cursor` (a keyset position plus a query signature); a mismatched cursor answers `invalid_argument` (#508). Placed after Phase 05.8 and before Phase 6 (owner, 2026-10-26).
-**Requirements**: TBD (planned from #507, #508)
-**Depends on:** Phase 05.8
+**Goal**: Any tool can be called from the shell. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). The paged reads (#508) moved to Phase 05.10 with the other surface changes. Placed after Phase 05.10, so the command speaks the renamed surface, and before Phase 05.8 (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #507)
+**Depends on:** Phase 05.10
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.9 to break down)
 
+### Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506) (INSERTED)
+
+**Goal**: Notes take Markdown and expose their attachments. `create_note` and `update_note` accept `format: "markdown"`, rendered by `markdown-it-py` with raw HTML off and a link-scheme allowlist (#505). `note_attachments`, `save_note_attachment` and `add_note_attachment` list, save and add files through `files.py`, and refuse locked and shared notes (#506). Builds on the Phase 05.6 Notes guards. Placed after Phase 05.9 and before the feedback and guidance phases, so its tools exist before the skills are written (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #505, #506)
+**Depends on:** Phase 05.9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.8 to break down)
+
+### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
+
+**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed after the surface and tool phases, so `report_problem` and `suggest_improvement` follow the `verb_noun` names and the error codes, and before Phase 6 so the first outside users can report problems (owner, 2026-10-25; slot 2026-10-31).
+**Requirements**: TBD (planned from #465)
+**Depends on:** Phase 05.8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
+
+### Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504) (INSERTED)
+
+**Goal**: Agents get the house rules from the server itself. The error codes (#502) moved to Phase 05.10 with the other surface changes. The server sends a short `instructions` text built from the registry, under a tested size budget (#503). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed last among the feature phases, after every tool exists, so the parity test and the instructions text are written once; Phase 6 packages the skills (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #503, #504)
+**Depends on:** Phase 05.3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.7 to break down)
+
+### Phase 05.5: Dashboard at a domain — the loader page (#483) (INSERTED)
+
+**Goal**: The operator dashboard opens at a domain: a static loader page on a public https origin fetches the daemon's pages from `127.0.0.1:47632` and shows them, local only, with the adapter switches and the restart (#483). The daemon answers CORS only for a paired origin and accepts the page key in `Authorization: Bearer`; Chrome and Firefox ask once for `loopback-network`, and Safari gets a "Safari is not supported" note with a link to the local page (spikes 009-011, design `docs/superpowers/specs/2026-10-25-dashboard-loader-design.md`). Optional: nothing depends on it; it may be skipped or moved to v2 (owner, 2026-10-31).
+**Requirements**: TBD (planned from #483)
+**Depends on:** Phase 05.7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.5 to break down)
+
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
 **Goal**: Someone who is not the author installs the server, the daemon and the companion skill without cloning the repo.
-**Depends on**: Phase 5
+**Depends on**: Phase 05.7 (Phase 05.5 is optional)
 **Requirements**: DIST-01, DIST-02, DIST-03, DIST-04, DIST-05, DIST-06
 **Success Criteria** (what must be TRUE):
 
-  1. A machine that has never seen the repo runs the server by following the README's first code block (`uvx macos-apps-mcp`); clone-and-venv is documented as the contributor path, not the user path.
-  2. The PyPI project page links to repo, issues and changelog from `[project.urls]`.
+  1. A machine that has never seen the repo runs the server by following the README's first code block (`uvx macos-apps-mcp`); clone-and-venv is documented as the contributor path, not the user path. — Landed: quick task 261009-l1d, PR #315; #113 closed (2026-10-09).
+  2. The PyPI project page links to repo, issues and changelog from `[project.urls]`. — Landed: quick task 261009-l1b, PR #314; #111 closed (2026-10-09).
   3. A release publishes a `.mcpb` bundle that installs into Claude Desktop in one click, and the notarized `.app` installs via `brew install --cask …` with the staple-then-zip order preserved.
-  4. `claude plugin install` wires the companion skill and the MCP server config in one step from the in-repo `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` and `.mcp.json`; the same `skills/` layout installs into another agent via `npx skills add elfensky/macos-apps-mcp`.
+  4. `claude plugin install` wires the companion skill and the MCP server config in one step from the in-repo `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` and `.mcp.json`; the same `skills/` layout installs into another agent via `npx skills add elfensky/macos-apps-mcp`. — Partly landed: the in-repo plugin and marketplace (quick task 261025-h09); the skill content comes from Phase 05.7.
   5. The companion skill teaches the cockpit workflows — triage reads, pointer citation, draft-review — and a session using it cites a Mail pointer by id + folder + account instead of pasting a body.
-  6. `scripts/build_app.sh` builds the bundle on an x86_64 Mac — `cryptography<49` (48.0.1, the last universal2 wheel) constrains the install on x86_64 only, arm64 keeps current cryptography — and the Intel bundle passes its env-free import smoke (#205). DIST-06 has no dependency on Phases 1–5 and may land early as a `/gsd-quick` task.
+  6. `scripts/build_app.sh` builds the bundle on an x86_64 Mac — `cryptography<49` (48.0.1, the last universal2 wheel) constrains the install on x86_64 only, arm64 keeps current cryptography — and the Intel bundle passes its env-free import smoke (#205). DIST-06 has no dependency on Phases 1–5 and may land early as a `/gsd-quick` task. — Landed: quick tasks 261007-tu3 (PR #308), 261011-4iv (PR #323), 261011-p90 (PR #330); #205 closed (2026-10-11).
 
 **Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.3 → 05.4 → 6
+Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-10-31): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -573,6 +573,12 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 7/13 | In Progress | - |
-| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
+| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471 (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
+| 05.10. Tool surface — rubric, verb_noun, error codes, cursors (INSERTED) | 0/TBD | Not started | - |
+| 05.9. CLI — tools from the shell (INSERTED) | 0/TBD | Not started | - |
+| 05.8. Notes depth — Markdown, attachments (INSERTED) | 0/TBD | Not started | - |
+| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
+| 05.7. Agent guidance — instructions, skills (INSERTED) | 0/TBD | Not started | - |
+| 05.5. Dashboard at a domain — optional (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

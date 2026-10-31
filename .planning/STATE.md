@@ -5,9 +5,9 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: "Phase 05.2: gap plans 05.2-08..13 planned — FIX-18 reply_all preview and FIX-14 wording (08), the Accessibility reply probe sitting (09), native-quote replies or refuse (10-12), device acceptance (13); next: /gsd-execute-phase 05.2 --gaps-only"
-last_updated: "2026-10-27T23:17:51.190Z"
-last_activity: 2026-10-28
-last_activity_desc: "Phase 05.2 gap plans 05.2-08..13 created (FIX-16, FIX-18)"
+last_updated: "2026-10-31T18:14:06.861Z"
+last_activity: 2026-10-31
+last_activity_desc: "Roadmap audit: pending phases reordered by dependency (05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6); #497 and #471 into 05.6; #502 and #508 into 05.10; DIST-01/02/06 marked complete"
 state_head: 5b607ef39a36c36203ca0715ffb241ff3f0219c8
 progress:
   total_phases: 19
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
 Plan: 8 of 13
 Status: Ready to execute
-Last activity: 2026-10-28 — Phase 05.2 gap plans 05.2-08..13 created (FIX-16, FIX-18)
+Last activity: 2026-10-31 — Roadmap audit: pending phases reordered by dependency (05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6); #497 and #471 into 05.6; #502 and #508 into 05.10; DIST-01/02/06 marked complete
 
 Progress: [█████████░] 92%
 
@@ -202,6 +202,16 @@ Recent decisions affecting current work:
 - Phase 05.8 inserted after Phase 05.7: Notes depth — Markdown input and note attachments (#505, #506); before Phase 6 (owner, 2026-10-26)
 - Phase 05.9 inserted after Phase 05.8: CLI and paged reads — tools from the shell, pages past the cap (#507, #508); before Phase 6 (owner, 2026-10-26)
 - Phase 05.10 inserted after Phase 05.6: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514); before Phase 05.3, so the breaking rename lands before the testers and before Phases 05.7–05.9 add skills and tools (owner, 2026-10-26)
+- Pending phases reordered by dependency, not insertion (owner, 2026-10-31, roadmap audit): 05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6 — the mcp 2/fastmcp 4 migration before every phase built on the middleware, proxy and registration it changes; the rename, error codes and cursors in one breaking release; agent guidance after the last tool lands; the domain loader optional and last. Every pending `Depends on` re-pointed; the execution-order line and the progress table list every pending phase
+- Phase 05.6 edited: edited fields: title, goal, requirements (+#497 Adapters page grant chips on macOS 27, +#471 MIT notices in the `.app`) — open bugs with no phase (2026-10-31)
+- Phase 05.10 edited: edited fields: title, goal, requirements, depends_on (05.4) — +#502 error codes from 05.7, +#508 paged reads from 05.9, one breaking release; `update_contact`/`delete_contact` dropped — Contacts depth is v2 (#94, 2026-08-28 review) (2026-10-31)
+- Phase 05.9 edited: edited fields: title, goal, requirements, depends_on (05.10) — CLI only (#507); phase directory renamed to the new slug (2026-10-31)
+- Phase 05.7 edited: edited fields: title, goal, requirements, depends_on (05.3) — #502 moved to 05.10; phase directory renamed to the new slug (2026-10-31)
+- Phase 05.4 edited: edited fields: goal, depends_on (05.6) (2026-10-31)
+- Phase 05.8 edited: edited fields: goal, depends_on (05.9) (2026-10-31)
+- Phase 05.3 edited: edited fields: goal, depends_on (05.8) (2026-10-31)
+- Phase 05.5 edited: edited fields: goal (optional), depends_on (05.7) (2026-10-31)
+- Phase 6 edited: edited fields: depends_on (05.7), success_criteria (1, 2 and 6 landed as quick tasks in October; 4 partly) — DIST-01, DIST-02 and DIST-06 marked complete in REQUIREMENTS.md (2026-10-31)
 
 ## Deferred Items
 
@@ -213,6 +223,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-28T00:00:00Z
+Last session: 2026-10-31T18:14:06.861Z
 Stopped at: Phase 05.2: gap plans 05.2-08..13 planned — FIX-18 reply_all preview and FIX-14 wording (08), the Accessibility reply probe sitting (09), native-quote replies or refuse (10-12), device acceptance (13); next: /gsd-execute-phase 05.2 --gaps-only
 Resume file: None
