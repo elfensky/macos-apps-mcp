@@ -994,9 +994,16 @@ def _rollback_reply(oid: str) -> None:
         say(f"rollback: error {type(e).__name__}: {str(e)[:200]}")
 
 
-def _wait_marker(el, marker: str, t0: float, until: float) -> int | None:
+def _wait_marker(
+    el, marker: str, t0: float, until: float, pre: str | None = None
+) -> int | None:
+    """Settled = the body starts with the marker AND it changed since just before the
+    key event: a body that already started with the marker (a second insert, or a
+    marker that prefixes an earlier one) once read as settled at 4 ms, the clipboard
+    was restored, and Mail's late Cmd-V pasted the owner's content (2026-10-31)."""
     while time.monotonic() - t0 < until:
-        if _starts_with_marker(_read_body(el)[0], marker):
+        body = _read_body(el)[0]
+        if _starts_with_marker(body, marker) and (pre is None or _squash(body) != pre):
             return round((time.monotonic() - t0) * 1000)
         time.sleep(0.05)
     return None
@@ -1034,6 +1041,7 @@ def cmd_insert(a) -> int:
     t_chk = time.monotonic()  # the last identity check
     if int(pb.changeCount()) != cc0:
         raise Refuse("clipboard changed after the snapshot; run again")
+    pre = _squash(_read_body(el)[0])  # the body before the key event
     _write_marker(pb, marker)
     mine = int(pb.changeCount())
     settled = None
@@ -1049,9 +1057,9 @@ def cmd_insert(a) -> int:
             if r != "keystroke-sent":
                 raise Refuse(f"M3 in-script check: {r}; no keystroke was sent")
         t0 = time.monotonic()  # F3: the settle timer starts AFTER the event
-        settled = _wait_marker(el, marker, t0, 2.0)
+        settled = _wait_marker(el, marker, t0, 2.0, pre)
         if settled is None:  # keep the marker on the pasteboard for a further 3 s
-            settled = _wait_marker(el, marker, t0, 5.0)
+            settled = _wait_marker(el, marker, t0, 5.0, pre)
             if settled is not None:
                 say("insert: late settle (inside the 3 s grace)")
         say(f"insert: {a.mech} paste_settle_ms={settled}")
