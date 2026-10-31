@@ -509,3 +509,82 @@ def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
             found.add(node.args[0].id)
     assert found == acting
     assert mail_outgoing.ORIGINAL_TIMEOUT == 120.0
+
+
+# --- FIX-16 (#348): the native-reply scripts (facts section 4e) ------------------------
+
+_REPLY_FLOW = (
+    "_OUTGOING_IDS",
+    "_REPLY_OPEN",
+    "_DISCARD_OUTGOING",
+    "_DISCARD_NEW_REPLY",
+)
+
+
+def test_reply_open_never_writes_content():
+    script = mail_outgoing._REPLY_OPEN
+    assert "opening window yes" in script and "reply to all" in script
+    assert "my rollback(" in script and "with timeout of 120 seconds" in script
+    assert "set content" not in script and "content of" not in script
+    assert "on rollback(msg)" in script  # composes ROLLBACK
+    assert "on mailboxFor(" in script
+    discard = mail_outgoing._DISCARD_OUTGOING
+    assert "on rollback(msg)" in discard and "my rollback(" in discard
+    assert "with timeout of 120 seconds" in discard
+
+
+def test_reply_open_binds_the_new_window():
+    script = mail_outgoing._REPLY_OPEN
+    before = script.index("id of every window")
+    verb = script.index("reply (item 1 of matches)")
+    after = script.index("id of every window", verb)
+    assert before < verb < after  # B1: ids before the verb and again after it
+    assert "id of window 1" not in script  # never the front window by index
+    # facts 4e: only CLOSEABLE new windows count (a tiled viewer adds a divider window)
+    assert "closeable of window id" in script
+    # zero or several new windows: error -> the rollback in the same script
+    assert "count of found) is not 1" in script
+    assert script.index("count of found) is not 1") < script.index("my rollback(r)")
+    assert "(id of r)" in script  # returns the outgoing id beside the window id
+
+
+def test_reply_flow_scripts_wait_as_long_as_their_backstop():
+    found = set()
+    names = set(_REPLY_FLOW) | {"_SWEEP_DELETE"}
+    for node in ast.walk(ast.parse(inspect.getsource(mail_outgoing))):
+        if not (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "attr", None) == "run_osascript"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in names
+        ):
+            continue
+        caps = [k.value for k in node.keywords if k.arg == "timeout"]
+        assert [getattr(c, "id", None) for c in caps] == ["ORIGINAL_TIMEOUT"], (
+            node.args[0].id
+        )
+        found.add(node.args[0].id)
+    assert found >= set(_REPLY_FLOW)
+    for name in found:
+        assert "with timeout of 120 seconds" in getattr(mail_outgoing, name), name
+
+
+def test_discard_new_reply_deletes_one_matching_reply_only():
+    script = mail_outgoing._DISCARD_NEW_REPLY
+    assert "on rollback(msg)" in script and "on mailboxFor(" in script
+    assert "with timeout of 120 seconds" in script
+    assert "ends with subj" in script  # the subject suffix rule
+    assert (
+        'if subj is "" then return "none"' in script
+    )  # an empty subject deletes nothing
+    assert "known does not contain" in script  # compared with the baseline
+    assert '(count of cands) > 1 then return "several"' in script
+    assert script.count("my rollback(") == 1  # one delete, only after both checks
+
+
+def test_outgoing_ids_reads_only_ids():
+    script = mail_outgoing._OUTGOING_IDS
+    assert "id of every outgoing message" in script
+    assert "with timeout of 120 seconds" in script
+    assert "messages of" not in script  # does not touch the original

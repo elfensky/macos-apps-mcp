@@ -40,6 +40,9 @@ from macos_apps_mcp.runtime import (
 # The seam's own self-tests bind the real function at import time: the conftest lock
 # replaces ``runtime.automation_permission`` in every unit test.
 _REAL_AUTOMATION_PERMISSION = runtime.automation_permission
+# Same for the two Accessibility seams of the Mail reply flow (#348): conftest locks them.
+_REAL_ACCESSIBILITY_TRUSTED = runtime.accessibility_trusted
+_REAL_COMPOSE_INSERT = runtime.compose_insert
 # Same for the attribution formatter: conftest swaps it for a deterministic fake.
 _REAL_MAIL_ATTRIBUTION_STAMP = getattr(runtime, "mail_attribution_stamp", None)
 
@@ -584,8 +587,403 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
         "read_via_sqlite",
         "photos_db",
         "automation_permission",
+        "accessibility_trusted",
+        "compose_insert",
         "mac_region",
         "mail_attribution_stamp",
         "log",
     }
     assert not hasattr(runtime, "EK")
+
+
+# --- FIX-16 (#348): the two Accessibility seams -----------------------------------------
+#
+# Facts section 4e is the contract. No test here makes a real AX, CoreGraphics or
+# pasteboard call: every private loader and helper is replaced.
+
+
+def test_accessibility_trusted_reads_the_switch_without_a_prompt(monkeypatch):
+    threads: list[str] = []
+
+    def trust():
+        threads.append(threading.current_thread().name)
+        return True
+
+    monkeypatch.setattr(runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": trust})
+    assert _REAL_ACCESSIBILITY_TRUSTED() is True
+    assert threads and all(n.startswith("mac-native") for n in threads)
+    monkeypatch.setattr(
+        runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": lambda: False}
+    )
+    assert _REAL_ACCESSIBILITY_TRUSTED() is False
+    # only the non-prompting trust read exists in the runtime source (T-05.2-38)
+    src = open(runtime.__file__, encoding="utf-8").read()
+    assert "WithOptions" not in src
+
+
+class _Clip:
+    """A fake general pasteboard: records the order of its calls."""
+
+    def __init__(self, events, items=None):
+        self.events = events
+        self.items = items if items is not None else [{"public.utf8-plain-text": b"x"}]
+        self.count = 10
+        self.written: list[str] = []
+
+    def change_count(self):
+        return self.count
+
+    def snapshot(self):
+        self.events.append("snapshot")
+        return [dict(i) for i in self.items]
+
+    def write_text(self, text):
+        self.events.append("write")
+        self.written.append(text)
+        self.count += 1
+
+    def restore(self, snap):
+        self.events.append("restore")
+        self.items = snap
+        self.count += 1
+
+
+def _compose_rig(
+    monkeypatch,
+    bodies,
+    *,
+    held=True,
+    focused=True,
+    trusted=True,
+    items=None,
+):
+    """Replace every private loader of compose_insert. ``bodies`` is the AX read-back
+    sequence (the last one repeats). Returns (events, clip, keys)."""
+    events: list = []
+    keys: list = []
+    reads = iter(bodies)
+    last = [bodies[0]]
+    clip = _Clip(events, items)
+    clock = [0.0]
+
+    def read(_el):
+        events.append("read")
+        try:
+            last[0] = next(reads)
+        except StopIteration:
+            pass
+        return last[0]
+
+    def hold(window_id):
+        events.append(("hold", window_id))
+        if not held:
+            raise runtime.ComposeRefused("window check: not the front window")
+
+    def focus(pid, window_id):
+        events.append(("focus", pid, window_id))
+        if not focused:
+            raise runtime.ComposeRefused("focus check: not the reply body")
+        return "EL"
+
+    def sleep(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(runtime, "accessibility_trusted", lambda: trusted)
+    monkeypatch.setattr(runtime, "_mail_pid", lambda: 4242)
+    monkeypatch.setattr(runtime, "_clipboard", lambda: clip)
+    monkeypatch.setattr(runtime, "_hold_window", hold)
+    monkeypatch.setattr(runtime, "_focused_body", focus)
+    monkeypatch.setattr(runtime, "_read_body", read)
+    monkeypatch.setattr(
+        runtime, "_post_cmd_key", lambda pid, code: keys.append((pid, code))
+    )
+    monkeypatch.setattr(
+        runtime,
+        "time",
+        types.SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep),
+    )
+    return events, clip, keys
+
+
+_TEXT = "Hi there"
+_QUOTE = "On 1 Jul 2026, at 14:39, Jane wrote:\n> original words end here"
+
+
+def test_compose_insert_targets_mails_window_only(monkeypatch):
+    events, clip, keys = _compose_rig(monkeypatch, ["", f"{_TEXT}\n{_QUOTE}"])
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
+    assert runtime._MAIL_BUNDLE == "com.apple.mail"
+    assert keys == [(4242, 9)]  # exactly one Cmd-V, to Mail's pid
+    assert ("hold", 77) in events and ("focus", 4242, 77) in events
+    assert clip.written == [_TEXT]
+    # the order of facts 4e `Insert`: snapshot, window, focus, write, key, restore
+    names = [e if isinstance(e, str) else e[0] for e in events]
+    assert names.index("snapshot") < names.index("hold") < names.index("focus")
+    assert names.index("focus") < names.index("write") < names.index("restore")
+
+
+def test_post_cmd_key_sends_one_down_and_one_up_to_mails_pid_only(monkeypatch):
+    calls: list = []
+
+    class Lib:
+        def CGEventCreateKeyboardEvent(self, src, code, down):
+            calls.append(("create", src, code, down))
+            return f"ev{len(calls)}"
+
+        def CGEventSetFlags(self, ev, flags):
+            calls.append(("flags", ev, flags))
+
+        def CGEventPostToPid(self, pid, ev):
+            calls.append(("post", pid, ev))
+
+        def CFRelease(self, ev):
+            calls.append(("release", ev))
+
+    monkeypatch.setattr(runtime, "_cg_lib", lambda: Lib())
+    runtime._post_cmd_key(4242, 9)
+    creates = [c for c in calls if c[0] == "create"]
+    assert [(c[2], c[3]) for c in creates] == [(9, True), (9, False)]
+    assert [c[2] for c in calls if c[0] == "flags"] == [0x100000, 0x100000]
+    assert [c[1] for c in calls if c[0] == "post"] == [4242, 4242]
+    assert "CGEventPost(" not in open(runtime.__file__, encoding="utf-8").read()
+
+
+def test_compose_insert_refuses_unconfirmed_text(monkeypatch):
+    # the body never changes: not settled -> the reply is rolled back BEFORE the restore
+    events, clip, keys = _compose_rig(monkeypatch, ["old body"])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(
+            77,
+            _TEXT,
+            quote_tail="tail words",
+            rollback=lambda: events.append("rollback"),
+        )
+    assert "rollback" in events and "restore" in events
+    assert events.index("rollback") < events.index("restore")
+    assert (4242, 9) in keys
+
+
+def test_compose_insert_refuses_another_front_window(monkeypatch):
+    events, clip, keys = _compose_rig(monkeypatch, ["x"], held=False)
+    with pytest.raises(runtime.ComposeRefused, match="window check"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert keys == [] and "write" not in events  # before any key event or write
+    events, clip, keys = _compose_rig(monkeypatch, ["x"], focused=False)
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert keys == [] and "write" not in events
+
+
+def test_compose_insert_refuses_when_accessibility_is_off(monkeypatch):
+    events, clip, keys = _compose_rig(monkeypatch, ["x"], trusted=False)
+    with pytest.raises(runtime.ComposeRefused, match="Accessibility"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert events == [] and keys == []  # clipboard untouched, no key event
+
+
+def test_compose_insert_refuses_a_reply_without_mails_quote(monkeypatch):
+    # the text landed, but nothing follows it: Mail's quote is missing
+    _compose_rig(monkeypatch, ["", _TEXT])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation") as exc:
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
+    msg = str(exc.value)
+    assert "Quote the text of the original message" in msg
+    assert "include_quote=False" in msg
+
+
+def test_compose_insert_refuses_an_unknown_quote_tail_before_any_write(monkeypatch):
+    events, _, keys = _compose_rig(monkeypatch, [""])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(77, _TEXT)  # a quoted reply with no known tail
+    assert events == [] and keys == []
+
+
+def test_compose_insert_confirms_after_nfc_and_line_folding(monkeypatch):
+    import unicodedata
+
+    text = "Hi\nSecond line \u2013 caf\u00e9 \u2713"
+    readback = unicodedata.normalize("NFD", text).replace("\n", "\r\n")
+    _compose_rig(monkeypatch, ["", f"{readback}\r\nquote text tail words"])
+    _REAL_COMPOSE_INSERT(77, text, quote_tail="tail words")
+    # the AX walk drops empty lines: no blank line between two paragraphs still passes
+    para = "First paragraph.\n\nSecond paragraph."
+    _compose_rig(
+        monkeypatch, ["", "First paragraph.\nSecond paragraph.\nquote tail words"]
+    )
+    _REAL_COMPOSE_INSERT(77, para, quote_tail="tail words")
+    # the text after the quote is not the text on top
+    _compose_rig(monkeypatch, ["", f"quote tail words\n{text}"])
+    with pytest.raises(runtime.ComposeRefused):
+        _REAL_COMPOSE_INSERT(77, text, quote_tail="tail words")
+
+
+def test_compose_insert_replace_all_selects_all_and_wants_nothing_after(monkeypatch):
+    events, _, keys = _compose_rig(monkeypatch, ["old quote", _TEXT])
+    _REAL_COMPOSE_INSERT(77, _TEXT, replace_all=True)
+    assert keys == [(4242, 0), (4242, 9)]  # Cmd-A, then Cmd-V, both to Mail
+    assert [e for e in events if isinstance(e, tuple) and e[0] == "focus"] == [
+        ("focus", 4242, 77),
+        ("focus", 4242, 77),  # the focus check runs again after Cmd-A
+    ]
+    _compose_rig(monkeypatch, ["old quote", f"{_TEXT}\nleft over quote"])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, replace_all=True)
+
+
+def test_compose_insert_seam_takes_no_target_app():
+    import inspect
+
+    params = list(inspect.signature(runtime.compose_insert).parameters)
+    assert params[:2] == ["window_id", "text"]
+    assert set(params) == {"window_id", "text", "replace_all", "quote_tail", "rollback"}
+    assert not any(w in p for p in params for w in ("app", "pid", "bundle"))
+    assert runtime._MAIL_BUNDLE == "com.apple.mail"
+
+
+def test_compose_insert_restores_every_pasteboard_item(monkeypatch):
+    items = [
+        {"public.utf8-plain-text": b"a", "public.html": b"<b>a</b>"},
+        {"com.example.one": b"\x00\x01", "com.example.two": b"b"},
+    ]
+    events, clip, _ = _compose_rig(monkeypatch, ["", f"{_TEXT}\ntail"], items=items)
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert clip.items == items
+    # and also when the insert raised
+    events, clip, _ = _compose_rig(monkeypatch, ["old"], items=items)
+    monkeypatch.setattr(
+        runtime, "_post_cmd_key", lambda *a: (_ for _ in ()).throw(OSError("boom"))
+    )
+    with pytest.raises(OSError):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert clip.items == items
+
+
+def test_compose_insert_keeps_a_newer_user_copy(monkeypatch):
+    events, clip, _ = _compose_rig(monkeypatch, ["", f"{_TEXT}\ntail"])
+    real_read = runtime._read_body
+
+    def read(el):
+        clip.count += 5  # the user copies something while the paste settles
+        return real_read(el)
+
+    monkeypatch.setattr(runtime, "_read_body", read)
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert "restore" not in events
+
+
+def test_compose_insert_marks_the_borrowed_clipboard_transient():
+    assert runtime._TRANSIENT_TYPES == (
+        "org.nspasteboard.TransientType",
+        "org.nspasteboard.ConcealedType",
+    )
+
+
+def test_compose_insert_refuses_a_changed_clipboard_before_writing(monkeypatch):
+    events, clip, keys = _compose_rig(monkeypatch, ["x"])
+    real_focus = runtime._focused_body
+
+    def focus(pid, wid):
+        clip.count += 1  # a copy between the snapshot and the write
+        return real_focus(pid, wid)
+
+    monkeypatch.setattr(runtime, "_focused_body", focus)
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert "write" not in events and keys == []
+
+
+def test_compose_insert_restores_only_after_the_paste_settles(monkeypatch):
+    # the text shows on the third read: the restore comes after that read
+    events, _, _ = _compose_rig(
+        monkeypatch, ["old", "old", "old", f"{_TEXT}\ntail", f"{_TEXT}\ntail"]
+    )
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert events.count("read") >= 4
+    assert events.index("restore") > [i for i, e in enumerate(events) if e == "read"][3]
+    # never shown: the restore runs after the bound, and the call refuses
+    events, _, _ = _compose_rig(monkeypatch, ["old"])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert runtime._PASTE_SETTLE_S == 1.0
+    assert "restore" in events
+
+
+def test_compose_insert_does_not_settle_on_an_unchanged_body(monkeypatch):
+    # facts 4e late-paste finding: a body that already starts with the text is not proof
+    events, _, _ = _compose_rig(monkeypatch, [f"{_TEXT}\ntail"])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+
+
+def test_snapshot_incomplete_refuses_and_an_empty_pasteboard_is_complete():
+    require = runtime._require_complete_snapshot
+    require([{"t": b"x"}], 0, 1)
+    require([], 0, 0)  # emptied pasteboard: no items and no types
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        require([{"t": b"x"}], 1, 2)  # one unreadable type
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        require([], 0, 3)  # types present, no items
+
+
+class _FakeAx:
+    """A fake HIServices binding over a dict of element -> attributes."""
+
+    def __init__(self, attrs, windows):
+        self.attrs, self.windows = attrs, windows
+
+    def lib(self):
+        return {
+            "AXUIElementCreateApplication": lambda pid: ("app", pid),
+            "AXUIElementCopyAttributeValue": lambda el, attr, _: (
+                (0, self.attrs[el][attr])
+                if attr in self.attrs.get(el, {})
+                else (-25212, None)
+            ),
+            "_AXUIElementGetWindow": lambda win, _: (0, self.windows[win]),
+        }
+
+
+def test_focused_body_wants_a_web_area_inside_the_bound_window(monkeypatch):
+    ax = _FakeAx(
+        {
+            ("app", 4242): {"AXFocusedUIElement": "body"},
+            "body": {"AXRole": "AXWebArea", "AXWindow": "win"},
+        },
+        {"win": 5001},
+    )
+    monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
+    assert runtime._focused_body(4242, 5001) == "body"
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 9999)  # another window of Mail
+    ax.attrs["body"]["AXRole"] = "AXTextField"
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)  # not a body
+
+
+def test_focused_body_waits_up_to_three_seconds_for_a_fresh_reply(monkeypatch):
+    ax = _FakeAx({("app", 4242): {}, "body": {}}, {})
+    clock = [0.0]
+    monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
+    monkeypatch.setattr(
+        runtime,
+        "time",
+        types.SimpleNamespace(
+            monotonic=lambda: clock[0],
+            sleep=lambda s: clock.__setitem__(0, clock[0] + s),
+        ),
+    )
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)
+    assert 3.0 <= clock[0] < 3.5
+
+
+def test_read_body_walks_the_static_text_parts(monkeypatch):
+    attrs = {
+        "web": {"AXRole": "AXWebArea", "AXChildren": ["a", "b"]},
+        "a": {"AXRole": "AXStaticText", "AXValue": "first"},
+        "b": {"AXRole": "AXGroup", "AXChildren": ["c"]},
+        "c": {"AXRole": "AXStaticText", "AXValue": "second"},
+    }
+    ax = _FakeAx(attrs, {})
+    monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
+    assert runtime._read_body("web") == "first\nsecond"
