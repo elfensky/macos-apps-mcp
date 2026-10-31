@@ -942,6 +942,151 @@ def test_reply_all_sends_with_quote(monkeypatch):
     assert seen[mail_outgoing._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
+def _recipients_payload(**kinds):
+    """A _REPLY_ALL_RECIPIENTS answer: each keyword is a record kind, a list
+    (to/cc/self) or a text (sender/replyto/subject)."""
+    out = ""
+    for kind, value in kinds.items():
+        for v in value if isinstance(value, list) else [value]:
+            out += f"{kind}{US}{v}{RS}"
+    return out
+
+
+def _preview(monkeypatch, **kinds):
+    """Run reply_all(dry_run=True) over a faked recipients read; return (out, calls)."""
+    calls = []
+
+    def fake(script, *argv, **_):
+        calls.append(script)
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            return _recipients_payload(**kinds)
+        raise AssertionError(f"dry run must not call {script!r}")
+
+    _patch_run(monkeypatch, fake)
+    out = mail.MailAdapter().reply_all("<orig@x>", "inbox", "ok")
+    return out, calls
+
+
+def test_reply_all_preview_lists_the_replys_recipients(monkeypatch):
+    # #516: the original is from the boss, addressed only to this account -> the reply
+    # goes To the boss alone, and `from` is no longer the original's sender.
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        sender="Boss <boss@corp.com>",
+        self=["me@example.com"],
+        subject="Hi",
+    )
+    w = out["would_send"]
+    assert w["to"] == ["boss@corp.com"]
+    assert w["cc"] == []
+    assert w["from"] == mail_outgoing.REPLY_SENDER
+    assert w["from"] != "boss@corp.com"
+
+
+def test_reply_all_preview_uses_reply_to_when_present(monkeypatch):
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        sender="Boss <boss@corp.com>",
+        replyto="Lists <list@corp.com>, b@corp.com",
+        self=["me@example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["list@corp.com", "b@corp.com"]
+    assert "boss@corp.com" not in w["to"] + w["cc"]
+
+
+def test_reply_all_preview_drops_own_addresses_and_duplicates(monkeypatch):
+    out, _ = _preview(
+        monkeypatch,
+        to=["Alice@Corp.com", "me@example.com"],
+        cc=["alice@corp.com", "carol@corp.com", "BOSS@corp.com"],
+        sender="boss@corp.com",
+        self=["ME@example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["boss@corp.com"]
+    assert w["cc"] == ["Alice@Corp.com", "carol@corp.com"]
+
+
+def test_reply_all_preview_keeps_a_self_sent_originals_sender(monkeypatch):
+    # facts 5f: Mail's reply-all of a self-sent original went To the owner's address.
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        sender="me@example.com",
+        self=["me@example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["me@example.com"]
+    assert w["cc"] == []
+
+
+def test_reply_all_preview_falls_back_to_the_sender_when_reply_to_has_no_address(
+    monkeypatch,
+):
+    out, _ = _preview(
+        monkeypatch,
+        sender="Boss <boss@corp.com>",
+        replyto="undisclosed, nobody",
+        self=["me@example.com"],
+    )
+    assert out["would_send"]["to"] == ["boss@corp.com"]
+
+
+def test_reply_all_preview_refuses_an_original_with_no_sender(monkeypatch):
+    calls = []
+
+    def fake(script, *argv, **_):
+        calls.append(script)
+        return _recipients_payload(to=["me@example.com"], sender="", replyto="")
+
+    _patch_run(monkeypatch, fake)
+    with pytest.raises(ValueError, match="no sender or Reply-To"):
+        mail.MailAdapter().reply_all("<orig@x>", "inbox", "ok")
+    assert calls == [mail_outgoing._REPLY_ALL_RECIPIENTS]
+
+
+def test_reply_all_preview_subtracts_nothing_when_the_account_is_unreadable(
+    monkeypatch,
+):
+    # prohibition: never hide an address the reply reaches.
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        cc=["carol@corp.com"],
+        sender="boss@corp.com",
+    )
+    w = out["would_send"]
+    assert w["to"] == ["boss@corp.com"]
+    assert w["cc"] == ["me@example.com", "carol@corp.com"]
+    assert "could not be read" in w["recipients_note"]
+
+
+def test_reply_all_result_labels_the_computed_recipients(monkeypatch):
+    kinds = dict(to=["me@example.com"], sender="boss@corp.com", self=["me@example.com"])
+    out, _ = _preview(monkeypatch, **kinds)
+    assert "Mail's own reply-all decides" in out["would_send"]["recipients_note"]
+    assert "could not be read" not in out["would_send"]["recipients_note"]
+
+    def fake(script, *argv, **kw):
+        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
+            return _recipients_payload(**kinds)
+        if script is mail_outgoing._ORIGINAL:
+            return _original_reply("Original text", "Boss <boss@corp.com>")
+        if script is mail_outgoing._OUTBOX_COUNT:
+            return "2"
+        return "sent"
+
+    _patch_run(monkeypatch, fake)
+    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
+    sent = mail.MailAdapter().reply_all("<orig@x>", "inbox", "ok", dry_run=False)
+    assert sent["to"] == ["boss@corp.com"]
+    assert sent["recipients_note"] == out["would_send"]["recipients_note"]
+    assert "not confirmed" in sent["note"].lower()  # the outbox note is kept
+
+
 def test_reply_all_quote_uses_mails_attribution_format(monkeypatch):
     # #348: reply_all reaches the same quote as mail_reply, through quoted_body.
     bodies = {}
