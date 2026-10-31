@@ -54,13 +54,43 @@
       "status": "in_progress"
     },
     {
-      "number": "05.3",
-      "name": "Feedback — problem reports (INSERTED)",
+      "number": "05.6",
+      "name": "Bug Fixes — Notes write safety, system folders, #497, #471 (INSERTED)",
       "status": "pending"
     },
     {
       "number": "05.4",
       "name": "Migration — mcp 2 and fastmcp 4 (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.10",
+      "name": "Tool surface — rubric, verb_noun, error codes, cursors (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.9",
+      "name": "CLI — tools from the shell (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.8",
+      "name": "Notes depth — Markdown, attachments (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.3",
+      "name": "Feedback — problem reports (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.7",
+      "name": "Agent guidance — instructions, skills (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.5",
+      "name": "Dashboard at a domain — optional (INSERTED)",
       "status": "pending"
     },
     {
@@ -74,5 +104,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 10 of 19 · executing"
   },
-  "updated_at": "2026-10-27T23:17:51.202Z"
+  "updated_at": "2026-10-31T18:14:06.861Z"
 }

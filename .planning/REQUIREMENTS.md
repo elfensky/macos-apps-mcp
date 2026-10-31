@@ -87,12 +87,12 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Distribution
 
-- [ ] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path (#113)
-- [ ] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog (#111)
+- [x] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path (#113)
+- [x] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog (#111)
 - [ ] **DIST-03**: Each release publishes a `.mcpb` bundle for one-click Claude Desktop install (#107)
 - [ ] **DIST-04**: The notarized `.app` installs via a Homebrew cask (`brew install --cask …`), with the staple-then-zip order preserved (#107)
 - [ ] **DIST-05**: A companion skill + Claude Code plugin live in-repo (`.claude-plugin/plugin.json`, `skills/<name>/SKILL.md`, `.mcp.json`) so `claude plugin install` wires skill + MCP server config in one step; the same `skills/` layout installs into other agents via `npx skills add elfensky/macos-apps-mcp`; the skill teaches the cockpit workflows (triage reads, pointer citation, draft-review) (#106)
-- [ ] **DIST-06**: `scripts/build_app.sh` builds the bundle on x86_64 (Intel) Macs — on x86_64 only, `cryptography<49` constrains the install (48.0.1, the last universal2 wheel); arm64 keeps current cryptography; the Intel bundle passes its env-free import smoke. Transitive and unused at runtime (`mcp → pyjwt[crypto] → cryptography`). Full Intel daemon deployment still needs a Developer-ID-signed build (#205)
+- [x] **DIST-06**: `scripts/build_app.sh` builds the bundle on x86_64 (Intel) Macs — on x86_64 only, `cryptography<49` constrains the install (48.0.1, the last universal2 wheel); arm64 keeps current cryptography; the Intel bundle passes its env-free import smoke. Transitive and unused at runtime (`mcp → pyjwt[crypto] → cryptography`). Full Intel daemon deployment still needs a Developer-ID-signed build (#205)
 
 ## v2 Requirements
 
@@ -216,12 +216,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-16 | Phase 05.2 | Pending |
 | FIX-17 | Phase 05.2 | Pending |
 | FIX-18 | Phase 05.2 | Pending |
-| DIST-01 | Phase 6 | Pending |
-| DIST-02 | Phase 6 | Pending |
+| DIST-01 | Phase 6 | Complete |
+| DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
 | DIST-04 | Phase 6 | Pending |
 | DIST-05 | Phase 6 | Pending |
-| DIST-06 | Phase 6 | Pending |
+| DIST-06 | Phase 6 | Complete |
 
 **Coverage:**
 
@@ -235,4 +235,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-10-27 — FIX-16 rewritten after the device verdict (native quote or refuse); #516 added as FIX-18 (Phase 05.2); 60/60 mapped*
+*Last updated: 2026-10-31 — DIST-01, DIST-02 and DIST-06 marked complete: landed as quick tasks in October (#113, #111, #205 closed); 60/60 mapped*
