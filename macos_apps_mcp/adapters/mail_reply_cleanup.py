@@ -124,7 +124,7 @@ def _before_quote(msg) -> str:
                 break
             lines.append(line)
         head = "\n".join(lines)
-    return squash_text(head.replace("￼", ""))
+    return squash_text(head.replace("\ufffc", ""))
 
 
 def _read_draft(url: str, rowid: int) -> tuple[str, str, str] | None:

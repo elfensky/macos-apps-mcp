@@ -857,6 +857,18 @@ def test_compose_insert_restores_every_pasteboard_item(monkeypatch):
     assert clip.items == items
 
 
+def test_compose_insert_undoes_a_clipboard_write_that_failed_midway(monkeypatch):
+    events, clip, keys = _compose_rig(monkeypatch, ["old"])
+
+    def broken(_text):
+        raise OSError("pasteboard write failed")
+
+    monkeypatch.setattr(clip, "write_text", broken)
+    with pytest.raises(OSError):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert "restore" in events and keys == []  # no key event for a failed write
+
+
 def test_compose_insert_keeps_a_newer_user_copy(monkeypatch):
     events, clip, _ = _compose_rig(monkeypatch, ["", f"{_TEXT}\ntail"])
     real_read = runtime._read_body

@@ -952,7 +952,7 @@ def _clipboard() -> _Clipboard:
 def _body_text(body: str) -> str:
     """The squashed body without the leading blanks and object-replacement marks the AX
     walk can emit before the first real text."""
-    return squash_text(body.lstrip(" \n\t￼"))
+    return squash_text(body.lstrip(" \n\t\ufffc"))
 
 
 def _starts_with(body: str, text: str) -> bool:
@@ -1052,10 +1052,11 @@ def compose_insert(
                 "pasted; run the call again"
             )
         before = squash_text(_read_body(el))
-        clip.write_text(text)
-        mine = clip.change_count()
+        mine = None  # the change count right after OUR write
         settled = False
         try:
+            clip.write_text(text)
+            mine = clip.change_count()
             _post_cmd_key(pid, _KEY_V)
             settled = _wait_settled(el, text, before)
             if not settled and rollback is not None:
@@ -1065,7 +1066,8 @@ def compose_insert(
                 rollback()
             raise
         finally:
-            if clip.change_count() == mine:  # a newer copy by the user stays
+            # a newer copy by the user stays; a write that failed midway is undone
+            if mine is None or clip.change_count() == mine:
                 clip.restore(snap)
         if not settled:
             raise ComposeRefused(

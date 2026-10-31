@@ -929,7 +929,7 @@ def _quote_tail(message_id: str, mailbox_args: tuple[str, str]) -> str:
     )
     parts = raw.split(US, 6)
     original = parts[6] if len(parts) == 7 else ""
-    words = squash_text(sanitize_block(original).replace("￼", "")).split()
+    words = squash_text(sanitize_block(original).replace("\ufffc", "")).split()
     if not words:
         raise ComposeRefused(
             "mail_reply cannot confirm Mail's quote: the original has no readable "
