@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import pathlib
 import re
 import subprocess
 import sys
@@ -40,7 +42,7 @@ from macos_apps_mcp.runtime import (
 # The seam's own self-tests bind the real function at import time: the conftest lock
 # replaces ``runtime.automation_permission`` in every unit test.
 _REAL_AUTOMATION_PERMISSION = runtime.automation_permission
-# Same for the two Accessibility seams of the Mail reply flow (#348): conftest locks them.
+# Same for the two Accessibility seams of the Mail reply flow (#348).
 _REAL_ACCESSIBILITY_TRUSTED = runtime.accessibility_trusted
 _REAL_COMPOSE_INSERT = runtime.compose_insert
 # Same for the attribution formatter: conftest swaps it for a deterministic fake.
@@ -596,7 +598,7 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
     assert not hasattr(runtime, "EK")
 
 
-# --- FIX-16 (#348): the two Accessibility seams -----------------------------------------
+# --- FIX-16 (#348): the two Accessibility seams -------------------------------
 #
 # Facts section 4e is the contract. No test here makes a real AX, CoreGraphics or
 # pasteboard call: every private loader and helper is replaced.
@@ -617,8 +619,7 @@ def test_accessibility_trusted_reads_the_switch_without_a_prompt(monkeypatch):
     )
     assert _REAL_ACCESSIBILITY_TRUSTED() is False
     # only the non-prompting trust read exists in the runtime source (T-05.2-38)
-    src = open(runtime.__file__, encoding="utf-8").read()
-    assert "WithOptions" not in src
+    assert "WithOptions" not in pathlib.Path(runtime.__file__).read_text("utf-8")
 
 
 class _Clip:
@@ -668,10 +669,8 @@ def _compose_rig(
 
     def read(_el):
         events.append("read")
-        try:
+        with contextlib.suppress(StopIteration):
             last[0] = next(reads)
-        except StopIteration:
-            pass
         return last[0]
 
     def hold(window_id):
@@ -745,7 +744,7 @@ def test_post_cmd_key_sends_one_down_and_one_up_to_mails_pid_only(monkeypatch):
     assert [(c[2], c[3]) for c in creates] == [(9, True), (9, False)]
     assert [c[2] for c in calls if c[0] == "flags"] == [0x100000, 0x100000]
     assert [c[1] for c in calls if c[0] == "post"] == [4242, 4242]
-    assert "CGEventPost(" not in open(runtime.__file__, encoding="utf-8").read()
+    assert "CGEventPost(" not in pathlib.Path(runtime.__file__).read_text("utf-8")
 
 
 def test_compose_insert_refuses_unconfirmed_text(monkeypatch):
@@ -833,7 +832,7 @@ def test_compose_insert_replace_all_selects_all_and_wants_nothing_after(monkeypa
 def test_compose_insert_seam_takes_no_target_app():
     import inspect
 
-    params = list(inspect.signature(runtime.compose_insert).parameters)
+    params = list(inspect.signature(_REAL_COMPOSE_INSERT).parameters)
     assert params[:2] == ["window_id", "text"]
     assert set(params) == {"window_id", "text", "replace_all", "quote_tail", "rollback"}
     assert not any(w in p for p in params for w in ("app", "pid", "bundle"))

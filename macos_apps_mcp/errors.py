@@ -20,6 +20,12 @@ from __future__ import annotations
 # wording can never drift between the raise sites and the diagnosis.
 PRIVACY_PANE = "System Settings → Privacy & Security"
 
+# macOS 27 renamed the Accessibility list "Device Control and Data Access" (facts §4e).
+ACCESSIBILITY_PANE = (
+    f"{PRIVACY_PANE} → Device Control and Data Access "
+    "(called Accessibility before macOS 27)"
+)
+
 
 class NativeError(RuntimeError):
     """Base for every typed native failure. ``str(e)`` is the agent-facing directive."""
@@ -37,6 +43,21 @@ class AutomationDenied(NativeError):
     """osascript blocked from controlling an app — Automation consent not granted."""
 
     kind = "automation_denied"
+
+
+class AccessibilityDenied(NativeError):
+    """macos-apps-mcp has no Accessibility grant, which the Mail reply flow needs to put
+    text above Mail's own quote. Raised before any Mail write: nothing was created."""
+
+    kind = "accessibility_denied"
+
+
+class ComposeRefused(NativeError):
+    """The reply flow stopped on a safety check (window, focus, paste, confirmation) and
+    refused to leave a half-built reply. ``str(e)`` says which step failed and what, if
+    anything, may be left in Mail and where to look."""
+
+    kind = "compose_refused"
 
 
 class AppNotRunning(NativeError):

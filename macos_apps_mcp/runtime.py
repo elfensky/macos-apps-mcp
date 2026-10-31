@@ -44,12 +44,14 @@ from .errors import (
     PRIVACY_PANE,
     AppNotRunning,
     AutomationDenied,
+    ComposeRefused,
     FullDiskAccessDenied,
     NativeError,
     NativeTimeout,
     SchemaDrift,
     UnsupportedPlatform,
 )
+from .text import squash_text
 
 # ponytail: one process-wide native thread. If a future app needs a *second* isolated
 # native context, give it its own executor — don't widen this one to max_workers>1
@@ -644,6 +646,435 @@ def automation_permission(bundle_id: str) -> int:
             lib.AEDisposeDesc(ctypes.byref(desc))
 
     return _probe() if on_worker() else run_native(_probe)
+
+
+# --- FIX-16 (#348): the Accessibility seams of the Mail reply flow -----------------
+#
+# Facts section 4e is the recipe; the phase 05.2 `reply_gui_probe.py` (in
+# `.planning/phases/05.2-*/05.2-proto/`) is the device-proven reference for every
+# binding below. `accessibility_trusted` and `compose_insert` are the ONLY two public
+# doors: every AX, CoreGraphics and general pasteboard call sits behind them, in
+# private helpers a test replaces. The target is a constant (Mail) plus the one reply
+# window the caller opened: there is no app, pid or bundle parameter, so the grant
+# cannot be steered at another app (T-05.2-36).
+
+_HISERVICES = (
+    "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/"
+    "HIServices.framework"
+)
+_COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework"
+_COREFOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+_MAIL_BUNDLE = "com.apple.mail"
+_KEY_A, _KEY_V = 0, 9  # kVK_ANSI_A, kVK_ANSI_V
+_CMD_FLAG = 0x100000  # kCGEventFlagMaskCommand
+# Clipboard-history tools skip an item that carries these (nspasteboard.org).
+_TRANSIENT_TYPES = (
+    "org.nspasteboard.TransientType",
+    "org.nspasteboard.ConcealedType",
+)
+# facts 4e `Pasteboard`: the largest settle was 133 ms over 5 runs; the bound is at
+# least twice that. Calculated, not run.
+_PASTE_SETTLE_S = 1.0
+_FOCUS_WAIT_S = 3.0  # a fresh reply's body takes AX focus late (untested bound)
+_ACTIVATE_WAIT_S = 0.4
+_SELECT_ALL_WAIT_S = 0.2
+# shortcut: the AX walk of the sitting stops after 400 nodes, so on a much longer
+# original the quote check can end before the tail and refuse (facts 4e `Confirm`);
+# raise it if a device run shows a refusal of that kind.
+_AX_WALK_BUDGET = 400
+_COMPOSE_OSA_TIMEOUT = 120.0  # equals each script's own `with timeout` backstop
+
+_WINDOW_INDEX = """on run argv
+  set wid to (item 1 of argv) as integer
+  with timeout of 120 seconds
+    tell application "Mail"
+      set idx to index of window id wid
+    end tell
+  end timeout
+  return idx
+end run"""
+
+_ACTIVATE_WINDOW = """on run argv
+  set wid to (item 1 of argv) as integer
+  with timeout of 120 seconds
+    tell application "Mail"
+      activate
+      set index of window id wid to 1
+    end tell
+  end timeout
+  return "activated"
+end run"""
+
+_AX: dict = {}
+
+
+def _ax_lib() -> dict:
+    """The HIServices calls, bound once through PyObjC. Lazy, so nothing loads at
+    import time (the server must import off macOS), and a test replaces it. The trust
+    read is the plain one: the variant that can raise the system prompt is never
+    bound."""
+    if not _AX:
+        import objc
+
+        lib: dict = {}
+        hi = objc.loadBundle("HIServices", {}, bundle_path=_HISERVICES)
+        objc.loadBundleFunctions(
+            hi,
+            lib,
+            [
+                ("AXIsProcessTrusted", b"Z"),
+                ("AXUIElementGetTypeID", b"Q"),
+                ("AXUIElementCreateApplication", b"^{__AXUIElement=}i"),
+                (
+                    "AXUIElementCopyAttributeValue",
+                    b"i^{__AXUIElement=}^{__CFString=}o^@",
+                ),
+                ("_AXUIElementGetWindow", b"i^{__AXUIElement=}o^I"),  # SPI
+            ],
+        )
+        objc.registerCFSignature(
+            "AXUIElementRef", b"^{__AXUIElement=}", lib["AXUIElementGetTypeID"]()
+        )
+        _AX.update(lib)
+    return _AX
+
+
+def accessibility_trusted() -> bool:
+    """Whether THIS process holds the Accessibility grant (macOS 27: "Device Control and
+    Data Access"). Reads the switch only: it never asks macOS to show a prompt. Safe on
+    or off the worker; it dispatches itself, so it waits behind a job that holds the one
+    worker."""
+
+    def work() -> bool:
+        return bool(_ax_lib()["AXIsProcessTrusted"]())
+
+    return work() if on_worker() else run_native(work)
+
+
+def _ax_get(el, attr: str):
+    """One AX attribute of ``el``, or None when it cannot be read."""
+    err, val = _ax_lib()["AXUIElementCopyAttributeValue"](el, attr, None)
+    return val if err == 0 else None
+
+
+def _mail_pid() -> int:
+    import AppKit
+
+    apps = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(
+        _MAIL_BUNDLE
+    )
+    if not apps:
+        raise ComposeRefused("window check: Mail is not running")
+    return int(apps[0].processIdentifier())
+
+
+def _frontmost_bundle() -> str | None:
+    import AppKit
+
+    # a process with no running main loop reads a stale frontmost app: spin it once
+    F.NSRunLoop.currentRunLoop().runUntilDate_(
+        F.NSDate.dateWithTimeIntervalSinceNow_(0.05)
+    )
+    app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    return str(app.bundleIdentifier()) if app else None
+
+
+def _window_index(window_id: int) -> int | None:
+    out = run_osascript(_WINDOW_INDEX, str(window_id), timeout=_COMPOSE_OSA_TIMEOUT)
+    return int(out) if out.strip().isdigit() else None
+
+
+def _window_held(window_id: int) -> bool:
+    return _frontmost_bundle() == _MAIL_BUNDLE and _window_index(window_id) == 1
+
+
+def _hold_window(window_id: int) -> None:
+    """Facts 4e `Activation`: Mail is active and the reply window is at index 1, else
+    activate Mail, put the window at index 1 and check again. The window is named by its
+    id (never by title, never by `window 1`); a reply can open BEHIND another window."""
+    if _window_held(window_id):
+        return
+    run_osascript(_ACTIVATE_WINDOW, str(window_id), timeout=_COMPOSE_OSA_TIMEOUT)
+    time.sleep(_ACTIVATE_WAIT_S)
+    if not _window_held(window_id):
+        raise ComposeRefused(
+            "window check: the reply window is not Mail's front window, so the text "
+            "was not inserted"
+        )
+
+
+def _window_number(win) -> int | None:
+    """The CoreGraphics window number of an AX window element (the id Mail's scripting
+    reports), through the SPI the sitting used; None when it is not readable."""
+    spi = _ax_lib().get("_AXUIElementGetWindow")
+    if spi is None:
+        return None
+    err, num = spi(win, None)
+    return int(num) if err == 0 and num else None
+
+
+def _focused_body(pid: int, window_id: int):
+    """Facts 4e `Insert`, the focus check: Mail's focused element is an AXWebArea whose
+    window is the bound one. A fresh reply's body takes focus late, so wait up to
+    ``_FOCUS_WAIT_S`` for it (AX reads only). Returns the element."""
+    app = _ax_lib()["AXUIElementCreateApplication"](pid)
+    t0 = time.monotonic()
+    el = _ax_get(app, "AXFocusedUIElement")
+    while el is None and time.monotonic() - t0 < _FOCUS_WAIT_S:
+        time.sleep(0.05)
+        el = _ax_get(app, "AXFocusedUIElement")
+    if el is None:
+        raise ComposeRefused("focus check: Mail has no focused element in the reply")
+    if _ax_get(el, "AXRole") != "AXWebArea":
+        raise ComposeRefused("focus check: the focused element is not a compose body")
+    win = _ax_get(el, "AXWindow")
+    if win is None or _window_number(win) != window_id:
+        raise ComposeRefused(
+            "focus check: the focused body is not inside the reply window"
+        )
+    return el
+
+
+def _read_body(el) -> str:
+    """The compose body text through AX: the AXStaticText parts, in document order. The
+    walk drops empty lines, so callers compare squashed text only."""
+    val = _ax_get(el, "AXValue")
+    if isinstance(val, str) and val:
+        return val
+    parts: list[str] = []
+    budget = [_AX_WALK_BUDGET]
+
+    def walk(node, depth: int) -> None:
+        if depth > 14 or budget[0] <= 0:
+            return
+        budget[0] -= 1
+        if _ax_get(node, "AXRole") == "AXStaticText":
+            text = _ax_get(node, "AXValue")
+            if isinstance(text, str):
+                parts.append(text)
+        for child in _ax_get(node, "AXChildren") or []:
+            walk(child, depth + 1)
+
+    walk(el, 0)
+    return "\n".join(parts)
+
+
+def _cg_lib():
+    """CoreGraphics with the three event calls bound (+ CFRelease). Lazy; a test
+    replaces it."""
+    lib = ctypes.CDLL(_COREGRAPHICS + "/CoreGraphics")
+    lib.CGEventCreateKeyboardEvent.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint16,
+        ctypes.c_bool,
+    ]
+    lib.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+    lib.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.CGEventPostToPid.argtypes = [ctypes.c_int, ctypes.c_void_p]
+    lib.CFRelease = ctypes.CDLL(_COREFOUNDATION).CFRelease
+    lib.CFRelease.argtypes = [ctypes.c_void_p]
+    return lib
+
+
+def _post_cmd_key(pid: int, keycode: int) -> None:
+    """Cmd+<key>, one key down and one key up, delivered to ONE process. Never the
+    global event post, so a focus change cannot send the key to another app."""
+    lib = _cg_lib()
+    for down in (True, False):
+        ev = lib.CGEventCreateKeyboardEvent(None, keycode, down)
+        lib.CGEventSetFlags(ev, _CMD_FLAG)
+        lib.CGEventPostToPid(pid, ev)
+        lib.CFRelease(ev)
+
+
+def _require_complete_snapshot(items: list, unreadable: int, type_count: int) -> None:
+    """A lossy snapshot would let the restore destroy the user's clipboard. Complete =
+    every type of every item returned data. No items but types present refuses; no
+    items and no types (an emptied pasteboard) is complete and restores by clearing."""
+    if unreadable or (not items and type_count):
+        raise ComposeRefused(
+            "clipboard: the clipboard could not be saved completely, so it was left "
+            "alone and nothing was pasted"
+        )
+
+
+class _Clipboard:
+    """The general pasteboard, as far as the paste needs it. AppKit loads lazily, so a
+    test that replaces ``_clipboard`` never touches it."""
+
+    def __init__(self) -> None:
+        import AppKit
+
+        self._ak = AppKit
+        self._pb = AppKit.NSPasteboard.generalPasteboard()
+
+    def change_count(self) -> int:
+        return int(self._pb.changeCount())
+
+    def snapshot(self) -> list[dict[str, bytes]]:
+        items, unreadable = [], 0
+        for item in self._pb.pasteboardItems() or []:
+            one: dict[str, bytes] = {}
+            for t in item.types():
+                data = item.dataForType_(t)
+                if data is None:
+                    unreadable += 1
+                else:
+                    one[str(t)] = bytes(data)
+            items.append(one)
+        _require_complete_snapshot(items, unreadable, len(self._pb.types() or []))
+        return items
+
+    def write_text(self, text: str) -> None:
+        item = self._ak.NSPasteboardItem.alloc().init()
+        item.setString_forType_(text, self._ak.NSPasteboardTypeString)
+        for t in _TRANSIENT_TYPES:
+            item.setData_forType_(F.NSData.data(), t)
+        self._pb.clearContents()
+        self._pb.writeObjects_([item])
+
+    def restore(self, snap: list[dict[str, bytes]]) -> None:
+        items = []
+        for types in snap:
+            item = self._ak.NSPasteboardItem.alloc().init()
+            for t, raw in types.items():
+                item.setData_forType_(F.NSData.dataWithBytes_length_(raw, len(raw)), t)
+            items.append(item)
+        self._pb.clearContents()
+        if items:
+            self._pb.writeObjects_(items)
+
+
+def _clipboard() -> _Clipboard:
+    return _Clipboard()
+
+
+def _body_text(body: str) -> str:
+    """The squashed body without the leading blanks and object-replacement marks the AX
+    walk can emit before the first real text."""
+    return squash_text(body.lstrip(" \n\t￼"))
+
+
+def _starts_with(body: str, text: str) -> bool:
+    return _body_text(body).startswith(squash_text(text))
+
+
+def _wait_settled(el, text: str, before: str) -> bool:
+    """Settled = the body starts with the text AND changed since just before the key
+    event (facts 4e: a body that already started with the text once read as settled at
+    4 ms, the clipboard was restored, and Mail's late Cmd-V pasted the user's own
+    clipboard). Reads AX only, for at most ``_PASTE_SETTLE_S``."""
+    t0 = time.monotonic()
+    while True:
+        body = _read_body(el)
+        if _starts_with(body, text) and squash_text(body) != before:
+            return True
+        if time.monotonic() - t0 >= _PASTE_SETTLE_S:
+            return False
+        time.sleep(0.05)
+
+
+def _confirm(el, text: str, replace_all: bool, quote_tail: str | None) -> None:
+    """Facts 4e `Confirm`, after a settled paste: the text is first and, in a quoted
+    reply, the original's own tail follows it; after a whole-body replace nothing
+    follows. Compared squashed (the AX walk drops empty lines)."""
+    body = _body_text(_read_body(el))
+    want = squash_text(text)
+    if not body.startswith(want):
+        raise ComposeRefused("confirmation: the reply does not start with your text")
+    rest = body[len(want) :]
+    if replace_all:
+        if rest:
+            raise ComposeRefused(
+                "confirmation: text is left in the reply after your text, so the "
+                "whole body was not replaced"
+            )
+    elif squash_text(quote_tail) not in rest:
+        raise ComposeRefused(
+            "confirmation: Mail's quote of the original does not follow your text. "
+            "Mail's setting 'Quote the text of the original message' (Mail > "
+            "Settings > Composing > Responding; 'Include original message text' "
+            "before Mail 16) may be off, or a text selection is left in Mail's "
+            "message viewer. Click the original once, or call mail_reply with "
+            "include_quote=False"
+        )
+
+
+def compose_insert(
+    window_id: int,
+    text: str,
+    *,
+    replace_all: bool = False,
+    quote_tail: str | None = None,
+    rollback: Callable[[], object] | None = None,
+) -> None:
+    """Put ``text`` at the top of the reply window ``window_id`` that the caller opened
+    in Mail, and confirm it landed (facts 4e, mechanism M2: one Cmd-V from a borrowed
+    and restored clipboard). Raises ``ComposeRefused`` naming the failed step.
+
+    ``replace_all`` first selects the whole body (a reply with no quote). Otherwise
+    ``quote_tail`` (the last words of the original) must follow the text, else the
+    call refuses: an unknown tail refuses before any write. ``rollback`` is called when
+    the paste did not settle, BEFORE the clipboard comes back, so a late Cmd-V cannot
+    paste the user's own clipboard into a reply that stays.
+
+    Identity rule: the target is Mail (constant), the window is the id the caller
+    bound, and right before the write Mail's AX focused element must be a body inside
+    that window. The key goes to Mail's pid only; the borrowed item is marked
+    transient and concealed; the clipboard is restored unless the user copied
+    something newer. No text or clipboard content reaches a message or a log. Safe on
+    or off the worker.
+    """
+
+    def work() -> None:
+        if not accessibility_trusted():
+            raise ComposeRefused(
+                "Accessibility is off for this process, so nothing was inserted"
+            )
+        if not replace_all and not squash_text(quote_tail):
+            raise ComposeRefused(
+                "confirmation: the original's last words are unknown, so Mail's "
+                "quote cannot be confirmed and nothing was inserted"
+            )
+        pid = _mail_pid()
+        clip = _clipboard()
+        snap = clip.snapshot()
+        count = clip.change_count()
+        _hold_window(window_id)
+        el = _focused_body(pid, window_id)
+        if replace_all:
+            _post_cmd_key(pid, _KEY_A)
+            time.sleep(_SELECT_ALL_WAIT_S)
+            el = _focused_body(pid, window_id)  # right before the write
+        if clip.change_count() != count:
+            raise ComposeRefused(
+                "clipboard: the clipboard changed after it was saved, so nothing was "
+                "pasted; run the call again"
+            )
+        before = squash_text(_read_body(el))
+        clip.write_text(text)
+        mine = clip.change_count()
+        settled = False
+        try:
+            _post_cmd_key(pid, _KEY_V)
+            settled = _wait_settled(el, text, before)
+            if not settled and rollback is not None:
+                rollback()  # BEFORE the restore (facts 4e `Pasteboard`)
+        except Exception:
+            if rollback is not None:
+                rollback()
+            raise
+        finally:
+            if clip.change_count() == mine:  # a newer copy by the user stays
+                clip.restore(snap)
+        if not settled:
+            raise ComposeRefused(
+                "confirmation: your text did not appear in the reply within "
+                f"{_PASTE_SETTLE_S:g} s"
+            )
+        _confirm(el, text, replace_all, quote_tail)
+
+    return work() if on_worker() else run_native(work)
 
 
 def mac_region() -> str | None:

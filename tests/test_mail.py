@@ -25,7 +25,6 @@ from macos_apps_mcp.adapters.mail import (
 )
 from macos_apps_mcp.contracts import Pointer
 from macos_apps_mcp.errors import BatchTooLarge, NativeTimeout
-from macos_apps_mcp.runtime import body_file as _real_body_file
 from macos_apps_mcp.text import RS, US
 from tests._fakes import FakeMail
 
@@ -180,7 +179,6 @@ def test_search_empty_query_raises():
 
 # --- mail_body + create_draft (#62) --------------------------------------------------
 
-import os  # noqa: E402
 import re  # noqa: E402
 
 from macos_apps_mcp.adapters.mail import _BODY  # noqa: E402
@@ -235,20 +233,12 @@ def test_get_body_huge_body_overflows(monkeypatch):
 
 # --- reply (#42/#46) ------------------------------------------------------------------
 
-from macos_apps_mcp.adapters.mail_drafts import _REPLY  # noqa: E402
 from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
     _ORIGINAL,
 )
 from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
     build_quote as _build_quote,
 )
-
-
-def _is_reply_script(script: str) -> bool:
-    # _REPLY is the only one of the two templates that invokes the native reply verb;
-    # _ORIGINAL only fetches sender/date/content. Distinguish on that, not on "reply"
-    # substring in a comment (both docstrings/templates mention "reply" in prose).
-    return "reply (item 1 of matches)" in script
 
 
 def _original_reply(body="original body", sender="Jane <j@x.com>"):
@@ -301,27 +291,15 @@ def test_quoted_body_keeps_a_us_char_inside_the_original(monkeypatch):
     assert out.rstrip().endswith("b")
 
 
-def test_reply_quote_keeps_a_huge_original(monkeypatch):
+def test_reply_all_quote_keeps_a_huge_original(monkeypatch):
     # The quote reaches the draft by tempfile, never the model's context: a huge
     # original is not cut and does not abort the reply.
-    import macos_apps_mcp.adapters.mail as mail
     from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 100)
-    bodies = []
-
-    def fake(script, *args, **kw):
-        if _is_reply_script(script):
-            with open(args[1], encoding="utf-8") as f:
-                bodies.append(f.read())
-            return ""
-        return _original_reply(huge)
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
-    out = mail.MailAdapter().reply("<abc@x>", "inbox", "thanks", include_quote=True)
-    assert out["created"] is True
-    assert bodies[0].endswith("> " + huge)
+    _patch_run(monkeypatch, lambda *a, **k: _original_reply(huge))
+    out = mail_outgoing.quoted_body("thanks", "abc@x", ("", "inbox"))
+    assert out.endswith("> " + huge)
 
 
 # --- _ORIGINAL sender/date framing hazard (#42/#46 review) ---------------------------
@@ -450,7 +428,7 @@ def test_framing_literals_live_only_in_the_contract_block():
     assert offenders == []
 
 
-def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
+def test_quoted_body_sanitizes_control_chars_from_sender_and_date(monkeypatch):
     # Behavioral defense-in-depth: this mock bypasses the AppleScript stripFraming
     # entirely (run_osascript is replaced outright), so it specifically tests the
     # Python-side sanitize_line guard. The stray control char is BEL (\x07), not the
@@ -458,117 +436,21 @@ def test_reply_sanitizes_control_chars_from_sender_and_date(monkeypatch):
     # partition-based parsing before sanitize_line ever runs, which is the scenario
     # stripFraming (tested above) guards against; sanitize_line's job is catching
     # OTHER control chars stripFraming doesn't touch.
-    import macos_apps_mcp.adapters.mail as mail
-
-    bodies = []
-
-    def fake(script, *args, **kw):
-        if _is_reply_script(script):
-            with open(args[1], encoding="utf-8") as f:
-                bodies.append(f.read())
-            return ""
-        # sender carries a stray control char the AppleScript strip doesn't remove
-        return _original_reply(sender="Jane\x07 <j@x.com>")
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
-    mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
-    header_line = next(
-        line for line in bodies[0].splitlines() if line.startswith("On ")
+    _patch_run(
+        monkeypatch,
+        lambda *a, **k: _original_reply(sender="Jane\x07 <j@x.com>"),
     )
+    body = mail_outgoing.quoted_body("my reply", "abc@x", ("", "inbox"))
+    header_line = next(line for line in body.splitlines() if line.startswith("On "))
     assert "\x07" not in header_line
 
 
-def test_reply_composes_body_and_targets_id(monkeypatch):
-    import macos_apps_mcp.adapters.mail as mail
-
-    calls = []
-    bodies = []
-
-    def fake(script, *args, **kw):
-        calls.append((script, args))
-        if not _is_reply_script(script):
-            # _ORIGINAL: return the US-framed sender, date integers and body
-            return _original_reply()
-        # _REPLY: the tempfile is deleted right after this call returns, so read it
-        # now (while it still exists) rather than after reply() has returned.
-        with open(args[1], encoding="utf-8") as f:
-            bodies.append(f.read())
-        return ""
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
-    out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
-    assert out["created"] is True
-    assert out["mailbox"] == "Drafts"
-    # both scripts ran: _ORIGINAL then _REPLY
-    assert [c[0] is _ORIGINAL for c in calls] == [True, False]
-    assert calls[1][0] is _REPLY
-    reply_call = calls[1]
-    assert reply_call[1][0] == "abc@x"  # brackets stripped, bare id via argv
-    body_on_disk = bodies[0]
-    assert "my reply" in body_on_disk
-    assert "> original body" in body_on_disk
-    assert "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:" in body_on_disk
-
-
-def test_reply_without_quote_omits_original(monkeypatch):
-    import macos_apps_mcp.adapters.mail as mail
-
-    bodies = []
-
-    def fake(script, *args, **_):
-        if _is_reply_script(script):
-            with open(args[1], encoding="utf-8") as f:
-                bodies.append(f.read())
-            return ""
-        # _ORIGINAL must NOT be called when include_quote=False
-        raise AssertionError("_ORIGINAL should not run when include_quote=False")
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
-    mail.MailAdapter().reply("<abc@x>", "inbox", "just this", include_quote=False)
-    assert bodies and bodies[0] == "just this"
-    assert ">" not in bodies[0]
-
-
-def test_reply_original_missing_value_skips_quote(monkeypatch):
+def test_quoted_body_skips_the_quote_for_a_missing_value_original(monkeypatch):
     # AppleScript coerces an unset property to the "missing value" literal — same guard
     # as get_body (#62): must not surface it as sender/date/body, and must not blow up
-    # the reply — the quote is silently skipped and the reply still goes through.
-    import macos_apps_mcp.adapters.mail as mail
-
-    bodies = []
-
-    def fake(script, *args, **kw):
-        if _is_reply_script(script):
-            with open(args[1], encoding="utf-8") as f:
-                bodies.append(f.read())
-            return ""
-        return "missing value"
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile semantics
-    out = mail.MailAdapter().reply("<abc@x>", "inbox", "my reply", include_quote=True)
-    assert out["created"] is True
-    assert bodies[0] == "my reply"  # no quote appended
-
-
-def test_reply_cleans_up_tempfile(monkeypatch):
-    import macos_apps_mcp.adapters.mail as mail
-
-    paths = []
-
-    def fake(script, *args, **_):
-        if _is_reply_script(script):
-            paths.append(args[1])
-            return ""
-        return ""
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, _real_body_file)  # asserts real tempfile is removed
-    mail.MailAdapter().reply("<abc@x>", "inbox", "body", include_quote=False)
-    assert paths and not os.path.exists(paths[0])
+    # the reply — the quote is silently skipped.
+    _patch_run(monkeypatch, lambda *a, **k: "missing value")
+    assert mail_outgoing.quoted_body("my reply", "abc@x", ("", "inbox")) == "my reply"
 
 
 def test_reply_empty_id_raises():
@@ -595,17 +477,10 @@ def test_reply_never_sends():
     # prose, which mentions sending) — a reply can only open a draft window for the
     # human, never send on its own. Anchored on the verb in statement position.
     assert not re.search(r"^\s*send \w+\s*$", _ORIGINAL, re.M)
-    assert not re.search(r"^\s*send \w+\s*$", _REPLY, re.M)
-    assert "reply (" in _REPLY  # uses Mail's native reply verb (real threading)
-    assert "opening window yes" in _REPLY  # opens for human review
-
-
-def test_reply_reads_body_through_shared_handler():
-    # Bug 1: same -39-on-empty-file hazard as _CREATE_DRAFT — _REPLY must compose the
-    # shared readBody handler rather than reading the tempfile directly.
-    assert "on readBody(p)" in _REPLY
-    assert "my readBody(item 2 of argv)" in _REPLY
-    assert _REPLY.count("read (POSIX file") == 1  # only inside the handler itself
+    assert not re.search(r"^\s*send \w+\s*$", mail_outgoing._REPLY_OPEN, re.M)
+    # Mail's native reply verb (real threading), opened for human review
+    assert "reply (item 1 of matches)" in mail_outgoing._REPLY_OPEN
+    assert "opening window yes" in mail_outgoing._REPLY_OPEN
 
 
 def test_reply_cleanup_on_failure_is_in_script():
@@ -613,7 +488,8 @@ def test_reply_cleanup_on_failure_is_in_script():
     # deleted in the error path, structurally (not just present as loose words). Since
     # #135 that delete goes through the verifying rollback handler.
     assert re.search(
-        r"on error errMsg\s+if my rollback\(r\) then\s+error errMsg", _REPLY
+        r"on error errMsg\s+if my rollback\(r\) then\s+error errMsg",
+        mail_outgoing._REPLY_OPEN,
     ), "the on-error handler must roll back the partial reply, then re-raise"
 
 
@@ -1239,7 +1115,7 @@ def test_forward_script_never_touches_content():
 # the three scripts that hand a message to Mail's `send` verb, vs. the two that roll
 # back but never send. Every one of them must roll back through the verifying handler.
 _SENDING_SCRIPTS = ("_SEND", "_REPLY_ALL", "_FORWARD")
-_ROLLING_BACK_SCRIPTS = _SENDING_SCRIPTS + ("_CREATE_DRAFT", "_REPLY")
+_ROLLING_BACK_SCRIPTS = _SENDING_SCRIPTS + ("_CREATE_DRAFT", "_REPLY_OPEN")
 
 
 @pytest.mark.parametrize("name", _SENDING_SCRIPTS)
@@ -1674,7 +1550,8 @@ _MAILBOX_SCOPED_SCRIPTS = (
     "_BODY",
     "_FORWARD",
     "_ORIGINAL",
-    "_REPLY",
+    "_REPLY_OPEN",
+    "_DISCARD_NEW_REPLY",
     "_REPLY_ALL",
     "_REPLY_ALL_RECIPIENTS",
 )
@@ -1721,36 +1598,14 @@ def test_get_body_rejects_an_empty_id():
         mail.MailAdapter().get_body("  ", "inbox")
 
 
-def test_reply_passes_the_mailbox_to_both_scripts(monkeypatch):
-    # the quote read (_ORIGINAL) and the draft build (_REPLY) must target the SAME
-    # mailbox — a reply that quotes nothing because the original wasn't in the inbox
-    # is the silent half of this bug.
-    seen = {}
-
-    def fake(script, *argv, **kw):
-        seen[script] = argv
-        if script is mail_outgoing._ORIGINAL:
-            return _original_reply("Original text", "Boss <boss@corp.com>")
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            # #160: the envelope is resolved for the REAL send too, so the result
-            # reports who it actually reached rather than echoing the caller.
-            return (
-                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
-                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
-                f"subject{US}Quarterly numbers{RS}"
-            )
-        return ""
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
+def test_reply_passes_the_mailbox_to_every_script(monkeypatch):
+    # the quote-tail read (_ORIGINAL) and the reply build (_REPLY_OPEN) must target the
+    # SAME mailbox — a reply that checks a quote of nothing because the original wasn't
+    # in the inbox is the silent half of this bug.
+    rig = _ReplyRig(monkeypatch)
     mail.MailAdapter().reply("<orig@x>", _SPAM_URL, "Sounds good")
-    assert seen[mail_outgoing._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
-    assert seen[mail_drafts._REPLY] == (
-        "orig@x",
-        "/tmp/fake-body",
-        _GMAIL_UUID,
-        "[Gmail]/Spam",
-    )
+    assert rig.call("_ORIGINAL")[1] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
+    assert rig.call("_REPLY_OPEN")[1] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam", "0")
 
 
 def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
@@ -2464,7 +2319,7 @@ def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch)
     assert "Do NOT retry" in out["note"]
 
 
-# --- FIX-16 (#348): mail_reply keeps Mail's own quote, or refuses with nothing left -----
+# --- FIX-16 (#348): mail_reply keeps Mail's own quote, or refuses ------------------
 #
 # Facts section 4e is the contract. The flow runs in ONE run_native closure; every seam
 # below is faked, so no AX, CoreGraphics, pasteboard, osascript or Mail call is made.
@@ -2575,7 +2430,7 @@ def test_reply_refuses_an_unreadable_original_before_opening_anything(monkeypatc
     with pytest.raises(ComposeRefused) as exc:
         mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
     assert "include_quote=False" in str(exc.value)
-    assert "nothing was created" in str(exc.value)
+    assert "nothing was created" in str(exc.value).lower()
     assert "_REPLY_OPEN" not in rig.names()
 
 
@@ -2605,7 +2460,7 @@ def test_reply_refusal_is_loud_when_the_discard_is_not_proven(monkeypatch):
         msg = str(exc.value)
         assert "nothing was created" not in msg
         assert "Drafts" in msg and "reply window" in msg
-        assert "nothing was sent" in msg
+        assert "nothing was sent" in msg.lower()
 
 
 def test_reply_discards_once_when_compose_insert_rolls_back_itself(monkeypatch):
@@ -2653,7 +2508,8 @@ def test_reply_id_free_discard_that_proves_nothing_is_loud(monkeypatch, answer):
         mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
     msg = str(exc.value)
     assert "nothing was created" not in msg
-    assert "reply window" in msg and "Drafts" in msg and "nothing was sent" in msg
+    assert "reply window" in msg and "Drafts" in msg
+    assert "nothing was sent" in msg.lower()
 
 
 def test_reply_without_quote_replaces_the_whole_body(monkeypatch):
