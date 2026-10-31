@@ -102,7 +102,7 @@ _DEVELOP_PERMISSION = {
     "mail_overview": ("Full Disk Access", "Automation"),
     "mail_search": ("Full Disk Access", "Automation"),
     "create_draft": "Automation",
-    "mail_reply": "Automation",
+    "mail_reply": ("Automation", "Accessibility"),
     "drafts": "Automation",
     "delete_draft": "Automation",
     "create_mailbox": ("Automation", "Full Disk Access"),

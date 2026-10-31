@@ -708,18 +708,32 @@ def create_draft(
     return _mail.create_draft(to, subject, body, from_address)
 
 
-@_additive_tool(audit="reply", adapter="mail", permission="Automation")
+@_additive_tool(
+    audit="reply", adapter="mail", permission=("Automation", "Accessibility")
+)
 def mail_reply(
     message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
 ) -> dict:
-    """Reply to a message, opening a threaded draft for review (Automation).
+    """Reply to a message, opening a threaded draft for review (Automation +
+    Accessibility).
 
     NEVER sends. message_id: the RFC822 id from a mail read. mailbox is REQUIRED: the
     `folder` value from the SAME search result, passed back VERBATIM (an opaque
-    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
-    threading headers natively. include_quote adds a plain-text quote below your
-    text: Mail's `On <date>, at <time>, <sender> wrote:` line, then the whole original
-    with `> ` prefixes. Formatting, inline images and Mail's quote bar are not kept.
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail builds its
+    normal reply and sets the threading headers natively. include_quote (the default)
+    keeps Mail's own quote of the original — quote bar, Mail's attribution line,
+    formatting, inline images, the whole message — with your text put on top through
+    Accessibility. include_quote=False replaces the whole body with your text alone
+    (also through Accessibility), so no quote at all.
+    Accessibility is needed for macos-apps-mcp (System Settings > Privacy & Security >
+    Device Control and Data Access; called Accessibility before macOS 27). Mail comes
+    to the front for about a second, and the clipboard is borrowed and restored. The
+    call REFUSES, and leaves no draft, when Accessibility is off, when Mail's reply
+    window cannot be confirmed, when the text does not land first, or when Mail's own
+    reply has no quote (Mail's setting "Quote the text of the original message" is off,
+    or a text selection is left in Mail's message viewer). A refusal after the reply
+    window opened takes about 45 seconds, because it waits for Mail's autosave and then
+    deletes that Drafts copy; the error says if anything may be left.
     Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
     stable message-id.
 

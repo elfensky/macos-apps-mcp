@@ -72,6 +72,7 @@ The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `u
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
+- **Accessibility** (no dialog: turn it on in System Settings → Privacy & Security → Device Control and Data Access, called Accessibility before macOS 27, for the app that starts the server): `mail_reply` only. It puts your text above Mail's own quote. Without it `mail_reply` refuses and creates nothing.
 - **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access, for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
 
 Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
@@ -163,7 +164,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
-| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References) that keeps Mail's own quote, your text on top through Accessibility; opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
 | `create_mailbox` | name (`/` nests), account | creates the folder; missing parents auto-created. **No delete counterpart** — `delete <mailbox>` is not scriptable, so removing one is a Mail.app action. In a Gmail account the new folder is a label, which `move_mail` refuses |

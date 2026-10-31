@@ -46,6 +46,7 @@ line plus a grep-test. There is nothing to pass, so there is nothing to get wron
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -66,7 +67,7 @@ from ..text import (
     sanitize_line,
     squash_text,
 )
-from . import mail_addressing
+from . import mail_addressing, mail_reply_cleanup
 from .mail_addressing import bare_id
 
 # The default-account placeholder a preview reports instead of guessing: Mail's default
@@ -632,6 +633,31 @@ end run"""
 )
 
 
+# Delete the call's own autosaved Drafts copy (facts 4e `Refusal cleanup`). Addressed
+# in the REPLY ACCOUNT'S Drafts by Message-ID, a `whose` query (0.3 s on a store of 287
+# drafts), never `delete_draft`'s walk of the unified Drafts mailbox (#521). Exactly one
+# match is deleted. `deleted` only when the re-query finds nothing: that is the proof.
+_SWEEP_DELETE = (
+    mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set mid to item 1 of argv
+  set mb to my mailboxFor(item 2 of argv, item 3 of argv)
+  with timeout of 120 seconds
+    tell application "Mail"
+      set matches to (messages of mb whose message id is mid)
+      if (count of matches) is 0 then return "gone"
+      if (count of matches) > 1 then return "several"
+      delete (item 1 of matches)
+      if (count of (messages of mb whose message id is mid)) is 0 then return "deleted"
+      return "alive"
+    end tell
+  end timeout
+end run"""
+)
+
+
 # read a saved draft's envelope (#157). Mail CANNOT script-send a stored draft — `send`
 # is declared on `outgoing message` only and a `message` in the Drafts mailbox raises
 # -1708 ("doesn't understand the send message"); `open`ing the draft does produce a real
@@ -926,6 +952,16 @@ _LEFT_OVER = (
     "mailbox (delete_draft removes a draft). Nothing was sent."
 )
 
+# Owner decision 2026-11-01 (rollback-sweep): a refusal after the window opened waits
+# until this long after it opened, because Mail's autosave copy of a scripted reply
+# landed 5 s after the open in the sitting and was only ever looked for at +45 s or
+# later. One bounded wait; the Envelope Index read is not a Mail call.
+SWEEP_AFTER_S = 45.0
+
+
+def _wait_until(deadline: float) -> None:
+    time.sleep(max(0.0, deadline - time.monotonic()))
+
 
 class _ReplyFlow:
     """What one native reply has created, and how to take it away (THE DISCARD RULE).
@@ -934,13 +970,18 @@ class _ReplyFlow:
     or timed out), the id-free discard against the baseline taken before the open. Only
     a ``dead`` answer (the -1728 proof) lets the refusal say nothing was created."""
 
-    def __init__(self, message_id: str, mailbox_args: tuple[str, str], baseline: str):
-        self.message_id, self.mailbox_args, self.baseline = (
-            message_id,
-            mailbox_args,
-            baseline,
-        )
+    def __init__(
+        self,
+        message_id: str,
+        mailbox_args: tuple[str, str],
+        text: str,
+        baseline: str,
+        drafts_before: frozenset[int] | None,
+    ):
+        self.message_id, self.mailbox_args = message_id, mailbox_args
+        self.text, self.baseline, self.drafts_before = text, baseline, drafts_before
         self.outgoing_id: int | None = None
+        self.opened_at: float | None = None
         self.stage = "open"
         self._discarded: str | None = None
 
@@ -969,17 +1010,55 @@ class _ReplyFlow:
             self._discarded = answer
         return self._discarded
 
+    def sweep(self) -> str:
+        """The Drafts sweep (rollback-sweep): ``removed`` (the call's own autosave copy
+        was found and deleted), ``none`` (no copy 45 s after the window opened),
+        ``unproven`` (a copy is there that cannot be proven the call's own, or the
+        delete was not confirmed) or ``unavailable`` (the index cannot be read)."""
+        if self.drafts_before is None:
+            return "unavailable"
+        _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
+        try:
+            found = mail_reply_cleanup.find_own_draft(
+                self.drafts_before, bare_id(self.message_id), self.text
+            )
+        except NativeError:
+            return "unavailable"
+        if found.kind != "one":
+            return found.kind
+        try:
+            answer = runtime.run_osascript(
+                _SWEEP_DELETE,
+                bare_id(found.mid),
+                *mail_addressing.mailbox_args(found.url),
+                timeout=ORIGINAL_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001 - reported as unproven, never raised
+            return "unproven"
+        return "removed" if answer.strip() == "deleted" else "unproven"
+
     def refusal(self, cause: Exception) -> ComposeRefused:
-        """The error for a failure after the flow started: discard, then word it."""
+        """The error for a failure after the flow started: discard, sweep, then word
+        it. "Nothing was created" is said only when the discard answered ``dead`` AND
+        the sweep left no Drafts copy behind."""
         discarded = self.discard()
+        swept = self.sweep()
         if isinstance(cause, ComposeRefused):
             said = str(cause)
         elif isinstance(cause, NativeError):  # agent-directed text, no reply text in it
             said = f"{self.stage}: {cause}"
         else:  # never echo a foreign exception's text: it could carry the reply text
             said = f"{self.stage}: {type(cause).__name__}"
-        if discarded == "dead":
-            end = " The reply was discarded: nothing was created and nothing was sent."
+        if discarded == "dead" and swept in ("none", "removed"):
+            looked = (
+                "a Drafts copy that Mail autosaved was found and deleted"
+                if swept == "removed"
+                else "no Drafts copy was there 45 s after the window opened"
+            )
+            end = (
+                f" The reply was discarded and {looked}: nothing was created and "
+                "nothing was sent."
+            )
         else:
             end = _LEFT_OVER
         return ComposeRefused(f"mail_reply did not complete ({said}).{end}")
@@ -1013,15 +1092,26 @@ def open_reply_with_text(
             )
         tail = None if replace_all else _quote_tail(message_id, mailbox_args)
         baseline = runtime.run_osascript(_OUTGOING_IDS, timeout=ORIGINAL_TIMEOUT)
-        flow = _ReplyFlow(message_id, mailbox_args, baseline.strip())
+        flow = _ReplyFlow(
+            message_id,
+            mailbox_args,
+            text,
+            baseline.strip(),
+            mail_reply_cleanup.drafts_baseline(),
+        )
         try:
-            raw = runtime.run_osascript(
-                _REPLY_OPEN,
-                message_id,
-                *mailbox_args,
-                "1" if reply_all else "0",
-                timeout=ORIGINAL_TIMEOUT,
-            )
+            try:
+                raw = runtime.run_osascript(
+                    _REPLY_OPEN,
+                    message_id,
+                    *mailbox_args,
+                    "1" if reply_all else "0",
+                    timeout=ORIGINAL_TIMEOUT,
+                )
+            finally:
+                # the window may have opened at any time before the call returned or
+                # failed: this is the latest it can have been (the sweep waits from it)
+                flow.opened_at = time.monotonic()
             outgoing_id, window_id = _parse_open(raw)
             flow.outgoing_id, flow.stage = outgoing_id, "insert"
             runtime.compose_insert(
