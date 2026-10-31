@@ -212,7 +212,9 @@ def _no_real_osascript(request, monkeypatch):
     subprocess against a live app (#176, GATE-01).
 
     Covers every seam name — ``run_osascript``, ``body_file``, ``tracked_run``,
-    ``photos_db``, ``automation_permission`` — and only reaches code that calls each
+    ``photos_db``, ``automation_permission``, ``accessibility_trusted``,
+    ``compose_insert`` (the last two drive AX, CoreGraphics and the general pasteboard
+    for the Mail reply flow, #348) — and only reaches code that calls each
     one qualified (``runtime.<seam>``); adapters still holding a module-global copy are
     unaffected. A test's own
     ``monkeypatch.setattr(runtime, <seam>, ...)`` simply overrides this fixture (last
@@ -230,6 +232,8 @@ def _no_real_osascript(request, monkeypatch):
         "tracked_run",
         "photos_db",
         "automation_permission",
+        "accessibility_trusted",
+        "compose_insert",
     ):
 
         def _refuse(*_args, _seam=seam, **_kwargs):

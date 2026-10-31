@@ -2462,3 +2462,205 @@ def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch)
     assert out["outbox_pending"] is None  # unknown, never a fake clean queue of 0
     assert "NOT confirmed" in out["note"]
     assert "Do NOT retry" in out["note"]
+
+
+# --- FIX-16 (#348): mail_reply keeps Mail's own quote, or refuses with nothing left -----
+#
+# Facts section 4e is the contract. The flow runs in ONE run_native closure; every seam
+# below is faked, so no AX, CoreGraphics, pasteboard, osascript or Mail call is made.
+
+from macos_apps_mcp.errors import (  # noqa: E402
+    AccessibilityDenied,
+    ComposeRefused,
+)
+
+_OPEN_OK = f"28{US}15927"
+_ORIGINAL_TEXT = "alpha beta gamma delta epsilon zeta eta theta"
+_TAIL = "gamma delta epsilon zeta eta theta"  # the last six words
+
+
+class _ReplyRig:
+    """Fakes every seam of the reply flow and records the calls in order."""
+
+    def __init__(self, monkeypatch, **kw):
+        self.calls: list = []
+        self.answers = {
+            "_ORIGINAL": _original_reply(_ORIGINAL_TEXT),
+            "_OUTGOING_IDS": "3,4",
+            "_REPLY_OPEN": _OPEN_OK,
+            "_DISCARD_OUTGOING": "dead",
+            "_DISCARD_NEW_REPLY": "dead",
+        }
+        self.answers.update(kw.pop("answers", {}))
+        self.trusted = kw.pop("trusted", True)
+        self.insert_error = kw.pop("insert_error", None)
+        self.insert_hook = kw.pop("insert_hook", None)
+        assert not kw, kw
+        monkeypatch.setattr(runtime, "accessibility_trusted", self._trusted)
+        monkeypatch.setattr(runtime, "compose_insert", self._insert)
+        _patch_run(monkeypatch, self._osa)
+
+    def _trusted(self):
+        self.calls.append(("accessibility_trusted",))
+        return self.trusted
+
+    def _names(self):
+        return {
+            getattr(mail_outgoing, n): n
+            for n in (
+                "_ORIGINAL",
+                "_OUTGOING_IDS",
+                "_REPLY_OPEN",
+                "_DISCARD_OUTGOING",
+                "_DISCARD_NEW_REPLY",
+            )
+        }
+
+    def _osa(self, script, *argv, **kw):
+        name = self._names()[script]
+        self.calls.append((name, argv, kw))
+        answer = self.answers[name]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    def _insert(self, window_id, text, **kw):
+        self.calls.append(("compose_insert", window_id, text, kw))
+        if self.insert_hook:
+            self.insert_hook(kw)
+        if self.insert_error:
+            raise self.insert_error
+
+    def names(self):
+        return [c[0] for c in self.calls]
+
+    def call(self, name):
+        return next(c for c in self.calls if c[0] == name)
+
+
+def test_reply_keeps_mails_quote_through_the_insert_seam(monkeypatch):
+    rig = _ReplyRig(monkeypatch)
+    out = mail.MailAdapter().reply("<abc@x>", "inbox", "Hi", include_quote=True)
+    assert out["created"] is True and out["mailbox"] == "Drafts"
+    assert rig.names() == [
+        "accessibility_trusted",
+        "_ORIGINAL",  # facts 4e Confirm: the tail comes from the original's own text
+        "_OUTGOING_IDS",
+        "_REPLY_OPEN",
+        "compose_insert",
+    ]
+    _, argv, kw = rig.call("_REPLY_OPEN")
+    assert argv == ("abc@x", "", "inbox", "0")
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    _, window_id, text, ikw = rig.call("compose_insert")
+    assert (window_id, text) == (15927, "Hi")
+    assert ikw["replace_all"] is False and ikw["quote_tail"] == _TAIL
+    assert callable(ikw["rollback"])
+    # no tempfile, no content write on this path
+    assert "set content" not in mail_outgoing._REPLY_OPEN
+
+
+def test_reply_refuses_before_any_write_without_accessibility(monkeypatch):
+    rig = _ReplyRig(monkeypatch, trusted=False)
+    with pytest.raises(AccessibilityDenied) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    msg = str(exc.value)
+    assert "Device Control and Data Access" in msg and "Accessibility" in msg
+    assert "nothing was created" in msg.lower() and "restart" not in msg.lower()
+    assert rig.names() == ["accessibility_trusted"]  # no osascript call at all
+
+
+def test_reply_refuses_an_unreadable_original_before_opening_anything(monkeypatch):
+    rig = _ReplyRig(monkeypatch, answers={"_ORIGINAL": "missing value"})
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    assert "include_quote=False" in str(exc.value)
+    assert "nothing was created" in str(exc.value)
+    assert "_REPLY_OPEN" not in rig.names()
+
+
+def test_reply_discards_the_reply_when_the_insert_is_refused(monkeypatch):
+    rig = _ReplyRig(
+        monkeypatch, insert_error=ComposeRefused("confirmation: the text did not land")
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    _, argv, kw = rig.call("_DISCARD_OUTGOING")
+    assert argv == ("28",) and kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    msg = str(exc.value)
+    assert "confirmation" in msg and "nothing was created" in msg
+    assert "nothing was sent" in msg
+    assert isinstance(exc.value.__cause__, ComposeRefused)
+
+
+def test_reply_refusal_is_loud_when_the_discard_is_not_proven(monkeypatch):
+    for answer in ("alive", NativeTimeout("slow")):
+        _ReplyRig(
+            monkeypatch,
+            insert_error=ComposeRefused("insert: refused"),
+            answers={"_DISCARD_OUTGOING": answer},
+        )
+        with pytest.raises(ComposeRefused) as exc:
+            mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+        msg = str(exc.value)
+        assert "nothing was created" not in msg
+        assert "Drafts" in msg and "reply window" in msg
+        assert "nothing was sent" in msg
+
+
+def test_reply_discards_once_when_compose_insert_rolls_back_itself(monkeypatch):
+    # facts 4e Pasteboard: an unsettled paste rolls the reply back BEFORE the restore,
+    # through the callback; the outer discard must not run a second script
+    def hook(kw):
+        kw["rollback"]()
+
+    rig = _ReplyRig(
+        monkeypatch,
+        insert_hook=hook,
+        insert_error=ComposeRefused("confirmation: not settled"),
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    assert rig.names().count("_DISCARD_OUTGOING") == 1
+    assert "nothing was created" in str(exc.value)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "garbage"])
+def test_reply_discards_without_an_id_when_the_open_fails(monkeypatch, failure):
+    bad = NativeTimeout("no answer") if failure == "timeout" else "not-a-reply"
+    rig = _ReplyRig(monkeypatch, answers={"_REPLY_OPEN": bad})
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    _, argv, kw = rig.call("_DISCARD_NEW_REPLY")
+    assert argv == ("3,4", "abc@x", "", "inbox")
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    assert (
+        "_DISCARD_OUTGOING" not in rig.names() and "compose_insert" not in rig.names()
+    )
+    assert "nothing was created" in str(exc.value)
+
+
+@pytest.mark.parametrize("answer", ["none", "several", "alive", "original-missing"])
+def test_reply_id_free_discard_that_proves_nothing_is_loud(monkeypatch, answer):
+    _ReplyRig(
+        monkeypatch,
+        answers={
+            "_REPLY_OPEN": NativeTimeout("no answer"),
+            "_DISCARD_NEW_REPLY": answer,
+        },
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", "inbox", "Hi")
+    msg = str(exc.value)
+    assert "nothing was created" not in msg
+    assert "reply window" in msg and "Drafts" in msg and "nothing was sent" in msg
+
+
+def test_reply_without_quote_replaces_the_whole_body(monkeypatch):
+    # gap-no-quote: gui-replace (owner choice 2026-10-31)
+    rig = _ReplyRig(monkeypatch)
+    mail.MailAdapter().reply("<abc@x>", "inbox", "Just this", include_quote=False)
+    assert "_ORIGINAL" not in rig.names()  # no quote, so no tail to look up
+    _, _, text, ikw = rig.call("compose_insert")
+    assert text == "Just this" and ikw["replace_all"] is True
+    assert ikw["quote_tail"] is None
