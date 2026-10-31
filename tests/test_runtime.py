@@ -128,6 +128,17 @@ def test_classify_automation_denied():
     assert "System Settings" in str(err) and "-1743" in str(err)
 
 
+def test_classify_automation_denied_needs_no_restart():
+    err = _classify_osascript_failure(
+        "execution error: Not authorized to send Apple events to Mail. (-1743)"
+    )
+    assert isinstance(err, AutomationDenied)
+    text = str(err)
+    assert "System Settings" in text and "-1743" in text
+    assert "Do not retry until the next user message" in text
+    assert "restart" not in text.lower()
+
+
 @pytest.mark.parametrize("code", ["(-609)", "(-10810)"])
 def test_classify_app_not_running(code):
     err = _classify_osascript_failure(f"execution error: something {code}")
