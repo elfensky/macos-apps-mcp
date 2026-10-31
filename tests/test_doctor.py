@@ -545,9 +545,10 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, pro
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
     # request=False live report (daemon, not-built state) measures, per status of the
-    # six Automation surfaces: denied 7301, not_running 7138, not_asked 7120,
-    # probe_error 7072 (OSStatus -1708). Denied is the worst case, so 7500 keeps 199
-    # chars of margin; a `ps` executable name longer by 199 chars would fail it.
+    # six Automation surfaces: not_running 7138, denied 7127 (7301 before the restart
+    # clause left its remediation, #516 follow-up), not_asked 7120, probe_error 7072
+    # (OSStatus -1708). not_running is the worst case, so 7500 keeps 362 chars of
+    # margin; a `ps` executable name longer by 362 chars would fail it.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).

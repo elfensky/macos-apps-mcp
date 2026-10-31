@@ -40,6 +40,14 @@ surface may still shift between minor versions.
   be told until it runs. Both read the same check, so they agree. macOS 27 keeps no readable
   database of these grants.
 
+- **`reply_all`'s dry run lists the reply's own recipients** (#516) — the preview
+  showed the original's To and Cc, and its sender as `from`. It now shows who the reply
+  reaches: `to` is the original's sender (its Reply-To when it has one), `cc` is everyone
+  else on the original minus your own addresses. The dry run still builds nothing.
+
+- **The denied-Automation message no longer asks for a restart** — a grant switched back
+  on takes effect at once (seen on device, 2026-10-27).
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added
