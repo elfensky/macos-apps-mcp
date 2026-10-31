@@ -26,7 +26,13 @@ from pathlib import Path
 import pytest
 
 from macos_apps_mcp import deploy, doctor, runtime
-from macos_apps_mcp.adapters import mail_addressing, mail_ids, mail_index
+from macos_apps_mcp.adapters import (
+    mail_addressing,
+    mail_ids,
+    mail_index,
+    mail_reply_cleanup,
+)
+from macos_apps_mcp.errors import NativeError
 from tests.envelope import SCHEMA, Envelope, seed_base
 
 
@@ -243,6 +249,14 @@ def _no_real_osascript(request, monkeypatch):
             )
 
         monkeypatch.setattr(runtime, seam, _refuse)
+
+    # The Drafts read of the reply sweep (#348) reads the user's real Envelope Index
+    # unless a test supplies its own rows: refuse like an unreadable index, which the
+    # flow tolerates (no sweep) instead of failing a test that never asked for one.
+    def _no_index(*_args, **_kwargs):
+        raise NativeError("the Envelope Index is not readable in a unit test")
+
+    monkeypatch.setattr(mail_reply_cleanup, "drafts_rows", _no_index)
 
     # A pure formatter, not a native door to refuse: a deterministic stand-in so a
     # quote test needs no Foundation (tests/test_runtime.py binds the real one).
