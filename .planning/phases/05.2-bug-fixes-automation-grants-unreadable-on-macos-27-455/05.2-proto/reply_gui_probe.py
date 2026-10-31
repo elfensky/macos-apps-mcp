@@ -937,7 +937,13 @@ def _window_ok(wid: int, pid: int, activate: bool) -> str:
 def _focus_check(pid: int, wid: int, roles: tuple[str, ...]):
     """The identity rule, part 2: Mail's focused element is a body inside that window."""
     app = _bind()["AXUIElementCreateApplication"](pid)
+    # a fresh reply's WebKit body takes focus only after it loads: wait (AX reads only)
+    t0 = time.monotonic()
     el = _ax(app, "AXFocusedUIElement")
+    while el is None and time.monotonic() - t0 < 3.0:
+        time.sleep(0.05)
+        el = _ax(app, "AXFocusedUIElement")
+    say(f"focus-check: focus_wait_ms={round((time.monotonic() - t0) * 1000)}")
     if el is None:
         raise Refuse("no focused element in Mail")
     role = _ax(el, "AXRole")
