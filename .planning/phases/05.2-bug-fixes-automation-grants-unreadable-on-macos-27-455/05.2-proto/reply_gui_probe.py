@@ -646,9 +646,13 @@ def _hash_items(items: list[dict[str, bytes]]) -> list[dict[str, str]]:
     ]
 
 
-def _require_snapshot(items: list, bad: int, change_count: int) -> None:
-    """F2: a lossy snapshot would let the restore destroy the owner's clipboard."""
-    if bad or (not items and change_count):
+def _require_snapshot(
+    items: list, bad: int, change_count: int, pb_types: int = 0
+) -> None:
+    """F2: a lossy snapshot would let the restore destroy the owner's clipboard. An
+    empty pasteboard (no items AND no types, e.g. after a password manager cleared it)
+    is a complete snapshot: its restore is clearContents."""
+    if bad or (not items and change_count and pb_types):
         raise Refuse(f"clipboard snapshot incomplete ({bad} unreadable types)")
 
 
@@ -780,7 +784,8 @@ def _selftest_pure() -> None:
     # F2: one unreadable type = incomplete snapshot = M2/M3 refuse before any write
     _require_snapshot([{"t": b"x"}], 0, 5)
     _require_snapshot([], 0, 0)
-    for bad_snap in (([{"t": b"x"}], 1, 5), ([], 0, 7)):
+    _require_snapshot([], 0, 7, 0)  # emptied pasteboard: no items, no types
+    for bad_snap in (([{"t": b"x"}], 1, 5), ([], 0, 7, 3)):
         try:
             _require_snapshot(*bad_snap)
         except Refuse as e:
@@ -1011,7 +1016,7 @@ def cmd_insert(a) -> int:
     if a.mech != "M1":  # F4: the slow snapshot goes FIRST, before any identity check
         snap, bad = _snapshot(pb)
         cc0 = int(pb.changeCount())
-        _require_snapshot(snap, bad, cc0)
+        _require_snapshot(snap, bad, cc0, len(pb.types() or []))
         base = _hash_items(snap)
     _window_ok(a.window_id, pid, a.activate)
     el = _focus_check(pid, a.window_id, roles)
