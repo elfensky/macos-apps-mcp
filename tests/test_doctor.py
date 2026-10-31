@@ -127,6 +127,17 @@ def test_automation_live_status_table(monkeypatch, rc, ok, status):
         assert all(str(rc) in s["remediation"] for s in surfaces)
 
 
+def test_denied_automation_remediation_needs_no_restart(monkeypatch):
+    # FIX-14 follow-up: a grant switched back on reads `granted` at once on device
+    # (2026-10-27), so the text asks only for the switch.
+    fake_automation(monkeypatch, -1743)
+    for s, app in zip(
+        doc._automation_surfaces(request=False), doc._AUTOMATION_APPS, strict=True
+    ):
+        assert app in s["remediation"] and "Automation" in s["remediation"]
+        assert "restart" not in s["remediation"].lower()
+
+
 def test_automation_live_check_sends_no_apple_event(monkeypatch):
     # The no-prompt guarantee: with request=False we never send an Apple event.
     monkeypatch.setattr(runtime, "run_osascript", _boom_osascript)
