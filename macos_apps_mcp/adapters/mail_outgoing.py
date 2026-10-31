@@ -19,12 +19,13 @@ nowhere).
    ``make new outgoing message`` / ``reply`` / ``forward``.
 2. *A preview MAY READ stored mail.* Reading a message that already exists strands
    nothing, so the rule in (1) does not forbid it — and two previews are worthless
-   without it. ``reply_all``'s preview reads the original's ACTUAL to/cc (reply-all is
-   exactly the tool whose recipient set surprises you), and ``send_mail(draft_id=…)``'s
-   preview reads the draft it is about to send (an id alone tells the approving human
-   nothing). This is the exception that used to carry a 9-line justification at
-   ``reply_all``'s call site; it lives here now because it is a property of the plane,
-   not of one tool.
+   without it. ``reply_all``'s preview reads the original (its to/cc, Reply-To, sender
+   and the holding account's addresses) to resolve the reply's OWN recipients (reply-all
+   is exactly the tool whose recipient set surprises you, #516), and
+   ``send_mail(draft_id=…)``'s preview reads the draft it is about to send (an id
+   alone tells the approving human nothing). This is the exception that used to carry
+   a 9-line justification at ``reply_all``'s call site; it lives here now because it is
+   a property of the plane, not of one tool.
 3. *Never roll back past the ``send`` verb.* ``delete`` after ``send`` is a silent
    no-op — it returns cleanly, removes nothing, and the message delivers anyway (#135).
    Every script here therefore keeps ``send`` OUTSIDE its rollback ``try``, and
@@ -67,6 +68,19 @@ from .mail_addressing import bare_id
 # a lie a human might approve.
 MAIL_DEFAULT_SENDER = "(Mail default account)"
 
+# What a reply_all preview reports as `from`: Mail answers from the account that holds
+# the original and picks the address itself, so naming one would be a guess (#516).
+REPLY_SENDER = "(the account that holds the original)"
+
+
+def _bare_address(value: str) -> str:
+    """The address inside the LAST ``<...>`` when the stripped value ends with ``>``,
+    else the whole stripped value (the rule ``owned_sender`` documents)."""
+    addr = value.strip()
+    if addr.endswith(">") and "<" in addr:
+        addr = addr.rsplit("<", 1)[1][:-1].strip()
+    return addr
+
 
 def owned_sender(from_address: str) -> str:
     """The caller's ``from_address``, verified against an owned Mail account and
@@ -90,9 +104,7 @@ def owned_sender(from_address: str) -> str:
     past this ownership check, since the real address Mail will send from is always
     the final bracketed pair.
     """
-    addr = from_address.strip()
-    if addr.endswith(">") and "<" in addr:
-        addr = addr.rsplit("<", 1)[1][:-1].strip()
+    addr = _bare_address(from_address)
     owned = mail_addressing.owned_addresses()
     spelling = owned.get(addr.lower())
     if spelling is None:
@@ -362,7 +374,9 @@ _OUTBOX_COUNT = """on run argv
 end run"""
 
 # reply_all dry-run preview (#129): resolve an inbox message's to/cc recipients — the
-# set reply-all would ACTUALLY reach — plus its sender and subject, by message-id.
+# set reply-all would ACTUALLY reach — plus its sender, Reply-To and subject, by
+# message-id, and the addresses of the account that holds the message (#516: Python
+# resolves the reply's own to/cc from them; the original's header is not the reply).
 # Reply-all is exactly the tool whose recipient set is surprising (a long cc list), and
 # the whole justification for dry_run defaulting to True is that a wrong recipient
 # becomes visible before anything leaves; a preview that echoes back only what the
@@ -398,9 +412,17 @@ on run argv
       set out to out & "cc" & us & (my stripFraming(address of r)) & rs
     end repeat
     set out to out & "sender" & us & (my stripFraming(sender of m)) & rs
+    set rt to reply to of m
+    if rt is missing value then set rt to ""
+    set out to out & "replyto" & us & (my stripFraming(rt)) & rs
     set subj to subject of m
     if subj is missing value then set subj to ""
     set out to out & "subject" & us & (my stripFraming(subj)) & rs
+    try
+      repeat with ea in (email addresses of (account of (mailbox of m)))
+        set out to out & "self" & us & (my stripFraming(ea as text)) & rs
+      end repeat
+    end try
   end tell
   end timeout
   return out
@@ -551,10 +573,11 @@ class Outgoing:
     body: str = ""
     html: bool = False
     source: str = ""
+    recipients_note: str = ""
     dispatch: Callable[[], None] = lambda: None
 
     def _envelope(self) -> dict:
-        return {
+        envelope = {
             "action": self.action,
             "to": self.to,
             "cc": self.cc,
@@ -563,6 +586,9 @@ class Outgoing:
             "subject": self.subject,
             "source": self.source,
         }
+        if self.recipients_note:  # own key: with_outbox_pending owns `note`
+            envelope["recipients_note"] = self.recipients_note
+        return envelope
 
     def preview(self) -> dict:
         """The ONE ``would_send`` shape. Same keys for every action, so a caller writes
@@ -757,11 +783,13 @@ def new_message(
 
 def _parse_reply_all_recipients(raw: str) -> dict:
     """Parse the _REPLY_ALL_RECIPIENTS payload: RS-framed (kind, value) records, kind in
-    "to"/"cc"/"sender"/"subject". Malformed/partial trailing records are skipped — same
-    defensive rule as every other parser here."""
+    "to"/"cc"/"sender"/"replyto"/"subject"/"self". Malformed/partial trailing records
+    are skipped — same defensive rule as every other parser here."""
     to: list[str] = []
     cc: list[str] = []
+    mine: list[str] = []
     sender = ""
+    replyto = ""
     subject = ""
     for rec in raw.split(RS):
         fields = rec.split(US)
@@ -774,16 +802,68 @@ def _parse_reply_all_recipients(raw: str) -> dict:
             cc.append(value)
         elif kind == "sender":
             sender = value
+        elif kind == "replyto":
+            replyto = value
         elif kind == "subject":
             subject = value
-    return {"to": to, "cc": cc, "sender": sender, "subject": subject}
+        elif kind == "self":
+            mine.append(value)
+    return {
+        "to": to,
+        "cc": cc,
+        "sender": sender,
+        "replyto": replyto,
+        "subject": subject,
+        "self": mine,
+    }
+
+
+def _reply_recipients(seen: dict) -> tuple[list[str], list[str], str | None]:
+    """The reply's OWN ``(to, cc, warning)``, by Mail's reply-all rule (#516): ``to`` is
+    the original's Reply-To addresses, else its sender; ``cc`` is the original's to + cc
+    minus every address of the holding account and minus ``to``. Addresses compare
+    lower-cased by their bare form and the first occurrence wins; the lists keep the
+    spelling the original carried. A self-sent original keeps its sender in ``to``
+    (facts 5f). When the account's addresses could not be read nothing is subtracted —
+    show more, never less — and the warning says so."""
+    to: list[str] = []
+    for part in seen["replyto"].split(","):
+        addr = _bare_address(part)
+        if "@" in addr and addr.lower() not in {a.lower() for a in to}:
+            to.append(addr)
+    if not to:
+        addr = _bare_address(seen["sender"])
+        if "@" in addr:
+            to.append(addr)
+    if not to:
+        raise ValueError(
+            "the original has no sender or Reply-To address to reply to; "
+            "nothing was built"
+        )
+    skip = {_bare_address(a).lower() for a in seen["self"]} | {a.lower() for a in to}
+    cc: list[str] = []
+    for raw in seen["to"] + seen["cc"]:
+        addr = _bare_address(raw)
+        if addr and addr.lower() not in skip:
+            skip.add(addr.lower())
+            cc.append(addr)
+    warning = None
+    if not seen["self"]:
+        warning = (
+            "The addresses of the account that holds the original could not be read, "
+            "so none were removed from cc: it may list this account's own address."
+        )
+    return to, cc, warning
 
 
 def reply_all_to(
     message_id: str, mailbox: str, body: str, include_quote: bool = True
 ) -> Outgoing:
-    """A reply-all. Its preview READS the original's actual to/cc — rule 2 at the module
-    docstring, and the reason ``dry_run`` defaults to True on this tool at all."""
+    """A reply-all. Its preview READS the original — rule 2 at the module docstring, and
+    the reason ``dry_run`` defaults to True on this tool at all — and reports the
+    reply's own ``to`` (the sender, or its Reply-To) and ``cc`` (everyone else on the
+    original minus this account's addresses), the set Mail's reply-all reaches (#516).
+    ``from`` is a label: Mail answers from the account that holds the original."""
     mid = bare_id(message_id)
     if not mid:
         raise ValueError("reply_all needs the original message's id")
@@ -793,6 +873,11 @@ def reply_all_to(
     seen = _parse_reply_all_recipients(
         runtime.run_osascript(_REPLY_ALL_RECIPIENTS, mid, *mb, timeout=ORIGINAL_TIMEOUT)
     )
+    to, cc, warning = _reply_recipients(seen)
+    note = (
+        "to and cc are computed from the original by Mail's reply-all rule; "
+        "Mail's own reply-all decides who receives the message."
+    )
 
     def dispatch() -> None:
         text = quoted_body(body, mid, mb) if include_quote else body
@@ -801,12 +886,13 @@ def reply_all_to(
 
     return Outgoing(
         action="reply_all",
-        to=seen["to"],
-        cc=seen["cc"],
-        sender=seen["sender"],
+        to=to,
+        cc=cc,
+        sender=REPLY_SENDER,
         subject=seen["subject"],
         body=body,
         source=message_id.strip(),
+        recipients_note=f"{note} {warning}" if warning else note,
         dispatch=dispatch,
     )
 
