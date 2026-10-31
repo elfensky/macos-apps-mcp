@@ -1014,6 +1014,47 @@ def test_reply_all_preview_drops_own_addresses_and_duplicates(monkeypatch):
     assert w["cc"] == ["Alice@Corp.com", "carol@corp.com"]
 
 
+def test_reply_all_preview_subtracts_reply_to_not_the_sender_from_cc(monkeypatch):
+    # With a Reply-To, cc loses the `to` addresses (the list), never the sender: a
+    # sender in the original's cc is still reached by Mail's reply-all.
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        cc=["list@corp.com", "boss@corp.com"],
+        sender="Boss <boss@corp.com>",
+        replyto="list@corp.com",
+        self=["me@example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["list@corp.com"]
+    assert w["cc"] == ["boss@corp.com"]
+
+
+def test_reply_all_preview_drops_every_address_of_the_account(monkeypatch):
+    out, _ = _preview(
+        monkeypatch,
+        to=["alias@example.com", "alice@corp.com"],
+        sender="boss@corp.com",
+        self=["me@example.com", "Alias@Example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["boss@corp.com"]
+    assert w["cc"] == ["alice@corp.com"]
+
+
+def test_reply_all_preview_drops_the_to_addresses_case_insensitively(monkeypatch):
+    out, _ = _preview(
+        monkeypatch,
+        to=["me@example.com"],
+        cc=["boss@corp.com", "carol@corp.com"],
+        sender="Boss <Boss@Corp.com>",
+        self=["me@example.com"],
+    )
+    w = out["would_send"]
+    assert w["to"] == ["Boss@Corp.com"]
+    assert w["cc"] == ["carol@corp.com"]
+
+
 def test_reply_all_preview_keeps_a_self_sent_originals_sender(monkeypatch):
     # facts 5f: Mail's reply-all of a self-sent original went To the owner's address.
     out, _ = _preview(
