@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2: gap plans 05.2-08..13 planned — FIX-18 reply_all preview and FIX-14 wording (08), the Accessibility reply probe sitting (09), native-quote replies or refuse (10-12), device acceptance (13); next: /gsd-execute-phase 05.2 --gaps-only"
-last_updated: "2026-10-31T18:21:44.791Z"
+stopped_at: "Phase 05.2 gaps: wave 1 done (05.2-08 PR #520, 05.2-09 sitting → route a/M2/gui-replace/rollback-sweep, PR #523; tests PR #522; issue #521); next: wave 2 (05.2-10)"
+last_updated: "2026-10-31T22:49:24.865Z"
 last_activity: 2026-10-31
 last_activity_desc: Phase 05.2 execution started
-state_head: 2246ffb929a04253afb6f7c265c3d1145c991a55
+state_head: 001060a5e44b1fc15b31f58685e3727539b0ceb9
 progress:
   total_phases: 19
   completed_phases: 9
@@ -224,5 +224,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-31T18:14:06.861Z
-Stopped at: Phase 05.2: gap plans 05.2-08..13 planned — FIX-18 reply_all preview and FIX-14 wording (08), the Accessibility reply probe sitting (09), native-quote replies or refuse (10-12), device acceptance (13); next: /gsd-execute-phase 05.2 --gaps-only
+Stopped at: Phase 05.2 gaps: wave 1 done (05.2-08 PR #520, 05.2-09 sitting → route a/M2/gui-replace/rollback-sweep, PR #523; tests PR #522; issue #521); next: wave 2 (05.2-10)
 Resume file: None
