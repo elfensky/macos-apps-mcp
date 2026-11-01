@@ -585,10 +585,17 @@ def test_quote_tail_refuses_an_original_with_no_letter_or_digit_to_compare(
     raw = US.join(["a", "b", "c", "d", "e", "f", "-- ... --"])
     monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
     with pytest.raises(ComposeRefused, match="no readable text"):
-        mail_outgoing._quote_tail("mid", ("x", "y"))
+        mail_outgoing._quote_facts("mid", ("x", "y"))
     raw = US.join(["a", "b", "c", "d", "e", "f", "see example.com."])
     monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
-    assert mail_outgoing._quote_tail("mid", ("x", "y")) == "see example.com."
+    tail, attribution = mail_outgoing._quote_facts("mid", ("x", "y"))
+    assert tail == "see example.com."
+    assert attribution == "a wrote:"  # an unreadable date: the line has no date
+    raw = US.join(["Jane <j@x.com>", "2026", "7", "1", "14", "39", "last words"])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    assert mail_outgoing._quote_facts("mid", ("x", "y"))[1] == (
+        "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"  # the date stamp is faked
+    )
 
 
 def test_reply_flow_scripts_wait_as_long_as_their_backstop():

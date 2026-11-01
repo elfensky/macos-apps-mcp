@@ -2325,6 +2325,8 @@ def test_outbox_read_failure_degrades_to_unknown_never_an_exception(monkeypatch)
 # Facts section 4e is the contract. The flow runs in ONE run_native closure; every seam
 # below is faked, so no AX, CoreGraphics, pasteboard, osascript or Mail call is made.
 
+import email.message  # noqa: E402
+import email.policy  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 from macos_apps_mcp.adapters import mail_reply_cleanup  # noqa: E402
@@ -2356,13 +2358,12 @@ class _ReplyRig:
         self.trusted = kw.pop("trusted", True)
         self.insert_error = kw.pop("insert_error", None)
         self.insert_hook = kw.pop("insert_hook", None)
-        # the Drafts sweep: a baseline, a fake clock and wait, a fake Drafts reader
-        baseline = kw.pop("baseline", frozenset({1}))
+        # the Drafts sweep: the index top, a fake clock and wait, a fake index reader
+        top = kw.pop("top", 7)
         found = kw.pop("found", None) or mail_reply_cleanup.Draft("none")
         assert not kw, kw
         self.waits: list[float] = []
         self.found_args: list = []
-        self.baseline_accounts: list = []
         self.threads: list[str] = []
         self.clock = [
             100.0
@@ -2380,14 +2381,14 @@ class _ReplyRig:
             mail_outgoing, "time", SimpleNamespace(monotonic=lambda: self.clock[0])
         )
 
-        def base(account):
-            self.baseline_accounts.append(account)
-            return baseline
+        def index_top():
+            self.calls.append(("index_top",))
+            return top
 
-        monkeypatch.setattr(mail_reply_cleanup, "drafts_baseline", base)
+        monkeypatch.setattr(mail_reply_cleanup, "index_top", index_top)
 
-        def find(account, base, mid, text):
-            self.found_args.append((account, base, mid, text))
+        def find(top, mid, text, attribution):
+            self.found_args.append((top, mid, text, attribution))
             if isinstance(found, Exception):
                 raise found
             return found
@@ -2444,6 +2445,7 @@ def test_reply_keeps_mails_quote_through_the_insert_seam(monkeypatch):
         "accessibility_trusted",
         "_ORIGINAL",  # facts 4e Confirm: the tail comes from the original's own text
         "_OUTGOING_IDS",
+        "index_top",  # the sweep baseline is taken BEFORE the window opens
         "_REPLY_OPEN",
         "compose_insert",
     ]
@@ -2595,11 +2597,12 @@ def test_reply_sweeps_its_own_autosaved_copy_after_a_refusal(monkeypatch):
     rig, msg = _refused_reply(monkeypatch)
     # owner decision 2026-11-01: one bounded wait until 45 s after the window opened
     assert rig.waits == [145.0]
-    # only the reply account's own Drafts is read (the account of the folder token)
-    assert rig.baseline_accounts == [_GMAIL_UUID]
-    assert rig.found_args == [(_GMAIL_UUID, frozenset({1}), "abc@x", "Hi")]
+    # every new row above the baseline is read, in any mailbox; the selector gets
+    # Mail's attribution line for the original (stamp faked by conftest)
+    attribution = "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"
+    assert rig.found_args == [(7, "abc@x", "Hi", attribution)]
     _, argv, kw = rig.call("_SWEEP_DELETE")
-    assert argv == ("d@x", _GMAIL_UUID, "Drafts")  # the reply account's Drafts
+    assert argv == ("d@x", _GMAIL_UUID, "Drafts")  # the Drafts the copy sits in
     assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
     names = rig.names()
     assert names.index("_DISCARD_OUTGOING") < names.index("_SWEEP_DELETE")
@@ -2627,10 +2630,22 @@ def test_reply_sweep_whose_delete_is_not_confirmed_is_loud(monkeypatch):
     assert "nothing was created" not in msg and "Drafts" in msg
 
 
-def test_reply_sweep_is_unavailable_without_a_drafts_baseline(monkeypatch):
-    rig, msg = _refused_reply(monkeypatch, baseline=None)
+@pytest.mark.parametrize("failure", [NativeTimeout("slow"), RuntimeError("boom")])
+def test_reply_sweep_whose_delete_raises_is_loud(monkeypatch, failure):
+    # a delete that raised proves nothing: the copy may still be there, so the refusal
+    # must not claim it was removed (a mutant that reported "removed" passed CI)
+    rig, msg = _refused_reply(monkeypatch, answers={"_SWEEP_DELETE": failure})
+    assert "_SWEEP_DELETE" in rig.names()
+    assert "nothing was created" not in msg and "was found and deleted" not in msg
+    assert "Drafts" in msg and "reply window" in msg
+
+
+def test_reply_sweep_is_unavailable_without_an_index_baseline(monkeypatch):
+    rig, msg = _refused_reply(monkeypatch, top=None)
     assert rig.waits == [] and rig.found_args == []  # no point waiting
     assert "nothing was created" not in msg and "Drafts" in msg
+    # the refusal comes seconds after the open: say the copy may still land
+    assert "up to about a minute" in msg and "account the reply is sent from" in msg
 
 
 def test_reply_sweep_that_cannot_read_the_index_afterwards_is_loud(monkeypatch):
@@ -2712,6 +2727,53 @@ def test_reply_sweep_that_reads_right_after_a_late_discard_cannot_say_nothing_wa
     assert "Drafts" in msg and "nothing was sent" in msg.lower()
 
 
+def test_reply_sweep_counts_its_gap_from_the_end_of_the_discard(monkeypatch):
+    # Mail answers the discard 40 s late (ORIGINAL_TIMEOUT is 120 s): the read follows
+    # the END of the discard by 5 s, which the sitting never tested. A gap counted from
+    # the start of the discard would read 45 s and call the mailbox clean.
+    rig = _SweepRig(
+        monkeypatch,
+        found=mail_reply_cleanup.Draft("none"),
+        insert_error=ComposeRefused("confirmation: no"),
+    )
+    real = rig._osa
+
+    def osa(script, *argv, **kw):
+        out = real(script, *argv, **kw)
+        if script is mail_outgoing._DISCARD_OUTGOING:
+            rig.clock[0] += 40.0
+        return out
+
+    _patch_run(monkeypatch, osa)
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    msg = str(exc.value)
+    assert "may still land" in msg and "nothing was created" not in msg
+
+
+@pytest.mark.parametrize("discard", ["alive", NativeTimeout("slow")])
+def test_reply_sweep_that_reads_late_after_an_unproven_discard_does_not_say_discarded(
+    monkeypatch, discard
+):
+    # the discard is not proven (`alive`, or no answer) AND the read followed it too
+    # closely: the window may still be open, so "The reply was discarded" is false
+    def stall(_kw):
+        rig.clock[0] += 60.0
+
+    rig = _SweepRig(
+        monkeypatch,
+        found=mail_reply_cleanup.Draft("none"),
+        insert_hook=stall,
+        insert_error=ComposeRefused("confirmation: no"),
+        answers={"_DISCARD_OUTGOING": discard},
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    msg = str(exc.value)
+    assert "The reply was discarded" not in msg and "nothing was created" not in msg
+    assert "reply window" in msg and "Drafts" in msg
+
+
 def test_reply_sweep_trusts_a_read_that_follows_the_discard_by_the_proven_gap(
     monkeypatch,
 ):
@@ -2734,28 +2796,123 @@ def test_reply_sweep_trusts_a_read_that_follows_the_discard_by_the_proven_gap(
     assert "nothing was created" not in str(exc.value)
 
 
-def test_reply_flow_never_deletes_a_draft_the_selector_cannot_prove_is_its_own(
+_ATTRIBUTION_LINE = "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"  # from _ORIGINAL
+_ATTRIBUTION_HTML = "On 1 Jul 2026, at 14:39, Jane &lt;j@x.com&gt; wrote:"
+
+
+def _real_selector(monkeypatch, *stored):
+    """The REAL selector over a faked index: ``stored`` is ``(url, body, kind)`` per new
+    row (rowids 8, 9, ...), each a reply to the original."""
+    monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
+    rows = [(8 + n, url) for n, (url, _, _) in enumerate(stored)]
+    monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: rows)
+
+    def read(url, rowid):
+        _, body, kind = stored[rowid - 8]
+        msg = email.message.EmailMessage(policy=email.policy.default)
+        msg.set_content(body, subtype=kind)
+        return ("<abc@x>", f"<own{rowid}@x>", msg)
+
+    monkeypatch.setattr(mail_reply_cleanup, "_read_draft", read)
+
+
+def _refuse_with(monkeypatch, text="Hi", folder=_REPLY_FOLDER):
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    return rig, folder, text
+
+
+def _run_refused(rig, folder, text):
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", folder, text)
+    return str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "text, hand",
+    [
+        ("Hi", "Hi Jane, sorry, I cannot make it."),
+        ("Thanks!", "Thanks! I'll check it tomorrow and send the figures."),
+    ],
+)
+@pytest.mark.parametrize("kind", ["html", "plain"])
+def test_reply_flow_never_deletes_a_hand_reply_that_starts_with_the_calls_text(
+    monkeypatch, text, hand, kind
+):
+    # the owner rule: a draft that is not PROVABLY the call's own is never touched. A
+    # short call text is the start of the owner's own reply to the same original.
+    rig, folder, _ = _refuse_with(monkeypatch)
+    if kind == "html":
+        body = f"<div>{hand}</div><blockquote>{_ATTRIBUTION_HTML} q</blockquote>"
+    else:
+        body = f"{hand}\n\n{_ATTRIBUTION_LINE}\n> quoted\n"
+    _real_selector(monkeypatch, (_DRAFTS_URL, body, kind))
+    msg = _run_refused(rig, folder, text)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "was found and deleted" not in msg
+    assert "Drafts" in msg and "reply window" in msg
+
+
+def test_reply_flow_never_deletes_an_empty_hand_reply_to_the_same_original(
     monkeypatch,
 ):
-    # the REAL selector, a faked Drafts reader: an empty hand reply to the same
-    # original is not provably the call's own, so no delete script runs
-    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
-    monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
-    monkeypatch.setattr(
-        mail_reply_cleanup,
-        "drafts_rows",
-        lambda account: [(1, _DRAFTS_URL), (9, _DRAFTS_URL)],
-    )
-    monkeypatch.setattr(
-        mail_reply_cleanup,
-        "_read_draft",
-        lambda url, rowid: ("<abc@x>", "<hand@x>", ""),
-    )
-    with pytest.raises(ComposeRefused) as exc:
-        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    rig, folder, text = _refuse_with(monkeypatch)
+    _real_selector(monkeypatch, (_DRAFTS_URL, "", "plain"))
+    msg = _run_refused(rig, folder, text)
     assert "_SWEEP_DELETE" not in rig.names()
-    assert "nothing was created" not in str(exc.value)
-    assert "Drafts" in str(exc.value)
+    assert "nothing was created" not in msg and "Drafts" in msg
+
+
+@pytest.mark.parametrize("kind", ["html", "plain"])
+def test_reply_flow_deletes_the_copy_that_is_exactly_its_text_and_mails_attribution(
+    monkeypatch, kind
+):
+    # the attribution line comes from the ORIGINAL the flow read, and is allowed once,
+    # after the call's text
+    rig, folder, text = _refuse_with(monkeypatch)
+    if kind == "html":
+        body = f"<div>Hi</div><div>{_ATTRIBUTION_HTML}</div><blockquote>q</blockquote>"
+    else:
+        body = f"Hi\n\n{_ATTRIBUTION_LINE}\n> q\n"
+    _real_selector(monkeypatch, (_DRAFTS_URL, body, kind))
+    msg = _run_refused(rig, folder, text)
+    _, argv, _ = rig.call("_SWEEP_DELETE")
+    assert argv == ("own8@x", _GMAIL_UUID, "Drafts")
+    assert "nothing was created" in msg and "deleted" in msg
+
+
+def test_reply_flow_deletes_a_copy_in_the_account_the_reply_is_sent_from(monkeypatch):
+    # spike 005: a reply to a message in this inbox can be sent from ANOTHER account,
+    # and Mail files the autosave in that account's Drafts. The copy is the call's own.
+    other = "imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/Drafts"
+    rig, folder, text = _refuse_with(monkeypatch)
+    _real_selector(monkeypatch, (other, "<div>Hi</div>", "html"))
+    msg = _run_refused(rig, folder, text)
+    _, argv, _ = rig.call("_SWEEP_DELETE")
+    assert argv == ("own8@x", "02B406D0-99D4-4E9A-9A7C-0DB912FD1D93", "Drafts")
+    assert "nothing was created" in msg
+
+
+def test_reply_flow_reports_a_copy_in_a_localized_drafts_and_deletes_nothing(
+    monkeypatch,
+):
+    rig, folder, text = _refuse_with(monkeypatch)
+    url = f"imap://{_GMAIL_UUID}/Concepten"
+    _real_selector(monkeypatch, (url, "<div>Hi</div>", "html"))
+    msg = _run_refused(rig, folder, text)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "Drafts" in msg
+
+
+@pytest.mark.parametrize("original", ["inbox", "imap://local-uuid/INBOX"])
+def test_reply_to_an_alias_or_local_original_still_waits_and_sweeps(
+    monkeypatch, original
+):
+    # no instant "may be left" for an original that names no real account: the sweep
+    # reads every new row, so it needs no account (the old read needed one)
+    rig, _, text = _refuse_with(monkeypatch)
+    msg = _run_refused(rig, original, text)
+    assert rig.waits == [145.0] and rig.found_args
+    assert "nothing was created" in msg
 
 
 def test_a_successful_reply_keeps_its_window_and_runs_no_sweep(monkeypatch):

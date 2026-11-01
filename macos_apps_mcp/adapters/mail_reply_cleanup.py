@@ -11,22 +11,26 @@ call's own. The delete is a Mail script in ``mail_outgoing`` (``_SWEEP_DELETE``)
 Reading the Envelope Index and the ``.emlx`` files is not a Mail call, so the wait
 before the read adds no load on Mail.
 
-**Scope** (owner rule "never touch what is not ours"): only the reply account's own
-Drafts mailbox is read, never another account's (family accounts live on this Mac).
-That mailbox is the shallowest mailbox of the account named ``Drafts`` / ``Draft`` (the
-probe's rule). An account whose Drafts has another name (a localized or renamed one)
-has none we can identify, so the read raises ``NativeError`` and the caller reports the
-sweep as unavailable ("may be left"), never "nothing was created". The same holds when
-the original was named by an alias (``inbox``), which names no account.
+**Scope.** The copy lands in the Drafts of the account the reply is SENT FROM, which is
+not always the account that holds the original (spike 005: a message from a family
+address in the owner's inbox got a reply from that address's account). The Drafts
+mailbox of an account cannot be named reliably either: the Envelope Index has no
+mailbox role (``mailboxes`` holds a url and counters), the draft flag in
+``messages.flags`` was set on 1 of 287 stored drafts, and a Drafts can be localized
+(``Concepten``) or sit beside a user folder named ``Drafts``. So no mailbox is guessed.
+The baseline is the highest ``messages.ROWID`` (the column is AUTOINCREMENT, so a new
+row always sorts above it) and the read looks at EVERY row above it, in any mailbox of
+any account. "No copy" therefore means no new row anywhere threads to the original.
 
-**Selector** (a design rule, run as one step on device only in 05.2-13): a row of that
-Drafts mailbox that is NEW since the call's own baseline, whose ``In-Reply-To`` header
-is the original. A hand reply to the same original matches too, so the copy is claimed
-only when exactly one row matches AND the squashed text before its quote STARTS WITH the
-call's own full squashed text. An empty copy or one with only Mail's attribution line is
-not provably the call's own (a hand reply opened and saved looks the same), so it is
-``unproven``: reported with the refusal, never deleted. Anything else is ``unproven``
-too, and nothing is deleted.
+**Selector** (a design rule, run as one step on device only in 05.2-13): a new row
+whose ``In-Reply-To`` header is the original. A hand reply to the same original matches
+too, so the copy is claimed (``one``, and so deleted) only when exactly one row matches,
+nothing new was unreadable, it sits in a mailbox that is named ``Drafts`` / ``Draft``
+(directly under the account or under one bracket folder such as ``[Gmail]``) AND the
+squashed text before its quote EQUALS the call's own full squashed text, optionally
+followed by Mail's own attribution line for this original (anchored, built the way the
+reply quote is). A longer text that merely starts with the call's text is a hand reply.
+Anything else is ``unproven``: reported with the refusal, never deleted.
 """
 
 from __future__ import annotations
@@ -44,26 +48,25 @@ from ..text import squash_text
 from . import mail_index, mailbox_url
 from .mail_addressing import _norm_mid
 
-# Only what the query reads: present in every Envelope Index shape (also the Sequoia
+# Only what the queries read: present in every Envelope Index shape (also the Sequoia
 # shape, where message_global_data loses its Message-ID column).
 _FINGERPRINT: dict[str, set[str]] = {
     "messages": {"ROWID", "mailbox", "deleted"},
     "mailboxes": {"ROWID", "url"},
 }
 
-# The account's Drafts mailbox: the shallowest url named Drafts/Draft (a nested
-# `Projects/Drafts` is a user folder; the `build_trash_query` rule).
-_DRAFTS_MAILBOX_SQL = """
-SELECT url FROM mailboxes
-WHERE url LIKE ? ESCAPE '\\' AND (url LIKE '%/Drafts' OR url LIKE '%/Draft')
-ORDER BY length(url) ASC LIMIT 1
+_TOP_SQL = "SELECT COALESCE(MAX(ROWID), 0) FROM messages"
+
+_NEW_ROWS_SQL = """
+SELECT m.ROWID, mb.url FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+WHERE m.ROWID > ? AND m.deleted = 0
+ORDER BY m.ROWID LIMIT ?
 """
 
-_DRAFTS_ROWS_SQL = """
-SELECT m.ROWID FROM messages m
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
-WHERE m.deleted = 0 AND mb.url = ?
-"""
+# More new rows than this in the sweep window (a mailbox sync) are not all read; the
+# sweep then proves nothing. Far above the 0 to 10 a quiet minute brings.
+MAX_NEW_ROWS = 300
 
 
 class Draft(NamedTuple):
@@ -76,43 +79,77 @@ class Draft(NamedTuple):
     mid: str = ""
 
 
-def drafts_rows(account: str) -> list[tuple[int, str]]:
-    """``(ROWID, mailbox url)`` of every live row in ``account``'s own Drafts mailbox.
-    Raises a ``NativeError`` when it cannot read (Full Disk Access, schema drift, no
-    index) or cannot say which mailbox is that account's Drafts: an empty or ``local``
-    account matches no mailbox, and neither does a Drafts with another name. The caller
-    must then treat the sweep as unavailable, never as "no copy"."""
+def _read(query):
+    """Run ``query(conn)`` on the Envelope Index, read-only. Raises a ``NativeError``
+    when it cannot read (Full Disk Access, schema drift, no index): the caller must then
+    treat the sweep as unavailable, never as "no copy"."""
     path = mail_index.envelope_index_path()
     if path is None:
         raise NativeError("Mail's Envelope Index does not exist on this Mac")
-
-    def query(conn) -> list[tuple[int, str]]:
-        pattern = f"%://{mail_index.like_escape(account)}/%"
-        mailbox = conn.execute(_DRAFTS_MAILBOX_SQL, (pattern,)).fetchone()
-        if mailbox is None:
-            raise NativeError("the reply account has no mailbox named Drafts or Draft")
-        url = str(mailbox[0])
-        return [(int(r[0]), url) for r in conn.execute(_DRAFTS_ROWS_SQL, (url,))]
-
     return runtime.read_via_sqlite(path, _FINGERPRINT, query)
 
 
-def drafts_baseline(account: str) -> frozenset[int] | None:
-    """The ROWIDs of ``account``'s Drafts now, or None when they cannot be read (the
+def index_top() -> int | None:
+    """The highest ``messages.ROWID`` now, or None when the index cannot be read (the
     sweep is then unavailable and the refusal says so)."""
     try:
-        return frozenset(rowid for rowid, _ in drafts_rows(account))
+        return int(_read(lambda conn: conn.execute(_TOP_SQL).fetchone()[0]))
     except NativeError:
         return None
 
 
+def new_rows(top: int) -> list[tuple[int, str]]:
+    """``(ROWID, mailbox url)`` of every live row above ``top``, at most
+    ``MAX_NEW_ROWS + 1`` (one over the cap tells the caller it was cut). Raises a
+    ``NativeError`` when the index cannot be read."""
+    return _read(
+        lambda conn: [
+            (int(r[0]), str(r[1]))
+            for r in conn.execute(_NEW_ROWS_SQL, (top, MAX_NEW_ROWS + 1))
+        ]
+    )
+
+
+def _is_drafts_url(url: str) -> bool:
+    """A mailbox named ``Drafts`` / ``Draft`` directly under its account or under ONE
+    bracket folder (``[Gmail]/Drafts``). A nested user folder (``Projects/Drafts``) is
+    not a Drafts mailbox, and neither is a localized one: both are ``unproven``."""
+    parts = mailbox_url.path(url).split("/")
+    if parts[-1] not in ("Drafts", "Draft"):
+        return False
+    return len(parts) == 1 or (
+        len(parts) == 2 and parts[0].startswith("[") and parts[0].endswith("]")
+    )
+
+
+def _shard(rowid: int) -> str:
+    """Mail's folder shard of a message: the digits of ``rowid // 1000`` reversed, one
+    folder each (174504 -> ``4/7/1``); none below 1000."""
+    return "/".join(reversed(str(rowid // 1000))) if rowid >= 1000 else ""
+
+
 def _emlx_path(url: str, rowid: int) -> Path | None:
-    root, account = mail_index.mail_root(), mailbox_url.account(url)
-    if root is None or not account:
+    """The stored file of one message. The mailbox folder is derived from the url (one
+    ``.mbox`` folder per path segment) and the shard from the ROWID, so a lookup costs a
+    stat; a miss walks that one mailbox folder, never the whole account (a walk of a
+    large account took 0.3 to 0.7 s per message)."""
+    root, parsed = mail_index.mail_root(), mailbox_url.parse(url)
+    if root is None or parsed is None or not parsed[1]:
         return None
-    for base in root.glob(f"V*/{account}"):
-        for name in (f"{rowid}.emlx", f"{rowid}.partial.emlx"):
-            hit = next(base.rglob(name), None)
+    segments = [seg + ".mbox" for seg in parsed[2].split("/") if seg]
+    names = (f"{rowid}.emlx", f"{rowid}.partial.emlx")
+    for base in root.glob(f"V*/{parsed[1]}"):
+        box = base.joinpath(*segments)
+        if not box.is_dir():
+            continue
+        shard = _shard(rowid)
+        pattern = f"*/Data/{shard}/Messages" if shard else "*/Data/Messages"
+        for messages in box.glob(pattern):
+            for name in names:
+                if (messages / name).is_file():
+                    return messages / name
+        for name in names:
+            hit = next(box.rglob(name), None)
             if hit is not None:
                 return hit
     return None
@@ -146,9 +183,9 @@ def _before_quote(msg) -> str:
     return squash_text(head.replace("\ufffc", ""))
 
 
-def _read_draft(url: str, rowid: int) -> tuple[str, str, str] | None:
-    """``(In-Reply-To, Message-ID, text before the quote)`` of one stored draft, or None
-    when its file is absent or unreadable."""
+def _read_draft(url: str, rowid: int):
+    """``(In-Reply-To, Message-ID, parsed message)`` of one stored message, or None when
+    its file is absent or unreadable. The body is parsed lazily, only for a match."""
     path = _emlx_path(url, rowid)
     if path is None:
         return None
@@ -162,38 +199,45 @@ def _read_draft(url: str, rowid: int) -> tuple[str, str, str] | None:
     return (
         str(msg.get("In-Reply-To", "") or ""),
         str(msg.get("Message-ID", "") or ""),
-        _before_quote(msg),
+        msg,
     )
 
 
-def _is_own(before_quote: str, own_text: str) -> bool:
-    """The text before the quote starts with the call's full text. Empty text and
-    Mail's attribution line alone are not proof (a hand reply looks the same)."""
+def _is_own(before_quote: str, own_text: str, attribution: str | None) -> bool:
+    """The text before the quote EQUALS the call's full text, optionally followed by
+    Mail's attribution line for this original. Empty text and the attribution alone are
+    not proof (a hand reply opened and saved looks the same), and neither is text that
+    merely starts with the call's (a hand reply that begins "Hi" is not "Hi")."""
     own = squash_text(own_text)
-    return bool(own) and before_quote.startswith(own)
+    if not own:
+        return False
+    if before_quote == own:
+        return True
+    line = squash_text(attribution)
+    return bool(line) and before_quote == f"{own} {line}"
 
 
 def find_own_draft(
-    account: str, baseline: frozenset[int], original_mid: str, own_text: str
+    top: int, original_mid: str, own_text: str, attribution: str | None
 ) -> Draft:
-    """The call's own Drafts copy in ``account``'s Drafts, if there is one. Raises
-    ``NativeError`` when the index cannot be read now or the account's Drafts cannot be
-    identified (the caller treats that as unavailable)."""
+    """The call's own Drafts copy among the rows new since ``top``, if there is one.
+    Raises ``NativeError`` when the index cannot be read now (the caller treats that as
+    unavailable)."""
+    rows = new_rows(top)
+    if len(rows) > MAX_NEW_ROWS:
+        return Draft("unproven")  # too many new rows to read them all
     found: list[Draft] = []
     unreadable = False
-    for rowid, url in drafts_rows(account):
-        if rowid in baseline:
-            continue
+    for rowid, url in rows:
         draft = _read_draft(url, rowid)
         if draft is None:
             unreadable = True  # a new row we cannot read might be the one
             continue
-        in_reply_to, mid, before_quote = draft
+        in_reply_to, mid, msg = draft
         if _norm_mid(in_reply_to) != _norm_mid(original_mid):
             continue
-        found.append(
-            Draft("one" if _is_own(before_quote, own_text) else "unproven", url, mid)
-        )
+        own = _is_drafts_url(url) and _is_own(_before_quote(msg), own_text, attribution)
+        found.append(Draft("one" if own else "unproven", url, mid))
     if not found:
         return Draft("unproven" if unreadable else "none")
     if len(found) > 1 or unreadable or found[0].kind != "one":
