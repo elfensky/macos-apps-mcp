@@ -30,7 +30,8 @@ surface may still shift between minor versions.
   from (the call reads the reply's From address and matches it to the one account that holds it;
   another account's Drafts is never touched), that landed between the reply verb and the discard
   (within the 120 second open timeout), whose text above the quote is exactly yours (followed
-  only by the signature Mail put into this reply, when your account places it above the quote)
+  only by the signature Mail put into this reply, equal except for white space, when your account
+  places it above the quote)
   and that still carries the original's quote with nothing below it, and only when no other reply window to that
   message was open when the call started (a retry cannot delete the first call's copy). The
   original is found before the reply opens and the reply is opened by Mail's own id for it, so
