@@ -214,7 +214,7 @@ not a re-litigation of that order.
 - [home-assistant.io/integrations/mcp/](https://www.home-assistant.io/integrations/mcp/) — fetched directly; confirmed SSE-only transport, OAuth Application Credentials auth, `/sse` URL format
 - Web search: home-assistant/discussions#1383 (streamable-HTTP client support still an open request)
 - `gh issue view` on elfensky/macos-apps-mcp — issues #86–#102, #105–#107, #111, #113, #126, #127 read directly for scope, prior-art citations, and each issue's own risk/sketch notes
-- `.planning/PROJECT.md`, `docs/ROADMAP.md`, `DESIGN.md` (this repo) — required reading, source of the pointers-not-payload/tier-gating invariants and the "Settled skips"/"Not planned" anti-feature baseline
+- `.planning/PROJECT.md`, `docs/landscape.md`, `DESIGN.md` (this repo) — required reading, source of the pointers-not-payload/tier-gating invariants and the "Settled skips"/"Not planned" anti-feature baseline
 
 ---
 *Feature research for: macos-apps-mcp — adapter depth parity, new domains, platform & DX*

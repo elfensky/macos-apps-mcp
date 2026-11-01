@@ -48,7 +48,7 @@ Write-to-disk rules shared as macos_apps_mcp.files, per-caller size cap, Mail un
 - `files.check_size(size, name, *, max_bytes, hint="")`: the cap is keyword-only with no default. `files` has no module-level byte cap.
 - `files.confirm_written(path, *, hint="")`: the 0-byte refusal takes the caller's explanation. The fallback literal is now `file`. The outside-root refusal says "files can only be written under it".
 - `mail_attachments.MAIL_MAX_BYTES = 25 * 1024 * 1024` (same value as before, same argv value). Mail passes `fallback="attachment"`, `hint="Save it from Mail directly."` and its old "not available locally" sentence. `mail.py` export keeps `fallback="message"`.
-- `docs/mail-applescript-facts.md` names `files` and `tests/test_files.py`. `docs/ROADMAP.md` line 46 stays as written (historical).
+- `docs/mail-applescript-facts.md` names `files` and `tests/test_files.py`. `docs/landscape.md` line 46 stays as written (historical).
 - The module docstring no longer holds a literal U+202E character; it names the code point in words.
 
 ## Commits (on origin/develop after the rebase merge)

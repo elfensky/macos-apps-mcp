@@ -65,7 +65,7 @@ and `man launchctl`, and measured this Mac's audit log and backup tree. Calibrat
   `httpx.ASGITransport` directly.
 - **Added decisions the analyzer did not raise:** `Open Settings` as a plain
   `x-apple.systempreferences:` link; `deployment.dashboard` in doctor; `adapters_unknown`; the
-  dated amendment to `docs/ROADMAP.md`'s floating note.
+  dated amendment to `docs/landscape.md`'s floating note.
 
 ## Corrections Made
 

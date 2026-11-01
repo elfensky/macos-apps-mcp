@@ -144,7 +144,7 @@ The stack research confirms all recommended technologies are available at curren
 
 ## Sources
 
-- `.planning/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` (each cites its primary sources: prior-art repos fetched directly, `gh issue view` on #86–#127, home-assistant.io/integrations/mcp, Apple developer forums, PyPI/Context7 for versions, and this repo's `CLAUDE.md`, `DESIGN.md`, `docs/ROADMAP.md`, `docs/mail-applescript-facts.md`, `.planning/codebase/CONCERNS.md`).
+- `.planning/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` (each cites its primary sources: prior-art repos fetched directly, `gh issue view` on #86–#127, home-assistant.io/integrations/mcp, Apple developer forums, PyPI/Context7 for versions, and this repo's `CLAUDE.md`, `DESIGN.md`, `docs/landscape.md`, `docs/mail-applescript-facts.md`, `.planning/codebase/CONCERNS.md`).
 
 ---
 *Research synthesized for: macos-apps-mcp target milestone (gate → adapter depth → new domains → platform & DX)*

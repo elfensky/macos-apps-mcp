@@ -53,7 +53,7 @@ macos-apps-mcp/                          # Root — FastMCP server for native ma
 │       └── test_*.py                    # Real EventKit, Mail, Contacts, etc. (run manually on macOS)
 ├── docs/                                # Documentation
 │   ├── DAEMON.md                        # Daemon/shim deployment (#71), installation, troubleshooting
-│   ├── ROADMAP.md                       # Features + architecture reviews (features 0.9.x–0.11.x)
+│   ├── landscape.md                     # Landscape survey, shipped 0.x cuts, architecture reviews (not a plan)
 │   ├── RELEASING.md                     # Version bump + build + tag + release procedure
 │   ├── mail-applescript-facts.md        # Device-verified Mail traps (delete behavior, autosave lag, etc.)
 │   ├── superpowers/                     # Guides for related tools (Claude Code, vault, etc.)
@@ -100,8 +100,8 @@ macos-apps-mcp/                          # Root — FastMCP server for native ma
 
 **docs/:**
 - Purpose: Reference docs for operators, developers, troubleshooters
-- Contains: DAEMON.md (deployment + TCC grant flow + troubleshooting), ROADMAP.md (feature plan + architecture reviews), RELEASING.md (version bump checklist), mail-applescript-facts.md (device-verified Mail quirks), superpowers/ (integration guides with Claude Code, vault, etc.)
-- Key reads: DAEMON.md for daemon mode installation; ROADMAP.md for architecture rationale; mail-applescript-facts.md before touching Mail code
+- Contains: DAEMON.md (deployment + TCC grant flow + troubleshooting), landscape.md (landscape survey + shipped cuts + architecture reviews), RELEASING.md (version bump checklist), mail-applescript-facts.md (device-verified Mail quirks), superpowers/ (integration guides with Claude Code, vault, etc.)
+- Key reads: DAEMON.md for daemon mode installation; landscape.md for architecture rationale; mail-applescript-facts.md before touching Mail code
 
 **scripts/:**
 - Purpose: Build automation
@@ -176,7 +176,7 @@ macos-apps-mcp/                          # Root — FastMCP server for native ma
 4. Create typed write dataclass in `macos_apps_mcp/contracts.py` if not reusing an existing one
 5. Add unit tests in `tests/test_<appname>.py` (Protocol fakes, no real native calls)
 6. Add integration tests in `tests/integration/test_<appname>_integration.py` (marked @pytest.mark.integration, real calls)
-7. Document in ROADMAP.md under the appropriate milestone (0.9.x, 0.10.x, 0.11.x)
+7. Track it in `.planning/ROADMAP.md` (a GSD phase) and `.planning/REQUIREMENTS.md`
 
 **New Read Tool:**
 1. In adapter, implement a method `search_<thing>(query: str, limit: int = 50) -> list[Pointer]` (or add to PointerSource.get_pointers)
@@ -207,7 +207,7 @@ macos-apps-mcp/                          # Root — FastMCP server for native ma
 4. Register tool in `macos_apps_mcp/server.py` dispatching to MailAdapter method
 5. Add unit test in `tests/test_mail_<subsystem>.py`
 6. Run `uv run pytest tests/test_mail*.py` to verify no regressions
-7. Device-verify on real Mail if the feature is destructive or involves attachment handling (device-facts may overturn premise; see ROADMAP.md pattern)
+7. Device-verify on real Mail if the feature is destructive or involves attachment handling (device-facts may overturn premise; see the docs/landscape.md 0.9.x table)
 
 **Shared Utility:**
 - Text hygiene → `macos_apps_mcp/text.py` (control-strip, truncation, punct normalization)
