@@ -511,8 +511,9 @@ def test_reply_open_reads_the_replys_own_signature():
     assert read < script.index("return ((id of r)")
     block = script[script.rindex("try", 0, read) : script.index("end try", read)]
     assert "set sig to" in block and "missing value" in block
-    assert script.index("set sig to \"\"") < script.rindex("try", 0, read)
-    assert script.rstrip().split("return ")[1].split("\n")[0].endswith("us & sig")
+    assert script.index('set sig to ""') < script.rindex("try", 0, read)
+    ret = script[script.index("return ((id of r)") :].split("on error")[0]
+    assert ret.rstrip().endswith("us & sig")
 
 
 @pytest.mark.parametrize(
