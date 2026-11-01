@@ -4,10 +4,10 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2 gap round 2 planned 2026-11-01: 05.2-14 (G2 live Accessibility read, G3 Mail pid from libproc, restart note), 05.2-15 (G1 preview self-addresses, G4 signature-aware Drafts sweep), 05.2-16 (owner re-sitting); next /gsd-execute-phase 05.2 --gaps-only after the records PR merges; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6"
+stopped_at: "Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6"
 last_updated: "2026-11-01T22:49:28.071Z"
-last_activity: 2026-11-01
-last_activity_desc: "Phase 05.2 gap round 2 planned: 3 plans (05.2-14..16) for G1-G4 and doctor's restart note, 3 checker passes"
+last_activity: 2026-11-02
+last_activity_desc: "Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed"
 state_head: 9f9a5e08fc9e774a310fbf090f9e567182eeb48c
 progress:
   total_phases: 20
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 ## Current Position
 
 Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
-Plan: 13 of 16 (gap round 2 planned: 05.2-14..16 for G1-G4)
+Plan: 13 of 16 merged (05.2-14, 05.2-15 executed as draft PRs #547, #546; 05.2-16 waits for the owner)
 Status: Ready to execute
-Last activity: 2026-11-01 — Phase 05.2 gap round 2 planned: 3 plans (05.2-14..16) for G1-G4 and doctor's restart note, 3 checker passes
+Last activity: 2026-11-02 — Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed
 
 Progress: [█████████░] 92%
 
@@ -241,5 +241,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-01T20:10:52.589Z
-Stopped at: Phase 05.2 gap round 2 planned 2026-11-01: 05.2-14 (G2 live Accessibility read, G3 Mail pid from libproc, restart note), 05.2-15 (G1 preview self-addresses, G4 signature-aware Drafts sweep), 05.2-16 (owner re-sitting); next /gsd-execute-phase 05.2 --gaps-only after the records PR merges; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6
+Stopped at: Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6
 Resume file: .planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md
