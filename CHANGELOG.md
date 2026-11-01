@@ -64,6 +64,13 @@ surface may still shift between minor versions.
 - **The denied-Automation message no longer asks for a restart** — a grant switched back
   on takes effect at once (seen on device, 2026-10-27).
 
+- **The Accessibility switch is read live, and `doctor` names the restarts** (#348) — a running
+  daemon kept its first answer, so a switch turned off still read granted and a switch turned on
+  still refused until a restart; each check now runs in a fresh process. The reply tools no
+  longer refuse with a false "Mail is not running": Mail is found in the system's process
+  list. `doctor`'s note says that Automation and Accessibility need no restart, and that
+  Full Disk Access, Calendars and Reminders may need one, not tested on a device.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added

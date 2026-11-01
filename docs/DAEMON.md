@@ -164,7 +164,9 @@ list is named "Device Control and Data Access" in System Settings → Privacy & 
 a terminal's grant gives every program run in it control of the Mac's windows. While a reply is
 built, Mail comes to the front for about a second, and the clipboard is borrowed and restored.
 Without the grant those two tools refuse and leave nothing. `doctor` reports it as
-`accessibility`, and the Health page shows an `Accessibility` row.
+`accessibility`, and the Health page shows an `Accessibility` row. A change to the switch takes
+effect at once: the daemon reads it through a fresh check process on every call, so it needs no
+restart.
 
 ### 4. Point every MCP client at the shim
 
@@ -428,6 +430,11 @@ build:
   changed the answer from `0` to `-1743`, and switching it back on returned `0`
   (installed bundle, 2026-10-26). An app that is not running cannot be checked: open it and
   run `doctor` again, or reload the Health page.
+
+- **Which permission changes need a restart.** Automation and Accessibility changes take
+  effect at once, with no restart. A Full Disk Access, Calendars or Reminders change may need a
+  daemon restart (the kickstart in section 6): this was not tested on a device, so restart when
+  `doctor` does not show the change. `doctor`'s `note` says the same.
 
 - **Log locations.**
   - Audit log and usage log live under `~/.local/state/macos-apps-mcp/` (or
