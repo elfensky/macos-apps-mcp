@@ -664,12 +664,13 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, pro
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
     # request=False live report (daemon, not-built state), with the Accessibility
     # surface NOT granted (#348, FIX-16) measures, per status of the six Automation
-    # surfaces: not_running 7467, denied 7456, not_asked 7449, probe_error 7401
-    # (OSStatus -1708); with Accessibility granted the same cases read 7226, 7215,
-    # 7208 and 7160. not_running is the worst case, so 7500 keeps 33 chars of margin
-    # (the Accessibility remediation names both panes, as the reply tools' refusal
-    # does): a `ps` executable name longer by 33 chars would fail it. The next text
-    # added to a surface must shorten something here, never raise 7500.
+    # surfaces: not_running 7477, denied 7466, not_asked 7459, probe_error 7411
+    # (OSStatus -1708); with Accessibility granted the same cases read 7236, 7225,
+    # 7218 and 7170 (re-measured with the per-permission restart note, 05.2-14, 10
+    # chars longer than before). not_running is the worst case, so 7500 keeps 23 chars
+    # of margin (the Accessibility remediation names both panes, as the reply tools'
+    # refusal does): a `ps` executable name longer by 23 chars would fail it. The next
+    # text added to a surface must shorten something here, never raise 7500.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).
