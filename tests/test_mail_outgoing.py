@@ -548,6 +548,49 @@ def test_reply_open_binds_the_new_window():
     assert "(id of r)" in script  # returns the outgoing id beside the window id
 
 
+def test_reply_open_binds_only_from_closeable_new_windows():
+    # B1 is pinned by its structure (an AppleScript cannot run in a unit test): `found`
+    # is only ever assigned an empty list or the result of newWindowIds, and that
+    # handler adds an id only when the window is closeable. Zero new windows reaches
+    # the error and the rollback; no fallback binds `window 1`, the front window, or
+    # a second read.
+    import re
+
+    script = mail_outgoing._REPLY_OPEN
+    handler = script[script.index("on newWindowIds") : script.index("end newWindowIds")]
+    assert re.findall(r"set end of found to \w+", handler) == ["set end of found to wi"]
+    assert "if cl then set end of found to wi" in handler
+    assert "wi is not in idsBefore" in handler
+    assert set(re.findall(r"set found to (.+)", script)) == {
+        "{}",
+        "my newWindowIds(idsBefore, id of every window)",
+    }
+    run = script[script.index("on run argv") :]
+    assert run.count("newWindowIds(") == 1  # read once: no second read can add a window
+    assert "(count of found) is not 1 then error" in run  # zero AND several refuse
+    assert run.index("is not 1 then error") < run.index("my rollback(r)")
+
+
+def test_reply_open_has_no_delayed_retry_that_could_bind_the_owners_window():
+    # a `delay` then a second read could pick a window the owner opened in that second
+    assert "delay" not in mail_outgoing._REPLY_OPEN
+
+
+def test_quote_tail_refuses_an_original_with_no_letter_or_digit_to_compare(
+    monkeypatch,
+):
+    # the confirm compares letters and digits: a tail of marks only would match anything
+    from macos_apps_mcp.errors import ComposeRefused
+
+    raw = US.join(["a", "b", "c", "d", "e", "f", "-- ... --"])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    with pytest.raises(ComposeRefused, match="no readable text"):
+        mail_outgoing._quote_tail("mid", ("x", "y"))
+    raw = US.join(["a", "b", "c", "d", "e", "f", "see example.com."])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    assert mail_outgoing._quote_tail("mid", ("x", "y")) == "see example.com."
+
+
 def test_reply_flow_scripts_wait_as_long_as_their_backstop():
     found = set()
     names = set(_REPLY_FLOW) | {"_SWEEP_DELETE"}

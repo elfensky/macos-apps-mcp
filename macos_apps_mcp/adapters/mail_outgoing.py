@@ -516,8 +516,10 @@ end run"""
 # tiled Mail viewer adds a non-closeable 13-pixel divider window beside the compose
 # window. Never `window 1`, never a title. An unreadable `closeable` keeps the id (more
 # candidates fail, never mis-bind). Zero or several candidates is an error, and the
-# error path rolls the reply back (verified, only -1728 counts). Returns
-# `outgoing-id US window-id`.
+# error path rolls the reply back (verified, only -1728 counts). There is NO retry on
+# zero: the device listed the reply window at once in all 43 opens, and a second read
+# after a delay could bind a window the OWNER opened in that second (a hand reply, with
+# focus in its body) and paste into it. Returns `outgoing-id US window-id`.
 _REPLY_OPEN = (
     ROLLBACK
     + "\n\n"
@@ -553,10 +555,6 @@ on run argv
     set r to reply (item 1 of matches) opening window yes reply to all doAll
     try
       set found to my newWindowIds(idsBefore, id of every window)
-      if (count of found) is 0 then
-        delay 1
-        set found to my newWindowIds(idsBefore, id of every window)
-      end if
       if (count of found) is not 1 then error ¬
         "could not tell which window is the reply (" & (count of found) & ¬
         " new windows)"
@@ -636,7 +634,11 @@ end run"""
 # Delete the call's own autosaved Drafts copy (facts 4e `Refusal cleanup`). Addressed
 # in the REPLY ACCOUNT'S Drafts by Message-ID, a `whose` query (0.3 s on a store of 287
 # drafts), never `delete_draft`'s walk of the unified Drafts mailbox (#521). Exactly one
-# match is deleted. `deleted` only when the re-query finds nothing: that is the proof.
+# match is deleted. `delete` is ASYNCHRONOUS on the source side (facts 5c: the source
+# still counts the message at t0 and has cleared it by t3), so absence is read once,
+# after one bounded `delay 3` (a single wait, never a loop on Mail). `deleted` only when
+# that re-query finds nothing; any other answer is `alive`, which the caller reports as
+# "may be left". Whether Drafts clears within 3 s is checked on device in 05.2-13.
 _SWEEP_DELETE = (
     mail_addressing.MAILBOX_REF
     + """
@@ -650,6 +652,7 @@ on run argv
       if (count of matches) is 0 then return "gone"
       if (count of matches) > 1 then return "several"
       delete (item 1 of matches)
+      delay 3
       if (count of (messages of mb whose message id is mid)) is 0 then return "deleted"
       return "alive"
     end tell
@@ -930,14 +933,15 @@ def _quote_tail(message_id: str, mailbox_args: tuple[str, str]) -> str:
     parts = raw.split(US, 6)
     original = parts[6] if len(parts) == 7 else ""
     words = squash_text(sanitize_block(original).replace("\ufffc", "")).split()
-    if not words:
+    tail = " ".join(words[-_TAIL_WORDS:])
+    if not any(c.isalnum() for c in tail):  # the confirm compares letters and digits
         raise ComposeRefused(
             "mail_reply cannot confirm Mail's quote: the original has no readable "
             "text, so there is nothing to check the quote against. Nothing was "
             "created and nothing was sent. To reply without the quote, call "
             "mail_reply with include_quote=False."
         )
-    return " ".join(words[-_TAIL_WORDS:])
+    return tail
 
 
 def _parse_open(raw: str) -> tuple[int, int]:
@@ -948,8 +952,17 @@ def _parse_open(raw: str) -> tuple[int, int]:
 
 _LEFT_OVER = (
     " The reply may NOT be fully removed: a reply window or a Drafts copy may be "
-    "left. Look for the open reply window to that message and in Mail's Drafts "
-    "mailbox (delete_draft removes a draft). Nothing was sent."
+    "left. Look for the open reply window to that message and in the Drafts mailbox "
+    "of the account that holds it (delete_draft removes a draft). Nothing was sent."
+)
+
+# Said when the discard ran so late that the Drafts read followed it too closely to
+# prove anything (facts 4e `Refusal cleanup`: only a read long after the discard is
+# proven).
+_STILL_LAND = (
+    " The reply was discarded, but the discard ran too long after the window opened to "
+    "rule out a Drafts copy that may still land: look in the Drafts mailbox of the "
+    "account that holds the original again in a minute. Nothing was sent."
 )
 
 # Owner decision 2026-11-01 (rollback-sweep): a refusal after the window opened waits
@@ -957,6 +970,11 @@ _LEFT_OVER = (
 # landed 5 s after the open in the sitting and was only ever looked for at +45 s or
 # later. One bounded wait; the Envelope Index read is not a Mail call.
 SWEEP_AFTER_S = 45.0
+
+# The Drafts read counts as "no copy" only when it follows the discard by at least this
+# long. The sitting proved reads 35 s or more after the discard (discards at 1.9 to
+# 10 s, reads at +45 s); a read right after a late discard is the case it never tested.
+SWEEP_GAP_S = 30.0
 
 
 def _wait_until(deadline: float) -> None:
@@ -982,6 +1000,7 @@ class _ReplyFlow:
         self.text, self.baseline, self.drafts_before = text, baseline, drafts_before
         self.outgoing_id: int | None = None
         self.opened_at: float | None = None
+        self.discarded_at: float | None = None
         self.stage = "open"
         self._discarded: str | None = None
 
@@ -1008,22 +1027,35 @@ class _ReplyFlow:
             except Exception:  # noqa: BLE001 - reported as unproven, never raised
                 answer = "unknown"
             self._discarded = answer
+            self.discarded_at = time.monotonic()
         return self._discarded
 
     def sweep(self) -> str:
         """The Drafts sweep (rollback-sweep): ``removed`` (the call's own autosave copy
         was found and deleted), ``none`` (no copy 45 s after the window opened),
-        ``unproven`` (a copy is there that cannot be proven the call's own, or the
-        delete was not confirmed) or ``unavailable`` (the index cannot be read)."""
+        ``late`` (no copy, but the discard ended too close to the read to rule out one
+        that has not landed), ``unproven`` (a copy is there that cannot be proven the
+        call's own, the delete was not confirmed, or the read failed) or
+        ``unavailable`` (the index cannot be read or the account's Drafts is unknown).
+        Only the reply account's own Drafts is read."""
         if self.drafts_before is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
         try:
             found = mail_reply_cleanup.find_own_draft(
-                self.drafts_before, bare_id(self.message_id), self.text
+                self.mailbox_args[0],
+                self.drafts_before,
+                bare_id(self.message_id),
+                self.text,
             )
         except NativeError:
             return "unavailable"
+        except Exception:  # noqa: BLE001 - a malformed draft must not hide the refusal
+            return "unproven"
+        if found.kind == "none":
+            discarded = self.discarded_at
+            late = discarded is None or time.monotonic() - discarded < SWEEP_GAP_S
+            return "late" if late else "none"
         if found.kind != "one":
             return found.kind
         try:
@@ -1059,6 +1091,8 @@ class _ReplyFlow:
                 f" The reply was discarded and {looked}: nothing was created and "
                 "nothing was sent."
             )
+        elif discarded == "dead" and swept == "late":
+            end = _STILL_LAND
         else:
             end = _LEFT_OVER
         return ComposeRefused(f"mail_reply did not complete ({said}).{end}")
@@ -1097,7 +1131,7 @@ def open_reply_with_text(
             mailbox_args,
             text,
             baseline.strip(),
-            mail_reply_cleanup.drafts_baseline(),
+            mail_reply_cleanup.drafts_baseline(mailbox_args[0]),
         )
         try:
             try:
