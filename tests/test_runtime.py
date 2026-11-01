@@ -774,7 +774,7 @@ def _compose_rig(
 _MAIL = b"/System/Applications/Mail.app/Contents/MacOS/Mail"
 
 
-class _FakeProc:
+class _FakeLibproc:
     """A stand-in for libproc. ``paths`` maps pid -> executable path (bytes) or an errno
     (the read fails with it). ``size`` / ``got`` override the two ``proc_listpids``
     answers; ``full`` makes the second answer fill the whole buffer."""
@@ -802,8 +802,8 @@ class _FakeProc:
         return len(item)
 
 
-def _proc(monkeypatch, paths, **kw) -> _FakeProc:
-    fake = _FakeProc(paths, **kw)
+def _proc(monkeypatch, paths, **kw) -> _FakeLibproc:
+    fake = _FakeLibproc(paths, **kw)
     monkeypatch.setattr(runtime, "_proc_lib", lambda: fake)
     return fake
 
