@@ -5,12 +5,12 @@ current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
 stopped_at: "Phase 05.2 gaps: 05.2-08..12 on develop; 05.2-13 Task 1 built (873b553, not installed); resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md"
-last_updated: "2026-11-01T09:58:25.022Z"
-last_activity: 2026-10-31
-last_activity_desc: Phase 05.2 execution started
+last_updated: "2026-11-01T18:38:14.985Z"
+last_activity: 2026-11-01
+last_activity_desc: "Grill session: 05.6 parallel with 05.2's wait; testers after 05.10 + 05.3 cut 1 (0.18.0); cursors split out as Phase 05.11; a release per daemon-changing phase close; rename 0.17.0, launch 1.0.0; one instructions builder (05.3 starts, 05.7 extends); cask stays; #521 into 05.6"
 state_head: d8c5b82296557217b1df1a11f410d7b2acd603e8
 progress:
-  total_phases: 19
+  total_phases: 20
   completed_phases: 9
   total_plans: 85
   completed_plans: 79
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — EXECUTING
 Plan: 8 of 13
 Status: Executing Phase 05.2
-Last activity: 2026-10-31 — Phase 05.2 execution started
+Last activity: 2026-11-01 — Grill session: 05.6 parallel with 05.2's wait; testers after 05.10 + 05.3 cut 1 (0.18.0); cursors split out as Phase 05.11; a release per daemon-changing phase close; rename 0.17.0, launch 1.0.0; one instructions builder (05.3 starts, 05.7 extends); cask stays; #521 into 05.6
 
 Progress: [█████████░] 92%
 
@@ -86,6 +86,7 @@ Progress: [█████████░] 92%
 - [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
 - [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
 - [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.
+- [Roadmap]: Grill session 2026-11-01 (owner, nine answers; decision page `.planning/reports/2026-11-01-phase-plan-grill.html`): plans are written one phase at a time, right before each runs; 05.6 runs in its own lane while 05.2-13 waits for the acceptance sitting; the testers get the brief after 05.10 and 05.3 cut 1 (release 0.18.0), so 05.3 sits right after 05.10; the paged reads (#508) are additive and become Phase 05.11 after 05.3; a release is cut at every phase close that changes the daemon; the rename is 0.17.0 and 1.0.0 is the launch release; one `instructions` builder, started by 05.3 cut 2 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (DIST-04); #521 joins 05.6.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -216,6 +217,12 @@ Recent decisions affecting current work:
 - Phase 05.3 edited: edited fields: goal, depends_on (05.8) (2026-10-31)
 - Phase 05.5 edited: edited fields: goal (optional), depends_on (05.7) (2026-10-31)
 - Phase 6 edited: edited fields: depends_on (05.7), success_criteria (1, 2 and 6 landed as quick tasks in October; 4 partly) — DIST-01, DIST-02 and DIST-06 marked complete in REQUIREMENTS.md (2026-10-31)
+- Phase 05.11 inserted after Phase 05.3: Paged reads — a cursor bound to the query (#508), split out of Phase 05.10 (additive, not breaking) so the breaking release reaches the testers sooner (owner, 2026-11-01, grill session)
+- Phase 05.3 moved to right after Phase 05.10: the testers get the brief after cut 1 (release 0.18.0); its goal names the registry-driven `instructions` builder that Phase 05.7 extends, and the lazy package import stays in cut 1 (owner, 2026-11-01)
+- Phase 05.10 edited: edited fields: title, goal, requirements — #508 moved to 05.11; the breaking release is 0.17.0, 1.0.0 is the launch release (owner, 2026-11-01)
+- Phase 05.6 edited: edited fields: title, goal, requirements (+#521 `delete_draft` times out on a busy Mail, found at the 05.2-09 sitting) (2026-11-01)
+- Phase 05.9 edited: depends_on (05.11); Phase 05.7 edited: goal, depends_on (05.8) (2026-11-01)
+- Release rule (owner, 2026-11-01): one release at every phase close that changes the daemon; no per-phase release decision from now on
 
 ## Deferred Items
 
@@ -227,6 +234,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-31T18:14:06.861Z
+Last session: 2026-11-01T18:38:14.985Z
 Stopped at: Phase 05.2 gaps: 05.2-08..12 on develop; 05.2-13 Task 1 built (873b553, not installed); resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md
 Resume file: None

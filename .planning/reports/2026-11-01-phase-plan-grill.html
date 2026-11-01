@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>macos-apps-mcp — phase plan after the grill session of 2026-11-01</title>
+<style>
+  :root { --bg: #111; --fg: #e8e8e8; --mut: #9a9a9a; --line: #333; --c1: #3b6cf0; --c2: #22c2b8; --c3: #f0b429; --warn: #f0b429; }
+  @media (prefers-color-scheme: light) { :root { --bg: #fff; --fg: #111; --mut: #666; --line: #ddd; } }
+  body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 760px; padding: 24px 16px; line-height: 1.4; }
+  h1 { font-size: 18px; margin: 0 0 4px; } h1 small { color: var(--mut); font-weight: 400; font-size: 13px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  p.lead { color: var(--mut); font-size: 13px; margin: 0 0 12px; }
+  svg text { font-family: ui-monospace, Menlo, monospace; font-size: 10px; fill: var(--mut); }
+  svg text.in { fill: var(--bg); } svg text.v { fill: var(--fg); }
+  svg rect.bug { fill: var(--c1); rx: 3; } svg rect.pl { fill: var(--c2); rx: 3; } svg rect.ft { fill: var(--c3); rx: 3; } svg rect.op { fill: var(--mut); rx: 3; }
+  svg rect.new { stroke: var(--fg); stroke-width: 1.5; }
+  svg path.cut { stroke: var(--fg); stroke-width: 2; fill: none; }
+  svg path.flag { stroke: var(--warn); stroke-width: 2; fill: var(--warn); }
+  table { border-collapse: collapse; font-size: 12px; width: 100%; margin: 8px 0 0; }
+  td, th { text-align: left; padding: 4px 10px 4px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { color: var(--mut); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  td.q { font-family: ui-monospace, Menlo, monospace; color: var(--mut); white-space: nowrap; }
+  td.a { font-weight: 600; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--mut); margin: 6px 0 0; flex-wrap: wrap; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+</style>
+</head>
+<body>
+<h1>Phase plan after the grill session <small>· macos-apps-mcp · 2026-11-01 · source: this file, <code>.planning/reports/</code></small></h1>
+<p class="lead">Nine questions, one at a time, each with a recommendation. The owner's answers are the decisions below. The roadmap, STATE.md, PROJECT.md and PROMOTION.md were changed to match in the same PR as this page.</p>
+
+<h2>The order, the releases, the testers</h2>
+<svg width="700" height="128" viewBox="0 0 700 128" role="img" aria-label="Final phase order with release cuts and the tester flag">
+  <rect class="bug" x="0" y="30" width="60" height="14"/><text class="in" x="4" y="41">05.2</text>
+  <rect class="bug" x="0" y="48" width="60" height="14"/><text class="in" x="4" y="59">05.6</text>
+  <text x="2" y="76">parallel</text>
+  <rect class="pl" x="66" y="30" width="56" height="14"/><text class="in" x="70" y="41">05.4</text>
+  <rect class="pl" x="128" y="30" width="76" height="14"/><text class="in" x="132" y="41">05.10</text>
+  <rect class="ft" x="210" y="30" width="60" height="14"/><text class="in" x="214" y="41">05.3</text>
+  <rect class="ft new" x="276" y="30" width="60" height="14"/><text class="in" x="280" y="41">05.11</text>
+  <rect class="ft" x="342" y="30" width="46" height="14"/><text class="in" x="346" y="41">05.9</text>
+  <rect class="ft" x="394" y="30" width="46" height="14"/><text class="in" x="398" y="41">05.8</text>
+  <rect class="ft" x="446" y="30" width="46" height="14"/><text class="in" x="450" y="41">05.7</text>
+  <rect class="op" x="498" y="30" width="46" height="14"/><text class="in" x="502" y="41">05.5</text>
+  <rect class="ft" x="550" y="30" width="36" height="14"/><text class="in" x="556" y="41">6</text>
+  <path class="cut" d="M62 18 v10"/><text class="v" x="40" y="14">0.15.x</text>
+  <path class="cut" d="M124 18 v10"/><text class="v" x="104" y="14">0.16.0</text>
+  <path class="cut" d="M206 18 v10"/><text class="v" x="186" y="14">0.17.0</text>
+  <path class="cut" d="M272 18 v10"/><text class="v" x="250" y="14">0.18.0</text>
+  <path class="flag" d="M272 50 v24 M272 50 l12 5 l-12 5"/><text x="288" y="60">testers get the brief</text>
+  <path class="cut" d="M588 18 v10"/><text class="v" x="566" y="14">1.0.0 at launch</text>
+  <text x="66" y="94">a release at every phase close that changes the daemon · outlined = new phase · 05.5 optional</text>
+  <text x="66" y="110">05.11 = the paged reads (#508), split out of 05.10 · 05.3 = feedback, cut 1 then cut 2 · #521 joins 05.6</text>
+</svg>
+<div class="legend"><span style="--c: var(--c1)">bug phase</span><span style="--c: var(--c2)">plumbing and surface</span><span style="--c: var(--c3)">feature</span><span style="--c: var(--mut)">optional</span></div>
+
+<h2>Decisions</h2>
+<table>
+  <tr><th>Q</th><th>Question</th><th>Options offered (recommended first)</th><th>Decision</th></tr>
+  <tr><td class="q">Q1</td><td>When are the nine pending phases planned?</td><td>one phase at a time · all nine now · discuss all now, plan one at a time</td><td class="a">A general discussion of all now (this session) highlights conflicts; then in depth, one phase at a time, right before it runs</td></tr>
+  <tr><td class="q">Q2</td><td>May 05.6 start while 05.2 waits for the owner's acceptance sitting (05.2-13)?</td><td>parallel · serial · parallel, 05.4 waits for the close</td><td class="a">Parallel: 05.6 in its own lane now</td></tr>
+  <tr><td class="q">Q3</td><td>When do the testers get the brief, and where does 05.3 sit?</td><td>after 05.10 + 05.3 cut 1 · now on 0.15.1 · after 05.10, 05.3 stays late</td><td class="a">After 05.10 and 05.3 cut 1 (release 0.18.0); 05.3 moves to right after 05.10</td></tr>
+  <tr><td class="q">Q4</td><td>Shape of 05.10: one phase in waves, or the cursors split out? (Correction: cursors are additive, not breaking.)</td><td>split · one phase, cursors last · cursors back into 05.9</td><td class="a">Split: the cursors become Phase 05.11, right after 05.3</td></tr>
+  <tr><td class="q">Q5</td><td>How many release cuts before the testers?</td><td>three · one per phase · one</td><td class="a">A rule, not a count: a release at every phase close that changes the daemon</td></tr>
+  <tr><td class="q">Q6</td><td>Which release is 1.0.0?</td><td>rename 0.17.0, launch 1.0.0 · the rename is 1.0.0</td><td class="a">The rename is 0.17.0; 1.0.0 is the launch release after the testers</td></tr>
+  <tr><td class="q">Q7</td><td>Who writes the server's <code>instructions</code> text?</td><td>one builder, two contributors · 05.3 static, 05.7 rebuilds · only 05.7</td><td class="a">One registry-driven builder: 05.3 cut 2 starts it with its three lines, 05.7 adds the house rules and the size test</td></tr>
+  <tr><td class="q">Q8</td><td>Where does the lazy package import land?</td><td>05.3 cut 1 as designed · fold into 05.4 · a quick task before 05.4</td><td class="a">05.3 cut 1, as designed</td></tr>
+  <tr><td class="q">Q9</td><td>Does Phase 6 keep the Homebrew cask (DIST-04)?</td><td>drop to on demand · keep</td><td class="a">Keep it in Phase 6</td></tr>
+  <tr><td class="q">—</td><td>#521, found at the 05.2-09 sitting: <code>delete_draft</code> times out on a busy Mail</td><td>bugs first</td><td class="a">Joins Phase 05.6</td></tr>
+</table>
+
+<h2>What each phase needs, in one line</h2>
+<table>
+  <tr><th>Phase</th><th>Settled by</th><th>Still open, and who answers it</th></tr>
+  <tr><td>05.2</td><td>13 plans; route a, mechanism M2 (sitting 2026-10-31)</td><td>the acceptance sitting (owner), then the phase close</td></tr>
+  <tr><td>05.6</td><td>#500, #501, #497, #471, #521</td><td>attachments: refuse or back up first (device probe); Mail special-use signal (research); #497 route (plan)</td></tr>
+  <tr><td>05.4</td><td>#470</td><td>nothing for the owner; the dead-stream guard and the UDS transport are the risk</td></tr>
+  <tr><td>05.10</td><td>#514 decisions of 2026-10-26, #502; release 0.17.0</td><td>nothing; Contacts update and delete stay v2</td></tr>
+  <tr><td>05.3</td><td>approved design 2026-10-25; cut 1 then cut 2; release 0.18.0 then the testers</td><td>builder's choices only: module layout, redaction patterns, thresholds</td></tr>
+  <tr><td>05.11</td><td>#508</td><td>nothing; keyset per read</td></tr>
+  <tr><td>05.9</td><td>#507</td><td>nothing</td></tr>
+  <tr><td>05.8</td><td>#505, #506 on the 05.6 guards</td><td>nothing</td></tr>
+  <tr><td>05.7</td><td>#503 on the 05.3 builder, #504</td><td>nothing</td></tr>
+  <tr><td>05.5</td><td>approved design, spikes 009–011; optional</td><td>how the loader gets the stylesheet (plan)</td></tr>
+  <tr><td>6</td><td>DIST-03 <code>.mcpb</code>, DIST-04 cask, DIST-05 skills packaging; three criteria landed</td><td>nothing</td></tr>
+</table>
+</body>
+</html>
