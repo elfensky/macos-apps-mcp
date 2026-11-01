@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -176,6 +177,98 @@ def test_automation_live_check_survives_a_broken_seam(monkeypatch, tmp_path, exc
         assert type(exc).__name__ in s["remediation"]
     _all_granted(monkeypatch, tmp_path)
     assert doc.diagnose(request=False)["surfaces"]
+
+
+# --- FIX-16 (#348): the Accessibility surface ----------------------------------------
+
+
+def _fake_trusted(monkeypatch, value=True):
+    """Fake ``runtime.accessibility_trusted``; ``value`` may be an exception class."""
+    calls: list[int] = []
+
+    def _fake() -> bool:
+        calls.append(1)
+        if isinstance(value, type) and issubclass(value, BaseException):
+            raise value("no AX")
+        return value
+
+    monkeypatch.setattr(runtime, "accessibility_trusted", _fake)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("trusted", "ok", "status"),
+    [
+        (True, True, "granted"),
+        (False, False, "not_granted"),
+        (OSError, None, "probe_error"),
+        (AttributeError, None, "probe_error"),
+    ],
+)
+def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, status):
+    _fake_trusted(monkeypatch, trusted)
+    s = doc._accessibility_surface()
+    assert s["surface"] == "accessibility" and s["kind"] == "accessibility"
+    assert s["ok"] is ok and s["status"] == status
+    if status == "granted":
+        assert "remediation" not in s
+    if status == "not_granted":
+        for word in ("Accessibility", "mail_reply", "reply_all", "Privacy & Security"):
+            assert word in s["remediation"]
+        assert "restart" not in s["remediation"].lower()  # facts 4e: no restart
+    if status == "probe_error":
+        assert "remediation" in s
+
+
+def test_accessibility_surface_is_off_with_the_mail_adapter(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    calls = _fake_trusted(monkeypatch, False)
+    s = doc._accessibility_surface()
+    assert s["status"] == "adapter_off" and s["ok"] is None
+    assert calls == []
+
+
+@pytest.mark.parametrize("request_", [False, True])
+def test_accessibility_surface_makes_one_seam_call_and_no_apple_event(
+    monkeypatch, tmp_path, request_
+):
+    # D-14: the check is the plain trust read through the seam, for both modes.
+    _all_granted(monkeypatch, tmp_path)
+    events: list[tuple] = []
+
+    def record(*a, **k):
+        events.append(a)
+        return "AppName"
+
+    monkeypatch.setattr(runtime, "run_osascript", record)
+    calls = _fake_trusted(monkeypatch, True)
+    surfaces = doc.diagnose(request=request_)["surfaces"]
+    assert len(calls) == 1
+    assert [s["surface"] for s in surfaces].count("accessibility") == 1
+    # the surface sits right after Full Disk Access and sent no Apple Event itself
+    names = [s["surface"] for s in surfaces]
+    assert names.index("accessibility") == names.index("full_disk_access") + 1
+    sent_for_it = [
+        e for e in events if "accessibility" in " ".join(map(str, e)).lower()
+    ]
+    assert sent_for_it == []
+
+
+def test_no_module_binds_the_accessibility_prompt():
+    # The only call path that can show the prompt is the options variant of the trust
+    # call; no module of the package may bind it or its prompt option.
+    import macos_apps_mcp
+
+    root = Path(macos_apps_mcp.__file__).parent
+    hits = [
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if any(
+            word in p.read_text("utf-8")
+            for word in ("AXIsProcessTrustedWithOptions", "kAXTrustedCheckOptionPrompt")
+        )
+    ]
+    assert hits == []
 
 
 def test_automation_bundle_ids_match_the_grant_map():

@@ -263,6 +263,60 @@ def banner(text):
     return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
 
 
+AX_OFF = (
+    "Accessibility is off for macos-apps-mcp, so mail_reply and reply_all refuse: "
+    "switch it on in the Accessibility pane."
+)
+
+
+def ax_report(status, ok, remediation=None):
+    report = make_report(make_ids(skip=()))
+    s = {
+        "surface": "accessibility",
+        "kind": "accessibility",
+        "ok": ok,
+        "status": status,
+    }
+    if remediation:
+        s["remediation"] = remediation
+    report["surfaces"].append(s)
+    return report
+
+
+def test_health_shows_the_accessibility_grant(doc, monkeypatch):
+    titles_ = ["Full Disk Access", "EventKit"]
+    doc.report = ax_report("granted", True)
+    text = get("/health").text
+    row = row_of(text, "Accessibility")
+    assert "dot ok" in row and ">Granted<" in row and "Open Settings" not in row
+    # right after Full Disk Access, before EventKit
+    order = titles(text)
+    assert order.index("Accessibility") == order.index(titles_[0]) + 1
+
+    doc.report = ax_report("not_granted", False, AX_OFF)
+    row = row_of(get("/health").text, "Accessibility")
+    assert "dot bad" in row and html.escape(AX_OFF, quote=False) in row
+    assert f'href="{SETTINGS}Privacy_Accessibility">Open Settings</a>' in row
+
+    only_active(monkeypatch, ["photos"])  # the Mail adapter is off
+    row = row_of(get("/health").text, "Accessibility")
+    assert "does not matter" in row and "Open Settings" not in row
+    assert "dot bad" not in row and "dot ok" not in row
+
+    only_active(monkeypatch, EVERYONE)
+    doc.report = ax_report("probe_error", None)
+    row = row_of(get("/health").text, "Accessibility")
+    assert "Could not be read" in row and "Open Settings" not in row
+    assert "dot bad" not in row and "dot ok" not in row
+
+
+def test_accessibility_row_raises_no_banner(doc):
+    doc.report = ax_report("not_granted", False, AX_OFF)
+    text = get("/health").text
+    assert "banner bad" not in text
+    assert '<span class="dot ok"></span>' in nav_health(get("/usage").text)
+
+
 def test_every_banner_glyph_is_hidden_from_screen_readers(doc):
     sources = "".join(
         p.read_text() for p in Path(dashboard.__file__).parent.glob("*.py")
