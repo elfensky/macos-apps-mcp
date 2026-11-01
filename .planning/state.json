@@ -55,7 +55,7 @@
     },
     {
       "number": "05.6",
-      "name": "Bug Fixes — Notes write safety, system folders, #497, #471 (INSERTED)",
+      "name": "Bug Fixes — Notes write safety, system folders, #497, #471, #521 (INSERTED)",
       "status": "pending"
     },
     {
@@ -65,7 +65,17 @@
     },
     {
       "number": "05.10",
-      "name": "Tool surface — rubric, verb_noun, error codes, cursors (INSERTED)",
+      "name": "Tool surface — rubric, verb_noun, error codes (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.3",
+      "name": "Feedback — problem reports (INSERTED)",
+      "status": "pending"
+    },
+    {
+      "number": "05.11",
+      "name": "Paged reads — cursor (INSERTED)",
       "status": "pending"
     },
     {
@@ -76,11 +86,6 @@
     {
       "number": "05.8",
       "name": "Notes depth — Markdown, attachments (INSERTED)",
-      "status": "pending"
-    },
-    {
-      "number": "05.3",
-      "name": "Feedback — problem reports (INSERTED)",
       "status": "pending"
     },
     {
@@ -104,5 +109,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 10 of 19 · executing"
   },
-  "updated_at": "2026-10-31T18:21:44.807Z"
+  "updated_at": "2026-11-01T18:38:14.985Z"
 }

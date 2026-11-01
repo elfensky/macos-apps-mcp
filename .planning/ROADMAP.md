@@ -41,12 +41,13 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
-- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice
+- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
-- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates, error codes and cursors (#514, #502, #508)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; a capped read continues with a cursor
+- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
+- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
+- [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
 - [ ] **Phase 05.9: CLI — tools from the shell (#507)** (INSERTED) - Any tool runs from the shell through the daemon
 - [ ] **Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506)** (INSERTED) - Notes take Markdown and expose their attachments
-- [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504)** (INSERTED) - Agents get server instructions and per-app skills from the server, written once after the last tool lands
 - [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page — optional, nothing depends on it
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
@@ -460,10 +461,10 @@ Plans:
 **Gap Wave 4** *(blocked on Gap Wave 3 completion)*
 - [ ] 05.2-13-PLAN.md — device acceptance on the rebuilt `.app`: an inspected `mail_reply` draft, one delivered `reply_all`, the refusals, the preview and the wording; closes #348 and #516 with evidence or records the gaps (FIX-16, FIX-18, FIX-14)
 
-### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471) (INSERTED)
+### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521) (INSERTED)
 
-**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). The Adapters page shows the live Automation grants on macOS 27, where the TCC-only chips cannot — from the last Health report or behind a `_WAIT` guard, as the plan decides (#497). The signed `.app` carries the licence text of every bundled package whose wheel ships none (PyObjC, bpylist2), and a build check fails when one is missing (#471). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26; #497 and #471 added at the 2026-10-31 roadmap audit).
-**Requirements**: TBD (planned from #500, #501, #497, #471)
+**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). The Adapters page shows the live Automation grants on macOS 27, where the TCC-only chips cannot — from the last Health report or behind a `_WAIT` guard, as the plan decides (#497). The signed `.app` carries the licence text of every bundled package whose wheel ships none (PyObjC, bpylist2), and a build check fails when one is missing (#471). `delete_draft` resolves the draft's account and mailbox from the Envelope Index and deletes with one `whose message id is` query on that mailbox, keeping the dry run and the exactly-one-match check, so a busy Mail no longer times out at 30 s (#521, found at the 05.2-09 sitting). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26; #497 and #471 added at the 2026-10-31 roadmap audit; #521 on 2026-11-01).
+**Requirements**: TBD (planned from #500, #501, #497, #471, #521)
 **Depends on:** Phase 05.2
 **Plans:** 0 plans
 
@@ -480,21 +481,41 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.4 to break down)
 
-### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates, error codes and cursors (#514, #502, #508) (INSERTED)
+### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 
-**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502), and a truncated bounded read returns a stateless `next_cursor` (a keyset position plus a query signature); a mismatched cursor answers `invalid_argument` (#508). One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.9, 05.8, 05.3, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
-**Requirements**: TBD (planned from #514, #502, #508)
+**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The paged reads (#508) are additive and are Phase 05.11. One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. The breaking release is 0.17.0; 1.0.0 is the launch release after the testers (owner, 2026-11-01). Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.3, 05.11, 05.9, 05.8, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #514, #502)
 **Depends on:** Phase 05.4
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.10 to break down)
 
+### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
+
+**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Cut 1 (recording, the lazy package import, the `report` command) ships as release 0.18.0 and the testers get the brief then; cut 2 (the two tools, the nudge) follows in the same phase. Cut 2 adds the registry-driven `instructions` builder with its three lines — when to call the two tools, the general-terms rule, the report command — and Phase 05.7 adds the house rules to the same builder, so no text is written twice (owner, 2026-11-01). Placed right after Phase 05.10, so `report_problem` and `suggest_improvement` follow the `verb_noun` names and the error codes, and the first outside users can report problems (owner, 2026-10-25; slot 2026-11-01).
+**Requirements**: TBD (planned from #465)
+**Depends on:** Phase 05.10
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
+
+### Phase 05.11: Paged reads — a cursor bound to the query (#508) (INSERTED)
+
+**Goal**: A capped read can continue. A truncated bounded read returns a stateless `next_cursor` — base64 JSON of a keyset position (the sort key of the last result, for example date plus id) and a signature of the query arguments — emitted only with `truncated`; a cursor whose signature does not match the arguments answers `invalid_argument`; the first users are the reads that hit their cap in practice (`mail_search`, `messages_search`, `notes`, and the merged `mail` read); others follow only when needed (#508). Additive, not breaking: split out of Phase 05.10 at the 2026-11-01 grill session so the breaking release reaches the testers sooner. Placed after Phase 05.3 and before Phase 05.9, so the CLI prints the cursor (owner, 2026-11-01).
+**Requirements**: TBD (planned from #508)
+**Depends on:** Phase 05.3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.11 to break down)
+
 ### Phase 05.9: CLI — tools from the shell (#507) (INSERTED)
 
-**Goal**: Any tool can be called from the shell. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). The paged reads (#508) moved to Phase 05.10 with the other surface changes. Placed after Phase 05.10, so the command speaks the renamed surface, and before Phase 05.8 (owner, 2026-10-26; slot 2026-10-31).
+**Goal**: Any tool can be called from the shell. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). The paged reads (#508) are Phase 05.11. Placed after Phase 05.11, so the command speaks the renamed surface and prints the cursor, and before Phase 05.8 (owner, 2026-10-26; slot 2026-11-01).
 **Requirements**: TBD (planned from #507)
-**Depends on:** Phase 05.10
+**Depends on:** Phase 05.11
 **Plans:** 0 plans
 
 Plans:
@@ -510,21 +531,11 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.8 to break down)
 
-### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
-
-**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed after the surface and tool phases, so `report_problem` and `suggest_improvement` follow the `verb_noun` names and the error codes, and before Phase 6 so the first outside users can report problems (owner, 2026-10-25; slot 2026-10-31).
-**Requirements**: TBD (planned from #465)
-**Depends on:** Phase 05.8
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.3 to break down)
-
 ### Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504) (INSERTED)
 
-**Goal**: Agents get the house rules from the server itself. The error codes (#502) moved to Phase 05.10 with the other surface changes. The server sends a short `instructions` text built from the registry, under a tested size budget (#503). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed last among the feature phases, after every tool exists, so the parity test and the instructions text are written once; Phase 6 packages the skills (owner, 2026-10-26; slot 2026-10-31).
+**Goal**: Agents get the house rules from the server itself. The error codes (#502) moved to Phase 05.10 with the other surface changes. The server's `instructions` text — its registry-driven builder and first three lines come from Phase 05.3 cut 2 — gains the house rules and a tested size budget (#503; one builder, two contributors: owner, 2026-11-01). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed last among the feature phases, after every tool exists, so the parity test and the instructions text are written once; Phase 6 packages the skills (owner, 2026-10-26; slot 2026-10-31).
 **Requirements**: TBD (planned from #503, #504)
-**Depends on:** Phase 05.3
+**Depends on:** Phase 05.8
 **Plans:** 0 plans
 
 Plans:
@@ -559,7 +570,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-10-31): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6
+Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-10-31; 2026-11-01): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.6 → 05.4 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -573,12 +584,13 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 12/13 | In Progress | - |
-| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471 (INSERTED) | 0/TBD | Not started | - |
+| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521 (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
-| 05.10. Tool surface — rubric, verb_noun, error codes, cursors (INSERTED) | 0/TBD | Not started | - |
+| 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
+| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
+| 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |
 | 05.9. CLI — tools from the shell (INSERTED) | 0/TBD | Not started | - |
 | 05.8. Notes depth — Markdown, attachments (INSERTED) | 0/TBD | Not started | - |
-| 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.7. Agent guidance — instructions, skills (INSERTED) | 0/TBD | Not started | - |
 | 05.5. Dashboard at a domain — optional (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

@@ -12,10 +12,10 @@ Weeks 1–2 of the [launch plan](#launch-plan) are done.
 
 | # | Step | Who | Done when |
 |---|---|---|---|
-| 1 | Send [the tester brief](tester-brief.md) to 3–5 Mac users; collect answers in Discussions; fix every setup blocker they hit | Owner sends; a session fixes | ≥ 3 testers finish a first task without help |
+| 1 | After release 0.18.0 — Phase 05.10's `verb_noun` rename plus Phase 05.3 cut 1, the `macos-apps-mcp report` command (owner, 2026-11-01) — send [the tester brief](tester-brief.md) to 3–5 Mac users; collect answers in Discussions and through the report command; fix every setup blocker they hit | Owner sends; a session fixes | ≥ 3 testers finish a first task without help |
 | 2 | Set up [@macosappsmcp](https://x.com/macosappsmcp): avatar `sips -Z 400 docs/images/logo.png --out avatar.png`, banner `docs/images/x-banner.png`, bio from [X](#x); first post = the release post there | Owner | Profile complete, one post |
 | 3 | Glama: on the [admin pages](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/admin/profile), check the short description and set it to the text below if it differs; if [the awesome-mcp-servers PR](https://github.com/punkpeye/awesome-mcp-servers/pull/17609) is still open on 2026-10-29, comment once that the Glama score is live | Owner | Description current; PR merged |
-| 4 | Raise Glama's grade (3.7 overall, coherence 2.8 C): Phase 05.10, [#514](https://github.com/elfensky/macos-apps-mcp/issues/514) — parameter descriptions, `verb_noun` names in one breaking release, merged duplicates, Contacts update and delete, `MACOS_APPS_ALLOW_SEND=mail` in Glama's build spec; breakdown on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score) | Session | Overall ≥ 4.3 and coherence ≥ 3.5 after the next Glama build |
+| 4 | Raise Glama's grade (3.7 overall, coherence 2.8 C): Phase 05.10, [#514](https://github.com/elfensky/macos-apps-mcp/issues/514) — parameter descriptions, `verb_noun` names in one breaking release (0.17.0), merged duplicates, error codes (#502), `MACOS_APPS_ALLOW_SEND=mail` in Glama's build spec; Contacts update and delete stay v2 (2026-10-31); breakdown on the [score page](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/score) | Session | Overall ≥ 4.3 and coherence ≥ 3.5 after the next Glama build |
 | 5 | Submit to the [Cline MCP Marketplace](https://github.com/cline/mcp-marketplace) (an issue with the repo URL, a reason and a 400×400 logo: `sips -Z 400 docs/images/logo.png --out logo-400.png`) and [awesome-claude-code](https://github.com/hesreallyhim/awesome-claude-code) (its issue form); fill in [mcpservers.org](https://mcpservers.org/submit) | Session drafts, owner approves | Three submissions open |
 | 6 | Demo kit: a seed script for a separate macOS test user (calendar, reminders, notes, an iCloud or IMAP test mailbox) and a 60 s shot list | Session, then owner records | Video on fake data |
 | 7 | Week 4: publish the project page in the [lav.ren repo](https://github.com/elfensky/lav.ren) (private; local checkout `~/Developer/lav.ren`; `src/content/projects/macos-apps-mcp/index.mdx`, `draft: false`, following that repo's AGENTS.md); add its blog link when the blog section opens | Session in lav.ren | Page live |
@@ -83,10 +83,10 @@ Waiting on others: PulseMCP and mcp.directory copy from the official registry by
 |---|---|---|
 | 1 | README first screen, CREDITS provenance, topics, Discussions | Done (#472) |
 | 2 | Registry metadata, Glama claim and score, awesome-list PR, plugin marketplace | Done (#474, #480, #487, release 0.15.1); awesome PR open |
-| 3 | 3–5 testers with [the tester brief](tester-brief.md); fix every setup blocker; record a 60 s demo on fake data | ≥ 3 testers finish a first task without help |
+| 3 | After release 0.18.0 (the rename and the report command): 3–5 testers with [the tester brief](tester-brief.md); fix every setup blocker; record a 60 s demo on fake data | ≥ 3 testers finish a first task without help |
 | 4 | Publish the lav.ren project page; the Mail post when the blog opens; an X thread | Strangers ask questions or open issues |
-| 5 | Show HN (link the repo, not a post), r/ClaudeAI, r/mcp, r/macapps (check each sidebar), X launch post | Actionable objections answered the same day |
-| 6 | `.mcpb`, Smithery, Anthropic plugin directory | Listed, Desktop install under 2 minutes |
+| 5 | Show HN (link the repo, not a post), r/ClaudeAI, r/mcp, r/macapps (check each sidebar), X launch post; the launch release is 1.0.0 (owner, 2026-11-01) | Actionable objections answered the same day |
+| 6 | `.mcpb`, Homebrew cask, Smithery, Anthropic plugin directory | Listed, Desktop install under 2 minutes |
 | After | One post per release with one visible change | — |
 
 ## X
