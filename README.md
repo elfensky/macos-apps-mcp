@@ -174,7 +174,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `update_mail_status` | ids (≤25), mailbox, `read`, `flagged`, `flag_color` | mark read/unread, flag (+colour). Re-issuing with the opposite value **is** the undo, so `dry_run` defaults to `False` |
 | `mail_duplicates` | `limit` | **report only** — per-mailbox redundant-copy counts + worst offenders. Cleanup is the `dedupe-mail` CLI below; this tool cannot delete |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
-| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
+| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native reply-all that keeps Mail's own quote, your text on top through Accessibility; sends only after the text is confirmed, then sweeps its own Drafts copy (`drafts_copy`) |
 | `forward_mail` | `message_id`, `mailbox`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
@@ -309,6 +309,12 @@ recipient-less message can jam the outbox so later, valid sends queue behind it 
 Every result also reports `outbox_pending`, Mail's current outbox count; when it's greater than
 zero the result carries a `note` explaining that delivery is not confirmed and to check Mail ▸
 Outbox.
+
+A real `reply_all` keeps Mail's own quote and takes about a minute: Mail can autosave a copy of the
+reply into Drafts that survives the send, so the call waits until 45 seconds after the reply window
+opened and deletes that copy only when it is provably its own. The result's `drafts_copy`
+(`removed`, `none`, `late`, `unproven` or `unavailable`) and a plain note say what it found; `sent`
+stays true whatever that is, and nothing in Sent or All Mail is touched.
 
 Run the `doctor` tool to check whether sending is actually enabled — `deployment.outbound` lists
 every adapter currently send-enabled (`[]` if none), derived from the same registration logic
