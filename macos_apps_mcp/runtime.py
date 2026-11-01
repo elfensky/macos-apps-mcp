@@ -662,6 +662,15 @@ _HISERVICES = (
     "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/"
     "HIServices.framework"
 )
+# The child program of `accessibility_trusted`: the plain trust read through ctypes, no
+# PyObjC. 05.2-proto/g2_ax_trust_probe.py builds the same text.
+_AX_CHILD = (
+    "import ctypes;"
+    f"l=ctypes.CDLL({_HISERVICES + '/HIServices'!r});"
+    "l.AXIsProcessTrusted.restype=ctypes.c_bool;"
+    "print(int(l.AXIsProcessTrusted()))"
+)
+_AX_CHILD_TIMEOUT = 5.0  # a normal child takes about 40 ms
 _COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework"
 _COREFOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 _MAIL_BUNDLE = "com.apple.mail"
@@ -712,8 +721,7 @@ _AX: dict = {}
 def _ax_lib() -> dict:
     """The HIServices calls, bound once through PyObjC. Lazy, so nothing loads at
     import time (the server must import off macOS), and a test replaces it. The trust
-    read is the plain one: the variant that can raise the system prompt is never
-    bound."""
+    read is not bound here: ``accessibility_trusted`` reads it in a fresh child."""
     if not _AX:
         import objc
 
@@ -723,7 +731,6 @@ def _ax_lib() -> dict:
             hi,
             lib,
             [
-                ("AXIsProcessTrusted", b"Z"),
                 ("AXUIElementGetTypeID", b"Q"),
                 ("AXUIElementCreateApplication", b"^{__AXUIElement=}i"),
                 (
@@ -741,13 +748,38 @@ def _ax_lib() -> dict:
 
 
 def accessibility_trusted() -> bool:
-    """Whether THIS process holds the Accessibility grant (macOS 27: "Device Control and
+    """Whether THIS app holds the Accessibility grant (macOS 27: "Device Control and
     Data Access"). Reads the switch only: it never asks macOS to show a prompt. Safe on
     or off the worker; it dispatches itself, so it waits behind a job that holds the one
-    worker."""
+    worker.
+
+    A fresh child interpreter reads it on every call, because the in-process read keeps
+    its first answer for the life of a daemon that never turns a run loop (05.2-13 G2).
+    ``-I`` keeps the child from loading code from the environment, the user site or the
+    current folder. A failed check is an error, never a guess."""
 
     def work() -> bool:
-        return bool(_ax_lib()["AXIsProcessTrusted"]())
+        try:
+            done = tracked_run(
+                [sys.executable, "-I", "-c", _AX_CHILD], timeout=_AX_CHILD_TIMEOUT
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            raise NativeError(
+                f"Accessibility check could not run ({type(e).__name__}), so the "
+                "grant is unknown."
+            ) from e
+        out = done.stdout.strip()
+        if done.returncode != 0:
+            raise NativeError(
+                "Accessibility check could not run (the check process answered exit "
+                f"{done.returncode}), so the grant is unknown."
+            )
+        if out not in ("0", "1"):
+            raise NativeError(
+                "Accessibility check could not run (an unexpected answer), so the "
+                "grant is unknown."
+            )
+        return out == "1"
 
     return work() if on_worker() else run_native(work)
 
