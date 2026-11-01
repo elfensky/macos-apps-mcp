@@ -687,7 +687,7 @@ def _find_kind_with_signature(body, *, signature=_SIG, own="Hi there"):
         (f"<div>Hi there</div>{_SIG_HTML}<div>and more</div>", False),
         (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>{_SIG_HTML}", False),
         (f"<div>{_ATTRIBUTION}</div><div>Hi there</div>{_SIG_HTML}", False),
-        (f"<div>Hi there</div><div>Jane Doe Other Corp</div>", False),
+        ("<div>Hi there</div><div>Jane Doe Other Corp</div>", False),
         ("<div>Hi there Jane Doe Example Corp</div>", True),  # same squashed text
         ("<div>Hi thereJane Doe Example Corp</div>", False),  # glued, no space
     ],

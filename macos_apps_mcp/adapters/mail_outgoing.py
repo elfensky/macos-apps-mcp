@@ -495,8 +495,11 @@ end run"""
 # claim window starts at the `reply` verb, so nothing slow may run before it), and its
 # `message id` is re-read and compared first: a mismatch (the id names another message
 # now) is an error BEFORE any reply exists. Returns `outgoing-id US window-id US
-# sender`; the sender (the From address of the reply, read while the reply exists) is
-# "" when Mail does not answer it, and the sweep then proves nothing.
+# sender US signature`; the sender (the From address of the reply, read while the reply
+# exists) is "" when Mail does not answer it, and the sweep then proves nothing. The
+# signature (the `content` of the reply's `message signature`, read into a variable
+# first: FIX-16 gap G4) is "" when Mail has none or does not answer; it is the LAST
+# field so a US character inside it cannot shift the others, and it is only compared.
 _REPLY_OPEN = (
     ROLLBACK
     + "\n\n"
@@ -545,7 +548,13 @@ on run argv
       try
         set snd to (sender of r) as text
       end try
-      return ((id of r) as text) & us & ((item 1 of found) as text) & us & snd
+      set sig to ""
+      try
+        set sg to message signature of r
+        if sg is not missing value then set sig to (content of sg) as text
+      end try
+      return ((id of r) as text) & us & ((item 1 of found) as text) & us & snd & ¬
+        us & sig
     on error errMsg
       if my rollback(r) then
         error errMsg
@@ -1013,13 +1022,16 @@ def _quote_facts(
     return tail, attribution, int(parts[0])
 
 
-def _parse_open(raw: str) -> tuple[int, int, str]:
-    """``(outgoing id, window id, sender)`` from ``_REPLY_OPEN``; ValueError otherwise.
-    The sender (the reply's From, "" when Mail did not answer it) is the last field."""
-    # strip() eats a trailing US (Python counts it as whitespace): an empty sender is
-    # an absent third field, not an error
-    outgoing, window, *sender = raw.strip().split(US, 2)
-    return int(outgoing), int(window), "".join(sender).strip()
+def _parse_open(raw: str) -> tuple[int, int, str, str]:
+    """``(outgoing id, window id, sender, signature)`` from ``_REPLY_OPEN``; ValueError
+    otherwise. The sender (the reply's From) and the signature (the one Mail put into
+    this reply) are "" when Mail did not answer them. The signature is the last field,
+    so a US character inside it stays whole."""
+    # strip() eats a trailing US (Python counts it as whitespace): an empty last field
+    # is an absent field, not an error
+    outgoing, window, *rest = raw.strip().split(US, 3)
+    sender, signature = (rest + ["", ""])[:2]
+    return int(outgoing), int(window), sender.strip(), signature.strip()
 
 
 _LEFT_OVER = (
@@ -1152,6 +1164,9 @@ class _ReplyFlow:
         self.landed_by: int | None = None
         self.outgoing_id: int | None = None
         self.sender = ""  # the reply's From, read while the reply exists
+        # the signature Mail put into this reply, read while it exists: compared by the
+        # Drafts sweep, never reported
+        self.signature = ""
         # the baseline read was just taken: no reply window exists yet
         self.started_at = time.monotonic()
         self.opened_at: float | None = None
@@ -1268,6 +1283,7 @@ class _ReplyFlow:
                 tail=self.tail,
                 landed_by=self.landed_by,
                 **({"sent_twins": True} if sent else {}),
+                **({"signature": self.signature} if self.signature else {}),
             )
         except NativeError:
             return "unavailable"
@@ -1403,7 +1419,7 @@ def open_reply_with_text(
                 # the window may have opened at any time before the call returned or
                 # failed: this is the latest it can have been (the sweep waits from it)
                 flow.opened_at = time.monotonic()
-            outgoing_id, window_id, flow.sender = _parse_open(raw)
+            outgoing_id, window_id, flow.sender, flow.signature = _parse_open(raw)
             flow.outgoing_id, flow.stage = outgoing_id, "insert"
             runtime.compose_insert(
                 window_id,
