@@ -426,7 +426,7 @@ Plans:
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
   5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
 
-**Plans:** 9/13 plans executed
+**Plans:** 10/13 plans executed
 
 Plans:
 **Wave 1**
@@ -451,7 +451,7 @@ Plans:
 - [x] 05.2-09-PLAN.md — owner sitting, run as the installed bundle: route (a) first — an AX write at the caret (M1), then Cmd-V to Mail's process only from a borrowed, restored clipboard (M2), then System Events (M3) only with the owner's OK; route (b) only if all fail; the finding lands as facts §4e and four handoff lines (FIX-16, #348)
 
 **Gap Wave 2** *(blocked on Gap Wave 1 completion)*
-- [ ] 05.2-10-PLAN.md — `runtime.accessibility_trusted()` and `runtime.compose_insert()` seams; `mail_reply` keeps Mail's native quote on the proven route, or refuses and discards the reply, leaving nothing (FIX-16, #348)
+- [x] 05.2-10-PLAN.md — `runtime.accessibility_trusted()` and `runtime.compose_insert()` seams; `mail_reply` keeps Mail's native quote on the proven route, or refuses and discards the reply, leaving nothing (FIX-16, #348)
 
 **Gap Wave 3** *(blocked on Gap Wave 2 completion)*
 - [ ] 05.2-11-PLAN.md — `reply_all` sends Mail's native reply-all only after the inserted text is confirmed, or refuses and sends nothing; the plain-text quote code and its tests are deleted (FIX-16, #348)
@@ -572,7 +572,7 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 9/13 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 10/13 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471 (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes, cursors (INSERTED) | 0/TBD | Not started | - |

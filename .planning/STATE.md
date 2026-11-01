@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2 gaps: wave 1 done (05.2-08 PR #520, 05.2-09 sitting → route a/M2/gui-replace/rollback-sweep, PR #523; tests PR #522; issue #521); next: wave 2 (05.2-10)"
-last_updated: "2026-10-31T22:49:24.865Z"
+stopped_at: "Phase 05.2 gaps: wave 2 done (05.2-10 PR #527: mail_reply keeps Mail's quote via Accessibility M2); probe review of #527 running; next: wave 3 (05.2-11 then 05.2-12)"
+last_updated: "2026-10-31T23:48:35.271Z"
 last_activity: 2026-10-31
 last_activity_desc: Phase 05.2 execution started
-state_head: 001060a5e44b1fc15b31f58685e3727539b0ceb9
+state_head: 877c76dfd2a7b491391562391d0d62be4b74bedc
 progress:
   total_phases: 19
   completed_phases: 9
@@ -82,6 +82,8 @@ Progress: [█████████░] 92%
 
 ### Decisions
 
+- [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
+- [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -224,5 +226,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-31T18:14:06.861Z
-Stopped at: Phase 05.2 gaps: wave 1 done (05.2-08 PR #520, 05.2-09 sitting → route a/M2/gui-replace/rollback-sweep, PR #523; tests PR #522; issue #521); next: wave 2 (05.2-10)
+Stopped at: Phase 05.2 gaps: wave 2 done (05.2-10 PR #527: mail_reply keeps Mail's quote via Accessibility M2); probe review of #527 running; next: wave 3 (05.2-11 then 05.2-12)
 Resume file: None
