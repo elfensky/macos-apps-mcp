@@ -30,8 +30,8 @@ after the discard answered (``landed_by``: a row that landed after the window wa
 is not proven the window's own); it has a Message-ID; it sits in a mailbox that is named
 ``Drafts`` / ``Draft`` (directly under the account or under ``[Gmail]`` /
 ``[Google Mail]``); the squashed text before its quote EQUALS the call's own full
-squashed text, optionally followed by the signature Mail put into this reply, then by
-Mail's own attribution line for this original; AND
+squashed text, optionally followed by the signature Mail put into this reply (equal
+except for white space), then by Mail's own attribution line for this original; AND
 it carries the original's quote and nothing after it (its tail, by letters and digits,
 as the insert's confirmation compares it, is the LAST thing in the draft), or, for a
 reply without a quote, nothing at all after the text. Anything else is ``unproven``:
@@ -65,6 +65,7 @@ import email.parser
 import email.policy
 import html
 import re
+import unicodedata
 from pathlib import Path
 from typing import NamedTuple
 
@@ -268,15 +269,28 @@ def _read_draft(url: str, rowid: int):
     )
 
 
+def _bare(text: str) -> str:
+    """``text`` after NFC with every white-space character and U+FFFC removed. The
+    signature branch compares with this and nothing looser: punctuation, symbols and
+    emoji count."""
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFC", str(text or ""))
+        if not c.isspace() and c != "\ufffc"
+    )
+
+
 def _is_own(
     before_quote: str, own_text: str, attribution: str | None, signature: str = ""
 ) -> bool:
     """The text before the quote is the call's full text (exact), then optionally the
     signature Mail put into THIS reply, then optionally Mail's attribution line for this
-    original: four shapes, in that order only. The signature and the attribution compare
-    by letters and digits (the stored HTML and the signature's own text split lines and
-    links differently, as for the quote tail). Empty or blank text, the attribution or
-    signature alone, and text that merely starts with the call's (a hand reply that
+    original: four shapes, in that order only. The signature (and the attribution
+    after it) must equal the text after the call's text EXCEPT FOR WHITE SPACE (the
+    stored HTML and the signature's own text break lines differently); punctuation,
+    symbols and emoji are never ignored, so a hand draft with any other content there
+    is not proof. Empty or blank text, the attribution or signature alone, and text
+    that merely starts with the call's (a hand reply that
     begins "Hi" is not "Hi") are not proof; neither is any other text between the call's
     and the quote, nor a signature that did not read (``""`` adds no shape).
     Residual (owner decision 2026-11-01): a hand draft with the same text, the same
@@ -289,11 +303,11 @@ def _is_own(
     line = squash_text(attribution)
     if line and before_quote == f"{own} {line}":
         return True
-    sig = runtime._alnum(signature)
+    sig = _bare(signature)
     if not sig or not before_quote.startswith(f"{own} "):
         return False
-    rest = runtime._alnum(before_quote[len(own) + 1 :])
-    return rest in (sig, sig + runtime._alnum(line))
+    rest = _bare(before_quote[len(own) + 1 :])
+    return rest in (sig, sig + _bare(line))
 
 
 def _has_quote(after_quote: str, tail: str | None) -> bool:

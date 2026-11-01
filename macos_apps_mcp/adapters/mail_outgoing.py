@@ -504,8 +504,11 @@ end run"""
 # signature (the `content` of the reply's `message signature`, read into a variable
 # first: FIX-16 gap G4) is "" when Mail has none or does not answer; it is the LAST
 # field so a US character inside it cannot shift the others, and it is only compared.
+# The sender passes `stripFraming` (no US or RS), so it cannot shift the signature.
 _REPLY_OPEN = (
     ROLLBACK
+    + "\n\n"
+    + STRIP_FRAMING
     + "\n\n"
     + mail_addressing.MAILBOX_REF
     + """
@@ -550,12 +553,15 @@ on run argv
         " new windows)"
       set snd to ""
       try
-        set snd to (sender of r) as text
+        set snd to my stripFraming((sender of r) as text)
       end try
       set sig to ""
       try
         set sg to message signature of r
-        if sg is not missing value then set sig to (content of sg) as text
+        if sg is not missing value then
+          set sc to content of sg
+          if sc is not missing value then set sig to sc as text
+        end if
       end try
       return ((id of r) as text) & us & ((item 1 of found) as text) & us & snd & ¬
         us & sig
@@ -1287,7 +1293,12 @@ class _ReplyFlow:
                 tail=self.tail,
                 landed_by=self.landed_by,
                 **({"sent_twins": True} if sent else {}),
-                **({"signature": self.signature} if self.signature else {}),
+                # a no-quote reply replaced Mail's signature with the text (gui-replace)
+                **(
+                    {"signature": self.signature}
+                    if self.signature and self.tail is not None
+                    else {}
+                ),
             )
         except NativeError:
             return "unavailable"
