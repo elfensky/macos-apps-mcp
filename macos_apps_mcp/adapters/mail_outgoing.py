@@ -5,9 +5,8 @@ Four tools dispatch mail off this Mac: ``send_mail``, ``reply_all``, ``forward_m
 and (#157) ``send_mail(draft_id=…)``. They differ only in how their envelope is
 *obtained*; everything after that — the preview shape, the rule about what a preview may
 touch, the send, the outbox truth-check — is identical, and before this module each copy
-re-derived it (three different ``would_send`` shapes, the quote preamble pasted twice,
-the "dry run constructs nothing" rule stated in prose in four docstrings and enforced
-nowhere).
+re-derived it (three different ``would_send`` shapes, the "dry run constructs nothing"
+rule stated in prose in four docstrings and enforced nowhere).
 
 **The discipline, stated once.**
 
@@ -28,8 +27,11 @@ nowhere).
    a property of the plane, not of one tool.
 3. *Never roll back past the ``send`` verb.* ``delete`` after ``send`` is a silent
    no-op — it returns cleanly, removes nothing, and the message delivers anyway (#135).
-   Every script here therefore keeps ``send`` OUTSIDE its rollback ``try``, and
-   ``tests/test_mail.py`` greps for exactly that.
+   Every script here therefore keeps ``send`` OUTSIDE its rollback ``try`` (the reply
+   send, ``_SEND_OUTGOING``, has no rollback at all), and ``tests/test_mail.py`` greps
+   for exactly that. What a sent ``reply_all`` leaves in Drafts is swept afterwards by
+   the stored row's own message id (``_ReplyFlow.after_send``), never by the outgoing
+   message.
 4. *``sent`` means ACCEPTED, not delivered.* Every real dispatch ends in
    ``with_outbox_pending``, which reports Mail's real queue.
 
@@ -252,48 +254,6 @@ on run argv
 end run"""
 )
 
-# reply_all (#83): Mail's NATIVE reply verb with `reply to all yes`, so In-Reply-To /
-# References are set by Mail (the only mechanism that threads — make-new-outgoing
-# cannot set headers). `opening window no` keeps it headless; device-verified
-# 2026-07-25, returns an outgoing message with the Re: subject already applied. The
-# body (reply text + our quote, built in Python exactly as `reply` does) is read
-# through the shared readBody handler, never a bare `read` (an empty body — no quote,
-# no reply text — would otherwise crash -39, #READ_BODY). Atomic (#44), with #133's
-# limit: a successful reply-all still leaves an autosaved Drafts copy behind.
-_REPLY_ALL = (
-    READ_BODY
-    + "\n\n"
-    + ROLLBACK
-    + "\n\n"
-    + mail_addressing.MAILBOX_REF
-    + """
-
-on run argv
-  set mid to item 1 of argv
-  set bodyText to my readBody(item 2 of argv)
-  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
-  with timeout of 120 seconds
-  tell application "Mail"
-    set matches to (messages of mb whose message id is mid)
-    if (count of matches) is 0 then error ¬
-      "no message with that message id in " & (item 4 of argv)
-    set r to reply (item 1 of matches) opening window no reply to all yes
-    try
-      set content of r to bodyText
-    on error errMsg
-      if my rollback(r) then
-        error errMsg
-      else
-        error errMsg & my outgoingLeftover()
-      end if
-    end try
-    send r
-    return "sent"
-  end tell
-  end timeout
-end run"""
-)
-
 # forward (#83): Mail's NATIVE forward verb (device-verified: returns an outgoing
 # message with the Fwd: subject and the original content + attachments already in
 # place). This script NEVER touches `content` of the forwarded message: `content` of a
@@ -436,17 +396,19 @@ on run argv
 end run"""
 )
 
-# reply (#42/#46): fetch the original's sender, received date and plaintext by
-# message-id (US-framed, seven fields), so Python can build the quoted block
-# deterministically (Mail's auto-quote is NOT visible via the content property — spike
-# 2026-07-11). The date travels as five integers (#348): Mail's attribution line wants
-# the Mac's own date and time format, which only Foundation gives (runtime.
-# mail_attribution_stamp), and a locale string cannot be parsed back. The sender is
-# stripped of raw framing bytes (the shared STRIP_FRAMING handler) before being joined,
-# so a display name that happens to contain a literal US/RS char can't desync the split
-# in quoted_body. The body `c` is the LAST field and needs no stripping for parse-safety
-# (sanitize_block strips control chars from it in build_quote). A missing date leaves
-# its five fields empty; quoted_body then writes the header without a date.
+# the native reply (#42/#46, #348): fetch the original's sender, received date and
+# plaintext by message-id (US-framed, seven fields). The flow takes the original's last
+# words from it (what must follow the reply text for Mail's own quote to count as
+# confirmed) and Mail's attribution line (which the Drafts sweep allows after the call's
+# text); nothing is quoted from it any more: Mail builds the quote itself. The date
+# travels as five integers (#348): Mail's attribution line wants the Mac's own date and
+# time format, which only Foundation gives (runtime.mail_attribution_stamp), and a
+# locale string cannot be parsed back. The sender is stripped of raw framing bytes (the
+# shared STRIP_FRAMING handler) before being joined, so a display name that happens to
+# contain a literal US/RS char can't desync the split in _quote_facts. The body `c` is
+# the LAST field and needs no stripping for parse-safety (sanitize_block strips control
+# chars from it in _quote_facts). A missing date leaves its five fields empty; the
+# attribution line is then written without a date.
 _ORIGINAL = (
     STRIP_FRAMING
     + "\n\n"
@@ -631,6 +593,23 @@ end run"""
 )
 
 
+# Send the reply that `_REPLY_OPEN` built and `compose_insert` filled, by its outgoing
+# message id (facts 4e `Send after insert`: works from a later osascript). It runs only
+# after the insert is CONFIRMED and sits outside every rollback: `delete` after the
+# `send` verb is a silent no-op (facts 3), so there is no handler here and nothing after
+# `send`. The autosave copy this leaves in Drafts is the sweep's business, by the stored
+# row's own message id, never by this outgoing message.
+_SEND_OUTGOING = """on run argv
+  with timeout of 120 seconds
+    tell application "Mail"
+      set r to outgoing message id ((item 1 of argv) as integer)
+      send r
+      return "sent"
+    end tell
+  end timeout
+end run"""
+
+
 # Delete the call's own autosaved Drafts copy (facts 4e `Refusal cleanup`). Addressed
 # in the REPLY ACCOUNT'S Drafts by Message-ID, a `whose` query (0.3 s on a store of 287
 # drafts), never `delete_draft`'s walk of the unified Drafts mailbox (#521). Exactly one
@@ -763,7 +742,8 @@ class Outgoing:
     html: bool = False
     source: str = ""
     recipients_note: str = ""
-    dispatch: Callable[[], None] = lambda: None
+    # what the builder's send leaves to report beside `sent` (reply_all's Drafts copy)
+    dispatch: Callable[[], dict | None] = lambda: None
 
     def _envelope(self) -> dict:
         envelope = {
@@ -804,11 +784,15 @@ def deliver(outgoing: Outgoing, *, dry_run: bool) -> dict:
 
     Whatever native READS a builder needed to fill the envelope have already happened by
     the time this is called — that is rule 2, and it is why this function cannot be
-    "make the preview cheap by moving the reads here"."""
+    "make the preview cheap by moving the reads here". A builder's ``dispatch`` may
+    return extra keys to report beside ``sent`` (``reply_all``'s ``drafts_copy``)."""
     if dry_run:
         return outgoing.preview()
-    outgoing.dispatch()
-    return with_outbox_pending(outgoing.accepted())
+    extra = outgoing.dispatch()
+    result = with_outbox_pending(outgoing.accepted())
+    if extra:  # its own keys, so the outbox note stays
+        result.update(extra)
+    return result
 
 
 def _outbox_pending() -> int:
@@ -874,17 +858,6 @@ def build_attribution(sender: str, stamp: tuple[str, str] | None) -> str:
     return f"{when}{sender} wrote:"
 
 
-def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) -> str:
-    """Mail's reply quote as plain text (#348): the attribution line, then the whole
-    original, each line `> `-prefixed. No cap: the quote reaches the draft by tempfile
-    and never the model's context, so a cap protects nothing and only cuts the
-    reply's tail."""
-    quoted = "\n".join(
-        "> " + line for line in sanitize_block(original_body).rstrip().splitlines()
-    )
-    return f"{build_attribution(sender, stamp)}\n{quoted}"
-
-
 # #230: every script that acts on the ORIGINAL message (read it, reply to it, forward
 # it) finds it with a `whose message id is` scan and can run past the 30s default on
 # device, with Mail mostly idle in the watchdog samples: `_ORIGINAL` did (02.1), then
@@ -904,29 +877,6 @@ def _stamp(date_parts: list[str]) -> tuple[str, str] | None:
         return None
 
 
-def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> str:
-    """``body`` plus the quoted original — the preamble ``reply`` and ``reply_all`` each
-    carried their own copy of (fetch, guard missing value, split on US, sanitize, build
-    the quote). The date arrives as integers and is formatted by
-    ``runtime.mail_attribution_stamp`` (#348).
-
-    The script strips raw framing bytes from the sender, so the seven-field split holds;
-    this side only re-sanitizes: ``sanitize_line`` strips any other control char a
-    display name could carry. The split stops after six fields, so a US char inside the
-    original stays in the quote. An original that cannot be read degrades to an unquoted
-    body, and a date that cannot be read to a header without one — the reply is the
-    deliverable, the quote is decoration."""
-    raw = runtime.run_osascript(
-        _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
-    )
-    parts = raw.split(US, 6)
-    if len(parts) != 7:  # "missing value", empty: nothing readable to quote
-        return body
-    sender, *date_parts, original = parts
-    quote = build_quote(sanitize_line(sender), _stamp(date_parts), original)
-    return body + "\n\n" + quote
-
-
 # --- the native reply flow (FIX-16, #348) --------------------------------------------
 
 # How many of the original's last words must follow the reply text (facts 4e `Confirm`:
@@ -934,7 +884,9 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
 _TAIL_WORDS = 6
 
 
-def _quote_facts(message_id: str, mailbox_args: tuple[str, str]) -> tuple[str, str]:
+def _quote_facts(
+    message_id: str, mailbox_args: tuple[str, str], tool: str = "mail_reply"
+) -> tuple[str, str]:
     """``(tail, attribution)`` of the original. The tail is its last words, squashed:
     what must follow the reply text for Mail's quote to count as confirmed. An original
     with no readable text has no tail, and the flow refuses before it creates anything.
@@ -949,10 +901,10 @@ def _quote_facts(message_id: str, mailbox_args: tuple[str, str]) -> tuple[str, s
     tail = " ".join(words[-_TAIL_WORDS:])
     if not any(c.isalnum() for c in tail):  # the confirm compares letters and digits
         raise ComposeRefused(
-            "mail_reply cannot confirm Mail's quote: the original has no readable "
+            f"{tool} cannot confirm Mail's quote: the original has no readable "
             "text, so there is nothing to check the quote against. Nothing was "
             "created and nothing was sent. To reply without the quote, call "
-            "mail_reply with include_quote=False."
+            f"{tool} with include_quote=False."
         )
     sender, *date_parts, _ = parts
     return tail, build_attribution(sanitize_line(sender), _stamp(date_parts))
@@ -998,6 +950,45 @@ _STILL_LAND = (
     "again in a minute. Nothing was sent."
 )
 
+# What the call says about the Drafts copy of a reply that WAS sent, beside `sent` (the
+# send itself is never reported as failed because of this check, and nothing outside the
+# one proven Drafts row is ever deleted).
+_LOOK_IN_DRAFTS = (
+    "Look in the Drafts mailbox of the account the reply was sent from (usually the "
+    "account that holds the original; delete_draft removes a draft)."
+)
+_SENT_COPY = {
+    "removed": (
+        "The reply was sent. A Drafts copy that Mail autosaved was found and deleted."
+    ),
+    "none": (
+        "The reply was sent. No Drafts copy was there 45 s after the window opened."
+    ),
+    "late": (
+        "The reply was sent. The check for a Drafts copy ran too soon after the send "
+        "to rule out one that has not landed yet. " + _LOOK_IN_DRAFTS + " Look "
+        "again in a minute."
+    ),
+    "unproven": (
+        "The reply was sent. A Drafts copy may be left: the check found a message it "
+        "could not prove to be this reply's own copy, or could not confirm a delete. "
+        + _LOOK_IN_DRAFTS
+    ),
+    "unavailable": (
+        "The reply was sent. A Drafts copy may be left: the check could not read "
+        "Mail's index (no Full Disk Access, for example). Mail saves the copy up to "
+        "about a minute after the window opened. " + _LOOK_IN_DRAFTS
+    ),
+}
+
+# Said when the send call fails: Mail may have accepted it all the same (a timeout), so
+# a retry could send twice. The reply is NOT discarded after a send started (facts 3).
+_SEND_UNSURE = (
+    " (WARNING: the reply may have been sent. Check Mail's Outbox and Sent before "
+    "retrying, so a retry cannot send twice. A reply window may still be open; close "
+    "it without sending.)"
+)
+
 # Owner decision 2026-11-01 (rollback-sweep): a refusal after the window opened waits
 # until this long after it opened, because Mail's autosave copy of a scripted reply
 # landed 5 s after the open in the sitting and was only ever looked for at +45 s or
@@ -1030,15 +1021,18 @@ class _ReplyFlow:
         index_top: int | None,
         attribution: str | None,
         tail: str | None,
+        tool: str = "mail_reply",
     ):
+        self.tool = tool  # the tool whose errors these are
         self.message_id, self.mailbox_args = message_id, mailbox_args
         self.text, self.baseline = text, baseline
         # the highest message row before the window opened (None: index unreadable),
         # Mail's attribution line and the last words of the original (None: a reply
         # without a quote)
         self.index_top, self.attribution, self.tail = index_top, attribution, tail
-        # the highest message row right after the discard answered: a Drafts row above
-        # it landed after the window was gone, so it is not proven the window's own
+        # the highest message row right after the window went (the discard, or the
+        # send, answered): a Drafts row above it landed after the window was gone, so it
+        # is not proven the window's own
         self.landed_by: int | None = None
         self.outgoing_id: int | None = None
         self.opened_at: float | None = None
@@ -1069,14 +1063,19 @@ class _ReplyFlow:
             except Exception:  # noqa: BLE001 - reported as unproven, never raised
                 answer = "unknown"
             self._discarded = answer
-            self.discarded_at = time.monotonic()
-            try:
-                self.landed_by = mail_reply_cleanup.index_top()
-            except Exception:  # noqa: BLE001 - None: nothing can be proven the window's
-                self.landed_by = None
+            self.window_gone()
         return self._discarded
 
-    def sweep(self) -> str:
+    def window_gone(self) -> None:
+        """The window is gone (the discard answered, or the send did): note when, and
+        the index top right then. Never raises; an unreadable top proves nothing."""
+        self.discarded_at = time.monotonic()
+        try:
+            self.landed_by = mail_reply_cleanup.index_top()
+        except Exception:  # noqa: BLE001 - None: nothing can be proven the window's
+            self.landed_by = None
+
+    def sweep(self, *, sent: bool = False) -> str:
         """The Drafts sweep (rollback-sweep): ``removed`` (the call's own autosave copy
         was found and deleted), ``none`` (no copy 45 s after the window opened),
         ``late`` (no copy, but the discard ended too close to the read to rule out one
@@ -1086,7 +1085,8 @@ class _ReplyFlow:
         any mailbox: the copy lands in the Drafts of the account the reply is sent
         from. A copy is deleted only when no other scripted compose window was open at
         the start (``baseline``): a window of an earlier call can autosave the same
-        text for the same original (facts 4e `Refusal cleanup`)."""
+        text for the same original (facts 4e `Refusal cleanup`). ``sent``: the reply was
+        sent, so its own Sent copies are set aside (``find_own_draft``)."""
         if self.index_top is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
@@ -1099,6 +1099,7 @@ class _ReplyFlow:
                 self.attribution,
                 tail=self.tail,
                 landed_by=self.landed_by,
+                **({"sent_twins": True} if sent else {}),
             )
         except NativeError:
             return "unavailable"
@@ -1151,7 +1152,20 @@ class _ReplyFlow:
             end = _DELETED_WINDOW_LEFT
         else:
             end = _LEFT_OVER
-        return ComposeRefused(f"mail_reply did not complete ({said}).{end}")
+        return ComposeRefused(f"{self.tool} did not complete ({said}).{end}")
+
+    def after_send(self) -> dict:
+        """The sweep after a SENT reply (owner decision 2026-11-01): the autosave copy
+        survives a send (facts 4e `Send after insert`), so wait until 45 s after the
+        window opened and sweep as a refusal does. Nothing here can fail the send or
+        delete anything but the one Drafts row it proved: the result rides beside
+        ``sent`` as ``drafts_copy`` plus a plain-language note."""
+        self.window_gone()
+        try:
+            outcome = self.sweep(sent=True)
+        except Exception:  # noqa: BLE001 - the send happened; the sweep never raises
+            outcome = "unproven"
+        return {"drafts_copy": outcome, "drafts_copy_note": _SENT_COPY[outcome]}
 
 
 def open_reply_with_text(
@@ -1161,27 +1175,40 @@ def open_reply_with_text(
     *,
     reply_all: bool,
     replace_all: bool = False,
+    send: bool = False,
+    report: dict | None = None,
 ) -> int:
     """Open Mail's native reply to ``message_id`` and put ``text`` on top of it; return
-    the reply's outgoing message id. Shared by ``reply`` and (05.2-11) ``reply_all``.
+    the reply's outgoing message id. Shared by ``reply`` and ``reply_all``.
 
     The whole flow runs in ONE ``run_native`` closure, so no other native call
     interleaves. Accessibility is checked before any Mail call. Every failure after the
     flow started applies THE DISCARD RULE (``_ReplyFlow``), then raises
     ``ComposeRefused``; the reply text never reaches a script, an argv or a file.
     ``replace_all`` is the no-quote reply: the whole body is replaced by ``text``.
+
+    ``send`` (``reply_all``): after the insert is CONFIRMED, send the reply by its
+    outgoing message id, outside every rollback (facts 3: ``delete`` after ``send`` is a
+    silent no-op). A failing send is re-raised as it is, with the wording that the reply
+    may have been sent, and is never followed by a discard or a sweep. After a send that
+    answered, the flow waits until 45 s after the window opened and sweeps its own
+    Drafts copy (``_ReplyFlow.after_send``); the outcome goes into ``report``
+    (``drafts_copy``, ``drafts_copy_note``) and can never fail the call.
     """
+    tool = "reply_all" if reply_all else "mail_reply"
 
     def work() -> int:
         if not runtime.accessibility_trusted():
             raise AccessibilityDenied(
-                "mail_reply needs Accessibility for macos-apps-mcp, to put your text "
+                f"{tool} needs Accessibility for macos-apps-mcp, to put your text "
                 "above Mail's own quote, and it is off. Tell the user to switch it on "
                 f"in {ACCESSIBILITY_PANE}. Nothing was created and nothing was sent. "
                 "Do not retry until the next user message."
             )
         tail, attribution = (
-            (None, None) if replace_all else _quote_facts(message_id, mailbox_args)
+            (None, None)
+            if replace_all
+            else _quote_facts(message_id, mailbox_args, tool)
         )
         baseline = runtime.run_osascript(_OUTGOING_IDS, timeout=ORIGINAL_TIMEOUT)
         flow = _ReplyFlow(
@@ -1192,6 +1219,7 @@ def open_reply_with_text(
             mail_reply_cleanup.index_top(),
             attribution,
             tail,
+            tool,
         )
         try:
             try:
@@ -1217,9 +1245,28 @@ def open_reply_with_text(
             )
         except Exception as exc:
             raise flow.refusal(exc) from exc
+        if send:
+            _send_reply(outgoing_id)
+            result = flow.after_send()
+            if report is not None:
+                report.update(result)
         return outgoing_id
 
     return work() if runtime.on_worker() else runtime.run_native(work)
+
+
+def _send_reply(outgoing_id: int) -> None:
+    """Send the confirmed reply. Outside every rollback and every discard: a failure
+    here (a timeout included) may mean Mail accepted the send, so it is re-raised with
+    the warning that a retry could send twice, and nothing is deleted."""
+    try:
+        runtime.run_osascript(
+            _SEND_OUTGOING, str(outgoing_id), timeout=ORIGINAL_TIMEOUT
+        )
+    except NativeError as exc:
+        raise type(exc)(f"{exc}{_SEND_UNSURE}") from exc
+    except Exception as exc:  # never echo a foreign text: it could carry the reply
+        raise NativeError(f"send: {type(exc).__name__}{_SEND_UNSURE}") from exc
 
 
 # --- the four builders ---------------------------------------------------------------
@@ -1358,7 +1405,12 @@ def reply_all_to(
     the reason ``dry_run`` defaults to True on this tool at all — and reports the
     reply's own ``to`` (the sender, or its Reply-To) and ``cc`` (everyone else on the
     original minus this account's addresses), the set Mail's reply-all reaches (#516).
-    ``from`` is a label: Mail answers from the account that holds the original."""
+    ``from`` is a label: Mail answers from the account that holds the original.
+
+    The send (``dry_run=False``) is Mail's own reply-all with the text put on top of its
+    quote through Accessibility (``open_reply_with_text(..., send=True)``): nothing is
+    written to ``content``, no plain quote is built, and the message goes out only after
+    the insert is confirmed."""
     mid = bare_id(message_id)
     if not mid:
         raise ValueError("reply_all needs the original message's id")
@@ -1374,10 +1426,21 @@ def reply_all_to(
         "Mail's own reply-all decides who receives the message."
     )
 
-    def dispatch() -> None:
-        text = quoted_body(body, mid, mb) if include_quote else body
-        with runtime.body_file(text) as path:
-            runtime.run_osascript(_REPLY_ALL, mid, path, *mb, timeout=ORIGINAL_TIMEOUT)
+    def dispatch() -> dict:
+        # Mail's own reply-all, the text put on top through Accessibility, sent only
+        # after the insert is confirmed (FIX-16, #348; facts 4e). `include_quote=False`
+        # replaces the whole body (gap-no-quote: gui-replace), never `set content`.
+        report: dict = {}
+        open_reply_with_text(
+            mid,
+            mb,
+            body,
+            reply_all=True,
+            replace_all=not include_quote,
+            send=True,
+            report=report,
+        )
+        return report
 
     return Outgoing(
         action="reply_all",

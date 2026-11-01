@@ -37,6 +37,14 @@ by letters and digits, as the insert's confirmation compares it), or, for a repl
 without a quote, nothing at all after the text. Anything else is ``unproven``: reported
 with the refusal, never deleted.
 
+**After a send** (``reply_all``, owner decision 2026-11-01) the same sweep runs once the
+window is gone. The sent message creates rows of its own, threaded to the original: its
+Sent copy and, on Gmail, an All Mail twin. ``find_own_draft(..., sent_twins=True)`` sets
+those aside (in a ``Sent`` mailbox or Gmail's ``All Mail``, with a Message-ID, the
+call's exact text and the original's quote); the Drafts copy is then judged by the rules
+above, and any other threaded row keeps the result ``unproven``. The sweep never
+deletes anything outside the one Drafts row it proved, by that row's own message id.
+
 The ROWID column is AUTOINCREMENT, so a new row always sorts above the baseline. That is
 checked once per index file at run time (``index_top``): an index without it is
 unreadable for the sweep.
@@ -149,6 +157,22 @@ def _is_drafts_url(url: str) -> bool:
     if parts[-1] not in ("Drafts", "Draft"):
         return False
     return len(parts) == 1 or (len(parts) == 2 and parts[0] in _GOOGLE_ROOTS)
+
+
+_SENT_NAMES = ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
+
+
+def _is_sent_url(url: str) -> bool:
+    """A mailbox that holds the SENT message's own copy: a ``Sent`` folder under its
+    account or under Google's root (``Sent Messages``, ``[Gmail]/Sent Mail``,
+    ``Sent Items``), or Gmail's ``All Mail``. Matched by name like ``_is_drafts_url``,
+    for the same reason (the index has no mailbox role): a localized name or a user
+    folder is not matched, so a copy there is ``unproven``, never explained away."""
+    parts = mailbox_url.path(url).split("/")
+    nested = len(parts) == 2 and parts[0] in _GOOGLE_ROOTS
+    if parts[-1] == "All Mail":
+        return nested
+    return parts[-1] in _SENT_NAMES and (len(parts) == 1 or nested)
 
 
 def _shard(rowid: int) -> str:
@@ -270,12 +294,20 @@ def find_own_draft(
     *,
     tail: str | None,
     landed_by: int | None,
+    sent_twins: bool = False,
 ) -> Draft:
     """The call's own Drafts copy among the rows new since ``top``, if there is one.
     ``tail``: the original's last words (None: a reply without a quote). ``landed_by``:
-    the index top read right after the discard answered (None: unreadable); a row above
-    it landed after the window was gone and is never claimed. Raises ``NativeError``
-    when the index cannot be read now (the caller treats that as unavailable)."""
+    the index top read right after the window went (the discard, or the send) answered
+    (None: unreadable); a row above it landed after the window was gone and is never
+    claimed. ``sent_twins``: the reply was SENT, so the sent message's own copies (its
+    Sent copy, and on Gmail an All Mail twin) are new rows threaded to the original
+    too. A threaded row in a ``Sent`` mailbox (or Gmail's ``All Mail``) that carries a
+    Message-ID, the call's exact text and the original's quote is such a copy and is set
+    aside, never claimed and never a reason for ``unproven``; any other threaded row
+    still is one (a localized Sent or Drafts, a user folder). After a refusal
+    nothing was sent, so nothing is set aside. Raises ``NativeError`` when the index
+    cannot be read now (the caller treats that as unavailable)."""
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven")  # too many new rows to read them all
@@ -287,15 +319,22 @@ def find_own_draft(
         in_reply_to, mid, body = draft
         if _norm_mid(in_reply_to) != _norm_mid(original_mid):
             continue
+        is_drafts = _is_drafts_url(url)
         own = (
             landed_by is not None
             and rowid <= landed_by
             and bool(_norm_mid(mid))
-            and _is_drafts_url(url)
+            and is_drafts
         )
-        if own:
+        twin = sent_twins and _is_sent_url(url) and bool(_norm_mid(mid))
+        if own or twin:
             before, after = _split_quote(body())
-            own = _is_own(before, own_text, attribution) and _has_quote(after, tail)
+            says_ours = _is_own(before, own_text, attribution) and _has_quote(
+                after, tail
+            )
+            if twin and says_ours:
+                continue  # the send itself, not a leftover; it is never touched
+            own = own and says_ours
         found.append(Draft("one" if own else "unproven", url, mid))
     if not found:
         return Draft("none")

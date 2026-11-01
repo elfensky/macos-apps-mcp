@@ -1017,7 +1017,7 @@ def send_mail(
     )
 
 
-@_send_tool("mail", permission="Automation")
+@_send_tool("mail", permission=("Automation", "Accessibility"))
 def reply_all(
     message_id: str,
     mailbox: str,
@@ -1025,21 +1025,47 @@ def reply_all(
     include_quote: bool = True,
     dry_run: bool = True,
 ) -> dict:
-    """Reply-all to a message and SEND it — this leaves your machine.
+    """Reply-all to a message and SEND it — this leaves your machine (Automation +
+    Accessibility).
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
     message_id is the RFC822 id from a mail read and mailbox is REQUIRED — the `folder`
     value from the SAME search result, passed back VERBATIM (an opaque
-    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
-    threading headers natively and the sending account is inherited from the original.
-    include_quote adds a plain-text quote below your text: Mail's
-    `On <date>, at <time>, <sender> wrote:` line, then the whole original with `> `
-    prefixes. Formatting, inline images and Mail's quote bar are not kept.
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail builds its
+    normal reply-all and sets the threading headers natively; the sending account is
+    inherited from the original. include_quote (the default) keeps Mail's own quote of
+    the original — quote bar, Mail's attribution line, formatting, inline images, the
+    whole message — with your text put on top through Accessibility.
+    include_quote=False replaces the whole body with your text alone (also through
+    Accessibility), so no quote at all.
     The dry run lists the reply's own `to` and `cc` (computed; Mail's reply-all decides
     delivery), so check them before `dry_run=False`; `from` reads "(the account that
-    holds the original)" because Mail picks the sending address itself.
+    holds the original)" because Mail picks the sending address itself. The dry run
+    opens no window and needs no Accessibility.
+    A real send needs Accessibility for macos-apps-mcp (System Settings > Privacy &
+    Security > Device Control and Data Access; called Accessibility before macOS 27).
+    The reply opens in a Mail window that comes to the front for about a second, and
+    the clipboard is borrowed and restored. The call sends ONLY after your text is
+    confirmed in place above Mail's quote. It REFUSES, and sends nothing, when
+    Accessibility is off, when Mail's reply window cannot be confirmed, when the text
+    does not land first, or when Mail's own reply has no quote (Mail's setting "Quote
+    the text of the original message" is off, or a text selection is left in Mail's
+    message viewer). A refusal before the reply window opened leaves nothing. A refusal
+    after it opened takes about 45 seconds: the call discards the reply, waits for
+    Mail's autosave, and deletes a Drafts copy only when that copy is provably its own.
+    A copy it cannot prove, or cannot look for, is left alone: the error then says a
+    copy MAY be left. Only "nothing was created" is clean.
+    After a send, Mail can leave an autosaved copy of the reply in Drafts. The call
+    then waits until about 45 seconds after the window opened (so it returns after about
+    a minute), looks for that copy and deletes it only when it is provably this reply's
+    own. The result carries `drafts_copy` (removed, none, late, unproven or
+    unavailable) and a plain note; `sent` stays true whatever that check finds, and
+    nothing in Sent or All Mail is ever touched. Do NOT retry the send because of a
+    `drafts_copy` that is not "removed" or "none": look in Drafts instead.
+    If the send call itself fails or times out, the reply may have been sent: check
+    Mail's Outbox and Sent before retrying.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
-    Automation access for Mail."""
+    Automation access for Mail and Accessibility for macos-apps-mcp."""
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
