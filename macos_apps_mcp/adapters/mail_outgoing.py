@@ -354,6 +354,9 @@ end run"""
 # (sender, …) and (subject, …) records: the _DRAFTS/_ATTACHMENTS idiom, so a
 # variable-length to/cc list parses with split_framed instead of a fixed-arity
 # US-partition. Every free-text field passes through the shared stripFraming handler.
+# The account's addresses are read into a variable first: a loop over the application
+# list gives a reference that `as text` cannot coerce (-1700, swallowed by the `try`:
+# the preview subtracted nothing, 05.2-13 G1).
 _REPLY_ALL_RECIPIENTS = (
     STRIP_FRAMING
     + "\n\n"
@@ -386,7 +389,8 @@ on run argv
     if subj is missing value then set subj to ""
     set out to out & "subject" & us & (my stripFraming(subj)) & rs
     try
-      repeat with ea in (email addresses of (account of (mailbox of m)))
+      set addrs to (email addresses of (account of (mailbox of m)))
+      repeat with ea in addrs
         set out to out & "self" & us & (my stripFraming(ea as text)) & rs
       end repeat
     end try
