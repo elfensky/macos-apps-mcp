@@ -298,7 +298,8 @@ def _fda_surface() -> dict:
     )
 
 
-# No restart clause: facts 4e shows the switch reads back with no restart of the probe.
+# No restart clause: the seam reads the switch in a fresh process on every call
+# (05.2-13 G2).
 _AX_REMEDIATION = (
     "Accessibility is off for macos-apps-mcp, so mail_reply and reply_all refuse: "
     f"switch it on in {ACCESSIBILITY_PANE}."
@@ -583,8 +584,9 @@ def diagnose(request: bool = False) -> dict:
         "libs": {name: version(name) for name in ("mcp", "fastmcp")},
         "responsible_process": _responsible_process(),
         "note": (
-            "TCC attributes permissions to the process that launched macos-apps-mcp "
-            "(above). Grant each permission to THAT app, then restart macos-apps-mcp."
+            "Grant each permission to the launching app (above). Automation and "
+            "Accessibility need no restart; Full Disk Access, Calendars and Reminders "
+            "may need one."
         ),
         "probed_automation": request,
         "summary": summary,
