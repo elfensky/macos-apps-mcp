@@ -2921,7 +2921,29 @@ def test_reply_flow_scans_before_the_baseline_and_opens_right_after_it(
     script = mail_outgoing._REPLY_OPEN
     assert "whose message id" not in script and "«class mssg» id n of mb" in script
     # the id it opened by is re-read and compared, before any reply exists
-    assert script.index("message id of m") < script.index("reply m opening window")
+    check = script.index("if gotId is not expected then error")
+    assert script.index("message id of m") < check < script.index("reply m opening")
+
+
+def test_reply_sweep_counts_the_claim_window_from_the_baseline_not_from_the_open(
+    monkeypatch,
+):
+    # rv533: Mail takes 130 s to answer the open (a #230 stall). The window started at
+    # the baseline read, not when the open returned, so the span is over the bound
+    # although the discard follows the open at once.
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    real = rig._osa
+
+    def osa(script, *argv, **kw):
+        out = real(script, *argv, **kw)
+        if script is mail_outgoing._REPLY_OPEN:
+            rig.clock[0] += 130.0
+        return out
+
+    _patch_run(monkeypatch, osa)
+    msg = _run_refused(rig, _REPLY_FOLDER, "Hi")
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "may NOT be fully removed" in msg
 
 
 def test_reply_flow_hands_the_selector_the_tail_and_the_top_after_the_discard(
