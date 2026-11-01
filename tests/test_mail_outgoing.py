@@ -621,3 +621,24 @@ def test_outgoing_ids_reads_only_ids():
     assert "id of every outgoing message" in script
     assert "with timeout of 120 seconds" in script
     assert "messages of" not in script  # does not touch the original
+
+
+def test_reply_all_recipients_reads_the_account_addresses_into_a_variable_first():
+    # G1 (05.2-13): a `repeat with ea in (email addresses of …)` loop gives an
+    # application reference; `ea as text` raised -1700 inside the try, so the preview
+    # subtracted nothing. Read the list into a variable first (device-proven form).
+    import re
+    from pathlib import Path
+
+    script = mail_outgoing._REPLY_ALL_RECIPIENTS
+    read = script.index("set addrs to (email addresses of (account of (mailbox of m)))")
+    loop = script.index("repeat with ea in addrs")
+    assert script.rindex("try", 0, read) > script.index("set rt to reply to of m")
+    assert read < loop < script.index("end try", read)
+    root = Path(mail_outgoing.__file__).resolve().parents[1]
+    bad = [
+        str(p)
+        for p in root.rglob("*.py")
+        if re.search(r"repeat with \w+ in \(email addresses", p.read_text())
+    ]
+    assert bad == []
