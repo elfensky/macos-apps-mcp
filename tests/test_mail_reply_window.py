@@ -249,3 +249,43 @@ def test_residual_a_same_text_same_signature_hand_draft_inside_the_window(
         during={"_REPLY_OPEN": lambda: world.land(DRAFTS, SIGNED, "hand@x")},
     )
     assert [a[0] for a in deleted(rig)] == ["hand@x"]
+
+
+def test_a_hand_draft_with_symbols_before_the_signature_is_left_loudly(
+    world, monkeypatch
+):
+    # owner rule 2026-11-01: owner content without a letter or a digit (emoji,
+    # punctuation) is still content: the draft is not the call's own
+    hand = f"<div>Hi</div><div>\U0001f44d !!</div>{SIG_HTML}{QUOTE}"
+    rig, msg = run(
+        monkeypatch,
+        open_answer=OPEN_WITH_SIGNATURE,
+        on_insert=[lambda: world.land(DRAFTS, hand, "hand@x")],
+    )
+    assert_left_loudly(rig, msg)
+
+
+def _sweep_kw(monkeypatch, **kw):
+    rig = _SweepRig(
+        monkeypatch,
+        insert_error=ComposeRefused("confirmation: no"),
+        answers={"_REPLY_OPEN": OPEN_WITH_SIGNATURE},
+    )
+    with pytest.raises(ComposeRefused):
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi", **kw)
+    return rig.found_kw[0]
+
+
+def test_a_reply_without_a_quote_gets_no_signature_shape(monkeypatch):
+    # gui-replace replaces Mail's signature too: nothing may follow the text
+    assert "signature" not in _sweep_kw(monkeypatch, include_quote=False)
+    assert _sweep_kw(monkeypatch)["signature"] == SIGNATURE
+
+
+def test_find_own_draft_without_a_quote_does_not_claim_text_plus_signature(
+    world, monkeypatch
+):
+    world.land(DRAFTS, f"<div>Hi</div>{SIG_HTML}", "hand@x")
+    monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: [(1, DRAFTS)])
+    found = _REAL_FIND_OWN_DRAFT(0, "abc@x", "Hi", None, tail=None, landed_by=10**6)
+    assert found.kind != "one"
