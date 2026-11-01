@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2 gaps: waves 1-3 done (05.2-08..12; PRs #520-#534 incl. three review-fix rounds #530 #532 #533); round 4 of the reply sweep fixes running; next: 05.2-13 device acceptance with the owner"
-last_updated: "2026-11-01T03:07:39.079Z"
+stopped_at: "Phase 05.2 gaps: 05.2-08..12 on develop; 05.2-13 Task 1 built (873b553, not installed); resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md"
+last_updated: "2026-11-01T09:58:25.022Z"
 last_activity: 2026-10-31
 last_activity_desc: Phase 05.2 execution started
-state_head: 8c2968c825a439f75f430af378b0bbeeeef8d90a
+state_head: d8c5b82296557217b1df1a11f410d7b2acd603e8
 progress:
   total_phases: 19
   completed_phases: 9
@@ -82,6 +82,8 @@ Progress: [█████████░] 92%
 
 ### Decisions
 
+- [Phase 05.2]: Owner decision 2026-11-01: the reply sweep's residual is accepted as documented (facts §4e `Refusal cleanup` (3)): the owner's own hand draft with the same text and the full quote, in the sending account, saved inside the claim window (at most 120 s), can be taken for the call's copy.
+- [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
 - [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
 - [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.
 Decisions are logged in PROJECT.md Key Decisions table.
@@ -226,5 +228,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-31T18:14:06.861Z
-Stopped at: Phase 05.2 gaps: waves 1-3 done (05.2-08..12; PRs #520-#534 incl. three review-fix rounds #530 #532 #533); round 4 of the reply sweep fixes running; next: 05.2-13 device acceptance with the owner
+Stopped at: Phase 05.2 gaps: 05.2-08..12 on develop; 05.2-13 Task 1 built (873b553, not installed); resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md
 Resume file: None
