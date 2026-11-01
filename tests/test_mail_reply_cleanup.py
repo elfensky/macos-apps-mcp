@@ -4,6 +4,9 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 
 from __future__ import annotations
 
+import email
+from pathlib import Path
+
 import pytest
 
 from macos_apps_mcp.adapters import mail_index, mail_reply_cleanup
@@ -16,6 +19,10 @@ _OTHER = "99999999-8888-7777-6666-555555555555"
 _ORIGINAL = "orig-1@example.com"
 _ATTRIBUTION = "On 1 Jul 2026, at 14:39, Jane wrote:"
 _QUOTE_HTML = f'<blockquote type="cite">{_ATTRIBUTION}<br>quoted words</blockquote>'
+_TAIL = "quoted words"  # the last words of the original, as the flow reads them
+# what the flow passes besides the text: the original's tail, and the index top right
+# after the discard (above every row these tests store)
+_KW = {"tail": _TAIL, "landed_by": 10**6}
 _URL = f"imap://{_ACCT}/Drafts"
 
 
@@ -31,8 +38,13 @@ def _emlx(in_reply_to: str, mid: str, body: str, kind: str = "html") -> bytes:
 @pytest.fixture
 def mailroot(tmp_path, monkeypatch):
     """``put(rowid, in_reply_to, mid, body)`` stores one message where Mail does:
-    ``<account>/<one .mbox folder per path segment>/<guid>/Data/<shard>/Messages``."""
-    monkeypatch.setattr(mail_index, "mail_root", lambda: tmp_path)
+    ``<V10>/<account>/<one .mbox folder per segment>/<guid>/Data/<shard>/Messages``,
+    beside the ``V10/MailData/Envelope Index`` the sweep reads."""
+    monkeypatch.setattr(
+        mail_index,
+        "envelope_index_path",
+        lambda: tmp_path / "V10" / "MailData" / "Envelope Index",
+    )
 
     def put(rowid, in_reply_to, mid, body, *, url=_URL, kind="html", partial=False):
         account, _, path = url.partition("://")[2].partition("/")
@@ -139,14 +151,16 @@ def test_emlx_path_searches_only_the_one_mailbox_folder(mailroot):
 # --- the selector ------------------------------------------------------------
 
 
-def _find(monkeypatch, rows=None, own="Hi there", attribution=_ATTRIBUTION):
+def _find(monkeypatch, rows=None, own="Hi there", attribution=_ATTRIBUTION, **kw):
     _rows(monkeypatch, [(20, _URL)] if rows is None else rows)
-    return mail_reply_cleanup.find_own_draft(10, _ORIGINAL, own, attribution)
+    return mail_reply_cleanup.find_own_draft(
+        10, _ORIGINAL, own, attribution, **{**_KW, **kw}
+    )
 
 
-def _kind(mailroot, monkeypatch, body, own="Hi there", **kw) -> str:
+def _kind(mailroot, monkeypatch, body, own="Hi there", *, tail=_TAIL, **kw) -> str:
     mailroot(20, _ORIGINAL, "draft-x@example.com", body, **kw)
-    return _find(monkeypatch, own=own).kind
+    return _find(monkeypatch, own=own, tail=tail).kind
 
 
 def test_find_own_draft_claims_exactly_one_new_reply_with_the_calls_text(
@@ -168,7 +182,7 @@ def test_find_own_draft_claims_exactly_one_new_reply_with_the_calls_text(
 def test_find_own_draft_claims_the_calls_text_alone_or_with_mails_attribution(
     mailroot, monkeypatch, body
 ):
-    assert _kind(mailroot, monkeypatch, body) == "one"
+    assert _kind(mailroot, monkeypatch, body + _QUOTE_HTML) == "one"
 
 
 @pytest.mark.parametrize(
@@ -237,9 +251,9 @@ def test_find_own_draft_without_an_attribution_accepts_only_the_text_itself(
 ):
     # a reply without a quote (include_quote=False): the body is the text, nothing else
     mailroot(20, _ORIGINAL, "a@x", f"<div>Hi there {_ATTRIBUTION}</div>")
-    assert _find(monkeypatch, attribution=None).kind == "unproven"
+    assert _find(monkeypatch, attribution=None, tail=None).kind == "unproven"
     mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>")
-    assert _find(monkeypatch, attribution=None).kind == "one"
+    assert _find(monkeypatch, attribution=None, tail=None).kind == "one"
 
 
 def test_find_own_draft_never_claims_with_an_empty_own_text(mailroot, monkeypatch):
@@ -254,6 +268,8 @@ def test_find_own_draft_never_claims_with_an_empty_own_text(mailroot, monkeypatc
         (f"imap://{_ACCT}/Drafts", "one"),
         (f"imap://{_ACCT}/Draft", "one"),  # a Yahoo-style server
         (f"imap://{_ACCT}/%5BGmail%5D/Drafts", "one"),
+        (f"imap://{_ACCT}/%5BGoogle%20Mail%5D/Drafts", "one"),  # a German Gmail
+        (f"imap://{_ACCT}/%5BArchive%202019%5D/Drafts", "unproven"),  # a user folder
         (f"imap://{_OTHER}/Drafts", "one"),  # the account the reply is sent FROM
         (f"imap://{_ACCT}/Concepten", "unproven"),  # a localized Drafts: loud
         (f"imap://{_ACCT}/%5BGmail%5D/All%20Mail", "unproven"),  # a label-backed Drafts
@@ -324,7 +340,9 @@ def test_find_own_draft_finds_a_copy_beside_a_decoy_drafts_folder(index, mailroo
     index.add_mailbox(f"imap://{_ACCT}/Drafts")
     top = mail_reply_cleanup.index_top()
     _land(index, mailroot, f"imap://{_ACCT}/Concepten")
-    got = mail_reply_cleanup.find_own_draft(top, _ORIGINAL, "Hi there", _ATTRIBUTION)
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
     assert got.kind == "unproven"
 
 
@@ -335,7 +353,9 @@ def test_find_own_draft_finds_the_gmail_copy_beside_a_labelled_drafts_folder(
     top = mail_reply_cleanup.index_top()
     url = f"imap://{_ACCT}/%5BGmail%5D/Drafts"
     _land(index, mailroot, url)
-    got = mail_reply_cleanup.find_own_draft(top, _ORIGINAL, "Hi there", _ATTRIBUTION)
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
     assert got == mail_reply_cleanup.Draft("one", url, "<own@x>")
 
 
@@ -345,10 +365,157 @@ def test_find_own_draft_finds_a_copy_in_another_accounts_drafts(index, mailroot)
     top = mail_reply_cleanup.index_top()
     url = f"imap://{_OTHER}/Drafts"
     _land(index, mailroot, url)
-    got = mail_reply_cleanup.find_own_draft(top, _ORIGINAL, "Hi there", _ATTRIBUTION)
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
     assert got == mail_reply_cleanup.Draft("one", url, "<own@x>")
 
 
 def test_find_own_draft_raises_when_the_index_cannot_be_read():
     with pytest.raises(NativeError):
-        mail_reply_cleanup.find_own_draft(0, _ORIGINAL, "Hi", None)
+        mail_reply_cleanup.find_own_draft(0, _ORIGINAL, "Hi", None, **_KW)
+
+
+# --- ownership proof beyond equal text (rv532) ---------------------------------
+
+
+def test_find_own_draft_never_claims_a_row_that_landed_after_the_discard(
+    mailroot, monkeypatch
+):
+    # landed_by is the index top right after the discard answered: a row above it
+    # landed once the window was gone, so a family or hand draft with the same text
+    # cannot be taken for the call's own
+    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    assert _find(monkeypatch, landed_by=20).kind == "one"  # up to the top: its own
+    assert _find(monkeypatch, landed_by=19).kind == "unproven"
+    assert _find(monkeypatch, landed_by=None).kind == "unproven"  # top unreadable
+
+
+@pytest.mark.parametrize(
+    "body, tail",
+    [
+        ("<div>Hi there</div>", _TAIL),  # the quote was removed
+        ("<div>Hi there</div><blockquote>owner trimmed it</blockquote>", _TAIL),
+        ("<div>Hi there</div>" + _QUOTE_HTML, None),  # a no-quote reply with a quote
+        ("<div>Hi there</div><div>and a signature</div>", None),
+    ],
+)
+def test_find_own_draft_needs_the_originals_quote_after_the_text(
+    mailroot, monkeypatch, body, tail
+):
+    # a hand copy of the text with a trimmed or removed quote is not the call's
+    # (include_quote=True: the original's tail follows; False: nothing follows)
+    assert _kind(mailroot, monkeypatch, body, tail=tail) == "unproven"
+
+
+def test_find_own_draft_compares_the_quote_the_way_the_insert_confirms_it(
+    mailroot, monkeypatch
+):
+    # letters and digits only: link and bullet marks differ between Mail's HTML and
+    # what the AX walk read (runtime._alnum)
+    body = "<div>Hi there</div><blockquote>quoted <b>words</b></blockquote>"
+    assert _kind(mailroot, monkeypatch, body) == "one"
+    plain = "Hi there\r\n\r\n> * quoted\r\n> words.\r\n"
+    assert _kind(mailroot, monkeypatch, plain, kind="plain") == "one"
+
+
+def test_find_own_draft_never_claims_a_copy_without_a_message_id(mailroot, monkeypatch):
+    # `whose message id is ""` would match nothing or the wrong message
+    mailroot(20, _ORIGINAL, "", "<div>Hi there</div>" + _QUOTE_HTML)
+    assert _find(monkeypatch).kind == "unproven"
+
+
+def test_find_own_draft_stops_at_the_first_unreadable_row(mailroot, monkeypatch):
+    # the verdict is unproven whatever follows: nothing after it is located or read
+    mailroot(21, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    seen: list[int] = []
+    real = mail_reply_cleanup._read_draft
+
+    def spy(url, rowid):
+        seen.append(rowid)
+        return real(url, rowid)
+
+    monkeypatch.setattr(mail_reply_cleanup, "_read_draft", spy)
+    rows = [(20, _URL), (21, _URL), (22, _URL)]  # row 20 has no file
+    assert _find(monkeypatch, rows).kind == "unproven"
+    assert seen == [20]
+
+
+def test_find_own_draft_parses_the_body_of_a_threaded_row_only(mailroot, monkeypatch):
+    mailroot(20, "other@example.com", "p@x", "<div>private</div>")
+    mailroot(21, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    mailroot(22, "other@example.com", "q@x", "<div>private</div>")
+    parsed: list[bytes] = []
+    real = email.message_from_bytes
+    monkeypatch.setattr(
+        mail_reply_cleanup.email,
+        "message_from_bytes",
+        lambda raw, **kw: parsed.append(raw) or real(raw, **kw),
+    )
+    rows = [(20, _URL), (21, _URL), (22, _URL)]
+    assert _find(monkeypatch, rows).kind == "one"
+    assert len(parsed) == 1 and b"a@x" in parsed[0]
+
+
+# --- where the files are (rv532) -----------------------------------------------
+
+
+def test_shard_is_the_reversed_digits_of_rowid_div_1000():
+    assert mail_reply_cleanup._shard(999) == ""
+    assert mail_reply_cleanup._shard(1000) == "1"
+    assert mail_reply_cleanup._shard(12345) == "2/1"
+    assert mail_reply_cleanup._shard(174504) == "4/7/1"
+
+
+def test_emlx_path_finds_a_file_by_its_shard_without_the_fallback_walk(
+    mailroot, monkeypatch
+):
+    # the rglob fallback finds the file whatever the shard rule says; with it disabled
+    # a wrong shard rule (always '') misses the file and fails here
+    put = mailroot(174504, _ORIGINAL, "a@x", "<div>x</div>")
+
+    def no_walk(self, pattern):
+        raise AssertionError("the fallback walk ran")
+
+    monkeypatch.setattr(Path, "rglob", no_walk)
+    assert mail_reply_cleanup._emlx_path(_URL, 174504) == put
+
+
+def test_emlx_path_reads_only_the_v_folder_of_the_index_being_read(mailroot, tmp_path):
+    # a stale V9 tree beside V10 holds an unrelated file under the same name
+    url = _URL
+    live = mailroot(20, _ORIGINAL, "own@x", "<div>live</div>", url=url)
+    decoy = tmp_path / "V9" / _ACCT / "Drafts.mbox" / "GUID" / "Data" / "Messages"
+    decoy.mkdir(parents=True)
+    (decoy / "20.emlx").write_bytes(_emlx("old@example.com", "old@x", "<div>old</div>"))
+    assert mail_reply_cleanup._emlx_path(url, 20) == live
+    live.unlink()  # a row with no file in V10 is unreadable, never read from V9
+    assert mail_reply_cleanup._emlx_path(url, 20) is None
+
+
+def test_emlx_path_is_none_without_an_index(monkeypatch):
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    assert mail_reply_cleanup._emlx_path(_URL, 20) is None
+
+
+# --- ROWID is AUTOINCREMENT (rv532) --------------------------------------------
+
+
+def test_index_top_checks_once_that_rowid_is_autoincrement(index, monkeypatch):
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    assert mail_reply_cleanup.index_top() == 0
+    # the table definition is read once per index file: a later read does not look
+    monkeypatch.setattr(mail_reply_cleanup, "_TABLE_SQL", "SELECT NULL WHERE 0")
+    assert mail_reply_cleanup.index_top() == 0
+
+
+def test_index_top_is_none_when_rowid_is_not_autoincrement(index):
+    # without AUTOINCREMENT SQLite may reuse the number of a deleted top row, so a new
+    # row would not sort above the baseline: the sweep is unavailable, not wrong
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    index.execute("ALTER TABLE messages RENAME TO kept")
+    index.execute(
+        "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
+        "deleted INT NOT NULL DEFAULT 0)"
+    )
+    assert mail_reply_cleanup.index_top() is None

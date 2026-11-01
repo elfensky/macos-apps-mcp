@@ -972,6 +972,22 @@ _LEFT_OVER = (
     "minute after the window opened, so look again after that. Nothing was sent."
 )
 
+# The same, after a PROVEN discard: the window is gone, only a Drafts copy may be left.
+_DRAFTS_LEFT = (
+    " The reply window was discarded, but the reply may NOT be fully removed: a "
+    "Drafts copy may be left. Look in the Drafts mailbox of the account the reply is "
+    "sent from (usually the account that holds the original; delete_draft removes a "
+    "draft). Mail saves the copy up to about a minute after the window opened, so "
+    "look again after that. Nothing was sent."
+)
+
+# After an unproven discard that still found and deleted the autosaved copy.
+_DELETED_WINDOW_LEFT = (
+    " A Drafts copy that Mail autosaved was found and deleted. The reply may NOT be "
+    "fully removed: the discard of the reply window was not proven, so look for the "
+    "open reply window to that message. Nothing was sent."
+)
+
 # Said when the discard ran so late that the Drafts read followed it too closely to
 # prove anything (facts 4e `Refusal cleanup`: only a read long after the discard is
 # proven).
@@ -1013,12 +1029,17 @@ class _ReplyFlow:
         baseline: str,
         index_top: int | None,
         attribution: str | None,
+        tail: str | None,
     ):
         self.message_id, self.mailbox_args = message_id, mailbox_args
         self.text, self.baseline = text, baseline
-        # the highest message row before the window opened (None: index unreadable) and
-        # Mail's attribution line for the original (None: a reply without a quote)
-        self.index_top, self.attribution = index_top, attribution
+        # the highest message row before the window opened (None: index unreadable),
+        # Mail's attribution line and the last words of the original (None: a reply
+        # without a quote)
+        self.index_top, self.attribution, self.tail = index_top, attribution, tail
+        # the highest message row right after the discard answered: a Drafts row above
+        # it landed after the window was gone, so it is not proven the window's own
+        self.landed_by: int | None = None
         self.outgoing_id: int | None = None
         self.opened_at: float | None = None
         self.discarded_at: float | None = None
@@ -1049,6 +1070,10 @@ class _ReplyFlow:
                 answer = "unknown"
             self._discarded = answer
             self.discarded_at = time.monotonic()
+            try:
+                self.landed_by = mail_reply_cleanup.index_top()
+            except Exception:  # noqa: BLE001 - None: nothing can be proven the window's
+                self.landed_by = None
         return self._discarded
 
     def sweep(self) -> str:
@@ -1059,16 +1084,21 @@ class _ReplyFlow:
         call's own, the delete was not confirmed, or the read failed) or
         ``unavailable`` (the index cannot be read). Every new message row is read, in
         any mailbox: the copy lands in the Drafts of the account the reply is sent
-        from."""
+        from. A copy is deleted only when no other scripted compose window was open at
+        the start (``baseline``): a window of an earlier call can autosave the same
+        text for the same original (facts 4e `Refusal cleanup`)."""
         if self.index_top is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
+        read_at = time.monotonic()  # no later than the index snapshot of the read
         try:
             found = mail_reply_cleanup.find_own_draft(
                 self.index_top,
                 bare_id(self.message_id),
                 self.text,
                 self.attribution,
+                tail=self.tail,
+                landed_by=self.landed_by,
             )
         except NativeError:
             return "unavailable"
@@ -1076,10 +1106,10 @@ class _ReplyFlow:
             return "unproven"
         if found.kind == "none":
             discarded = self.discarded_at
-            late = discarded is None or time.monotonic() - discarded < SWEEP_GAP_S
+            late = discarded is None or read_at - discarded < SWEEP_GAP_S
             return "late" if late else "none"
-        if found.kind != "one":
-            return found.kind
+        if found.kind != "one" or self.baseline:
+            return "unproven"
         try:
             answer = runtime.run_osascript(
                 _SWEEP_DELETE,
@@ -1115,6 +1145,10 @@ class _ReplyFlow:
             )
         elif discarded == "dead" and swept == "late":
             end = _STILL_LAND
+        elif discarded == "dead":
+            end = _DRAFTS_LEFT
+        elif swept == "removed":
+            end = _DELETED_WINDOW_LEFT
         else:
             end = _LEFT_OVER
         return ComposeRefused(f"mail_reply did not complete ({said}).{end}")
@@ -1157,6 +1191,7 @@ def open_reply_with_text(
             baseline.strip(),
             mail_reply_cleanup.index_top(),
             attribution,
+            tail,
         )
         try:
             try:

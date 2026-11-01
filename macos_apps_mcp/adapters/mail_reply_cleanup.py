@@ -24,18 +24,28 @@ any account. "No copy" therefore means no new row anywhere threads to the origin
 
 **Selector** (a design rule, run as one step on device only in 05.2-13): a new row
 whose ``In-Reply-To`` header is the original. A hand reply to the same original matches
-too, so the copy is claimed (``one``, and so deleted) only when exactly one row matches,
-nothing new was unreadable, it sits in a mailbox that is named ``Drafts`` / ``Draft``
-(directly under the account or under one bracket folder such as ``[Gmail]``) AND the
-squashed text before its quote EQUALS the call's own full squashed text, optionally
-followed by Mail's own attribution line for this original (anchored, built the way the
-reply quote is). A longer text that merely starts with the call's text is a hand reply.
-Anything else is ``unproven``: reported with the refusal, never deleted.
+too, so the copy is claimed (``one``, and so deleted) only when ALL of these hold:
+exactly one row matches and nothing new was unreadable; the flow's baseline of open
+compose windows was empty (the flow checks that: another scripted window could hold the
+same text); the row is not above the index top read right after the discard answered
+(``landed_by``: a row that landed after the window was gone is not proven the window's
+own); it has a Message-ID; it sits in a mailbox that is named ``Drafts`` / ``Draft``
+(directly under the account or under ``[Gmail]`` / ``[Google Mail]``); the squashed text
+before its quote EQUALS the call's own full squashed text, optionally followed by Mail's
+own attribution line for this original; AND it carries the original's quote (its tail,
+by letters and digits, as the insert's confirmation compares it), or, for a reply
+without a quote, nothing at all after the text. Anything else is ``unproven``: reported
+with the refusal, never deleted.
+
+The ROWID column is AUTOINCREMENT, so a new row always sorts above the baseline. That is
+checked once per index file at run time (``index_top``): an index without it is
+unreadable for the sweep.
 """
 
 from __future__ import annotations
 
 import email
+import email.parser
 import email.policy
 import html
 import re
@@ -56,6 +66,7 @@ _FINGERPRINT: dict[str, set[str]] = {
 }
 
 _TOP_SQL = "SELECT COALESCE(MAX(ROWID), 0) FROM messages"
+_TABLE_SQL = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'"
 
 _NEW_ROWS_SQL = """
 SELECT m.ROWID, mb.url FROM messages m
@@ -89,11 +100,27 @@ def _read(query):
     return runtime.read_via_sqlite(path, _FINGERPRINT, query)
 
 
+# Index files whose ``messages.ROWID`` was seen to be AUTOINCREMENT (checked once each).
+_AUTOINCREMENT_SEEN: set[Path] = set()
+
+
 def index_top() -> int | None:
     """The highest ``messages.ROWID`` now, or None when the index cannot be read (the
-    sweep is then unavailable and the refusal says so)."""
+    sweep is then unavailable and the refusal says so) or when ``messages.ROWID`` is not
+    AUTOINCREMENT: only then does a new row always sort above the baseline, and the
+    whole sweep rests on that. The table definition is read once per index file."""
+    path = mail_index.envelope_index_path()
+
+    def top(conn) -> int | None:
+        if path not in _AUTOINCREMENT_SEEN:
+            row = conn.execute(_TABLE_SQL).fetchone()
+            if not row or "AUTOINCREMENT" not in str(row[0]).upper():
+                return None
+            _AUTOINCREMENT_SEEN.add(path)
+        return int(conn.execute(_TOP_SQL).fetchone()[0])
+
     try:
-        return int(_read(lambda conn: conn.execute(_TOP_SQL).fetchone()[0]))
+        return _read(top)
     except NativeError:
         return None
 
@@ -110,16 +137,18 @@ def new_rows(top: int) -> list[tuple[int, str]]:
     )
 
 
+_GOOGLE_ROOTS = ("[Gmail]", "[Google Mail]")
+
+
 def _is_drafts_url(url: str) -> bool:
-    """A mailbox named ``Drafts`` / ``Draft`` directly under its account or under ONE
-    bracket folder (``[Gmail]/Drafts``). A nested user folder (``Projects/Drafts``) is
-    not a Drafts mailbox, and neither is a localized one: both are ``unproven``."""
+    """A mailbox named ``Drafts`` / ``Draft`` directly under its account or under
+    Google's root (``[Gmail]/Drafts``, ``[Google Mail]/Drafts``). A nested user folder
+    (``Projects/Drafts``, ``[Archive 2019]/Drafts``) is not a Drafts mailbox, and
+    neither is a localized one: both are ``unproven``."""
     parts = mailbox_url.path(url).split("/")
     if parts[-1] not in ("Drafts", "Draft"):
         return False
-    return len(parts) == 1 or (
-        len(parts) == 2 and parts[0].startswith("[") and parts[0].endswith("]")
-    )
+    return len(parts) == 1 or (len(parts) == 2 and parts[0] in _GOOGLE_ROOTS)
 
 
 def _shard(rowid: int) -> str:
@@ -132,32 +161,34 @@ def _emlx_path(url: str, rowid: int) -> Path | None:
     """The stored file of one message. The mailbox folder is derived from the url (one
     ``.mbox`` folder per path segment) and the shard from the ROWID, so a lookup costs a
     stat; a miss walks that one mailbox folder, never the whole account (a walk of a
-    large account took 0.3 to 0.7 s per message)."""
-    root, parsed = mail_index.mail_root(), mailbox_url.parse(url)
-    if root is None or parsed is None or not parsed[1]:
+    large account took 0.3 to 0.7 s per message). Only the ``V*`` folder of the index
+    that is read counts: a ROWID means nothing in another version's tree."""
+    index_path, parsed = mail_index.envelope_index_path(), mailbox_url.parse(url)
+    if index_path is None or parsed is None or not parsed[1]:
         return None
-    segments = [seg + ".mbox" for seg in parsed[2].split("/") if seg]
+    box = index_path.parents[1].joinpath(
+        parsed[1], *(seg + ".mbox" for seg in parsed[2].split("/") if seg)
+    )
+    if not box.is_dir():
+        return None
     names = (f"{rowid}.emlx", f"{rowid}.partial.emlx")
-    for base in root.glob(f"V*/{parsed[1]}"):
-        box = base.joinpath(*segments)
-        if not box.is_dir():
-            continue
-        shard = _shard(rowid)
-        pattern = f"*/Data/{shard}/Messages" if shard else "*/Data/Messages"
-        for messages in box.glob(pattern):
-            for name in names:
-                if (messages / name).is_file():
-                    return messages / name
+    shard = _shard(rowid)
+    pattern = f"*/Data/{shard}/Messages" if shard else "*/Data/Messages"
+    for messages in box.glob(pattern):
         for name in names:
-            hit = next(box.rglob(name), None)
-            if hit is not None:
-                return hit
+            if (messages / name).is_file():
+                return messages / name
+    for name in names:
+        hit = next(box.rglob(name), None)
+        if hit is not None:
+            return hit
     return None
 
 
-def _before_quote(msg) -> str:
-    """The squashed text of a draft up to its first quote: the HTML text before the
-    first blockquote, else the plain lines before the first ``>`` line."""
+def _split_quote(msg) -> tuple[str, str]:
+    """The squashed text of a draft before its first quote, and the squashed text from
+    the quote on: the HTML text before / from the first blockquote, else the plain lines
+    before / from the first ``>`` line."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
@@ -170,22 +201,25 @@ def _before_quote(msg) -> str:
             continue
     if markup:
         cut = re.search(r"(?i)<blockquote\b", markup)
-        head = markup[: cut.start()] if cut else markup
-        head = re.sub(r"(?is)<(script|style).*?</\1>", "", head)
-        head = html.unescape(re.sub(r"<[^>]+>", " ", head))
+        at = cut.start() if cut else len(markup)
+        parts = []
+        for chunk in (markup[:at], markup[at:]):
+            chunk = re.sub(r"(?is)<(script|style).*?</\1>", "", chunk)
+            parts.append(html.unescape(re.sub(r"<[^>]+>", " ", chunk)))
+        head, tail = parts
     else:
-        lines: list[str] = []
-        for line in text.splitlines():
-            if line.startswith(">"):
-                break
-            lines.append(line)
-        head = "\n".join(lines)
-    return squash_text(head.replace("\ufffc", ""))
+        lines = text.splitlines()
+        at = next(
+            (n for n, line in enumerate(lines) if line.startswith(">")), len(lines)
+        )
+        head, tail = "\n".join(lines[:at]), "\n".join(lines[at:])
+    return squash_text(head.replace("\ufffc", "")), squash_text(tail)
 
 
 def _read_draft(url: str, rowid: int):
-    """``(In-Reply-To, Message-ID, parsed message)`` of one stored message, or None when
-    its file is absent or unreadable. The body is parsed lazily, only for a match."""
+    """``(In-Reply-To, Message-ID, body)`` of one stored message, or None when its file
+    is absent or unreadable. Only the headers are parsed here; ``body()`` parses the
+    whole message and is called for a threaded row only."""
     path = _emlx_path(url, rowid)
     if path is None:
         return None
@@ -195,11 +229,13 @@ def _read_draft(url: str, rowid: int):
         return None
     if not payload:
         return None
-    msg = email.message_from_bytes(payload, policy=email.policy.default)
+    head = email.parser.BytesParser(policy=email.policy.default).parsebytes(
+        payload, headersonly=True
+    )
     return (
-        str(msg.get("In-Reply-To", "") or ""),
-        str(msg.get("Message-ID", "") or ""),
-        msg,
+        str(head.get("In-Reply-To", "") or ""),
+        str(head.get("Message-ID", "") or ""),
+        lambda: email.message_from_bytes(payload, policy=email.policy.default),
     )
 
 
@@ -217,29 +253,50 @@ def _is_own(before_quote: str, own_text: str, attribution: str | None) -> bool:
     return bool(line) and before_quote == f"{own} {line}"
 
 
+def _has_quote(after_quote: str, tail: str | None) -> bool:
+    """A quoted reply carries the original's tail after the text, compared the way the
+    insert's confirmation does (letters and digits only); a reply without a quote
+    (``tail`` None) has nothing after the text."""
+    if tail is None:
+        return not after_quote
+    return runtime._alnum(tail) in runtime._alnum(after_quote)
+
+
 def find_own_draft(
-    top: int, original_mid: str, own_text: str, attribution: str | None
+    top: int,
+    original_mid: str,
+    own_text: str,
+    attribution: str | None,
+    *,
+    tail: str | None,
+    landed_by: int | None,
 ) -> Draft:
     """The call's own Drafts copy among the rows new since ``top``, if there is one.
-    Raises ``NativeError`` when the index cannot be read now (the caller treats that as
-    unavailable)."""
+    ``tail``: the original's last words (None: a reply without a quote). ``landed_by``:
+    the index top read right after the discard answered (None: unreadable); a row above
+    it landed after the window was gone and is never claimed. Raises ``NativeError``
+    when the index cannot be read now (the caller treats that as unavailable)."""
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven")  # too many new rows to read them all
     found: list[Draft] = []
-    unreadable = False
     for rowid, url in rows:
         draft = _read_draft(url, rowid)
         if draft is None:
-            unreadable = True  # a new row we cannot read might be the one
-            continue
-        in_reply_to, mid, msg = draft
+            return Draft("unproven")  # a new row we cannot read might be the one
+        in_reply_to, mid, body = draft
         if _norm_mid(in_reply_to) != _norm_mid(original_mid):
             continue
-        own = _is_drafts_url(url) and _is_own(_before_quote(msg), own_text, attribution)
+        own = (
+            landed_by is not None
+            and rowid <= landed_by
+            and bool(_norm_mid(mid))
+            and _is_drafts_url(url)
+        )
+        if own:
+            before, after = _split_quote(body())
+            own = _is_own(before, own_text, attribution) and _has_quote(after, tail)
         found.append(Draft("one" if own else "unproven", url, mid))
     if not found:
-        return Draft("unproven" if unreadable else "none")
-    if len(found) > 1 or unreadable or found[0].kind != "one":
-        return Draft("unproven")
-    return found[0]
+        return Draft("none")
+    return Draft("unproven") if len(found) > 1 else found[0]
