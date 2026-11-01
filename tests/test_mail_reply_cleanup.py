@@ -5,6 +5,7 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 from __future__ import annotations
 
 import email
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -262,6 +263,15 @@ def test_find_own_draft_never_claims_with_an_empty_own_text(mailroot, monkeypatc
     assert _kind(mailroot, monkeypatch, "", own="  ") == "unproven"
 
 
+@pytest.mark.parametrize("body", ["", "<div></div>"])
+def test_find_own_draft_empty_text_guard_stands_on_its_own(mailroot, monkeypatch, body):
+    # rv533: with no quote and no attribution to fail on, an empty call text would
+    # EQUAL an empty draft: only the empty-text guard keeps this unproven
+    mailroot(20, _ORIGINAL, "draft-x@example.com", body)
+    got = _find(monkeypatch, own="  ", attribution=None, tail=None)
+    assert got.kind == "unproven"
+
+
 @pytest.mark.parametrize(
     "url, kind",
     [
@@ -398,6 +408,10 @@ def test_find_own_draft_never_claims_a_row_that_landed_after_the_discard(
         ("<div>Hi there</div><blockquote>owner trimmed it</blockquote>", _TAIL),
         ("<div>Hi there</div>" + _QUOTE_HTML, None),  # a no-quote reply with a quote
         ("<div>Hi there</div><div>and a signature</div>", None),
+        # rv533: nothing may follow the original's tail. The call pastes only at the
+        # top, so text below the quote (a PS, a signature) is a hand copy
+        ("<div>Hi there</div>" + _QUOTE_HTML + "<div>PS: bring the forms</div>", _TAIL),
+        ("<div>Hi there</div>" + _QUOTE_HTML + "<div>--<br>Jane</div>", _TAIL),
     ],
 )
 def test_find_own_draft_needs_the_originals_quote_after_the_text(
@@ -417,6 +431,9 @@ def test_find_own_draft_compares_the_quote_the_way_the_insert_confirms_it(
     assert _kind(mailroot, monkeypatch, body) == "one"
     plain = "Hi there\r\n\r\n> * quoted\r\n> words.\r\n"
     assert _kind(mailroot, monkeypatch, plain, kind="plain") == "one"
+    # ... and a plain-text PS below the quote is a hand copy
+    ps = plain + "\r\nPS: bring the forms\r\n"
+    assert _kind(mailroot, monkeypatch, ps, kind="plain") == "unproven"
 
 
 def test_find_own_draft_never_claims_a_copy_without_a_message_id(mailroot, monkeypatch):
@@ -518,6 +535,26 @@ def test_index_top_is_none_when_rowid_is_not_autoincrement(index):
         "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
         "deleted INT NOT NULL DEFAULT 0)"
     )
+    assert mail_reply_cleanup.index_top() is None
+    # rv533 (I2): the refusal is not cached as a pass: a second call refuses too
+    assert mail_reply_cleanup.index_top() is None
+
+
+def test_index_top_checks_every_index_file_on_its_own(index, monkeypatch, tmp_path):
+    # rv533 (I3): the check is per file (the set holds paths): a later index without
+    # AUTOINCREMENT (another version's folder) is refused although the first passed
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    assert mail_reply_cleanup.index_top() == 0
+    other = tmp_path / "V11" / "MailData" / "Envelope Index"
+    other.parent.mkdir(parents=True)
+    conn = sqlite3.connect(other)
+    conn.execute(
+        "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
+        "deleted INT NOT NULL DEFAULT 0)"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: other)
     assert mail_reply_cleanup.index_top() is None
 
 

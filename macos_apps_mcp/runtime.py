@@ -1009,7 +1009,9 @@ def _wait_settled(el, text: str, before: str) -> bool:
         time.sleep(0.05)
 
 
-def _confirm(el, text: str, replace_all: bool, quote_tail: str | None) -> None:
+def _confirm(
+    el, text: str, replace_all: bool, quote_tail: str | None, tool: str = "mail_reply"
+) -> None:
     """Facts 4e `Confirm`, after a settled paste: the text is first and, in a quoted
     reply, the original's own tail follows it; after a whole-body replace nothing
     follows. Compared squashed (the AX walk drops empty lines); the tail compares by
@@ -1038,14 +1040,14 @@ def _confirm(el, text: str, replace_all: bool, quote_tail: str | None) -> None:
             raise ComposeRefused(
                 "confirmation: the reply is too long to check through Accessibility, "
                 "so Mail's quote of the original could not be confirmed. To reply "
-                "without the quote, call mail_reply with include_quote=False"
+                f"without the quote, call {tool} with include_quote=False"
             )
         raise ComposeRefused(
             "confirmation: Mail's quote of the original does not follow your text. "
             "Mail's setting 'Quote the text of the original message' (Mail > "
             "Settings > Composing > Responding; 'Include original message text' "
             "before Mail 16) may be off, or a text selection is left in Mail's "
-            "message viewer. Click the original once, or call mail_reply with "
+            f"message viewer. Click the original once, or call {tool} with "
             "include_quote=False"
         )
 
@@ -1057,6 +1059,7 @@ def compose_insert(
     replace_all: bool = False,
     quote_tail: str | None = None,
     rollback: Callable[[], object] | None = None,
+    tool: str = "mail_reply",
 ) -> None:
     """Put ``text`` at the top of the reply window ``window_id`` that the caller opened
     in Mail, and confirm it landed (facts 4e, mechanism M2: one Cmd-V from a borrowed
@@ -1066,7 +1069,9 @@ def compose_insert(
     ``quote_tail`` (the last words of the original) must follow the text, else the
     call refuses: an unknown tail refuses before any write. ``rollback`` is called when
     the paste did not settle, BEFORE the clipboard comes back, so a late Cmd-V cannot
-    paste the user's own clipboard into a reply that stays.
+    paste the user's own clipboard into a reply that stays. ``tool`` is the tool whose
+    refusal this is (``mail_reply`` or ``reply_all``): the refusal names it, so the
+    advice to retry with ``include_quote=False`` points at the tool the model called.
 
     Identity rule: the target is Mail (constant), the window is the id the caller
     bound, and right before the write Mail's AX focused element must be a body inside
@@ -1124,7 +1129,7 @@ def compose_insert(
                 "confirmation: your text did not appear in the reply within "
                 f"{_PASTE_SETTLE_S:g} s"
             )
-        _confirm(el, text, replace_all, quote_tail)
+        _confirm(el, text, replace_all, quote_tail, tool)
 
     return work() if on_worker() else run_native(work)
 
