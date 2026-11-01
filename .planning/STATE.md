@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.2 gaps: wave 2 done (05.2-10 PR #527: mail_reply keeps Mail's quote via Accessibility M2); probe review of #527 running; next: wave 3 (05.2-11 then 05.2-12)"
-last_updated: "2026-10-31T23:48:35.271Z"
+stopped_at: "Phase 05.2 gaps: waves 1-3 done (05.2-08..12; PRs #520-#534 incl. three review-fix rounds #530 #532 #533); round 4 of the reply sweep fixes running; next: 05.2-13 device acceptance with the owner"
+last_updated: "2026-11-01T03:07:39.079Z"
 last_activity: 2026-10-31
 last_activity_desc: Phase 05.2 execution started
-state_head: 877c76dfd2a7b491391562391d0d62be4b74bedc
+state_head: 8c2968c825a439f75f430af378b0bbeeeef8d90a
 progress:
   total_phases: 19
   completed_phases: 9
@@ -226,5 +226,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-31T18:14:06.861Z
-Stopped at: Phase 05.2 gaps: wave 2 done (05.2-10 PR #527: mail_reply keeps Mail's quote via Accessibility M2); probe review of #527 running; next: wave 3 (05.2-11 then 05.2-12)
+Stopped at: Phase 05.2 gaps: waves 1-3 done (05.2-08..12; PRs #520-#534 incl. three review-fix rounds #530 #532 #533); round 4 of the reply sweep fixes running; next: 05.2-13 device acceptance with the owner
 Resume file: None
