@@ -5,6 +5,7 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 from __future__ import annotations
 
 import email
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -547,7 +548,9 @@ def test_index_top_checks_every_index_file_on_its_own(index, monkeypatch, tmp_pa
     assert mail_reply_cleanup.index_top() == 0
     other = tmp_path / "V11" / "MailData" / "Envelope Index"
     other.parent.mkdir(parents=True)
+    shutil.copy(index.path, other)  # the full schema, so only AUTOINCREMENT differs
     conn = sqlite3.connect(other)
+    conn.execute("ALTER TABLE messages RENAME TO kept")
     conn.execute(
         "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
         "deleted INT NOT NULL DEFAULT 0)"
