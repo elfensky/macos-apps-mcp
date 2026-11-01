@@ -837,7 +837,14 @@ def test_compose_insert_seam_takes_no_target_app():
 
     params = list(inspect.signature(_REAL_COMPOSE_INSERT).parameters)
     assert params[:2] == ["window_id", "text"]
-    assert set(params) == {"window_id", "text", "replace_all", "quote_tail", "rollback"}
+    assert set(params) == {
+        "window_id",
+        "text",
+        "replace_all",
+        "quote_tail",
+        "rollback",
+        "tool",
+    }
     assert not any(w in p for p in params for w in ("app", "pid", "bundle"))
     assert runtime._MAIL_BUNDLE == "com.apple.mail"
 

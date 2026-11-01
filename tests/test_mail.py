@@ -238,10 +238,10 @@ from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
 )
 
 
-def _original_reply(body="original body", sender="Jane <j@x.com>"):
-    """What ``_ORIGINAL`` returns: the stripped sender, the date as five integers
-    (2026-07-01 14:39), then the content, US-framed — seven fields."""
-    return US.join([sender, "2026", "7", "1", "14", "39", body])
+def _original_reply(body="original body", sender="Jane <j@x.com>", original_id="77"):
+    """What ``_ORIGINAL`` returns: Mail's internal id, the stripped sender, the date as
+    five integers (2026-07-01 14:39), then the content, US-framed — eight fields."""
+    return US.join([original_id, sender, "2026", "7", "1", "14", "39", body])
 
 
 def test_attribution_line_uses_mails_format():
@@ -258,7 +258,10 @@ def test_attribution_line_uses_mails_format():
 def test_quote_facts_keep_a_us_char_inside_the_original(monkeypatch):
     # PM-19: only the first six US split, so a US inside the original stays in the tail
     _patch_run(monkeypatch, lambda *a, **k: _original_reply(f"a{US}b gamma"))
-    tail, attribution = mail_outgoing._quote_facts("<abc@x>", ("ACCT", "inbox"))
+    tail, attribution, original_id = mail_outgoing._quote_facts(
+        "<abc@x>", ("ACCT", "inbox")
+    )
+    assert original_id == 77
     assert tail.endswith("gamma")
     assert attribution.endswith("Jane <j@x.com> wrote:")
 
@@ -271,7 +274,7 @@ def test_quote_facts_sanitize_control_chars_from_the_sender(monkeypatch):
         monkeypatch,
         lambda *a, **k: _original_reply("hello", sender="Jane\x07 <j@x.com>"),
     )
-    _, attribution = mail_outgoing._quote_facts("abc@x", ("", "inbox"))
+    _, attribution, _ = mail_outgoing._quote_facts("abc@x", ("", "inbox"))
     assert "\x07" not in attribution and attribution.endswith("wrote:")
 
 
@@ -403,7 +406,7 @@ def test_reply_never_sends():
     assert not re.search(r"^\s*send \w+\s*$", _ORIGINAL, re.M)
     assert not re.search(r"^\s*send \w+\s*$", mail_outgoing._REPLY_OPEN, re.M)
     # Mail's native reply verb (real threading), opened for human review
-    assert "reply (item 1 of matches)" in mail_outgoing._REPLY_OPEN
+    assert "reply m opening window yes" in mail_outgoing._REPLY_OPEN
     assert "opening window yes" in mail_outgoing._REPLY_OPEN
 
 
@@ -1325,6 +1328,7 @@ def test_parse_search_absent_subject_and_sender_use_the_placeholder():
 # (account-id, decoded path) pair the shared `mailboxFor` AppleScript handler needs.
 
 _GMAIL_UUID = "5936B2CE-D3DC-4072-A81B-E79E6DA94B15"
+_FAMILY_UUID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
 _SPAM_URL = f"imap://{_GMAIL_UUID}/%5BGmail%5D/Spam"
 
 
@@ -1440,7 +1444,14 @@ def test_reply_passes_the_mailbox_to_every_script(monkeypatch):
     rig = _ReplyRig(monkeypatch)
     mail.MailAdapter().reply("<orig@x>", _SPAM_URL, "Sounds good")
     assert rig.call("_ORIGINAL")[1] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
-    assert rig.call("_REPLY_OPEN")[1] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam", "0")
+    # the reply is opened by Mail's internal id from _ORIGINAL, the Message-ID last
+    assert rig.call("_REPLY_OPEN")[1] == (
+        "77",
+        _GMAIL_UUID,
+        "[Gmail]/Spam",
+        "0",
+        "orig@x",
+    )
 
 
 def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
@@ -2139,7 +2150,8 @@ from macos_apps_mcp.errors import (  # noqa: E402
 )
 
 _REAL_FIND_OWN_DRAFT = mail_reply_cleanup.find_own_draft
-_OPEN_OK = f"28{US}15927"
+_SENDER = "Bob <bob@corp.com>"  # the reply's From, read while the reply exists
+_OPEN_OK = f"28{US}15927{US}{_SENDER}"
 _RECIPIENTS_OK = (
     f"to{US}alice@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
     f"subject{US}Quarterly numbers{RS}self{US}bob@corp.com{RS}"
@@ -2157,6 +2169,13 @@ class _ReplyRig:
             "_ORIGINAL": _original_reply(_ORIGINAL_TEXT),
             "_OUTGOING_IDS": "3,4",
             "_REPLY_OPEN": _OPEN_OK,
+            # the account that holds the sender address is the Gmail one; a second
+            # (family) account is there too and never a candidate
+            "_ACCOUNT_ADDRESSES": (
+                f"{_GMAIL_UUID.lower()}{US}bob@corp.com{US}b2@corp.com{RS}"
+                f"{_FAMILY_UUID}{US}fam@x{RS}"
+            ),
+            "_BASELINE_CLEAR": "clear",
             "_DISCARD_OUTGOING": "dead",
             "_DISCARD_NEW_REPLY": "dead",
             "_SWEEP_DELETE": "deleted",
@@ -2224,6 +2243,8 @@ class _ReplyRig:
                 "_ORIGINAL",
                 "_OUTGOING_IDS",
                 "_REPLY_OPEN",
+                "_ACCOUNT_ADDRESSES",
+                "_BASELINE_CLEAR",
                 "_DISCARD_OUTGOING",
                 "_DISCARD_NEW_REPLY",
                 "_SWEEP_DELETE",
@@ -2273,11 +2294,12 @@ def test_reply_keeps_mails_quote_through_the_insert_seam(monkeypatch):
         "compose_insert",
     ]
     _, argv, kw = rig.call("_REPLY_OPEN")
-    assert argv == ("abc@x", "", "inbox", "0")
+    assert argv == ("77", "", "inbox", "0", "abc@x")
     assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
     _, window_id, text, ikw = rig.call("compose_insert")
     assert (window_id, text) == (15927, "Hi")
     assert ikw["replace_all"] is False and ikw["quote_tail"] == _TAIL
+    assert ikw["tool"] == "mail_reply"
     assert callable(ikw["rollback"])
     # no tempfile, no content write on this path
     assert "set content" not in mail_outgoing._REPLY_OPEN
@@ -2384,7 +2406,9 @@ def test_reply_without_quote_replaces_the_whole_body(monkeypatch):
     # gap-no-quote: gui-replace (owner choice 2026-10-31)
     rig = _ReplyRig(monkeypatch)
     mail.MailAdapter().reply("<abc@x>", "inbox", "Just this", include_quote=False)
-    assert "_ORIGINAL" not in rig.names()  # no quote, so no tail to look up
+    # no quote, so no tail to look up: _ORIGINAL runs for the internal id alone ("0")
+    assert rig.call("_ORIGINAL")[1] == ("abc@x", "", "inbox", "0")
+    assert rig.call("_REPLY_OPEN")[1][0] == "77"
     _, _, text, ikw = rig.call("compose_insert")
     assert text == "Just this" and ikw["replace_all"] is True
     assert ikw["quote_tail"] is None
@@ -2710,16 +2734,78 @@ def test_reply_flow_deletes_the_copy_that_is_exactly_its_text_and_mails_attribut
     assert "nothing was created" in msg and "deleted" in msg
 
 
+_OTHER_UUID = "77777777-6666-5555-4444-333333333333"
+
+
+def _sent_from_other_account(monkeypatch):
+    """A rig whose reply is SENT FROM another account than the one that holds the
+    original (spike 005): the sender's address belongs to ``_OTHER_UUID``."""
+    rig, folder, text = _refuse_with(monkeypatch)
+    rig.answers["_ACCOUNT_ADDRESSES"] = (
+        f"{_GMAIL_UUID}{US}bob@corp.com{RS}{_OTHER_UUID}{US}fam@corp.com{RS}"
+    )
+    rig.answers["_REPLY_OPEN"] = f"28{US}15927{US}Fam <fam@corp.com>"
+    return rig, folder, text
+
+
 def test_reply_flow_deletes_a_copy_in_the_account_the_reply_is_sent_from(monkeypatch):
     # spike 005: a reply to a message in this inbox can be sent from ANOTHER account,
     # and Mail files the autosave in that account's Drafts. The copy is the call's own.
-    other = "imap://77777777-6666-5555-4444-333333333333/Drafts"
-    rig, folder, text = _refuse_with(monkeypatch)
+    rig, folder, text = _sent_from_other_account(monkeypatch)
+    other = f"imap://{_OTHER_UUID}/Drafts"
     _real_selector(monkeypatch, (other, "<div>Hi</div>" + _QUOTE_HTML, "html"))
     msg = _run_refused(rig, folder, text)
     _, argv, _ = rig.call("_SWEEP_DELETE")
-    assert argv == ("own8@x", "77777777-6666-5555-4444-333333333333", "Drafts")
+    assert argv == ("own8@x", _OTHER_UUID, "Drafts")
     assert "nothing was created" in msg
+
+
+def test_reply_flow_never_claims_a_drafts_row_outside_the_sending_account(monkeypatch):
+    # rv533: a family account's Drafts is no candidate. The reply is sent from the
+    # Gmail account; a same-text, full-quote row in ANOTHER account's Drafts (it
+    # synced while the window was open) is reported, never deleted.
+    rig, folder, text = _refuse_with(monkeypatch)
+    other = f"imap://{_FAMILY_UUID}/Drafts"
+    _real_selector(monkeypatch, (other, "<div>Hi</div>" + _QUOTE_HTML, "html"))
+    msg = _run_refused(rig, folder, text)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "may NOT be fully removed" in msg
+
+
+@pytest.mark.parametrize(
+    "answers",
+    [
+        {"_REPLY_OPEN": f"28{US}15927{US}"},  # Mail did not answer the From
+        {"_REPLY_OPEN": f"28{US}15927"},
+        {"_REPLY_OPEN": f"28{US}15927{US}Nobody <nobody@x>"},  # no account holds it
+        {"_ACCOUNT_ADDRESSES": NativeTimeout("slow")},
+        {"_ACCOUNT_ADDRESSES": ""},
+        # two accounts hold the address: which one sends is not provable
+        {
+            "_ACCOUNT_ADDRESSES": f"{_GMAIL_UUID}{US}bob@corp.com{RS}"
+            f"{_FAMILY_UUID}{US}BOB@corp.com{RS}"
+        },
+    ],
+)
+def test_reply_flow_claims_nothing_when_the_sending_account_is_not_proven(
+    monkeypatch, answers
+):
+    rig, msg = _refused_reply(monkeypatch, answers=answers)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "may NOT be fully removed" in msg
+
+
+def test_reply_flow_reads_the_accounts_once_and_never_a_message(monkeypatch):
+    rig, _ = _refused_reply(monkeypatch)
+    assert len(rig.calls_of("_ACCOUNT_ADDRESSES")) == 1
+    _, argv, kw = rig.call("_ACCOUNT_ADDRESSES")
+    assert argv == () and kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    # accounts and their addresses only: no message property is read by that script
+    script = mail_outgoing._ACCOUNT_ADDRESSES
+    assert "email addresses of acc" in script and "message" not in script
+    # a 'none' needs no account at all
+    rig, _ = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft("none"))
+    assert "_ACCOUNT_ADDRESSES" not in rig.names()
 
 
 def test_reply_flow_reports_a_copy_in_a_localized_drafts_and_deletes_nothing(
@@ -2740,10 +2826,57 @@ def test_reply_sweep_deletes_nothing_when_another_compose_window_was_open(monkey
     # a retry: the first call's reply window is still open and its OWN autosave (same
     # original, same text) lands during this call's wait. The baseline lists that
     # window, so no copy can be proven this call's own (facts 4e `Refusal cleanup`).
-    rig, msg = _refused_reply(monkeypatch, answers={"_OUTGOING_IDS": "28"})
+    rig, msg = _refused_reply(
+        monkeypatch, answers={"_OUTGOING_IDS": "28", "_BASELINE_CLEAR": "block"}
+    )
     assert "_SWEEP_DELETE" not in rig.names()
     assert "nothing was created" not in msg and "was found and deleted" not in msg
     assert "may NOT be fully removed" in msg and "Drafts" in msg
+    _, argv, kw = rig.call("_BASELINE_CLEAR")
+    assert argv == ("28", "77", _GMAIL_UUID, "INBOX")  # ids, original's id, mailbox
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+
+
+def test_reply_sweep_still_deletes_beside_a_window_of_another_message(monkeypatch):
+    # rv533: only a window that can autosave a reply to THIS original blocks (its
+    # subject ends with the original's). A create_draft window or a reply to another
+    # message, still open, is clear: `_BASELINE_CLEAR` answers "clear".
+    rig, msg = _refused_reply(
+        monkeypatch, answers={"_OUTGOING_IDS": "28,41", "_BASELINE_CLEAR": "clear"}
+    )
+    assert rig.call("_BASELINE_CLEAR")[1][0] == "28,41"
+    assert "_SWEEP_DELETE" in rig.names()
+    assert "nothing was created" in msg and "was found and deleted" in msg
+
+
+@pytest.mark.parametrize(
+    "answer", ["block", "", "garbage", NativeTimeout("slow"), RuntimeError("boom")]
+)
+def test_reply_sweep_that_cannot_clear_an_open_window_deletes_nothing(
+    monkeypatch, answer
+):
+    rig, msg = _refused_reply(
+        monkeypatch, answers={"_OUTGOING_IDS": "28", "_BASELINE_CLEAR": answer}
+    )
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "may NOT be fully removed" in msg
+
+
+def test_reply_sweep_reads_no_window_subject_when_none_was_open(monkeypatch):
+    rig, _ = _refused_reply(monkeypatch)
+    assert "_BASELINE_CLEAR" not in rig.names()
+
+
+def test_baseline_clear_blocks_on_every_subject_it_cannot_prove_unrelated():
+    # the script's structure (an AppleScript cannot run in a unit test): the same
+    # predicate as _DISCARD_NEW_REPLY, and every unreadable or empty subject blocks
+    script = mail_outgoing._BASELINE_CLEAR
+    assert "ends with subj" in script
+    assert 'subj is missing value or subj is ""' in script  # the original's own
+    assert "set blocked to true" in script and "set blocked to false" in script
+    assert script.count("set blocked to false") == 1  # only a readable, unrelated one
+    assert script.index("set blocked to false") < script.index("if blocked then")
+    assert 'return "clear"' in script and "return" in script
 
 
 def test_reply_sweep_that_finds_no_copy_still_says_so_beside_an_open_window(
@@ -2756,6 +2889,39 @@ def test_reply_sweep_that_finds_no_copy_still_says_so_beside_an_open_window(
         answers={"_OUTGOING_IDS": "28"},
     )
     assert "nothing was created" in msg
+
+
+@pytest.mark.parametrize("stall, claimed", [(120.0, True), (120.5, False)])
+def test_reply_sweep_claims_only_within_the_open_timeout_of_the_baseline(
+    monkeypatch, stall, claimed
+):
+    # rv533: the claim window runs from the baseline read (just before the reply verb)
+    # to the discard. Mail stalled longer than the open's own timeout: a hand draft of
+    # the owner's could have landed in it, so the row is reported, not deleted.
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    rig.insert_hook = lambda _kw: rig.clock.__setitem__(0, rig.clock[0] + stall)
+    msg = _run_refused(rig, _REPLY_FOLDER, "Hi")
+    assert ("_SWEEP_DELETE" in rig.names()) is claimed
+    assert ("nothing was created" in msg) is claimed
+    assert ("may NOT be fully removed" in msg) is not claimed
+
+
+def test_reply_flow_scans_before_the_baseline_and_opens_right_after_it(
+    monkeypatch,
+):
+    # rv533: nothing slow may run between the baseline index read and the reply verb.
+    # The O(mailbox) whose-scan is _ORIGINAL's, before; _REPLY_OPEN addresses the
+    # original by id and carries no scan at all.
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    _run_refused(rig, _REPLY_FOLDER, "Hi")
+    names = rig.names()
+    assert names.index("_ORIGINAL") < names.index("index_top")
+    assert names.index("_OUTGOING_IDS") < names.index("index_top")
+    assert names.index("index_top") + 1 == names.index("_REPLY_OPEN")
+    script = mail_outgoing._REPLY_OPEN
+    assert "whose message id" not in script and "«class mssg» id n of mb" in script
+    # the id it opened by is re-read and compared, before any reply exists
+    assert script.index("message id of m") < script.index("reply m opening window")
 
 
 def test_reply_flow_hands_the_selector_the_tail_and_the_top_after_the_discard(
@@ -2978,6 +3144,7 @@ _REPLY_ALL_SENT_ORDER = [
     "compose_insert",
     "_SEND_OUTGOING",
     "index_top",  # right after the send answers: the window is gone
+    "_ACCOUNT_ADDRESSES",  # the account the reply was sent from
     "_SWEEP_DELETE",
     "_OUTBOX_COUNT",
 ]
@@ -3002,10 +3169,11 @@ def test_reply_all_sends_only_after_the_insert_is_confirmed(monkeypatch):
     )
     out = _reply_all()
     assert rig.names() == _REPLY_ALL_SENT_ORDER
-    assert rig.call("_REPLY_OPEN")[1] == ("abc@x", _GMAIL_UUID, "INBOX", "1")
+    assert rig.call("_REPLY_OPEN")[1] == ("77", _GMAIL_UUID, "INBOX", "1", "abc@x")
     _, window_id, text, ikw = rig.call("compose_insert")
     assert (window_id, text) == (15927, "Hi")
     assert ikw["replace_all"] is False and ikw["quote_tail"] == _TAIL
+    assert ikw["tool"] == "reply_all"  # its refusals name reply_all, not mail_reply
     _, argv, kw = rig.call("_SEND_OUTGOING")
     assert argv == ("28",) and kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
     # the send is the only thing after the insert that talks to the reply: no discard
@@ -3037,7 +3205,8 @@ def test_reply_all_without_a_quote_replaces_the_body_and_sweeps_with_no_tail(
 ):
     rig = _SweepRig(monkeypatch)
     out = _reply_all(text="Just this", include_quote=False)
-    assert "_ORIGINAL" not in rig.names()  # no quote, so no tail to look up
+    # no quote, so no tail to look up: _ORIGINAL runs for the internal id alone
+    assert rig.call("_ORIGINAL")[1][3:] == ("0",)
     _, _, text, ikw = rig.call("compose_insert")
     assert text == "Just this" and ikw["replace_all"] is True
     assert ikw["quote_tail"] is None
@@ -3084,7 +3253,11 @@ def test_reply_all_discards_without_an_id_and_never_sends(monkeypatch):
     assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
     names = rig.names()
     assert "_SEND_OUTGOING" not in names and "compose_insert" not in names
-    assert "nothing was sent" in str(exc.value)
+    msg = str(exc.value)
+    assert "nothing was sent" in msg.lower()
+    # the open never answered, so the From of the reply is unknown: a Drafts copy found
+    # afterwards cannot be bound to the sending account, and is reported, not deleted
+    assert "_SWEEP_DELETE" not in names and "may NOT be fully removed" in msg
 
 
 def test_reply_all_refuses_without_accessibility_before_any_write(monkeypatch):
@@ -3144,17 +3317,55 @@ def test_a_send_that_fails_is_reported_as_possibly_sent_and_never_rolled_back(
     msg = str(exc.value)
     assert "Outbox" in msg and "Sent" in msg and "before retrying" in msg
     assert "may have been sent" in msg
+    # rv534: the send may have gone, and Mail's autosave copy may be in Drafts: the
+    # error says so (nothing was swept, because the send's outcome is unknown)
+    assert "Drafts copy" in msg and "may also be left" in msg
     names = rig.names()
     assert "_DISCARD_OUTGOING" not in names and "_DISCARD_NEW_REPLY" not in names
     assert "_SWEEP_DELETE" not in names and "_OUTBOX_COUNT" not in names
+    # never send twice (rv534 R3): a retry of the send, after a timeout Mail may have
+    # accepted, would deliver the reply twice
+    assert len(rig.calls_of("_SEND_OUTGOING")) == 1
 
 
 def test_a_foreign_failure_of_the_send_is_wrapped_without_its_text(monkeypatch):
-    _SweepRig(monkeypatch, answers={"_SEND_OUTGOING": RuntimeError("the secret text")})
+    rig = _SweepRig(
+        monkeypatch, answers={"_SEND_OUTGOING": RuntimeError("the secret text")}
+    )
     with pytest.raises(NativeError) as exc:
         _reply_all()
     msg = str(exc.value)
     assert "secret" not in msg and "RuntimeError" in msg and "before retrying" in msg
+    assert "Drafts copy" in msg
+    assert len(rig.calls_of("_SEND_OUTGOING")) == 1
+
+
+@pytest.mark.parametrize(
+    "boom",
+    [
+        lambda rig, mp: mp.setattr(
+            mail_outgoing,
+            "_wait_until",
+            lambda deadline: (_ for _ in ()).throw(RuntimeError("boom")),
+        ),
+        lambda rig, mp: mp.setattr(
+            mail_outgoing._ReplyFlow,
+            "sweep",
+            lambda self, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+        ),
+    ],
+    ids=["the wait raises", "the sweep raises"],
+)
+def test_a_sweep_that_raises_after_the_send_never_fails_the_call(monkeypatch, boom):
+    # rv534 R8a: the send happened, so nothing after it may raise (a bare error would
+    # read as a failed send and a model could retry into a double send)
+    rig = _SweepRig(monkeypatch)
+    boom(rig, monkeypatch)
+    out = _reply_all()
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert "Drafts" in out["drafts_copy_note"]
+    assert len(rig.calls_of("_SEND_OUTGOING")) == 1
+    assert "_SWEEP_DELETE" not in rig.names()
 
 
 def test_send_outgoing_has_no_delete_after_send():
@@ -3229,7 +3440,11 @@ def test_send_then_sweep_with_an_unknown_row_alone_is_unproven(monkeypatch):
 def test_send_then_sweep_deletes_nothing_beside_an_open_compose_window(monkeypatch):
     # an earlier call's window is still open (a non-empty `_OUTGOING_IDS` baseline): its
     # autosave could hold the same text, so no copy is provably this call's own
-    rig, out = _sent_reply(monkeypatch, _OWN_COPY, answers={"_OUTGOING_IDS": "21"})
+    rig, out = _sent_reply(
+        monkeypatch,
+        _OWN_COPY,
+        answers={"_OUTGOING_IDS": "21", "_BASELINE_CLEAR": "block"},
+    )
     assert "_SWEEP_DELETE" not in rig.names()
     assert out["sent"] is True and out["drafts_copy"] == "unproven"
 

@@ -69,7 +69,7 @@ from ..text import (
     sanitize_line,
     squash_text,
 )
-from . import mail_addressing, mail_reply_cleanup
+from . import mail_addressing, mail_reply_cleanup, mailbox_url
 from .mail_addressing import bare_id
 
 # The default-account placeholder a preview reports instead of guessing: Mail's default
@@ -396,19 +396,24 @@ on run argv
 end run"""
 )
 
-# the native reply (#42/#46, #348): fetch the original's sender, received date and
-# plaintext by message-id (US-framed, seven fields). The flow takes the original's last
-# words from it (what must follow the reply text for Mail's own quote to count as
-# confirmed) and Mail's attribution line (which the Drafts sweep allows after the call's
-# text); nothing is quoted from it any more: Mail builds the quote itself. The date
-# travels as five integers (#348): Mail's attribution line wants the Mac's own date and
-# time format, which only Foundation gives (runtime.mail_attribution_stamp), and a
-# locale string cannot be parsed back. The sender is stripped of raw framing bytes (the
-# shared STRIP_FRAMING handler) before being joined, so a display name that happens to
-# contain a literal US/RS char can't desync the split in _quote_facts. The body `c` is
-# the LAST field and needs no stripping for parse-safety (sanitize_block strips control
-# chars from it in _quote_facts). A missing date leaves its five fields empty; the
-# attribution line is then written without a date.
+# the native reply (#42/#46, #348): fetch the original's Mail-internal id, sender,
+# received date and plaintext by message-id (US-framed, eight fields). The flow takes
+# the original's last words from it (what must follow the reply text for Mail's own
+# quote to count as confirmed) and Mail's attribution line (which the Drafts sweep
+# allows after the call's text); nothing is quoted from it any more: Mail builds the
+# quote itself. The internal id is what `_REPLY_OPEN` opens the reply by (`«class
+# mssg» id n`, 4-12 ms on any mailbox size, spike 006), so the O(mailbox) `whose
+# message id` scan happens HERE, before the sweep's baseline, and never between the
+# baseline and the `reply` verb. A fourth argument "0" skips the body
+# (`include_quote=False` needs only the id). The date travels as five integers (#348):
+# Mail's attribution line wants the Mac's own date and time format, which only
+# Foundation gives (runtime.mail_attribution_stamp), and a locale string cannot be
+# parsed back. The sender is stripped of raw framing bytes (the shared STRIP_FRAMING
+# handler) before being joined, so a display name that happens to contain a literal
+# US/RS char can't desync the split in _quote_facts. The body `c` is the LAST field
+# and needs no stripping for parse-safety (sanitize_block strips control chars from it
+# in _quote_facts). A missing date leaves its five fields empty; the attribution line
+# is then written without a date.
 _ORIGINAL = (
     STRIP_FRAMING
     + "\n\n"
@@ -418,6 +423,7 @@ _ORIGINAL = (
 on run argv
   set mid to item 1 of argv
   set mb to my mailboxFor(item 2 of argv, item 3 of argv)
+  set wantText to ((count of argv) < 4) or ((item 4 of argv) is not "0")
   set us to character id 31
   with timeout of 120 seconds
   tell application "Mail"
@@ -433,9 +439,12 @@ on run argv
       set dp to "" & (year of d) & us & ((month of d) as integer) & us & (day of d) ¬
         & us & (hours of d) & us & (minutes of d)
     end if
-    set c to content of m
-    if c is missing value then set c to ""
-    return (my stripFraming(snd)) & us & dp & us & c
+    set c to ""
+    if wantText then
+      set c to content of m
+      if c is missing value then set c to ""
+    end if
+    return "" & (id of m) & us & (my stripFraming(snd)) & us & dp & us & c
   end tell
   end timeout
 end run"""
@@ -481,7 +490,13 @@ end run"""
 # error path rolls the reply back (verified, only -1728 counts). There is NO retry on
 # zero: the device listed the reply window at once in all 43 opens, and a second read
 # after a delay could bind a window the OWNER opened in that second (a hand reply, with
-# focus in its body) and paste into it. Returns `outgoing-id US window-id`.
+# focus in its body) and paste into it. The original is addressed by its Mail-internal
+# id from `_ORIGINAL` (`«class mssg» id n of mb`, no `whose` scan: the Drafts sweep's
+# claim window starts at the `reply` verb, so nothing slow may run before it), and its
+# `message id` is re-read and compared first: a mismatch (the id names another message
+# now) is an error BEFORE any reply exists. Returns `outgoing-id US window-id US
+# sender`; the sender (the From address of the reply, read while the reply exists) is
+# "" when Mail does not answer it, and the sweep then proves nothing.
 _REPLY_OPEN = (
     ROLLBACK
     + "\n\n"
@@ -504,23 +519,33 @@ on newWindowIds(idsBefore, idsAfter)
 end newWindowIds
 
 on run argv
-  set mid to item 1 of argv
+  set n to (item 1 of argv) as integer
   set mb to my mailboxFor(item 2 of argv, item 3 of argv)
   set doAll to ((item 4 of argv) is "1")
+  set expected to item 5 of argv
   set us to character id 31
   with timeout of 120 seconds
   tell application "Mail"
-    set matches to (messages of mb whose message id is mid)
-    if (count of matches) is 0 then error ¬
-      "no message with that message id in " & (item 3 of argv)
+    set m to «class mssg» id n of mb
+    set gotId to "<<unreadable>>"
+    try
+      set gotId to message id of m
+    end try
+    if gotId is not expected then error ¬
+      "the original is no longer the message at Mail's id " & n & " in " & ¬
+      (item 3 of argv)
     set idsBefore to id of every window
-    set r to reply (item 1 of matches) opening window yes reply to all doAll
+    set r to reply m opening window yes reply to all doAll
     try
       set found to my newWindowIds(idsBefore, id of every window)
       if (count of found) is not 1 then error ¬
         "could not tell which window is the reply (" & (count of found) & ¬
         " new windows)"
-      return ((id of r) as text) & us & ((item 1 of found) as text)
+      set snd to ""
+      try
+        set snd to (sender of r) as text
+      end try
+      return ((id of r) as text) & us & ((item 1 of found) as text) & us & snd
     on error errMsg
       if my rollback(r) then
         error errMsg
@@ -587,6 +612,66 @@ on run argv
       if (count of cands) > 1 then return "several"
       if my rollback(outgoing message id (item 1 of cands)) then return "dead"
       return "alive"
+    end tell
+  end timeout
+end run"""
+)
+
+
+# Which account SENDS the reply (facts 4e `Refusal cleanup` (3)): every account's id
+# (the UUID that mailboxes.url embeds) with its email addresses, US-framed, one
+# RS-ended record per account: `id US address US address RS`. Reads account properties
+# only, never a message; the sweep matches the reply's From address against it in
+# Python (case insensitive) and claims a Drafts row only in the one account that holds
+# it.
+_ACCOUNT_ADDRESSES = """on run argv
+  set us to character id 31
+  set rs to character id 30
+  set out to ""
+  with timeout of 120 seconds
+  tell application "Mail"
+    repeat with acc in accounts
+      set AppleScript's text item delimiters to us
+      set out to out & (id of acc) & us & ((email addresses of acc) as text) & rs
+    end repeat
+  end tell
+  end timeout
+  set AppleScript's text item delimiters to ""
+  return out
+end run"""
+
+# Does an earlier scripted compose window rule the sweep out? (facts 4e `Refusal
+# cleanup` (2)). Reads the subject of the original (by its Mail-internal id) and of
+# every outgoing message that was open at the start (`known`, comma-joined ids):
+# "clear" only when every one has a readable, non-empty subject that does NOT end with
+# the original's, the `_DISCARD_NEW_REPLY` predicate (a window that can autosave a
+# reply to THIS original carries "Re: <its subject>"). An empty original subject, and
+# a window that is gone or unreadable by now, answer "block": stricter, never looser.
+_BASELINE_CLEAR = (
+    mail_addressing.MAILBOX_REF
+    + """
+
+on run argv
+  set AppleScript's text item delimiters to ","
+  set ids to text items of (item 1 of argv)
+  set AppleScript's text item delimiters to ""
+  set n to (item 2 of argv) as integer
+  set mb to my mailboxFor(item 3 of argv, item 4 of argv)
+  with timeout of 120 seconds
+    tell application "Mail"
+      set subj to subject of («class mssg» id n of mb)
+      if subj is missing value or subj is "" then return "block"
+      repeat with oi in ids
+        set blocked to true
+        try
+          set s to subject of (outgoing message id ((contents of oi) as integer))
+          if s is not missing value and s is not "" then
+            if not (s ends with subj) then set blocked to false
+          end if
+        end try
+        if blocked then return "block"
+      end repeat
+      return "clear"
     end tell
   end timeout
 end run"""
@@ -885,35 +970,57 @@ _TAIL_WORDS = 6
 
 
 def _quote_facts(
-    message_id: str, mailbox_args: tuple[str, str], tool: str = "mail_reply"
-) -> tuple[str, str]:
-    """``(tail, attribution)`` of the original. The tail is its last words, squashed:
-    what must follow the reply text for Mail's quote to count as confirmed. An original
-    with no readable text has no tail, and the flow refuses before it creates anything.
-    The attribution is Mail's line for this original, which the Drafts sweep allows
-    after the call's text (facts 4e `Refusal cleanup`)."""
+    message_id: str,
+    mailbox_args: tuple[str, str],
+    tool: str = "mail_reply",
+    *,
+    quote: bool = True,
+) -> tuple[str | None, str | None, int]:
+    """``(tail, attribution, internal id)`` of the original. The tail is its last words,
+    squashed: what must follow the reply text for Mail's quote to count as confirmed. An
+    original with no readable text has no tail, and the flow refuses before it creates
+    anything. The attribution is Mail's line for this original, which the Drafts sweep
+    allows after the call's text (facts 4e `Refusal cleanup`). The internal id is what
+    the reply is opened by (``_REPLY_OPEN``). ``quote=False`` (no quote) reads the id
+    alone: tail and attribution are None."""
     raw = runtime.run_osascript(
-        _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
+        _ORIGINAL,
+        message_id,
+        *mailbox_args,
+        *(() if quote else ("0",)),
+        timeout=ORIGINAL_TIMEOUT,
     )
-    parts = raw.split(US, 6)
-    original = parts[6] if len(parts) == 7 else ""
-    words = squash_text(sanitize_block(original).replace("\ufffc", "")).split()
-    tail = " ".join(words[-_TAIL_WORDS:])
-    if not any(c.isalnum() for c in tail):  # the confirm compares letters and digits
+    parts = raw.split(US, 7)
+    tail = attribution = None
+    if quote:
+        original = parts[7] if len(parts) == 8 else ""
+        words = squash_text(sanitize_block(original).replace("\ufffc", "")).split()
+        tail = " ".join(words[-_TAIL_WORDS:])
+        if not any(
+            c.isalnum() for c in tail
+        ):  # the confirm compares letters and digits
+            raise ComposeRefused(
+                f"{tool} cannot confirm Mail's quote: the original has no readable "
+                "text, so there is nothing to check the quote against. Nothing was "
+                "created and nothing was sent. To reply without the quote, call "
+                f"{tool} with include_quote=False."
+            )
+        attribution = build_attribution(sanitize_line(parts[1]), _stamp(parts[2:7]))
+    if len(parts) != 8 or not parts[0].strip().isdigit():
         raise ComposeRefused(
-            f"{tool} cannot confirm Mail's quote: the original has no readable "
-            "text, so there is nothing to check the quote against. Nothing was "
-            "created and nothing was sent. To reply without the quote, call "
-            f"{tool} with include_quote=False."
+            f"{tool} could not read the original message from Mail. Nothing was "
+            "created and nothing was sent."
         )
-    sender, *date_parts, _ = parts
-    return tail, build_attribution(sanitize_line(sender), _stamp(date_parts))
+    return tail, attribution, int(parts[0])
 
 
-def _parse_open(raw: str) -> tuple[int, int]:
-    """``(outgoing id, window id)`` from ``_REPLY_OPEN``; ValueError otherwise."""
-    outgoing, window = raw.strip().split(US)
-    return int(outgoing), int(window)
+def _parse_open(raw: str) -> tuple[int, int, str]:
+    """``(outgoing id, window id, sender)`` from ``_REPLY_OPEN``; ValueError otherwise.
+    The sender (the reply's From, "" when Mail did not answer it) is the last field."""
+    # strip() eats a trailing US (Python counts it as whitespace): an empty sender is
+    # an absent third field, not an error
+    outgoing, window, *sender = raw.strip().split(US, 2)
+    return int(outgoing), int(window), "".join(sender).strip()
 
 
 _LEFT_OVER = (
@@ -986,7 +1093,8 @@ _SENT_COPY = {
 _SEND_UNSURE = (
     " (WARNING: the reply may have been sent. Check Mail's Outbox and Sent before "
     "retrying, so a retry cannot send twice. A reply window may still be open; close "
-    "it without sending.)"
+    "it without sending. A Drafts copy of the reply may also be left, in the Drafts "
+    "mailbox of the account the reply is sent from; nothing was swept.)"
 )
 
 # Owner decision 2026-11-01 (rollback-sweep): a refusal after the window opened waits
@@ -999,6 +1107,12 @@ SWEEP_AFTER_S = 45.0
 # long. The sitting proved reads 35 s or more after the discard (discards at 1.9 to
 # 10 s, reads at +45 s); a read right after a late discard is the case it never tested.
 SWEEP_GAP_S = 30.0
+
+# The longest span from the baseline read (just before the `reply` verb) to the moment
+# the window went (the discard, or the send, answered) in which a Drafts row may still
+# be claimed: the open's own timeout. A longer span means Mail stalled, and the
+# owner's own hand draft could have landed in it (facts 4e `Refusal cleanup` (3)).
+CLAIM_SPAN_S = ORIGINAL_TIMEOUT
 
 
 def _wait_until(deadline: float) -> None:
@@ -1022,9 +1136,12 @@ class _ReplyFlow:
         attribution: str | None,
         tail: str | None,
         tool: str = "mail_reply",
+        original_id: int = 0,
     ):
         self.tool = tool  # the tool whose errors these are
         self.message_id, self.mailbox_args = message_id, mailbox_args
+        # Mail's internal id of the original (the reply is opened by it)
+        self.original_id = original_id
         self.text, self.baseline = text, baseline
         # the highest message row before the window opened (None: index unreadable),
         # Mail's attribution line and the last words of the original (None: a reply
@@ -1035,6 +1152,9 @@ class _ReplyFlow:
         # is not proven the window's own
         self.landed_by: int | None = None
         self.outgoing_id: int | None = None
+        self.sender = ""  # the reply's From, read while the reply exists
+        # the baseline read was just taken: no reply window exists yet
+        self.started_at = time.monotonic()
         self.opened_at: float | None = None
         self.discarded_at: float | None = None
         self.stage = "open"
@@ -1075,6 +1195,54 @@ class _ReplyFlow:
         except Exception:  # noqa: BLE001 - None: nothing can be proven the window's
             self.landed_by = None
 
+    def _may_claim(self, url: str) -> bool:
+        """The flow's own conditions for deleting the one row ``find_own_draft`` proved
+        (the selector cannot know them). Cheapest first; any doubt is False."""
+        return (
+            self.discarded_at is not None
+            and self.discarded_at - self.started_at <= CLAIM_SPAN_S
+            and self._sent_from(url)
+            and self._baseline_clear()
+        )
+
+    def _sent_from(self, url: str) -> bool:
+        """The row sits in the account whose email addresses hold the reply's From
+        address: one account, read once (a claim is made once per call, so there is
+        nothing to cache). An unreadable From, an unknown or shared address, or a failed
+        read is False: a family account's Drafts is never a candidate."""
+        addr = _bare_address(self.sender).lower()
+        account = mailbox_url.account(url)
+        if not addr or not account:
+            return False
+        try:
+            raw = runtime.run_osascript(_ACCOUNT_ADDRESSES, timeout=ORIGINAL_TIMEOUT)
+        except Exception:  # noqa: BLE001 - nothing proven
+            return False
+        owners = []
+        for record in raw.split(RS):
+            uuid, *held = record.split(US)
+            if addr in {a.strip().lower() for a in held}:
+                owners.append(uuid.strip().casefold())
+        return owners == [account.casefold()]
+
+    def _baseline_clear(self) -> bool:
+        """No scripted compose window that was open at the start can autosave a reply
+        to THIS original (``_BASELINE_CLEAR``: its subject does not end with the
+        original's). Nothing open at the start is clear without a read."""
+        if not self.baseline:
+            return True
+        try:
+            raw = runtime.run_osascript(
+                _BASELINE_CLEAR,
+                self.baseline,
+                str(self.original_id),
+                *self.mailbox_args,
+                timeout=ORIGINAL_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001 - nothing proven
+            return False
+        return raw.strip() == "clear"
+
     def sweep(self, *, sent: bool = False) -> str:
         """The Drafts sweep (rollback-sweep): ``removed`` (the call's own autosave copy
         was found and deleted), ``none`` (no copy 45 s after the window opened),
@@ -1082,11 +1250,12 @@ class _ReplyFlow:
         that has not landed), ``unproven`` (a copy is there that cannot be proven the
         call's own, the delete was not confirmed, or the read failed) or
         ``unavailable`` (the index cannot be read). Every new message row is read, in
-        any mailbox: the copy lands in the Drafts of the account the reply is sent
-        from. A copy is deleted only when no other scripted compose window was open at
-        the start (``baseline``): a window of an earlier call can autosave the same
-        text for the same original (facts 4e `Refusal cleanup`). ``sent``: the reply was
-        sent, so its own Sent copies are set aside (``find_own_draft``)."""
+        any mailbox. A copy is deleted only when ``_may_claim`` holds (facts 4e
+        `Refusal cleanup` (2), (3)): the window went within ``CLAIM_SPAN_S`` of the
+        baseline read, the row sits in the account the reply is SENT FROM, and no
+        other scripted compose window for this original was open at the start
+        (``baseline``). ``sent``: the reply was sent, so its own Sent copies are set
+        aside (``find_own_draft``)."""
         if self.index_top is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
@@ -1109,7 +1278,7 @@ class _ReplyFlow:
             discarded = self.discarded_at
             late = discarded is None or read_at - discarded < SWEEP_GAP_S
             return "late" if late else "none"
-        if found.kind != "one" or self.baseline:
+        if found.kind != "one" or not self._may_claim(found.url):
             return "unproven"
         try:
             answer = runtime.run_osascript(
@@ -1205,10 +1374,9 @@ def open_reply_with_text(
                 f"in {ACCESSIBILITY_PANE}. Nothing was created and nothing was sent. "
                 "Do not retry until the next user message."
             )
-        tail, attribution = (
-            (None, None)
-            if replace_all
-            else _quote_facts(message_id, mailbox_args, tool)
+        # the one O(mailbox) scan runs here, before the sweep's baseline
+        tail, attribution, original_id = _quote_facts(
+            message_id, mailbox_args, tool, quote=not replace_all
         )
         baseline = runtime.run_osascript(_OUTGOING_IDS, timeout=ORIGINAL_TIMEOUT)
         flow = _ReplyFlow(
@@ -1220,21 +1388,23 @@ def open_reply_with_text(
             attribution,
             tail,
             tool,
+            original_id,
         )
         try:
             try:
                 raw = runtime.run_osascript(
                     _REPLY_OPEN,
-                    message_id,
+                    str(original_id),
                     *mailbox_args,
                     "1" if reply_all else "0",
+                    message_id,
                     timeout=ORIGINAL_TIMEOUT,
                 )
             finally:
                 # the window may have opened at any time before the call returned or
                 # failed: this is the latest it can have been (the sweep waits from it)
                 flow.opened_at = time.monotonic()
-            outgoing_id, window_id = _parse_open(raw)
+            outgoing_id, window_id, flow.sender = _parse_open(raw)
             flow.outgoing_id, flow.stage = outgoing_id, "insert"
             runtime.compose_insert(
                 window_id,
@@ -1242,6 +1412,7 @@ def open_reply_with_text(
                 replace_all=replace_all,
                 quote_tail=tail,
                 rollback=flow.discard,
+                tool=tool,
             )
         except Exception as exc:
             raise flow.refusal(exc) from exc

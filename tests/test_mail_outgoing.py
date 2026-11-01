@@ -466,6 +466,8 @@ _REPLY_FLOW = (
     "_REPLY_OPEN",
     "_DISCARD_OUTGOING",
     "_DISCARD_NEW_REPLY",
+    "_ACCOUNT_ADDRESSES",
+    "_BASELINE_CLEAR",
 )
 
 
@@ -484,7 +486,7 @@ def test_reply_open_never_writes_content():
 def test_reply_open_binds_the_new_window():
     script = mail_outgoing._REPLY_OPEN
     before = script.index("id of every window")
-    verb = script.index("reply (item 1 of matches)")
+    verb = script.index("reply m opening window yes")
     after = script.index("id of every window", verb)
     assert before < verb < after  # B1: ids before the verb and again after it
     assert "id of window 1" not in script  # never the front window by index
@@ -494,6 +496,8 @@ def test_reply_open_binds_the_new_window():
     assert "count of found) is not 1" in script
     assert script.index("count of found) is not 1") < script.index("my rollback(r)")
     assert "(id of r)" in script  # returns the outgoing id beside the window id
+    # ... and the From of the reply, read while the reply exists (never a failure)
+    assert "sender of r" in script
 
 
 def test_reply_open_binds_only_from_closeable_new_windows():
@@ -530,16 +534,16 @@ def test_quote_tail_refuses_an_original_with_no_letter_or_digit_to_compare(
     # the confirm compares letters and digits: a tail of marks only would match anything
     from macos_apps_mcp.errors import ComposeRefused
 
-    raw = US.join(["a", "b", "c", "d", "e", "f", "-- ... --"])
+    raw = US.join(["5", "a", "b", "c", "d", "e", "f", "-- ... --"])
     monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
     with pytest.raises(ComposeRefused, match="no readable text"):
         mail_outgoing._quote_facts("mid", ("x", "y"))
-    raw = US.join(["a", "b", "c", "d", "e", "f", "see example.com."])
+    raw = US.join(["5", "a", "b", "c", "d", "e", "f", "see example.com."])
     monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
-    tail, attribution = mail_outgoing._quote_facts("mid", ("x", "y"))
+    tail, attribution, _ = mail_outgoing._quote_facts("mid", ("x", "y"))
     assert tail == "see example.com."
     assert attribution == "a wrote:"  # an unreadable date: the line has no date
-    raw = US.join(["Jane <j@x.com>", "2026", "7", "1", "14", "39", "last words"])
+    raw = US.join(["5", "Jane <j@x.com>", "2026", "7", "1", "14", "39", "last words"])
     monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
     assert mail_outgoing._quote_facts("mid", ("x", "y"))[1] == (
         "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"  # the date stamp is faked

@@ -64,9 +64,8 @@ TRASH_SUFFIXES = tuple(_like_leaf(leaf) for leaf, is_trash, _ in _SPECIALS if is
 # an Exchange account doesn't silently vanish from the awaiting-reply scan.
 # Final-segment-anchored like TRASH_SUFFIXES, and for the same reason: a user
 # folder named `Sentimental` must not read as a Sent mailbox.
-SENT_SUFFIXES = tuple(
-    _like_leaf(leaf) for leaf in ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
-)
+SENT_LEAVES = ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
+SENT_SUFFIXES = tuple(_like_leaf(leaf) for leaf in SENT_LEAVES)
 
 
 def rank_case(col: str) -> str:

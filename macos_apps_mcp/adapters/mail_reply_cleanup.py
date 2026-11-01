@@ -24,18 +24,25 @@ any account. "No copy" therefore means no new row anywhere threads to the origin
 
 **Selector** (a design rule, run as one step on device only in 05.2-13): a new row
 whose ``In-Reply-To`` header is the original. A hand reply to the same original matches
-too, so the copy is claimed (``one``, and so deleted) only when ALL of these hold:
-exactly one row matches and nothing new was unreadable; the flow's baseline of open
-compose windows was empty (the flow checks that: another scripted window could hold the
-same text); the row is not above the index top read right after the discard answered
-(``landed_by``: a row that landed after the window was gone is not proven the window's
-own); it has a Message-ID; it sits in a mailbox that is named ``Drafts`` / ``Draft``
-(directly under the account or under ``[Gmail]`` / ``[Google Mail]``); the squashed text
-before its quote EQUALS the call's own full squashed text, optionally followed by Mail's
-own attribution line for this original; AND it carries the original's quote (its tail,
-by letters and digits, as the insert's confirmation compares it), or, for a reply
-without a quote, nothing at all after the text. Anything else is ``unproven``: reported
-with the refusal, never deleted.
+too, so the copy is claimed (``one``) only when ALL of these hold: exactly one row
+matches and nothing new was unreadable; the row is not above the index top read right
+after the discard answered (``landed_by``: a row that landed after the window was gone
+is not proven the window's own); it has a Message-ID; it sits in a mailbox that is named
+``Drafts`` / ``Draft`` (directly under the account or under ``[Gmail]`` /
+``[Google Mail]``); the squashed text before its quote EQUALS the call's own full
+squashed text, optionally followed by Mail's own attribution line for this original; AND
+it carries the original's quote and nothing after it (its tail, by letters and digits,
+as the insert's confirmation compares it, is the LAST thing in the draft), or, for a
+reply without a quote, nothing at all after the text. Anything else is ``unproven``:
+reported with the refusal, never deleted.
+
+The selector reads the index and the files only. The flow adds what it alone knows
+before it deletes the claimed row (``mail_outgoing._ReplyFlow._may_claim``): the span
+from the baseline read to the discard is within the open's timeout; the row is in the
+account the reply is sent from (the From of the outgoing message, matched to the one
+account that holds that address); and no scripted compose window for this original was
+open at the start. The baseline read comes right before the ``reply`` verb, after the
+slow lookup of the original, so a row that landed during that lookup is never new.
 
 **After a send** (``reply_all``, owner decision 2026-11-01) the same sweep runs once the
 window is gone. The sent message creates rows of its own, threaded to the original: its
@@ -159,9 +166,6 @@ def _is_drafts_url(url: str) -> bool:
     return len(parts) == 1 or (len(parts) == 2 and parts[0] in _GOOGLE_ROOTS)
 
 
-_SENT_NAMES = ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
-
-
 def _is_sent_url(url: str) -> bool:
     """A mailbox that holds the SENT message's own copy: a ``Sent`` folder under its
     account or under Google's root (``Sent Messages``, ``[Gmail]/Sent Mail``,
@@ -172,7 +176,7 @@ def _is_sent_url(url: str) -> bool:
     nested = len(parts) == 2 and parts[0] in _GOOGLE_ROOTS
     if parts[-1] == "All Mail":
         return nested
-    return parts[-1] in _SENT_NAMES and (len(parts) == 1 or nested)
+    return parts[-1] in mailbox_url.SENT_LEAVES and (len(parts) == 1 or nested)
 
 
 def _shard(rowid: int) -> str:
@@ -278,12 +282,13 @@ def _is_own(before_quote: str, own_text: str, attribution: str | None) -> bool:
 
 
 def _has_quote(after_quote: str, tail: str | None) -> bool:
-    """A quoted reply carries the original's tail after the text, compared the way the
-    insert's confirmation does (letters and digits only); a reply without a quote
-    (``tail`` None) has nothing after the text."""
+    """A quoted reply carries the original's tail after the text and NOTHING after the
+    tail (the call pastes only at the top, so its own copy never has a PS below the
+    quote), compared the way the insert's confirmation does (letters and digits only);
+    a reply without a quote (``tail`` None) has nothing after the text."""
     if tail is None:
         return not after_quote
-    return runtime._alnum(tail) in runtime._alnum(after_quote)
+    return runtime._alnum(after_quote).endswith(runtime._alnum(tail))
 
 
 def find_own_draft(
