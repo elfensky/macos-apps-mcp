@@ -519,3 +519,68 @@ def test_index_top_is_none_when_rowid_is_not_autoincrement(index):
         "deleted INT NOT NULL DEFAULT 0)"
     )
     assert mail_reply_cleanup.index_top() is None
+
+
+# --- the sent message's own copies (reply_all, owner decision 2026-11-01) --------
+
+_SENT = f"imap://{_ACCT}/Sent%20Messages"
+_ALL_MAIL = f"imap://{_ACCT}/%5BGmail%5D/All%20Mail"
+_OWN = "<div>Hi there</div>" + _QUOTE_HTML
+
+
+def test_find_own_draft_treats_the_sent_copies_as_the_send_only_after_a_send(
+    mailroot, monkeypatch
+):
+    # a refusal sent nothing, so a threaded row outside Drafts is never explained away
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "d@x", _OWN, url=_SENT)
+    mailroot(22, _ORIGINAL, "d@x", _OWN, url=_ALL_MAIL)
+    rows = [(20, _URL), (21, _SENT), (22, _ALL_MAIL)]
+    assert _find(monkeypatch, rows).kind == "unproven"
+    got = _find(monkeypatch, rows, sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def test_find_own_draft_after_a_send_with_only_the_sent_copy_finds_no_draft(
+    mailroot, monkeypatch
+):
+    mailroot(21, _ORIGINAL, "s@x", _OWN, url=_SENT)
+    got = _find(monkeypatch, [(21, _SENT)], sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize(
+    "body, url",
+    [
+        ("<div>Something else</div>" + _QUOTE_HTML, _SENT),  # another text
+        ("<div>Hi there, Jane</div>" + _QUOTE_HTML, _SENT),  # only starts with ours
+        ("<div>Hi there</div>", _SENT),  # the quote is gone
+        (_OWN, f"imap://{_ACCT}/Projects/Drafts"),  # a user folder, still not ours
+    ],
+)
+def test_find_own_draft_after_a_send_still_reports_any_other_threaded_row(
+    mailroot, monkeypatch, body, url
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "s@x", body, url=url)
+    got = _find(monkeypatch, [(20, _URL), (21, url)], sent_twins=True)
+    assert got.kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_needs_a_message_id_on_the_sent_copy(
+    mailroot, monkeypatch
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "", _OWN, url=_SENT)
+    got = _find(monkeypatch, [(20, _URL), (21, _SENT)], sent_twins=True)
+    assert got.kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_never_lets_a_second_drafts_row_pass(
+    mailroot, monkeypatch
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "e@x", _OWN)  # a second copy in Drafts
+    mailroot(22, _ORIGINAL, "d@x", _OWN, url=_SENT)
+    rows = [(20, _URL), (21, _URL), (22, _SENT)]
+    assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"

@@ -22,6 +22,8 @@ from macos_apps_mcp.errors import NativeError, UnsupportedPlatform
 _REAL_RUN_OSASCRIPT = runtime.run_osascript
 _REAL_TRACKED_RUN = runtime.tracked_run
 _REAL_MAIL_ATTRIBUTION_STAMP = getattr(runtime, "mail_attribution_stamp", None)
+_REAL_ACCESSIBILITY_TRUSTED = runtime.accessibility_trusted
+_REAL_COMPOSE_INSERT = runtime.compose_insert
 
 
 @pytest.fixture
@@ -74,6 +76,18 @@ def test_mail_attribution_stamp_refuses(linux):
     # Foundation is None off macOS; run_native refuses before the formatter runs.
     with pytest.raises(UnsupportedPlatform):
         _REAL_MAIL_ATTRIBUTION_STAMP(datetime(2026, 10, 13, 14, 39))
+
+
+def test_gui_seams_refuse_off_macos(linux, monkeypatch):
+    # the two seams of the native reply (#348) load no framework off macOS: the
+    # dispatch refuses before any AX, CoreGraphics or pasteboard call
+    monkeypatch.setattr(
+        runtime, "_ax_lib", lambda: pytest.fail("no framework call off macOS")
+    )
+    with pytest.raises(UnsupportedPlatform):
+        _REAL_ACCESSIBILITY_TRUSTED()
+    with pytest.raises(UnsupportedPlatform):
+        _REAL_COMPOSE_INSERT(1, "x")
 
 
 def test_diagnose_refuses(linux, monkeypatch):

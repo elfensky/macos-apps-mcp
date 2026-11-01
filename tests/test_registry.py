@@ -115,7 +115,7 @@ _DEVELOP_PERMISSION = {
     "mail_duplicates": "Full Disk Access",
     "update_mail_status": "Automation",
     "send_mail": "Automation",
-    "reply_all": "Automation",
+    "reply_all": ("Automation", "Accessibility"),
     "forward_mail": "Automation",
     "notes": "Automation",
     "notes_all": "Automation",
