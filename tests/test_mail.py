@@ -2360,10 +2360,12 @@ class _ReplyRig:
         self.insert_hook = kw.pop("insert_hook", None)
         # the Drafts sweep: the index top, a fake clock and wait, a fake index reader
         top = kw.pop("top", 7)
+        top_after = kw.pop("top_after", None)  # the index top right after the discard
         found = kw.pop("found", None) or mail_reply_cleanup.Draft("none")
         assert not kw, kw
         self.waits: list[float] = []
         self.found_args: list = []
+        self.found_kw: list = []
         self.threads: list[str] = []
         self.clock = [
             100.0
@@ -2381,14 +2383,19 @@ class _ReplyRig:
             mail_outgoing, "time", SimpleNamespace(monotonic=lambda: self.clock[0])
         )
 
+        tops = [top, top_after if top_after is not None else top]
+
         def index_top():
+            # the first read is the baseline before the open, the next ones follow
+            # the discard (the flow takes one right after the discard answers)
             self.calls.append(("index_top",))
-            return top
+            return tops[0] if len(self.calls_of("index_top")) == 1 else tops[1]
 
         monkeypatch.setattr(mail_reply_cleanup, "index_top", index_top)
 
-        def find(top, mid, text, attribution):
+        def find(top, mid, text, attribution, **kw):
             self.found_args.append((top, mid, text, attribution))
+            self.found_kw.append(kw)
             if isinstance(found, Exception):
                 raise found
             return found
@@ -2432,6 +2439,9 @@ class _ReplyRig:
 
     def names(self):
         return [c[0] for c in self.calls]
+
+    def calls_of(self, name):
+        return [c for c in self.calls if c[0] == name]
 
     def call(self, name):
         return next(c for c in self.calls if c[0] == name)
@@ -2574,9 +2584,13 @@ _REPLY_FOLDER = f"imap://{_GMAIL_UUID}/INBOX"  # a folder token names the accoun
 
 
 class _SweepRig(_ReplyRig):
-    """The reply rig, whose Drafts sweep finds one proven copy by default."""
+    """The reply rig, whose Drafts sweep finds one proven copy by default, with no
+    other compose window open at the start (an empty ``_OUTGOING_IDS`` baseline) and an
+    index top after the discard that is above every row a test stores."""
 
     def __init__(self, monkeypatch, found=None, **kw):
+        kw["answers"] = {"_OUTGOING_IDS": "", **kw.get("answers", {})}
+        kw.setdefault("top_after", 1000)
         super().__init__(
             monkeypatch,
             found=found or mail_reply_cleanup.Draft("one", _DRAFTS_URL, "<d@x>"),
@@ -2798,6 +2812,9 @@ def test_reply_sweep_trusts_a_read_that_follows_the_discard_by_the_proven_gap(
 
 _ATTRIBUTION_LINE = "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"  # from _ORIGINAL
 _ATTRIBUTION_HTML = "On 1 Jul 2026, at 14:39, Jane &lt;j@x.com&gt; wrote:"
+_QUOTE_HTML = (
+    f"<blockquote>{_ORIGINAL_TEXT}</blockquote>"  # carries the original's tail
+)
 
 
 def _real_selector(monkeypatch, *stored):
@@ -2811,13 +2828,13 @@ def _real_selector(monkeypatch, *stored):
         _, body, kind = stored[rowid - 8]
         msg = email.message.EmailMessage(policy=email.policy.default)
         msg.set_content(body, subtype=kind)
-        return ("<abc@x>", f"<own{rowid}@x>", msg)
+        return ("<abc@x>", f"<own{rowid}@x>", lambda: msg)
 
     monkeypatch.setattr(mail_reply_cleanup, "_read_draft", read)
 
 
-def _refuse_with(monkeypatch, text="Hi", folder=_REPLY_FOLDER):
-    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+def _refuse_with(monkeypatch, text="Hi", folder=_REPLY_FOLDER, **kw):
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"), **kw)
     return rig, folder, text
 
 
@@ -2870,9 +2887,9 @@ def test_reply_flow_deletes_the_copy_that_is_exactly_its_text_and_mails_attribut
     # after the call's text
     rig, folder, text = _refuse_with(monkeypatch)
     if kind == "html":
-        body = f"<div>Hi</div><div>{_ATTRIBUTION_HTML}</div><blockquote>q</blockquote>"
+        body = f"<div>Hi</div><div>{_ATTRIBUTION_HTML}</div>{_QUOTE_HTML}"
     else:
-        body = f"Hi\n\n{_ATTRIBUTION_LINE}\n> q\n"
+        body = f"Hi\n\n{_ATTRIBUTION_LINE}\n> {_ORIGINAL_TEXT}\n"
     _real_selector(monkeypatch, (_DRAFTS_URL, body, kind))
     msg = _run_refused(rig, folder, text)
     _, argv, _ = rig.call("_SWEEP_DELETE")
@@ -2885,7 +2902,7 @@ def test_reply_flow_deletes_a_copy_in_the_account_the_reply_is_sent_from(monkeyp
     # and Mail files the autosave in that account's Drafts. The copy is the call's own.
     other = "imap://77777777-6666-5555-4444-333333333333/Drafts"
     rig, folder, text = _refuse_with(monkeypatch)
-    _real_selector(monkeypatch, (other, "<div>Hi</div>", "html"))
+    _real_selector(monkeypatch, (other, "<div>Hi</div>" + _QUOTE_HTML, "html"))
     msg = _run_refused(rig, folder, text)
     _, argv, _ = rig.call("_SWEEP_DELETE")
     assert argv == ("own8@x", "77777777-6666-5555-4444-333333333333", "Drafts")
@@ -2901,6 +2918,176 @@ def test_reply_flow_reports_a_copy_in_a_localized_drafts_and_deletes_nothing(
     msg = _run_refused(rig, folder, text)
     assert "_SWEEP_DELETE" not in rig.names()
     assert "nothing was created" not in msg and "Drafts" in msg
+
+
+# --- rv532: ownership beyond equal text, retry, gap timing, refusal texts ---------
+
+
+def test_reply_sweep_deletes_nothing_when_another_compose_window_was_open(monkeypatch):
+    # a retry: the first call's reply window is still open and its OWN autosave (same
+    # original, same text) lands during this call's wait. The baseline lists that
+    # window, so no copy can be proven this call's own (facts 4e `Refusal cleanup`).
+    rig, msg = _refused_reply(monkeypatch, answers={"_OUTGOING_IDS": "28"})
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "was found and deleted" not in msg
+    assert "may NOT be fully removed" in msg and "Drafts" in msg
+
+
+def test_reply_sweep_that_finds_no_copy_still_says_so_beside_an_open_window(
+    monkeypatch,
+):
+    # no new row threads to the original anywhere: that is true whoever else is open
+    _, msg = _refused_reply(
+        monkeypatch,
+        found=mail_reply_cleanup.Draft("none"),
+        answers={"_OUTGOING_IDS": "28"},
+    )
+    assert "nothing was created" in msg
+
+
+def test_reply_flow_hands_the_selector_the_tail_and_the_top_after_the_discard(
+    monkeypatch,
+):
+    rig, _ = _refused_reply(monkeypatch, top_after=55)
+    assert rig.found_kw == [{"tail": _TAIL, "landed_by": 55}]
+    # the second index read follows the discard answer (the first is the baseline)
+    names = rig.names()
+    assert names.count("index_top") == 2
+    assert names.index("_DISCARD_OUTGOING") < len(names) - 1 - names[::-1].index(
+        "index_top"
+    )
+    assert names.index("index_top") < names.index("_REPLY_OPEN")
+    # a reply without a quote has no tail: nothing may follow the text
+    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    with pytest.raises(ComposeRefused):
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi", include_quote=False)
+    assert rig.found_kw[0]["tail"] is None
+
+
+def test_reply_flow_reads_the_top_once_even_when_the_discard_runs_twice(monkeypatch):
+    # compose_insert rolls back through the callback, then the outer refusal discards
+    # again: the second call returns the first answer and reads nothing
+    rig = _SweepRig(
+        monkeypatch,
+        insert_hook=lambda kw: kw["rollback"](),
+        insert_error=ComposeRefused("confirmation: no"),
+    )
+    with pytest.raises(ComposeRefused):
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    assert rig.names().count("index_top") == 2
+
+
+def test_reply_flow_with_an_unreadable_top_after_the_discard_proves_nothing(
+    monkeypatch,
+):
+    rig, folder, text = _refuse_with(monkeypatch, top_after=None)
+    # the baseline was readable (7), the read after the discard is not
+    monkeypatch.setattr(
+        mail_reply_cleanup,
+        "index_top",
+        iter([7, None]).__next__,
+    )
+    _real_selector(monkeypatch, (_DRAFTS_URL, "<div>Hi</div>" + _QUOTE_HTML, "html"))
+    msg = _run_refused(rig, folder, text)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg
+
+
+_FAMILY_DRAFTS = "imap://77777777-6666-5555-4444-333333333333/Drafts"
+_OWN_BODY = "<div>Hi</div>" + _QUOTE_HTML
+
+
+_PLAIN_RETYPE = f"Hi\n\n{_ATTRIBUTION_LINE}\n> {_ORIGINAL_TEXT}\n"
+_LOOKALIKES = [
+    # a family member's draft with the same text, in her own Drafts
+    (_FAMILY_DRAFTS, _OWN_BODY, "html"),
+    # the owner's plain-text retype of the same text, after the window flashed shut
+    (_DRAFTS_URL, _PLAIN_RETYPE, "plain"),
+]
+_WRONG_SHAPES = [
+    # the same text with a trimmed quote, or none
+    (_DRAFTS_URL, "<div>Hi</div><blockquote>owner trimmed it</blockquote>", "html"),
+    (_DRAFTS_URL, "<div>Hi</div>", "html"),
+    # a user folder with a bracketed name
+    (f"imap://{_GMAIL_UUID}/%5BArchive%202019%5D/Drafts", _OWN_BODY, "html"),
+]
+
+
+def _lookalike_flow(monkeypatch, url, body, kind, top_after):
+    rig, folder, text = _refuse_with(monkeypatch, top_after=top_after)
+    _real_selector(monkeypatch, (url, body, kind))
+    return rig, _run_refused(rig, folder, text)
+
+
+@pytest.mark.parametrize("url, body, kind", _LOOKALIKES + _WRONG_SHAPES)
+def test_reply_flow_never_deletes_a_draft_that_landed_after_the_discard(
+    monkeypatch, url, body, kind
+):
+    # row 8 is above the index top read right after the discard (7): it landed once
+    # the window was gone, so whatever its text, it is not proven the window's own
+    rig, msg = _lookalike_flow(monkeypatch, url, body, kind, top_after=7)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "was found and deleted" not in msg
+    assert "may NOT be fully removed" in msg
+
+
+@pytest.mark.parametrize("url, body, kind", _WRONG_SHAPES)
+def test_reply_flow_never_deletes_a_copy_without_the_calls_text_and_quote_in_drafts(
+    monkeypatch, url, body, kind
+):
+    # even when the row predates the discard: a trimmed or removed quote, or a Drafts
+    # that is a user folder, is not the call's own copy
+    rig, msg = _lookalike_flow(monkeypatch, url, body, kind, top_after=1000)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert "nothing was created" not in msg and "may NOT be fully removed" in msg
+
+
+def test_reply_sweep_counts_its_gap_to_the_read_not_to_the_end_of_the_read(
+    monkeypatch,
+):
+    # the discard ran at +16 s; the read starts at +45 s (29 s later, under the proven
+    # gap) and takes 2 s. A gap measured after the read would call it 31 s and clean.
+    rig = _SweepRig(
+        monkeypatch,
+        found=mail_reply_cleanup.Draft("none"),
+        insert_error=ComposeRefused("confirmation: no"),
+    )
+
+    def stall(_kw):
+        rig.clock[0] += 16.0
+
+    rig.insert_hook = stall
+
+    real_find = mail_reply_cleanup.find_own_draft
+
+    def find(*args, **kw):
+        out = real_find(*args, **kw)
+        rig.clock[0] += 2.0  # the files of the new rows are read after the snapshot
+        return out
+
+    monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", find)
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    msg = str(exc.value)
+    assert "may still land" in msg and "nothing was created" not in msg
+
+
+def test_reply_refusal_after_a_proven_discard_does_not_send_the_user_to_a_window(
+    monkeypatch,
+):
+    # the window is gone (-1728 proof): only a Drafts copy may be left
+    _, msg = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft("unproven"))
+    assert "The reply window was discarded" in msg
+    assert "Look for the open reply window" not in msg
+    assert "may NOT be fully removed" in msg and "Drafts" in msg
+
+
+def test_reply_refusal_says_a_copy_was_deleted_when_the_discard_was_not_proven(
+    monkeypatch,
+):
+    _, msg = _refused_reply(monkeypatch, answers={"_DISCARD_OUTGOING": "alive"})
+    assert "was found and deleted" in msg and "may NOT be fully removed" in msg
+    assert "reply window" in msg and "nothing was created" not in msg
 
 
 @pytest.mark.parametrize("original", ["inbox", "imap://local-uuid/INBOX"])

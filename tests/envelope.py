@@ -69,8 +69,9 @@ CREATE TABLE recipients(
     type INT NOT NULL DEFAULT 0, position INT NOT NULL DEFAULT 0);
 CREATE TABLE attachments(ROWID INTEGER PRIMARY KEY, message INT, name TEXT);
 CREATE TABLE messages(
-    ROWID INTEGER PRIMARY KEY, subject INT, sender INT, global_message_id INT,
-    mailbox INT, date_received INT, date_sent INT, read INT, flagged INT,
+    ROWID INTEGER PRIMARY KEY AUTOINCREMENT, subject INT, sender INT,
+    global_message_id INT, mailbox INT, date_received INT, date_sent INT, read INT,
+    flagged INT,
     deleted INT NOT NULL DEFAULT 0, conversation_id INT,
     size INT NOT NULL DEFAULT 0,
     message_id INT NOT NULL DEFAULT 0,

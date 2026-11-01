@@ -734,11 +734,13 @@ def mail_reply(
     selection is left in Mail's message viewer). A refusal before the reply window
     opened leaves nothing. A refusal after it opened takes about 45 seconds: the call
     discards the reply, waits for Mail's autosave, and deletes a Drafts copy only when
-    that copy is provably its own (the text above Mail's quote is exactly yours). A
-    copy it cannot prove, or cannot look for (not exactly your text, a localized
-    Drafts, no Full Disk Access), is left alone: the error then says a copy MAY be
-    left. Look in the Drafts of the account the reply is sent from, and again after a
-    minute, because Mail saves its copy late. Only "nothing was created" is clean.
+    that copy is provably its own (it landed before the discard, the text above Mail's
+    quote is exactly yours, the quote is still there, and no other reply window was open
+    when the call started). A copy it cannot prove, or cannot look for (not exactly
+    your text, a localized Drafts, no Full Disk Access), is left alone: the error then
+    says a copy MAY be left. Look in the Drafts of the account the reply is sent from,
+    and again after a minute, because Mail saves its copy late. Only "nothing was
+    created" is clean.
     Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
     stable message-id.
 

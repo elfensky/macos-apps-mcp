@@ -26,8 +26,10 @@ surface may still shift between minor versions.
   refuses. A refusal after the reply window opened waits 45 seconds for Mail's autosave
   and deletes that Drafts copy, only when it is provably the call's own: a new reply to the
   same message, in a mailbox named Drafts (of whichever account the reply is sent from),
-  whose text above the quote is exactly yours. Anything else is left alone and the error
-  says where a copy may be left; only "nothing was created" is clean. `include_quote=False` replaces the whole body with your text. `reply_all` still
+  that landed before the discard, whose text above the quote is exactly yours and that
+  still carries the original's quote, and only when no other reply window was open when the
+  call started (a retry cannot delete the first call's copy). Anything else is left alone
+  and the error says where a copy may be left; only "nothing was created" is clean. `include_quote=False` replaces the whole body with your text. `reply_all` still
   sends a plain-text quote.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
   the first write, so a name that already exists, or two ids that derive one file name,

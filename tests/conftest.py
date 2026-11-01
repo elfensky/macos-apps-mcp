@@ -201,8 +201,11 @@ def blank_envelope(tmp_path, monkeypatch, envelope_mode):
     for a test that needs exact control over row counts (an arithmetic assertion,
     or a specific url list) that layering onto the canonical seed would shift.
     Still parametrized over ``envelope_mode``, so these queries get real
-    native+sidecar coverage too."""
-    db = tmp_path / "Envelope Index"
+    native+sidecar coverage too. The file sits where Mail keeps it
+    (``<mail root>/V10/MailData/Envelope Index``), so the ``V10`` folder beside it is
+    the tree of the ``.emlx`` files this index describes."""
+    db = tmp_path / "V10" / "MailData" / "Envelope Index"
+    db.parent.mkdir(parents=True)
     conn = sqlite3.connect(db)
     conn.executescript(SCHEMA)
     conn.commit()
