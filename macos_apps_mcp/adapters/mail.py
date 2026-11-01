@@ -1316,10 +1316,21 @@ class MailAdapter:
         dry_run: bool = True,
     ) -> dict:
         """Reply-all to a message and SEND it. Mail's native reply verb sets the
-        threading headers; ``include_quote`` appends a plain-text quote (Mail's
-        `On <date>, at <time>, <sender> wrote:` line and the whole original), built in
-        Python exactly as ``reply`` builds it (#348). The sending account is
+        threading headers and builds the reply; ``include_quote`` (the default) keeps
+        Mail's OWN quote of the original (quote bar, attribution line, formatting,
+        inline images) and puts the text on top of it through Accessibility (#348,
+        FIX-16, facts §4e). ``include_quote=False`` replaces the whole body with the
+        text, also through Accessibility. The reply opens in a Mail window that comes
+        to the front for about a second, and the clipboard is borrowed and restored.
+        The message is sent only after the text is confirmed in place; without
+        Accessibility, or when the reply window, the text or Mail's quote cannot be
+        confirmed, the call raises (``AccessibilityDenied`` / ``ComposeRefused``) and
+        sends nothing: there is no plain-text fallback. The sending account is
         inherited from the original message — the correct identity for a thread.
+        After the send Mail can leave an autosaved copy in Drafts; the call waits
+        until 45 s after the window opened and deletes that copy only when it is
+        provably its own (the result's ``drafts_copy`` says what it found; ``sent``
+        stays true whatever it finds).
 
         ``dry_run=True`` (default) reads the original and reports the reply's own ``to``
         (the sender, or its Reply-To) and ``cc`` (everyone else on the original minus

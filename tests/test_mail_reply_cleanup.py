@@ -556,6 +556,10 @@ def test_find_own_draft_after_a_send_with_only_the_sent_copy_finds_no_draft(
         ("<div>Hi there, Jane</div>" + _QUOTE_HTML, _SENT),  # only starts with ours
         ("<div>Hi there</div>", _SENT),  # the quote is gone
         (_OWN, f"imap://{_ACCT}/Projects/Drafts"),  # a user folder, still not ours
+        (_OWN, f"imap://{_ACCT}/Verzonden"),  # a localized Sent is not matched
+        (_OWN, f"imap://{_ACCT}/Concepten"),  # a localized Drafts leftover is reported
+        (_OWN, f"imap://{_ACCT}/Projects/Sent"),  # a user folder named Sent
+        (_OWN, f"imap://{_ACCT}/All%20Mail"),  # All Mail only under Google's root
     ],
 )
 def test_find_own_draft_after_a_send_still_reports_any_other_threaded_row(
@@ -584,3 +588,21 @@ def test_find_own_draft_after_a_send_never_lets_a_second_drafts_row_pass(
     mailroot(22, _ORIGINAL, "d@x", _OWN, url=_SENT)
     rows = [(20, _URL), (21, _URL), (22, _SENT)]
     assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_never_calls_a_localized_drafts_leftover_none(
+    mailroot, monkeypatch
+):
+    # the own autosave in a localized Drafts must not be taken for the Sent copy
+    url = f"imap://{_ACCT}/Concepten"
+    mailroot(20, _ORIGINAL, "d@x", _OWN, url=url)
+    assert _find(monkeypatch, [(20, url)], sent_twins=True).kind == "unproven"
+
+
+def test_sent_mailbox_names(monkeypatch):
+    sent = mail_reply_cleanup._is_sent_url
+    for name in ("Sent", "Sent%20Messages", "Sent%20Items", "%5BGmail%5D/Sent%20Mail"):
+        assert sent(f"imap://{_ACCT}/{name}"), name
+    assert sent(f"imap://{_ACCT}/%5BGoogle%20Mail%5D/All%20Mail")
+    for name in ("Verzonden", "Projects/Sent", "All%20Mail", "%5BArchive%5D/Sent"):
+        assert not sent(f"imap://{_ACCT}/{name}"), name
