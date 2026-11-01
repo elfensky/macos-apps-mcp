@@ -996,9 +996,8 @@ def _quote_facts(
         original = parts[7] if len(parts) == 8 else ""
         words = squash_text(sanitize_block(original).replace("\ufffc", "")).split()
         tail = " ".join(words[-_TAIL_WORDS:])
-        if not any(
-            c.isalnum() for c in tail
-        ):  # the confirm compares letters and digits
+        # the confirm compares letters and digits: a tail of marks only matches anything
+        if not any(c.isalnum() for c in tail):
             raise ComposeRefused(
                 f"{tool} cannot confirm Mail's quote: the original has no readable "
                 "text, so there is nothing to check the quote against. Nothing was "
