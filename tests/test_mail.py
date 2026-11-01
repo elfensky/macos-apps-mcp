@@ -2883,12 +2883,12 @@ def test_reply_flow_deletes_the_copy_that_is_exactly_its_text_and_mails_attribut
 def test_reply_flow_deletes_a_copy_in_the_account_the_reply_is_sent_from(monkeypatch):
     # spike 005: a reply to a message in this inbox can be sent from ANOTHER account,
     # and Mail files the autosave in that account's Drafts. The copy is the call's own.
-    other = "imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/Drafts"
+    other = "imap://77777777-6666-5555-4444-333333333333/Drafts"
     rig, folder, text = _refuse_with(monkeypatch)
     _real_selector(monkeypatch, (other, "<div>Hi</div>", "html"))
     msg = _run_refused(rig, folder, text)
     _, argv, _ = rig.call("_SWEEP_DELETE")
-    assert argv == ("own8@x", "02B406D0-99D4-4E9A-9A7C-0DB912FD1D93", "Drafts")
+    assert argv == ("own8@x", "77777777-6666-5555-4444-333333333333", "Drafts")
     assert "nothing was created" in msg
 
 

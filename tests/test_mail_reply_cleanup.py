@@ -302,10 +302,13 @@ def test_find_own_draft_with_an_unreadable_new_row_proves_nothing(
 def test_find_own_draft_with_more_new_rows_than_it_reads_proves_nothing(
     mailroot, monkeypatch
 ):
+    # the rows beyond the cap are never read, so "no copy" cannot be said
     monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2)
-    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
-    rows = [(20, _URL), (21, _URL), (22, _URL)]
+    rows = [(20 + n, _URL) for n in range(3)]
+    for rowid, _ in rows:  # all readable, none a reply to the original
+        mailroot(rowid, "other@example.com", f"m{rowid}@x", "<div>hello</div>")
     assert _find(monkeypatch, rows) == mail_reply_cleanup.Draft("unproven")
+    assert _find(monkeypatch, rows[:2]) == mail_reply_cleanup.Draft("none")
 
 
 def _land(index, mailroot, url, text="Hi there"):
