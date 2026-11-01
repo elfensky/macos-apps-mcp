@@ -1327,7 +1327,7 @@ def test_parse_search_absent_subject_and_sender_use_the_placeholder():
 # the model). `_mailbox_args` is the inverse of `_resolve_mailbox`: url -> the
 # (account-id, decoded path) pair the shared `mailboxFor` AppleScript handler needs.
 
-_GMAIL_UUID = "5936B2CE-D3DC-4072-A81B-E79E6DA94B15"
+_GMAIL_UUID = "0F0F0F0F-1111-4222-8333-444455556666"  # synthetic account id
 _FAMILY_UUID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
 _SPAM_URL = f"imap://{_GMAIL_UUID}/%5BGmail%5D/Spam"
 

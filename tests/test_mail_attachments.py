@@ -14,7 +14,7 @@ from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail
 from macos_apps_mcp.adapters.mail_attachments import _parse_attachments
 
-_GMAIL_UUID = "5936B2CE-D3DC-4072-A81B-E79E6DA94B15"
+_GMAIL_UUID = "0F0F0F0F-1111-4222-8333-444455556666"  # synthetic account id
 
 
 def _patch_run(monkeypatch, fake):

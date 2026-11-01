@@ -28,9 +28,9 @@ HERE = Path(__file__).parent
 US = "\x1f"
 MISSING = "gsd-spike-006-missing@example.invalid"
 ACCOUNTS = {  # name -> uuid; Grandma and Mama are never probe targets
-    "Business": "02B406D0-99D4-4E9A-9A7C-0DB912FD1D93",
-    "Personal": "AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1",
-    "Fiction": "BDA93031-756E-4487-BEDD-F2768006926A",
+    "Business": "<business-account-uuid>",
+    "Personal": "<personal-account-uuid>",  # set from mail_overview before a run
+    "Fiction": "<fiction-account-uuid>",
 }
 MAILBOXES = [  # smallest first, so the first store load is not blamed on size
     ("Business", "INBOX"),
