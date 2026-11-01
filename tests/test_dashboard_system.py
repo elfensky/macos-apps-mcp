@@ -264,10 +264,7 @@ def banner(text):
     return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
 
 
-AX_OFF = (
-    "Accessibility is off for macos-apps-mcp, so mail_reply and reply_all refuse: "
-    "switch it on in the Accessibility pane."
-)
+AX_OFF = doctor._AX_REMEDIATION  # the real text: its "&" proves the row escapes
 
 
 def ax_report(status, ok, remediation=None):
