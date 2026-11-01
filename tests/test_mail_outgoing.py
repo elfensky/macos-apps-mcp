@@ -531,6 +531,16 @@ def test_parse_open_returns_the_signature_last(raw, expected):
     assert mail_outgoing._parse_open(raw) == expected
 
 
+def test_reply_open_strips_framing_from_the_sender_and_guards_a_missing_content():
+    # a US in the sender must not shift into the signature field; a signature whose
+    # `content` is missing value must not become the text "missing value"
+    script = mail_outgoing._REPLY_OPEN
+    assert "set snd to my stripFraming((sender of r) as text)" in script
+    assert "on stripFraming(t)" in script
+    assert "if sc is not missing value then set sig to sc as text" in script
+    assert "(content of sg) as text" not in script
+
+
 def test_reply_open_binds_only_from_closeable_new_windows():
     # B1 is pinned by its structure (an AppleScript cannot run in a unit test): `found`
     # is only ever assigned an empty list or the result of newWindowIds, and that

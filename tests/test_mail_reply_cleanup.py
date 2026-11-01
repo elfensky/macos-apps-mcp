@@ -652,7 +652,8 @@ def test_sent_mailbox_names(monkeypatch):
 
 _SIG = "Jane Doe\nExample Corp"
 _SIG_HTML = '<div id="AppleMailSignature">Jane Doe<br>Example Corp</div>'
-_SIG_LINK = '<div>Jane Doe - <a href="https://x.example">Example Corp</a></div>'
+# the same words, broken into lines and links differently: white space only
+_SIG_WS = '<div>Jane  Doe<br>\n<a href="https://x.example">Example&nbsp;Corp</a></div>'
 
 
 def _signed(before: str, **kw):
@@ -681,7 +682,18 @@ def _find_kind_with_signature(body, *, signature=_SIG, own="Hi there"):
         (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>", True),
         (f"<div>Hi there</div>{_SIG_HTML}", True),
         (f"<div>Hi there</div>{_SIG_HTML}<div>{_ATTRIBUTION}</div>", True),
-        (f"<div>Hi there</div>{_SIG_LINK}", True),  # letters and digits equal
+        (f"<div>Hi there</div>{_SIG_WS}", True),  # differs in white space only
+        (f"<div>Hi there</div>{_SIG_WS}<div>{_ATTRIBUTION}</div>", True),
+        # owner content without a letter or a digit is still owner content
+        (f"<div>Hi there</div><div>!!!</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div><div>\U0001f44d \U0001f600</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>?? :-)</div>", False),
+        (
+            f"<div>Hi there</div><div>\u2014 \u2014 \u2014</div>{_SIG_HTML}"
+            f"<div>\u2014 \u2713</div><div>{_ATTRIBUTION}</div>",
+            False,
+        ),
+        ("<div>Hi there</div><div>Jane Doe - Example Corp</div>", False),
         (_SIG_HTML, False),  # the signature alone
         (f"<div>Hi there</div><div>and more</div>{_SIG_HTML}", False),
         (f"<div>Hi there</div>{_SIG_HTML}<div>and more</div>", False),
