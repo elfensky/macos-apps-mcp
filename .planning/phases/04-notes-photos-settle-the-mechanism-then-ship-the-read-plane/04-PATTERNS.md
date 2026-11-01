@@ -43,7 +43,7 @@ if path.exists():
     raise FileExistsError(f"{path} already exists — this never overwrites. ...")
 return path
 ```
-Importers to edit (grep, tracked only): `adapters/mail.py` (import list ~:96; uses `target_path` :2496, `resolve_dest` :2513; docstrings :40, :1442, :2474), `adapters/mail_attachments.py` (`from . import mail_addressing, mail_files` :30; `check_size` :326, `target_path` :328, `MAX_BYTES` :336, `confirm_written` :344), `tests/test_mail_extras.py` (:72 exact argv assertion, :240), `tests/test_mail_files.py`, `docs/mail-applescript-facts.md` (:161-171), `docs/ROADMAP.md:46`. Adapters import it as `from .. import files` (qualified).
+Importers to edit (grep, tracked only): `adapters/mail.py` (import list ~:96; uses `target_path` :2496, `resolve_dest` :2513; docstrings :40, :1442, :2474), `adapters/mail_attachments.py` (`from . import mail_addressing, mail_files` :30; `check_size` :326, `target_path` :328, `MAX_BYTES` :336, `confirm_written` :344), `tests/test_mail_extras.py` (:72 exact argv assertion, :240), `tests/test_mail_files.py`, `docs/mail-applescript-facts.md` (:161-171), `docs/landscape.md:46`. Adapters import it as `from .. import files` (qualified).
 
 ### `runtime.photos_db()` (native seam)
 **Analog:** `runtime.read_via_sqlite` (runtime.py:433, signature `path, fingerprint, query, *, fallback, immutable, setup`) and the RESEARCH Pattern 1 skeleton (lazy `import osxphotos` inside the function, run on worker via `run_native`, `PermissionError` -> FDA typed error, `sqlite3.Error/KeyError/AttributeError/ValueError` -> `SchemaDrift`). Register the seam in three places:
