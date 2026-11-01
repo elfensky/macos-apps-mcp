@@ -16,6 +16,7 @@ import pytest
 import macos_apps_mcp.doctor as doc
 from macos_apps_mcp import runtime
 from macos_apps_mcp.errors import (
+    ACCESSIBILITY_PANE,
     AppNotRunning,
     AutomationDenied,
     FullDiskAccessDenied,
@@ -203,6 +204,8 @@ def _fake_trusted(monkeypatch, value=True):
         (False, False, "not_granted"),
         (OSError, None, "probe_error"),
         (AttributeError, None, "probe_error"),
+        (ImportError, None, "probe_error"),  # PyObjC: a bundle that does not load
+        (KeyError, None, "probe_error"),  # PyObjC: a symbol that was not bound
     ],
 )
 def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, status):
@@ -216,6 +219,7 @@ def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, statu
         for word in ("Accessibility", "mail_reply", "reply_all", "Privacy & Security"):
             assert word in s["remediation"]
         assert "restart" not in s["remediation"].lower()  # facts 4e: no restart
+        assert ACCESSIBILITY_PANE in s["remediation"]  # the macOS 27 pane name too
     if status == "probe_error":
         assert "remediation" in s
 
@@ -798,3 +802,19 @@ def test_report_carries_the_build_stamp(monkeypatch):
     monkeypatch.setattr(doc, "build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
     report = doc.diagnose(request=False)
     assert report["build"] == "b7fbde6 2026-08-20T10:00:00Z"
+
+
+@pytest.mark.parametrize(
+    ("trusted", "head"),
+    [
+        (False, "1 of 12 surfaces need attention: "),
+        (OSError, "no denied surfaces; "),  # live Automation reads: unverified too
+    ],
+)
+def test_summary_names_the_accessibility_surface(monkeypatch, tmp_path, trusted, head):
+    # Off is a need; unreadable is unverified: neither is ever counted as OK.
+    _all_granted(monkeypatch, tmp_path)
+    _fake_trusted(monkeypatch, trusted)
+    summary = doc.diagnose(request=False)["summary"]
+    assert summary.startswith(head)
+    assert "accessibility" in summary.split(": ", 1)[1].split(", ")

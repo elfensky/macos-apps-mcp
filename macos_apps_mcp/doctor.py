@@ -312,7 +312,7 @@ def _accessibility_surface() -> dict:
         return _surface("accessibility", "accessibility", None, "adapter_off")
     try:
         trusted = runtime.accessibility_trusted()
-    except (OSError, AttributeError) as e:
+    except Exception as e:  # PyObjC fails with ImportError/KeyError too: report it
         return _surface(
             "accessibility",
             "accessibility",
