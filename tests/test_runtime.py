@@ -45,6 +45,7 @@ _REAL_AUTOMATION_PERMISSION = runtime.automation_permission
 # Same for the two Accessibility seams of the Mail reply flow (#348).
 _REAL_ACCESSIBILITY_TRUSTED = runtime.accessibility_trusted
 _REAL_COMPOSE_INSERT = runtime.compose_insert
+_REAL_HOLD_WINDOW = runtime._hold_window
 # Same for the attribution formatter: conftest swaps it for a deterministic fake.
 _REAL_MAIL_ATTRIBUTION_STAMP = getattr(runtime, "mail_attribution_stamp", None)
 
@@ -657,9 +658,11 @@ def _compose_rig(
     focused=True,
     trusted=True,
     items=None,
+    complete=True,
 ):
     """Replace every private loader of compose_insert. ``bodies`` is the AX read-back
-    sequence (the last one repeats). Returns (events, clip, keys)."""
+    sequence (the last one repeats); ``complete`` is whether each read walked the whole
+    body. Returns (events, clip, keys)."""
     events: list = []
     keys: list = []
     reads = iter(bodies)
@@ -671,7 +674,7 @@ def _compose_rig(
         events.append("read")
         with contextlib.suppress(StopIteration):
             last[0] = next(reads)
-        return last[0]
+        return last[0], complete
 
     def hold(window_id):
         events.append(("hold", window_id))
@@ -874,7 +877,8 @@ def test_compose_insert_keeps_a_newer_user_copy(monkeypatch):
     real_read = runtime._read_body
 
     def read(el):
-        clip.count += 5  # the user copies something while the paste settles
+        if "write" in events:
+            clip.count += 5  # the user copies something while the paste settles
         return real_read(el)
 
     monkeypatch.setattr(runtime, "_read_body", read)
@@ -939,17 +943,21 @@ def test_snapshot_incomplete_refuses_and_an_empty_pasteboard_is_complete():
 class _FakeAx:
     """A fake HIServices binding over a dict of element -> attributes."""
 
-    def __init__(self, attrs, windows):
+    def __init__(self, attrs, windows, failing=()):
         self.attrs, self.windows = attrs, windows
+        self.failing = set(failing)  # (element, attribute) reads that fail outright
+
+    def _copy(self, el, attr, _):
+        if (el, attr) in self.failing:
+            return -25204, None  # kAXErrorCannotComplete
+        if attr in self.attrs.get(el, {}):
+            return 0, self.attrs[el][attr]
+        return -25212, None  # kAXErrorNoValue: the element has no such attribute
 
     def lib(self):
         return {
             "AXUIElementCreateApplication": lambda pid: ("app", pid),
-            "AXUIElementCopyAttributeValue": lambda el, attr, _: (
-                (0, self.attrs[el][attr])
-                if attr in self.attrs.get(el, {})
-                else (-25212, None)
-            ),
+            "AXUIElementCopyAttributeValue": self._copy,
             "_AXUIElementGetWindow": lambda win, _: (0, self.windows[win]),
         }
 
@@ -997,4 +1005,375 @@ def test_read_body_walks_the_static_text_parts(monkeypatch):
     }
     ax = _FakeAx(attrs, {})
     monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
-    assert runtime._read_body("web") == "first\nsecond"
+    assert runtime._read_body("web") == ("first\nsecond", True)
+
+
+# --- the live frontmost read and the Activation rule (facts 4e `Activation`) ----------
+
+
+def test_frontmost_pid_is_the_owner_of_the_top_layer_zero_window(monkeypatch):
+    # front-to-back list: a menu-bar window (layer 25), then the app windows
+    calls: list = []
+    windows = [
+        {"kCGWindowLayer": 25, "kCGWindowOwnerPID": 111},
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 222},
+        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 333},
+    ]
+
+    def listing(option, relative_to):
+        calls.append((option, relative_to))
+        return windows
+
+    monkeypatch.setitem(runtime._WINDOW_LIB, "CGWindowListCopyWindowInfo", listing)
+    assert runtime._frontmost_pid() == 222
+    assert calls == [(1 | 16, 0)]  # on-screen only, desktop elements excluded
+    windows.clear()
+    assert runtime._frontmost_pid() is None
+
+
+def test_frontmost_is_not_read_from_nsworkspace():
+    # NSWorkspace.frontmostApplication caches until the MAIN run loop turns, which the
+    # daemon never runs: the worker thread read a frozen app (review of #348)
+    source = pathlib.Path(runtime.__file__).read_text("utf-8")
+    assert "sharedWorkspace" not in source and "frontmostApplication()" not in source
+
+
+class _Front:
+    """Fakes the pieces of the window check: who is in front, the window's index."""
+
+    def __init__(self, monkeypatch, *, front=1, index=1, after=None):
+        self.front, self.index, self.after = front, index, after
+        self.osa: list = []
+        monkeypatch.setattr(runtime, "_frontmost_pid", lambda: self.front)
+        monkeypatch.setattr(runtime, "_mail_pid", lambda: 4242)
+        monkeypatch.setattr(runtime, "_window_index", lambda wid: self.index)
+        monkeypatch.setattr(runtime, "run_osascript", self._osa)
+        monkeypatch.setattr(
+            runtime, "time", types.SimpleNamespace(sleep=lambda s: None)
+        )
+
+    def _osa(self, script, *argv, **kw):
+        self.osa.append((script, argv))
+        if self.after is not None:  # activating Mail changes what the next read says
+            self.front, self.index = self.after
+        return "activated"
+
+
+def test_hold_window_does_nothing_when_mail_is_in_front_with_the_reply_at_index_1(
+    monkeypatch,
+):
+    rig = _Front(monkeypatch, front=4242, index=1)
+    runtime._hold_window(77)
+    assert rig.osa == []
+
+
+def test_hold_window_activates_mail_then_checks_again(monkeypatch):
+    rig = _Front(monkeypatch, front=999, index=3, after=(4242, 1))
+    runtime._hold_window(77)  # passes: the second check sees Mail in front
+    assert rig.osa == [(runtime._ACTIVATE_WINDOW, ("77",))]  # named by its id
+
+
+def test_hold_window_activates_when_mail_is_in_front_but_the_reply_is_not_first(
+    monkeypatch,
+):
+    rig = _Front(monkeypatch, front=4242, index=2, after=(4242, 1))
+    runtime._hold_window(77)
+    assert [a[0] for a in rig.osa] == [runtime._ACTIVATE_WINDOW]
+
+
+def test_hold_window_activates_when_another_app_is_in_front_of_window_1(monkeypatch):
+    rig = _Front(monkeypatch, front=999, index=1, after=(4242, 1))
+    runtime._hold_window(77)
+    assert [a[0] for a in rig.osa] == [runtime._ACTIVATE_WINDOW]
+
+
+def test_hold_window_refuses_when_activating_did_not_bring_the_window_first(
+    monkeypatch,
+):
+    # the second check is the proof: without it a failed activation would insert anyway
+    rig = _Front(monkeypatch, front=999, index=3)
+    with pytest.raises(runtime.ComposeRefused, match="window check"):
+        runtime._hold_window(77)
+    assert [a[0] for a in rig.osa] == [runtime._ACTIVATE_WINDOW]
+
+
+def test_compose_insert_sends_no_key_when_the_window_cannot_be_held(monkeypatch):
+    # the REAL _hold_window inside compose_insert: no clipboard write, no key event
+    events, clip, keys = _compose_rig(monkeypatch, ["x"])
+    monkeypatch.setattr(runtime, "_hold_window", _REAL_HOLD_WINDOW)
+    _Front(monkeypatch, front=999, index=3)
+    with pytest.raises(runtime.ComposeRefused, match="window check"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert keys == [] and "write" not in events
+
+
+# --- the body read: a cut-short walk is reported, never trusted ----------------------
+
+
+def _chain(depth):
+    """A web area whose only text sits ``depth`` groups down."""
+    attrs = {"n0": {"AXRole": "AXWebArea", "AXChildren": ["n1"]}}
+    for i in range(1, depth):
+        attrs[f"n{i}"] = {"AXRole": "AXGroup", "AXChildren": [f"n{i + 1}"]}
+    attrs[f"n{depth}"] = {"AXRole": "AXStaticText", "AXValue": "deep text"}
+    return attrs
+
+
+def test_read_body_is_complete_at_any_depth_within_the_budget(monkeypatch):
+    # the depth cut of 14 is gone: only the node budget bounds the walk
+    monkeypatch.setattr(runtime, "_ax_lib", _FakeAx(_chain(30), {}).lib)
+    assert runtime._read_body("n0") == ("deep text", True)
+
+
+def test_read_body_reports_the_end_of_the_node_budget(monkeypatch):
+    monkeypatch.setattr(runtime, "_ax_lib", _FakeAx(_chain(30), {}).lib)
+    monkeypatch.setattr(runtime, "_AX_WALK_BUDGET", 10)
+    text, complete = runtime._read_body("n0")
+    assert text == "" and complete is False
+    # a walk that ends exactly on its last node is still complete
+    monkeypatch.setattr(runtime, "_AX_WALK_BUDGET", 31)
+    assert runtime._read_body("n0") == ("deep text", True)
+
+
+def test_read_body_reports_an_ax_read_that_failed(monkeypatch):
+    attrs = {
+        "web": {"AXRole": "AXWebArea", "AXChildren": ["a", "b"]},
+        "a": {"AXRole": "AXStaticText", "AXValue": "first"},
+        "b": {"AXRole": "AXGroup", "AXChildren": ["c"]},
+        "c": {"AXRole": "AXStaticText", "AXValue": "second"},
+    }
+    for failing in ({("b", "AXChildren")}, {("c", "AXValue")}, {("a", "AXRole")}):
+        ax = _FakeAx(attrs, {}, failing=failing)
+        monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
+        assert runtime._read_body("web")[1] is False, failing
+
+
+def test_confirm_refuses_a_cut_short_read_after_a_whole_body_replace(monkeypatch):
+    # nothing visible follows the text, but the walk ended early: not proof
+    _compose_rig(monkeypatch, ["", _TEXT], complete=False)
+    with pytest.raises(runtime.ComposeRefused, match="read to its end"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, replace_all=True)
+
+
+def test_confirm_names_a_cut_short_read_instead_of_blaming_mails_setting(monkeypatch):
+    _compose_rig(monkeypatch, ["", _TEXT], complete=False)
+    with pytest.raises(runtime.ComposeRefused, match="too long to check") as exc:
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
+    assert "Quote the text of the original message" not in str(exc.value)
+    assert "include_quote=False" in str(exc.value)
+    # a tail that was seen needs no complete walk
+    _compose_rig(monkeypatch, ["", f"{_TEXT}\n{_QUOTE}"], complete=False)
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
+
+
+@pytest.mark.parametrize(
+    "parts, tail",
+    [
+        (["see ", "example.com", "."], "see example.com."),  # a link, then a period
+        (["Friday", ", thanks."], "Friday, thanks."),  # a bold run, then punctuation
+        (["see the doc (", "example.com", ") for more"], "doc (example.com) for more"),
+        (["Kind regards", ",", "Jan Peeters"], "Kind regards,\nJan Peeters"),
+        (["\u2022 first", "\u2022 second item"], "first\nsecond item"),  # list marks
+    ],
+)
+def test_confirm_finds_a_tail_whose_words_cross_inline_formatting(
+    monkeypatch, parts, tail
+):
+    attrs = {
+        "web": {
+            "AXRole": "AXWebArea",
+            "AXChildren": ["mine", *map(str, range(len(parts)))],
+        },
+        "mine": {"AXRole": "AXStaticText", "AXValue": _TEXT},
+    }
+    for i, part in enumerate(parts):
+        attrs[str(i)] = {"AXRole": "AXStaticText", "AXValue": part}
+    monkeypatch.setattr(runtime, "_ax_lib", _FakeAx(attrs, {}).lib)
+    runtime._confirm("web", _TEXT, False, tail)
+
+
+def test_confirm_still_refuses_a_tail_that_is_not_there(monkeypatch):
+    attrs = {
+        "web": {"AXRole": "AXWebArea", "AXChildren": ["mine", "q"]},
+        "mine": {"AXRole": "AXStaticText", "AXValue": _TEXT},
+        "q": {"AXRole": "AXStaticText", "AXValue": "something else entirely"},
+    }
+    monkeypatch.setattr(runtime, "_ax_lib", _FakeAx(attrs, {}).lib)
+    with pytest.raises(runtime.ComposeRefused, match="quote of the original"):
+        runtime._confirm("web", _TEXT, False, "see example.com.")
+
+
+def test_compose_insert_refuses_a_tail_with_no_letter_or_digit_before_any_write(
+    monkeypatch,
+):
+    events, _, keys = _compose_rig(monkeypatch, [""])
+    with pytest.raises(runtime.ComposeRefused, match="confirmation"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="-- ... --")  # would match anything
+    assert events == [] and keys == []
+
+
+# --- the clipboard guard and the real _Clipboard -------------------------------------
+
+
+def test_compose_insert_refuses_a_copy_made_while_the_snapshot_was_read(monkeypatch):
+    # the change count is taken BEFORE the snapshot, so a copy during it is caught
+    events, clip, keys = _compose_rig(monkeypatch, ["x"])
+    real_snapshot = clip.snapshot
+
+    def snapshot():
+        out = real_snapshot()
+        clip.count += 1  # the user copies while the snapshot finishes
+        return out
+
+    monkeypatch.setattr(clip, "snapshot", snapshot)
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert "write" not in events and keys == []
+
+
+def test_compose_insert_rolls_back_before_the_restore_when_a_step_raises(monkeypatch):
+    # an exception after the write (a failed key post) rolls the reply back FIRST
+    events, clip, keys = _compose_rig(monkeypatch, ["old"])
+    monkeypatch.setattr(
+        runtime, "_post_cmd_key", lambda *a: (_ for _ in ()).throw(OSError("boom"))
+    )
+    with pytest.raises(OSError):
+        _REAL_COMPOSE_INSERT(
+            77, _TEXT, quote_tail="tail", rollback=lambda: events.append("rollback")
+        )
+    assert events.index("rollback") < events.index("restore")
+
+
+class _Data:
+    """A fake NSData."""
+
+    def __init__(self, raw=b""):
+        self.raw = raw
+
+    @staticmethod
+    def data():
+        return _Data()
+
+    @staticmethod
+    def dataWithBytes_length_(raw, length):
+        return _Data(bytes(raw[:length]))
+
+    def __bytes__(self):
+        return self.raw
+
+
+class _PbItem:
+    """A fake NSPasteboardItem."""
+
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+
+    @classmethod
+    def alloc(cls):
+        return cls()
+
+    def init(self):
+        return self
+
+    def types(self):
+        return list(self.data)
+
+    def dataForType_(self, t):
+        return self.data[t]
+
+    def setData_forType_(self, d, t):
+        self.data[t] = d
+
+    def setString_forType_(self, s, t):
+        self.data[t] = _Data(s.encode())
+
+
+class _Pb:
+    """A fake general pasteboard that records clearContents / writeObjects order."""
+
+    def __init__(self, items, types_=None):
+        self.items, self.calls, self._types = items, [], types_
+
+    def pasteboardItems(self):
+        return self.items
+
+    def types(self):
+        if self._types is not None:
+            return self._types
+        return [t for i in self.items for t in i.data]
+
+    def clearContents(self):
+        self.calls.append("clear")
+        self.items = []
+
+    def writeObjects_(self, objs):
+        self.calls.append("write")
+        self.items = list(objs)
+
+
+def _real_clipboard(monkeypatch, pb):
+    """The real _Clipboard over a fake pasteboard and a fake AppKit / NSData."""
+    clip = object.__new__(runtime._Clipboard)
+    clip._pb = pb
+    clip._ak = types.SimpleNamespace(
+        NSPasteboardItem=_PbItem, NSPasteboardTypeString="public.utf8-plain-text"
+    )
+    monkeypatch.setattr(
+        runtime, "F", types.SimpleNamespace(NSData=_Data), raising=False
+    )
+    return clip
+
+
+def _held(pb):
+    return [{t: bytes(d) for t, d in i.data.items()} for i in pb.items]
+
+
+def test_real_clipboard_round_trip_restores_every_item_and_type(monkeypatch):
+    pb = _Pb(
+        [
+            _PbItem(
+                {"public.utf8-plain-text": _Data(b"a"), "public.html": _Data(b"<b>")}
+            ),
+            _PbItem({"com.example.one": _Data(b"\x00\x01")}),
+        ]
+    )
+    clip = _real_clipboard(monkeypatch, pb)
+    snap = clip.snapshot()
+    assert snap == _held(pb)
+    clip.write_text("reply")
+    clip.restore(snap)
+    assert _held(pb) == snap  # item- and type-equal
+    assert pb.calls == ["clear", "write", "clear", "write"]  # clear before every write
+
+
+def test_real_clipboard_marks_the_borrowed_item_transient_and_concealed(monkeypatch):
+    pb = _Pb([])
+    clip = _real_clipboard(monkeypatch, pb)
+    clip.write_text("Hi")
+    (item,) = pb.items
+    assert set(item.data) == {"public.utf8-plain-text", *runtime._TRANSIENT_TYPES}
+    assert bytes(item.data["public.utf8-plain-text"]) == b"Hi"
+    assert pb.calls == ["clear", "write"]
+
+
+def test_real_clipboard_snapshot_refuses_a_type_that_returns_no_data(monkeypatch):
+    pb = _Pb([_PbItem({"public.utf8-plain-text": _Data(b"x"), "com.x": None})])
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        _real_clipboard(monkeypatch, pb).snapshot()
+
+
+def test_real_clipboard_snapshot_refuses_types_with_no_items(monkeypatch):
+    pb = _Pb([], types_=["public.utf8-plain-text"])
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        _real_clipboard(monkeypatch, pb).snapshot()
+
+
+def test_real_clipboard_restores_an_empty_pasteboard_by_clearing_only(monkeypatch):
+    pb = _Pb([])
+    clip = _real_clipboard(monkeypatch, pb)
+    snap = clip.snapshot()
+    assert snap == []  # no items and no types: complete
+    clip.write_text("reply")
+    pb.calls.clear()
+    clip.restore(snap)
+    assert pb.calls == ["clear"] and pb.items == []

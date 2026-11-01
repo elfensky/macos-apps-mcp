@@ -679,8 +679,9 @@ _FOCUS_WAIT_S = 3.0  # a fresh reply's body takes AX focus late (untested bound)
 _ACTIVATE_WAIT_S = 0.4
 _SELECT_ALL_WAIT_S = 0.2
 # shortcut: the AX walk of the sitting stops after 400 nodes, so on a much longer
-# original the quote check can end before the tail and refuse (facts 4e `Confirm`);
-# raise it if a device run shows a refusal of that kind.
+# original the read is incomplete and the quote check refuses ("too long to check",
+# facts 4e `Confirm`); raise it if a device run shows a refusal of that kind. The walk
+# is bounded by this budget alone (no depth cut): a cut walk is reported, never trusted.
 _AX_WALK_BUDGET = 400
 _COMPOSE_OSA_TIMEOUT = 120.0  # equals each script's own `with timeout` backstop
 
@@ -751,10 +752,22 @@ def accessibility_trusted() -> bool:
     return work() if on_worker() else run_native(work)
 
 
+# AX errors that only say "this element has no such attribute / no value": an empty
+# read, not a failed one (a leaf has no children). Any other error is a failed read.
+_AX_NO_ATTRIBUTE = (-25205, -25212)  # kAXErrorAttributeUnsupported, ...NoValue
+
+
+def _ax_read(el, attr: str):
+    """``(value, readable)``: the AX attribute of ``el`` (None when absent) and whether
+    the read itself worked. ``readable`` is False only for a failed read, so a caller
+    that must not act on a partial walk can tell it from an empty one."""
+    err, val = _ax_lib()["AXUIElementCopyAttributeValue"](el, attr, None)
+    return (val if err == 0 else None), err == 0 or err in _AX_NO_ATTRIBUTE
+
+
 def _ax_get(el, attr: str):
     """One AX attribute of ``el``, or None when it cannot be read."""
-    err, val = _ax_lib()["AXUIElementCopyAttributeValue"](el, attr, None)
-    return val if err == 0 else None
+    return _ax_read(el, attr)[0]
 
 
 def _mail_pid() -> int:
@@ -768,15 +781,32 @@ def _mail_pid() -> int:
     return int(apps[0].processIdentifier())
 
 
-def _frontmost_bundle() -> str | None:
-    import AppKit
+# kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements
+_ON_SCREEN_WINDOWS = 1 | 16
+_WINDOW_LIB: dict = {}
 
-    # a process with no running main loop reads a stale frontmost app: spin it once
-    F.NSRunLoop.currentRunLoop().runUntilDate_(
-        F.NSDate.dateWithTimeIntervalSinceNow_(0.05)
-    )
-    app = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
-    return str(app.bundleIdentifier()) if app else None
+
+def _frontmost_pid() -> int | None:
+    """The pid of the front app: the owner of the topmost on-screen layer-0 window (the
+    list is front to back). A live WindowServer read that works on any thread.
+
+    NOT ``NSWorkspace.frontmostApplication``: it caches its answer until the MAIN run
+    loop turns, and the daemon never runs one (asyncio holds the main thread), so on the
+    worker thread it froze at its first answer (measured stale 43 of 44 reads, review of
+    #348). The CGWindowList read matched ``lsappinfo front`` in 25 of 25 samples. Needs
+    no Screen Recording grant: only the window title is withheld, not owner or layer."""
+    if not _WINDOW_LIB:
+        import CoreFoundation  # noqa: F401 - registers CFArrayRef for the bound call
+        import objc
+
+        cg = objc.loadBundle("CoreGraphics", {}, bundle_path=_COREGRAPHICS)
+        objc.loadBundleFunctions(
+            cg, _WINDOW_LIB, [("CGWindowListCopyWindowInfo", b"^{__CFArray=}II")]
+        )
+    for info in _WINDOW_LIB["CGWindowListCopyWindowInfo"](_ON_SCREEN_WINDOWS, 0) or []:
+        if info.get("kCGWindowLayer") == 0:
+            return int(info["kCGWindowOwnerPID"])
+    return None
 
 
 def _window_index(window_id: int) -> int | None:
@@ -785,7 +815,7 @@ def _window_index(window_id: int) -> int | None:
 
 
 def _window_held(window_id: int) -> bool:
-    return _frontmost_bundle() == _MAIL_BUNDLE and _window_index(window_id) == 1
+    return _frontmost_pid() == _mail_pid() and _window_index(window_id) == 1
 
 
 def _hold_window(window_id: int) -> None:
@@ -835,28 +865,37 @@ def _focused_body(pid: int, window_id: int):
     return el
 
 
-def _read_body(el) -> str:
-    """The compose body text through AX: the AXStaticText parts, in document order. The
-    walk drops empty lines, so callers compare squashed text only."""
+def _read_body(el) -> tuple[str, bool]:
+    """``(text, complete)``: the compose body text through AX, the AXStaticText parts in
+    document order. The walk drops empty lines, so callers compare squashed text only.
+    ``complete`` is False when the walk was cut short (the node budget ran out or an AX
+    read failed), so the text may be missing its end: a caller must not treat "nothing
+    follows" as proof then."""
     val = _ax_get(el, "AXValue")
     if isinstance(val, str) and val:
-        return val
+        return val, True
     parts: list[str] = []
-    budget = [_AX_WALK_BUDGET]
+    state = {"budget": _AX_WALK_BUDGET, "complete": True}
 
-    def walk(node, depth: int) -> None:
-        if depth > 14 or budget[0] <= 0:
+    def walk(node) -> None:
+        if state["budget"] <= 0:
+            state["complete"] = False
             return
-        budget[0] -= 1
-        if _ax_get(node, "AXRole") == "AXStaticText":
-            text = _ax_get(node, "AXValue")
+        state["budget"] -= 1
+        role, ok = _ax_read(node, "AXRole")
+        if role == "AXStaticText":
+            text, text_ok = _ax_read(node, "AXValue")
+            ok = ok and text_ok
             if isinstance(text, str):
                 parts.append(text)
-        for child in _ax_get(node, "AXChildren") or []:
-            walk(child, depth + 1)
+        children, children_ok = _ax_read(node, "AXChildren")
+        if not (ok and children_ok):
+            state["complete"] = False
+        for child in children or []:
+            walk(child)
 
-    walk(el, 0)
-    return "\n".join(parts)
+    walk(el)
+    return "\n".join(parts), state["complete"]
 
 
 def _cg_lib():
@@ -955,6 +994,15 @@ def _body_text(body: str) -> str:
     return squash_text(body.lstrip(" \n\t\ufffc"))
 
 
+def _alnum(text: str) -> str:
+    """Only the letters and digits of ``text``, for the quote-tail compare. The AX walk
+    joins the parts of one line with a separator the original's own text does not have
+    (a link or bold run followed by punctuation reads 'example.com .' for
+    'example.com.'), and list bullets and '>' marks differ too. Squashed whitespace
+    alone misses those; letters and digits carry the words and nothing else."""
+    return "".join(c for c in squash_text(text) if c.isalnum())
+
+
 def _starts_with(body: str, text: str) -> bool:
     return _body_text(body).startswith(squash_text(text))
 
@@ -966,7 +1014,7 @@ def _wait_settled(el, text: str, before: str) -> bool:
     clipboard). Reads AX only, for at most ``_PASTE_SETTLE_S``."""
     t0 = time.monotonic()
     while True:
-        body = _read_body(el)
+        body = _read_body(el)[0]
         if _starts_with(body, text) and squash_text(body) != before:
             return True
         if time.monotonic() - t0 >= _PASTE_SETTLE_S:
@@ -977,8 +1025,12 @@ def _wait_settled(el, text: str, before: str) -> bool:
 def _confirm(el, text: str, replace_all: bool, quote_tail: str | None) -> None:
     """Facts 4e `Confirm`, after a settled paste: the text is first and, in a quoted
     reply, the original's own tail follows it; after a whole-body replace nothing
-    follows. Compared squashed (the AX walk drops empty lines)."""
-    body = _body_text(_read_body(el))
+    follows. Compared squashed (the AX walk drops empty lines); the tail compares by
+    letters and digits only (``_alnum``). A body read that was cut short proves nothing
+    about what follows, so it never confirms a whole-body replace and gets its own
+    refusal reason when the tail was not seen."""
+    read, complete = _read_body(el)
+    body = _body_text(read)
     want = squash_text(text)
     if not body.startswith(want):
         raise ComposeRefused("confirmation: the reply does not start with your text")
@@ -989,7 +1041,18 @@ def _confirm(el, text: str, replace_all: bool, quote_tail: str | None) -> None:
                 "confirmation: text is left in the reply after your text, so the "
                 "whole body was not replaced"
             )
-    elif squash_text(quote_tail) not in rest:
+        if not complete:
+            raise ComposeRefused(
+                "confirmation: the reply could not be read to its end through "
+                "Accessibility, so the whole-body replace cannot be confirmed"
+            )
+    elif _alnum(quote_tail or "") not in _alnum(rest):
+        if not complete:
+            raise ComposeRefused(
+                "confirmation: the reply is too long to check through Accessibility, "
+                "so Mail's quote of the original could not be confirmed. To reply "
+                "without the quote, call mail_reply with include_quote=False"
+            )
         raise ComposeRefused(
             "confirmation: Mail's quote of the original does not follow your text. "
             "Mail's setting 'Quote the text of the original message' (Mail > "
@@ -1031,27 +1094,27 @@ def compose_insert(
             raise ComposeRefused(
                 "Accessibility is off for this process, so nothing was inserted"
             )
-        if not replace_all and not squash_text(quote_tail):
+        if not replace_all and not _alnum(quote_tail or ""):
             raise ComposeRefused(
                 "confirmation: the original's last words are unknown, so Mail's "
                 "quote cannot be confirmed and nothing was inserted"
             )
         pid = _mail_pid()
         clip = _clipboard()
+        count = clip.change_count()  # BEFORE the snapshot: a copy during it is caught
         snap = clip.snapshot()
-        count = clip.change_count()
         _hold_window(window_id)
         el = _focused_body(pid, window_id)
         if replace_all:
             _post_cmd_key(pid, _KEY_A)
             time.sleep(_SELECT_ALL_WAIT_S)
             el = _focused_body(pid, window_id)  # right before the write
-        if clip.change_count() != count:
+        before = squash_text(_read_body(el)[0])
+        if clip.change_count() != count:  # the last step before the write
             raise ComposeRefused(
                 "clipboard: the clipboard changed after it was saved, so nothing was "
                 "pasted; run the call again"
             )
-        before = squash_text(_read_body(el))
         mine = None  # the change count right after OUR write
         settled = False
         try:
