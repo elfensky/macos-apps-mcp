@@ -156,6 +156,16 @@ yourself); drag
 `macos-apps-mcp.app` into the Full Disk Access list and enable it (this is what lets the daemon
 read `chat.db` for Messages, and `TCC.db` itself for the `doctor` identity report).
 
+**Accessibility does not prompt either** (#348) — `mail_reply` and `reply_all` keep Mail's own
+quote by putting your text on top of Mail's reply window through Accessibility. Open
+`x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility` (on macOS 27 the
+list is named "Device Control and Data Access" in System Settings → Privacy & Security), add
+`/Applications/macos-apps-mcp.app` and switch it on. Grant it to the bundle, never to a terminal:
+a terminal's grant gives every program run in it control of the Mac's windows. While a reply is
+built, Mail comes to the front for about a second, and the clipboard is borrowed and restored.
+Without the grant those two tools refuse and leave nothing. `doctor` reports it as
+`accessibility`, and the Health page shows an `Accessibility` row.
+
 ### 4. Point every MCP client at the shim
 
 The bundled interpreter runs with `-E -s -P` (ignore `PYTHON*` env vars, skip user
