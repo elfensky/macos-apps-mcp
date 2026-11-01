@@ -4,10 +4,10 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 Task 1 built (873b553, not installed), resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md"
+stopped_at: "Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 device acceptance done 2026-11-01 on build 873b553 — verdict failed (C2 dry run FIX-18, C3 live grant read); gaps G1-G4 in 05.2-13-SUMMARY.md; next /gsd-plan-phase 05.2 --gaps"
 last_updated: "2026-11-01T20:10:53.453Z"
 last_activity: 2026-11-01
-last_activity_desc: "Phase 05.6 discuss (assumptions mode): 28 decisions; Mail folders by translated names; Notes backups kept like Mail backups; #540 (state folder permissions) filed and folded into 05.6"
+last_activity_desc: "05.2-13 owner sitting: FIX-16 quote route holds on draft and delivered reply-all; FIX-18 preview and the live Accessibility read fail; 4 gaps"
 state_head: 4af6a5d5b977331519b8a45b8e36711791283069
 progress:
   total_phases: 20
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 ## Current Position
 
 Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — EXECUTING
-Plan: 8 of 13
+Plan: 13 of 13 (05.2-13 done; gaps G1-G4 open)
 Status: Executing Phase 05.2
-Last activity: 2026-11-01 — Phase 05.6 discuss (assumptions mode): 28 decisions; Mail folders by translated names; Notes backups kept like Mail backups; #540 filed and folded into 05.6
+Last activity: 2026-11-01 — 05.2-13 owner sitting: FIX-16 quote route holds on draft and delivered reply-all; FIX-18 preview and the live Accessibility read fail; 4 gaps
 
 Progress: [█████████░] 92%
 
@@ -82,6 +82,7 @@ Progress: [█████████░] 92%
 
 ### Decisions
 
+- [Phase 05.2]: Owner decision 2026-11-01 (05.2-13 sitting): the device acceptance verdict is failed (C2 dry run FIX-18, C3 live Accessibility read); #348 and #516 stay open; gaps G1-G4 (05.2-13-SUMMARY.md) go to /gsd-plan-phase 05.2 --gaps; build 873b553 stays installed, 0.15.1 kept in ~/p052-gaps-rollback/.
 - [Phase 05.2]: Owner decision 2026-11-01: the reply sweep's residual is accepted as documented (facts §4e `Refusal cleanup` (3)): the owner's own hand draft with the same text and the full quote, in the sending account, saved inside the claim window (at most 120 s), can be taken for the call's copy.
 - [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
 - [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
@@ -237,5 +238,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-01T20:10:52.589Z
-Stopped at: Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 Task 1 built (873b553, not installed), resume the owner sitting from .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-HANDOFF.md
+Stopped at: Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 device acceptance done 2026-11-01 on build 873b553 — verdict failed (C2 dry run FIX-18, C3 live grant read); gaps G1-G4 in 05.2-13-SUMMARY.md; next /gsd-plan-phase 05.2 --gaps
 Resume file: .planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md
