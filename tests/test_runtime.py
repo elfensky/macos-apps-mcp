@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
+import errno
+import inspect
+import os
 import pathlib
 import re
 import subprocess
@@ -605,22 +609,93 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
 # pasteboard call: every private loader and helper is replaced.
 
 
+def _fake_child(monkeypatch, *answers):
+    """Replace ``runtime.tracked_run``: each call answers the next item of ``answers``
+    (a stdout string, a ``CompletedProcess``, or an exception to raise). Returns the
+    call log of ``(cmd, timeout, thread name)``."""
+    calls: list[tuple] = []
+    queue = list(answers)
+
+    def fake(cmd, *, timeout, errors=None, **_):
+        calls.append((cmd, timeout, threading.current_thread().name, errors))
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, subprocess.CompletedProcess):
+            return item
+        return subprocess.CompletedProcess(cmd, 0, item, "")
+
+    monkeypatch.setattr(runtime, "tracked_run", fake)
+    return calls
+
+
 def test_accessibility_trusted_reads_the_switch_without_a_prompt(monkeypatch):
-    threads: list[str] = []
-
-    def trust():
-        threads.append(threading.current_thread().name)
-        return True
-
-    monkeypatch.setattr(runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": trust})
+    calls = _fake_child(monkeypatch, "1\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is True
-    assert threads and all(n.startswith("mac-native") for n in threads)
-    monkeypatch.setattr(
-        runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": lambda: False}
+    cmd, timeout, thread, errors = calls[0]
+    assert cmd[:3] == [sys.executable, "-I", "-c"]
+    assert (
+        "AXIsProcessTrusted" in cmd[3] and runtime._HISERVICES + "/HIServices" in cmd[3]
     )
+    # a hung child would hold the one native worker (T-05.2-51): pin the bound
+    assert 0 < runtime._AX_CHILD_TIMEOUT <= 5
+    assert timeout == runtime._AX_CHILD_TIMEOUT
+    assert (
+        errors == "replace"
+    )  # non-UTF-8 child output must not raise UnicodeDecodeError
+    assert thread.startswith("mac-native")
+    _fake_child(monkeypatch, "0\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is False
     # only the non-prompting trust read exists in the runtime source (T-05.2-38)
     assert "WithOptions" not in pathlib.Path(runtime.__file__).read_text("utf-8")
+
+
+def test_accessibility_trusted_on_the_worker_does_not_redispatch(monkeypatch):
+    # compose_insert and the mail_outgoing work call the seam FROM the worker: a
+    # re-dispatch would make the one worker wait on itself
+    _fake_child(monkeypatch, "1\n")
+    fut = runtime._executor.submit(_REAL_ACCESSIBILITY_TRUSTED)
+    assert fut.result(timeout=5) is True
+
+
+def test_accessibility_trusted_spawns_a_fresh_child_every_call(monkeypatch):
+    # the G2 regression pin (05.2-13): a daemon kept its first in-process answer
+    calls = _fake_child(monkeypatch, "1\n", "0\n")
+    assert _REAL_ACCESSIBILITY_TRUSTED() is True
+    assert _REAL_ACCESSIBILITY_TRUSTED() is False
+    assert len(calls) == 2
+
+
+def test_accessibility_trusted_never_reads_in_process(monkeypatch):
+    _fake_child(monkeypatch, "1\n")
+    monkeypatch.setattr(
+        runtime, "_ax_lib", lambda: pytest.fail("the in-process trust read is gone")
+    )
+    assert _REAL_ACCESSIBILITY_TRUSTED() is True
+    assert "AXIsProcessTrusted" not in inspect.getsource(runtime._ax_lib)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(subprocess.CompletedProcess([], 1, "1\n", ""), id="exit-1"),
+        pytest.param("x\n", id="junk"),
+        pytest.param("", id="empty"),
+        pytest.param(OSError("no exec"), id="oserror"),
+        pytest.param(subprocess.TimeoutExpired("c", 5), id="timeout"),
+    ],
+)
+def test_accessibility_trusted_child_failure_is_a_native_error(monkeypatch, answer):
+    _fake_child(monkeypatch, answer)
+    with pytest.raises(NativeError, match="Accessibility check could not run"):
+        _REAL_ACCESSIBILITY_TRUSTED()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads the macOS switch")
+def test_accessibility_trusted_real_child_returns_a_bool():
+    # read-only: a real child reads the switch; run by hand, never in CI
+    assert isinstance(_REAL_ACCESSIBILITY_TRUSTED(), bool)
 
 
 class _Clip:
@@ -707,6 +782,149 @@ def _compose_rig(
     return events, clip, keys
 
 
+# --- FIX-16 (#348, 05.2-13 G3): Mail's pid from the kernel process table --------------
+
+_MAIL = b"/System/Applications/Mail.app/Contents/MacOS/Mail"
+
+
+class _FakeLibproc:
+    """A stand-in for libproc. ``paths`` maps pid -> executable path (bytes) or an errno
+    (the read fails with it). ``size`` / ``got`` override the two ``proc_listpids``
+    answers; ``full`` makes the second answer fill the whole buffer."""
+
+    def __init__(self, paths, *, size=None, got=None, full=False):
+        self.paths, self.size, self.got, self.full = paths, size, got, full
+        self.asked: list[tuple] = []
+
+    def proc_listpids(self, kind, uid, buf, nbytes):
+        self.asked.append((kind, uid))
+        if buf is None:
+            return len(self.paths) * 4 if self.size is None else self.size
+        if self.got is not None:
+            return self.got
+        for i, pid in enumerate(self.paths):
+            buf[i] = pid
+        return nbytes if self.full else len(self.paths) * 4
+
+    def proc_pidpath(self, pid, buf, nbytes):
+        item = self.paths[pid]
+        if isinstance(item, int):
+            ctypes.set_errno(item)
+            return 0
+        buf.value = item
+        return len(item)
+
+
+def _proc(monkeypatch, paths, **kw) -> _FakeLibproc:
+    fake = _FakeLibproc(paths, **kw)
+    monkeypatch.setattr(runtime, "_proc_lib", lambda: fake)
+    return fake
+
+
+def test_mail_pid_reads_the_process_table(monkeypatch):
+    fake = _proc(
+        monkeypatch,
+        {
+            11: b"/Applications/Other.app/Contents/MacOS/Other",
+            22: _MAIL,
+            33: b"/opt/helper/Mail.app/Contents/MacOS/Mail",  # a suffix is no match
+            55: b"/System/Applications/mail.app/Contents/MacOS/Mail",  # no case folding
+            44: b"/System/Applications/Mail.app/Contents/MacOS/MailHelper",
+        },
+    )
+    assert runtime._mail_pid() == 22
+    assert fake.asked and set(fake.asked) == {(runtime._PROC_UID_ONLY, os.getuid())}
+    assert runtime._PROC_UID_ONLY == 4
+
+
+@pytest.mark.parametrize(
+    ("paths", "text"),
+    [
+        pytest.param({11: b"/bin/zsh"}, "Mail is not running", id="none"),
+        pytest.param({22: _MAIL, 23: _MAIL}, "more than one Mail process", id="two"),
+    ],
+)
+def test_mail_pid_refuses_without_exactly_one_mail(monkeypatch, paths, text):
+    _proc(monkeypatch, paths)
+    with pytest.raises(runtime.ComposeRefused, match=text):
+        runtime._mail_pid()
+
+
+@pytest.mark.parametrize(
+    "rig",
+    [
+        pytest.param({"paths": {22: _MAIL}, "size": 0}, id="size-0"),
+        pytest.param({"paths": {22: _MAIL}, "size": -1}, id="size-minus-1"),
+        pytest.param({"paths": {22: _MAIL}, "got": 0}, id="second-0"),
+        pytest.param({"paths": {22: _MAIL}, "got": -1}, id="second-minus-1"),
+        # the list may be cut short: Mail's pid is not in the part that was written
+        pytest.param({"paths": {11: b"/bin/zsh"}, "full": True}, id="full-buffer"),
+        pytest.param(
+            {"paths": {11: errno.EPERM, 22: errno.EPERM}}, id="all-unreadable"
+        ),
+        pytest.param(
+            {"paths": {11: b"/bin/zsh", 22: errno.EPERM}}, id="one-unreadable"
+        ),
+    ],
+)
+def test_mail_pid_refuses_when_the_process_list_cannot_be_read(monkeypatch, rig):
+    _proc(monkeypatch, rig.pop("paths"), **rig)
+    with pytest.raises(runtime.ComposeRefused, match="the process list could not") as e:
+        runtime._mail_pid()
+    assert "Mail is not running" not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    ("paths", "expect"),
+    [
+        pytest.param({11: errno.ESRCH, 22: _MAIL}, 22, id="beside-mail"),
+        # a deleted executable (an in-place update) is never Mail on the sealed volume
+        pytest.param({11: errno.ENOENT, 22: _MAIL}, 22, id="deleted-beside-mail"),
+        pytest.param({11: errno.ENOENT, 12: b"/bin/zsh"}, None, id="deleted-no-mail"),
+        pytest.param({11: errno.ESRCH, 12: b"/bin/zsh"}, None, id="beside-unrelated"),
+    ],
+)
+def test_mail_pid_skips_a_process_that_exited(monkeypatch, paths, expect):
+    _proc(monkeypatch, paths)
+    if expect is not None:
+        assert runtime._mail_pid() == expect
+    else:
+        with pytest.raises(runtime.ComposeRefused, match="Mail is not running"):
+            runtime._mail_pid()
+
+
+def test_mail_pid_needs_no_appkit(monkeypatch):
+    monkeypatch.setitem(sys.modules, "AppKit", None)
+    _proc(monkeypatch, {22: _MAIL})
+    assert runtime._mail_pid() == 22
+    assert "AppKit" not in inspect.getsource(runtime._mail_pid)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="loads libproc")
+def test_proc_lib_binds_listpids_and_pidpath_with_exact_types():
+    lib = runtime._proc_lib()  # binds only: calls nothing
+    assert lib.proc_listpids.argtypes == [
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    assert lib.proc_listpids.restype is ctypes.c_int
+    assert lib.proc_pidpath.argtypes == [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    assert lib.proc_pidpath.restype is ctypes.c_int
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads the macOS process table")
+def test_mail_pid_real_matches_pgrep():
+    # read-only: a process-table read compared with pgrep; no Apple Event
+    out = subprocess.run(["pgrep", "-x", "Mail"], capture_output=True, text=True).stdout
+    pids = {int(p) for p in out.split()}
+    if not pids:
+        pytest.skip("Mail not running")
+    assert runtime._mail_pid() in pids
+
+
 _TEXT = "Hi there"
 _QUOTE = "On 1 Jul 2026, at 14:39, Jane wrote:\n> original words end here"
 
@@ -714,7 +932,7 @@ _QUOTE = "On 1 Jul 2026, at 14:39, Jane wrote:\n> original words end here"
 def test_compose_insert_targets_mails_window_only(monkeypatch):
     events, clip, keys = _compose_rig(monkeypatch, ["", f"{_TEXT}\n{_QUOTE}"])
     _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
-    assert runtime._MAIL_BUNDLE == "com.apple.mail"
+    assert runtime._MAIL_EXECUTABLE.endswith(b"/Mail.app/Contents/MacOS/Mail")
     assert keys == [(4242, 9)]  # exactly one Cmd-V, to Mail's pid
     assert ("hold", 77) in events and ("focus", 4242, 77) in events
     assert clip.written == [_TEXT]
@@ -846,7 +1064,7 @@ def test_compose_insert_seam_takes_no_target_app():
         "tool",
     }
     assert not any(w in p for p in params for w in ("app", "pid", "bundle"))
-    assert runtime._MAIL_BUNDLE == "com.apple.mail"
+    assert runtime._MAIL_EXECUTABLE.endswith(b"/Mail.app/Contents/MacOS/Mail")
 
 
 def test_compose_insert_restores_every_pasteboard_item(monkeypatch):

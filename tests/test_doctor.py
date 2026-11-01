@@ -224,6 +224,27 @@ def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, statu
         assert "remediation" in s
 
 
+def test_accessibility_surface_follows_the_seam_across_reports(monkeypatch):
+    # G2 (05.2-13): two reports in one process follow the switch, no cached answer
+    answers = iter([True, False])
+    monkeypatch.setattr(runtime, "accessibility_trusted", lambda: next(answers))
+    first = doc._accessibility_surface()["status"]
+    second = doc._accessibility_surface()["status"]
+    assert (first, second) == ("granted", "not_granted")
+
+
+def test_note_names_the_permissions_that_need_a_restart(monkeypatch, tmp_path):
+    _all_granted(monkeypatch, tmp_path)
+    _fake_trusted(monkeypatch, True)
+    note = doc.diagnose(request=False)["note"]
+    assert note == (
+        "Grant each permission to the launching app (above). Automation and "
+        "Accessibility need no restart; Full Disk Access, Calendars and Reminders "
+        "may need one."
+    )
+    assert "Only" not in note and "then restart" not in note
+
+
 def test_accessibility_surface_is_off_with_the_mail_adapter(monkeypatch):
     monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
     calls = _fake_trusted(monkeypatch, False)
@@ -643,12 +664,13 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, pro
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
     # request=False live report (daemon, not-built state), with the Accessibility
     # surface NOT granted (#348, FIX-16) measures, per status of the six Automation
-    # surfaces: not_running 7467, denied 7456, not_asked 7449, probe_error 7401
-    # (OSStatus -1708); with Accessibility granted the same cases read 7226, 7215,
-    # 7208 and 7160. not_running is the worst case, so 7500 keeps 33 chars of margin
-    # (the Accessibility remediation names both panes, as the reply tools' refusal
-    # does): a `ps` executable name longer by 33 chars would fail it. The next text
-    # added to a surface must shorten something here, never raise 7500.
+    # surfaces: not_running 7477, denied 7466, not_asked 7459, probe_error 7411
+    # (OSStatus -1708); with Accessibility granted the same cases read 7236, 7225,
+    # 7218 and 7170 (re-measured with the per-permission restart note, 05.2-14, 10
+    # chars longer than before). not_running is the worst case, so 7500 keeps 23 chars
+    # of margin (the Accessibility remediation names both panes, as the reply tools'
+    # refusal does): a `ps` executable name longer by 23 chars would fail it. The next
+    # text added to a surface must shorten something here, never raise 7500.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).

@@ -18,6 +18,7 @@ from __future__ import annotations
 import calendar
 import contextlib
 import ctypes
+import errno
 import logging
 import os
 import re
@@ -662,9 +663,20 @@ _HISERVICES = (
     "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/"
     "HIServices.framework"
 )
+# The child program of `accessibility_trusted`: the plain trust read through ctypes, no
+# PyObjC. 05.2-proto/g2_ax_trust_probe.py builds the same text.
+_AX_CHILD = (
+    "import ctypes;"
+    f"l=ctypes.CDLL({_HISERVICES + '/HIServices'!r});"
+    "l.AXIsProcessTrusted.restype=ctypes.c_bool;"
+    "print(int(l.AXIsProcessTrusted()))"
+)
+_AX_CHILD_TIMEOUT = 5.0  # a normal child takes about 40 ms
 _COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework"
 _COREFOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
-_MAIL_BUNDLE = "com.apple.mail"
+_MAIL_EXECUTABLE = b"/System/Applications/Mail.app/Contents/MacOS/Mail"
+_PROC_UID_ONLY = 4  # <sys/proc_info.h>; 1 is all pids, 5 the real uid
+_PROC_PATH_MAX = 4 * 1024  # PROC_PIDPATHINFO_MAXSIZE
 _KEY_A, _KEY_V = 0, 9  # kVK_ANSI_A, kVK_ANSI_V
 _CMD_FLAG = 0x100000  # kCGEventFlagMaskCommand
 # Clipboard-history tools skip an item that carries these (nspasteboard.org).
@@ -712,8 +724,7 @@ _AX: dict = {}
 def _ax_lib() -> dict:
     """The HIServices calls, bound once through PyObjC. Lazy, so nothing loads at
     import time (the server must import off macOS), and a test replaces it. The trust
-    read is the plain one: the variant that can raise the system prompt is never
-    bound."""
+    read is not bound here: ``accessibility_trusted`` reads it in a fresh child."""
     if not _AX:
         import objc
 
@@ -723,7 +734,6 @@ def _ax_lib() -> dict:
             hi,
             lib,
             [
-                ("AXIsProcessTrusted", b"Z"),
                 ("AXUIElementGetTypeID", b"Q"),
                 ("AXUIElementCreateApplication", b"^{__AXUIElement=}i"),
                 (
@@ -741,13 +751,40 @@ def _ax_lib() -> dict:
 
 
 def accessibility_trusted() -> bool:
-    """Whether THIS process holds the Accessibility grant (macOS 27: "Device Control and
+    """Whether THIS app holds the Accessibility grant (macOS 27: "Device Control and
     Data Access"). Reads the switch only: it never asks macOS to show a prompt. Safe on
     or off the worker; it dispatches itself, so it waits behind a job that holds the one
-    worker."""
+    worker.
+
+    A fresh child interpreter reads it on every call, because the in-process read keeps
+    its first answer for the life of a daemon that never turns a run loop (05.2-13 G2).
+    ``-I`` keeps the child from loading code from the environment, the user site or the
+    current folder. A failed check is an error, never a guess."""
 
     def work() -> bool:
-        return bool(_ax_lib()["AXIsProcessTrusted"]())
+        try:
+            done = tracked_run(
+                [sys.executable, "-I", "-c", _AX_CHILD],
+                timeout=_AX_CHILD_TIMEOUT,
+                errors="replace",  # junk output becomes the "unexpected answer" error
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            raise NativeError(
+                f"Accessibility check could not run ({type(e).__name__}), so the "
+                "grant is unknown."
+            ) from e
+        out = done.stdout.strip()
+        if done.returncode != 0:
+            raise NativeError(
+                "Accessibility check could not run (the check process answered exit "
+                f"{done.returncode}), so the grant is unknown."
+            )
+        if out not in ("0", "1"):
+            raise NativeError(
+                "Accessibility check could not run (an unexpected answer), so the "
+                "grant is unknown."
+            )
+        return out == "1"
 
     return work() if on_worker() else run_native(work)
 
@@ -770,15 +807,62 @@ def _ax_get(el, attr: str):
     return _ax_read(el, attr)[0]
 
 
-def _mail_pid() -> int:
-    import AppKit
+def _proc_lib():
+    """libproc with the two process-table calls bound. Lazy; a test replaces it."""
+    lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    lib.proc_listpids.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    lib.proc_listpids.restype = ctypes.c_int
+    lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    lib.proc_pidpath.restype = ctypes.c_int
+    return lib
 
-    apps = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(
-        _MAIL_BUNDLE
-    )
-    if not apps:
+
+def _mail_pid() -> int:
+    """The pid of THIS user's Mail, read from the kernel process table (libproc).
+
+    05.2-13 G3: the earlier running-applications read answered "no Mail" in 3 of 11
+    windowed calls inside the daemon while Mail ran, a cause not reproduced in a plain
+    process, so that dependency is removed. This user's processes only (the table also
+    answers for other users); the exact executable path rejects helpers. A list or a
+    path read that fails refuses naming the process list, never "Mail is not running":
+    Mail may be the process that could not be read."""
+    unreadable = ComposeRefused("window check: the process list could not be read")
+    lib, uid = _proc_lib(), os.getuid()
+    size = lib.proc_listpids(_PROC_UID_ONLY, uid, None, 0)
+    if size <= 0:
+        raise unreadable
+    # +64 slots: processes may start between the two calls
+    pids = (ctypes.c_int * (size // ctypes.sizeof(ctypes.c_int) + 64))()
+    got = lib.proc_listpids(_PROC_UID_ONLY, uid, pids, ctypes.sizeof(pids))
+    if got <= 0 or got >= ctypes.sizeof(pids):  # a full buffer: the list may be cut
+        raise unreadable
+    path = ctypes.create_string_buffer(_PROC_PATH_MAX)
+    matches: list[int] = []
+    read_ok = failed = 0
+    for pid in pids[: got // ctypes.sizeof(ctypes.c_int)]:
+        if pid <= 0:
+            continue
+        ctypes.set_errno(0)
+        if lib.proc_pidpath(pid, path, _PROC_PATH_MAX) > 0:
+            read_ok += 1
+            if path.value == _MAIL_EXECUTABLE:
+                matches.append(pid)
+        elif ctypes.get_errno() not in (errno.ESRCH, errno.ENOENT):
+            # ESRCH: exited between the calls; ENOENT: executable deleted (an update),
+            # never Mail, whose binary sits on the sealed system volume
+            failed += 1
+    if not matches and (failed or not read_ok):
+        raise unreadable
+    if not matches:
         raise ComposeRefused("window check: Mail is not running")
-    return int(apps[0].processIdentifier())
+    if len(matches) > 1:
+        raise ComposeRefused("window check: more than one Mail process is running")
+    return matches[0]
 
 
 def _mail_active(pid: int) -> bool:
