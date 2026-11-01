@@ -121,7 +121,7 @@ junit counts: `tests 80 failures 5 errors 0 skipped 1`
 
 pytest summary line: `5 failed, 74 passed, 1 skipped, 1492 deselected in 6679.74s (1:51:19)`
 
-Marker-mail count in the scratch INBOX (`imap://AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1/INBOX`)
+Marker-mail count in the scratch INBOX (`imap://<personal-account-uuid>/INBOX`)
 after the run: **2/2** — confirmed via `MailAdapter().search(subject="macos-apps-mcp sweep
 marker", mailbox=<that INBOX>, limit=5)`.
 
@@ -380,7 +380,7 @@ pytest summary line: `==== 77 passed, 1 skipped, 1492 deselected, 2 xfailed in 7
 **D-06 gate: PASS** — failures 0, errors 0, no XPASS. Mail stayed responsive throughout (watchdog
 `osascript=0` between calls; Mail pid 92104 unchanged, never force-quit).
 
-Marker mails in the scratch INBOX (`imap://AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1/INBOX`) after the
+Marker mails in the scratch INBOX (`imap://<personal-account-uuid>/INBOX`) after the
 run: **2/2** — `<748F15CE-D3A6-4594-B8B0-DFAF9EAE2707@lav.ren>` and
 `<903E7153-34B4-4AB8-A51D-9E6845FD5C0D@lav.ren>`, via `mail_search(subject="macos-apps-mcp sweep
 marker", limit=5)` on the installed daemon.
