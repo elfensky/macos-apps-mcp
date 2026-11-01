@@ -734,13 +734,14 @@ def mail_reply(
     selection is left in Mail's message viewer). A refusal before the reply window
     opened leaves nothing. A refusal after it opened takes about 45 seconds: the call
     discards the reply, waits for Mail's autosave, and deletes a Drafts copy only when
-    that copy is provably its own (it landed before the discard, the text above Mail's
-    quote is exactly yours, the quote is still there, and no other reply window was open
-    when the call started). A copy it cannot prove, or cannot look for (not exactly
-    your text, a localized Drafts, no Full Disk Access), is left alone: the error then
-    says a copy MAY be left. Look in the Drafts of the account the reply is sent from,
-    and again after a minute, because Mail saves its copy late. Only "nothing was
-    created" is clean.
+    that copy is provably its own (it sits in the Drafts of the account the reply is
+    sent from, it landed between the reply verb and the discard, the text above Mail's
+    quote is exactly yours, the quote is still there with nothing below it, and no other
+    reply window to that message was open when the call started). A copy it cannot
+    prove, or cannot look for (not exactly your text, a localized Drafts, no Full Disk
+    Access), is left alone: the error then says a copy MAY be left. Look in the Drafts
+    of the account the reply is sent from, and again after a minute, because Mail saves
+    its copy late. Only "nothing was created" is clean.
     Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
     stable message-id.
 
@@ -1052,9 +1053,10 @@ def reply_all(
     the text of the original message" is off, or a text selection is left in Mail's
     message viewer). A refusal before the reply window opened leaves nothing. A refusal
     after it opened takes about 45 seconds: the call discards the reply, waits for
-    Mail's autosave, and deletes a Drafts copy only when that copy is provably its own.
-    A copy it cannot prove, or cannot look for, is left alone: the error then says a
-    copy MAY be left. Only "nothing was created" is clean.
+    Mail's autosave, and deletes a Drafts copy only when that copy is provably its own
+    (in the Drafts of the account the reply is sent from, as for mail_reply). A copy it
+    cannot prove, or cannot look for, is left alone: the error then says a copy MAY be
+    left. Only "nothing was created" is clean.
     After a send, Mail can leave an autosaved copy of the reply in Drafts. The call
     then waits until about 45 seconds after the window opened (so it returns after about
     a minute), looks for that copy and deletes it only when it is provably this reply's
