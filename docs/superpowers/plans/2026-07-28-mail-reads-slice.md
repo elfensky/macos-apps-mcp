@@ -1162,12 +1162,12 @@ git commit -m "test(mail): on-device integration for the reads slice"
 ### Task 9: Docs and close-out
 
 **Files:**
-- Modify: `docs/ROADMAP.md`
+- Modify: `docs/landscape.md`
 - Modify: `README.md` (tool table, if one lists tools)
 
 - [ ] **Step 1: Check whether the README lists tools**
 
-Run: `grep -n "mail_search\|mail_body" README.md docs/ROADMAP.md`
+Run: `grep -n "mail_search\|mail_body" README.md docs/landscape.md`
 If `mail_search` appears in a tool table, add `mail_thread` and `mail_overview` rows in the same format. If it does not appear, skip the README edit — do not invent a table.
 
 - [ ] **Step 2: Run the full verification set one final time**

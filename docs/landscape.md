@@ -1,9 +1,10 @@
-# Roadmap
+# Landscape and shipped history
 
-High-level direction for macos-apps-mcp, grounded in a full landscape survey of Apple-apps MCP servers
-(2026-07-14; findings embedded in the linked issues). Detail lives in the issues — this file is the
-map, not the territory. Issues here are **candidates**: filing ≠ commitment; refinement happens per
-milestone.
+The landscape survey of Apple-apps MCP servers (2026-07-14; findings embedded in the linked issues)
+and the record of what each 0.x cut shipped and why. **This file is not a plan.** The one roadmap
+is [`.planning/ROADMAP.md`](../.planning/ROADMAP.md) (GSD phases); deferred work and anti-features
+live in [`.planning/REQUIREMENTS.md`](../.planning/REQUIREMENTS.md) ("v2 Requirements", "Out of
+Scope"). Renamed from `docs/ROADMAP.md` on 2026-11-02 so the repo holds one roadmap file.
 
 **Status in plain language:** the [progress guide](../.planning/reports/progress-guide.html)
 (published copy: <https://artifacts.static.lav.ren/macos-apps-mcp-progress/>) shows every GSD phase,
@@ -40,7 +41,7 @@ serves its old build until you do it.
 
 ## 0.9.x — the rest of Mail depth
 
-Candidate cuts, smallest coherent slice each. Ordering is a proposal, not a commitment.
+The cuts that finished Mail depth, smallest coherent slice each, in the order they ran.
 
 | Cut | Contents | Note |
 |---|---|---|
@@ -55,10 +56,10 @@ Candidate cuts, smallest coherent slice each. Ordering is a proposal, not a comm
 | **Mail polish & cleanup** ✅ | [#174](https://github.com/elfensky/macos-apps-mcp/issues/174) `_MOVE`'s false "this was a COPY" · [#162](https://github.com/elfensky/macos-apps-mcp/issues/162) the device-suite failures · [#167](https://github.com/elfensky/macos-apps-mcp/issues/167) probe gate (below) | **Landed on `develop`. #174's suspected mechanism did not reproduce — the NINTH consecutive cut whose premise the device revised.** The hypothesis was `_TRASH`'s source-side lag arriving on `move`; measured 2026-08-13, **17/17 cross-account moves read source=0 in the same script statement as the verb** — quiet AND under a read-load that tripled verb latency to ~3.7 s. `move` is synchronous on the source side, so no `_TRASH`-style poll: the accusing branch now **re-checks once after a bounded 2 s wait** and then reports the OBSERVATION — present in both, naming self-move (§5e) as one of the two readings, plus that nothing was deleted — never the old "so this was a COPY" inference, which was twice a false accusation. The happy path stays poll-free and the verify stays loud (#135). **#162 closed, and two of its three were not code bugs**: outbound rollback ran 5/5 green with `MACOS_APPS_ALLOW_SEND=mail` (including the real-send round-trip, 31.95 s — the failure predates 0.9.4's assertion fix and is gone); the Notes U+2028 case was **test drift** — the raw-decoder comparison already normalised CRLF on the grounds that `clean_body` folds it, and U+2028/9 is the identical case missing from the same line (the decoder faithfully preserving what the store holds is correct; no client ever sees the separator); Contacts was **app-launch state** — a wedged Contacts.app raises -600 even on AppleScript `launch` while `open -a` heals it, so the test now ensures the process exists before testing what it actually claims to test (failed 0.18 s cold, passes 2.6 s with the guard). |
 | **Mail scripting health** ✅ | [#183](https://github.com/elfensky/macos-apps-mcp/issues/183) the wedged event queue | **Landed on `develop`.** A live incident, not a review finding: a wedged Mail returned -1712 to EVERY Apple Event for 37 minutes while the generic 30 s timeout message kept suggesting retry. Triage had already overturned the issue's first mitigation, the TENTH consecutive premise revised by checking — "serialize AppleScript per app" **already exists** (every `run_osascript` dispatches through `runtime`'s single `max_workers=1` worker), so what shipped is detection + honest remediation, no new serialization. On every osascript timeout — the host-side kill AND the in-script `with timeout` firing (-1712, which used to fall through as a generic "osascript failed") — `runtime` now reads the target app's process off `ps` (failure path only; the happy path makes no process read) and classifies: **WEDGED** (idle state, ~1 % CPU, yet not answering — permanent, facts §9b) gets the honest remediation, *force-quit (`killall Mail && open -a Mail`) and confirm the pid changed*, because the incident's UI quit left the 37-minute-old process alive; **BUSY** (running state or real CPU — an account resync, a long scan) gets "recovers on its own, wait and retry once", never a force-quit. A script naming no app, or an unreadable process, appends nothing — the generic message reads byte-identical to before (device-checked, along with an unchanged 0.22 s happy path against a healthy Mail). `doctor`'s automation surfaces now carry a `process` line (pid, uptime, state, %CPU — a ps read, no Apple Event, reported even unprobed), so "did the restart actually happen" is answerable from a doctor report. Honestly scoped, per the triage: the wedge was NOT re-reproduced — facts §9b records the rename-race attribution as a single uncontrolled observation — and the classifier is the deliverable regardless; both signatures it discriminates were observed live. Unit tests cover the classification and both message shapes (fake ps output; the taxonomy in `errors.py` stays free of native imports). |
 | **Mail plumbing** ✅ | [#175](https://github.com/elfensky/macos-apps-mcp/issues/175) one mailbox-url module · [#177](https://github.com/elfensky/macos-apps-mcp/issues/177) one `.emlx` walk per destructive op | **Landed on `develop`.** #175: the `<scheme>://<uuid>/<path>` grammar now has ONE home — `adapters/mailbox_url.py`, pure stdlib — and the nine hand-parse/synthesis sites across `mail_addressing`/`mail_index`/`mail`/`dedupe` are callers. The three drifted special-mailbox vocabularies (`_MAILBOX_RANK`, `_TRASH_SUFFIXES`, dedupe's `_TRASH_LEAVES`) are now TWO questions — copy-rank and trash-ness — generated from ONE table, kept deliberately un-collapsed (the table's comments carry the Junkyard/'Wallets/Old Mail' final-segment anchoring and the Exchange `Junk%20E-mail` prefix rule, and tests pin both). **The Bin gap is fixed and regression-tested** through `_fake_envelope`: a `Bin`-spelling trash used to rank as a FILED copy and beat an Archive copy for keeper/citation; the new test fails on the old rank. Device sanity exactly as scoped: `mail_overview` + `mail_duplicates` output **byte-identical** old-vs-new on this Mac (39 KB compared; no Bin account here — that IS the check). #177: `locate` stamps the located `.emlx` path on each `Target` (in-memory only — `as_dict` never records it, receipts unchanged) and `_backup`/`read_payloads` read it instead of re-walking the store; the OSError→absent expunge-race handling is untouched and a test pins ONE walk per op. Device-measured on the real store (64,863 files, walk ≈ 0.67 s warm): a 10-message `export_mail` batch — the same locate→read seam — went **1.35 s → 0.70 s**, exactly the duplicate walk. The composable rglob-scoping option stays in the `ponytail:` comment for whenever one walk bites. #179 was offered a seat and DECLINED on its own caution: the ×8 VERBATIM clauses turn out to be hand-tuned per tool, not byte-identical — flattening them would be the regression-dressed-as-hygiene the issue warns about; only the ×3 autosave line qualifies, too little to carry a cut. |
-| **0.9.8 — Messages depth** | [#86](https://github.com/elfensky/macos-apps-mcp/issues/86) gated send · [#87](https://github.com/elfensky/macos-apps-mcp/issues/87) attachments · [#88](https://github.com/elfensky/macos-apps-mcp/issues/88) unread + date filters | #86 reuses the existing gate — `allow-send messages`; the second-adapter plumbing already exists. |
+| **0.9.8 — Messages depth** | [#86](https://github.com/elfensky/macos-apps-mcp/issues/86) gated send · [#87](https://github.com/elfensky/macos-apps-mcp/issues/87) attachments · [#88](https://github.com/elfensky/macos-apps-mcp/issues/88) unread + date filters | #86 reuses the existing gate — `allow-send messages`; the second-adapter plumbing already exists. **Deferred to v2 on 2026-08-28** (owner's call): MSG-01–MSG-07 in `.planning/REQUIREMENTS.md`. |
 | **0.9.9 — Attachment download** ❌ | [#167](https://github.com/elfensky/macos-apps-mcp/issues/167) `download-attachments` | **Does not ship — the trigger gate failed, and the probe table IS the deliverable (2026-08-13), exactly as #84 and #119 before it.** The CLI needed a mechanism that converts a `.partial.emlx` to a full `.emlx`; all three candidates are now measured with control groups and none exists: `content` never fetches, `source` converted 2/10 vs 0/10 control (background-drift noise), and `save <mail attachment>` — the promising lead — **converted 0/10 vs 0/10 control** at 30/60/120 s, at ~15 min, and after a full Mail quit+relaunch, despite all 10 saves succeeding with genuine bytes (16–20 s real fetches, an 832-byte `BEGIN:VCALENDAR` byte-complete on disk). What the probe found instead: **Mail parks fetched payloads as `Attachments/<rowid>/` sidecars and never upgrades the store file** — 8/10 untouched controls already had complete weeks-old sidecars, so `.partial` does not even mean the payload is absent, and `downloaded=true` describes the sidecar, not the `.emlx`. Building the resumable CLI on this would ship a progress bar that lies and a "lossless backup" that is not. Evidence in [facts §4c](mail-applescript-facts.md); a save-based per-attachment export (the 10/10 mechanism) would be a DIFFERENT product under a different issue, not this one. [#153](https://github.com/elfensky/macos-apps-mcp/issues/153)'s byte-identity upgrade dies with it; the recoverable plane's `fidelity` gate stays conservative-and-correct. Rider [#177](https://github.com/elfensky/macos-apps-mcp/issues/177) (one `.emlx` walk per destructive op) survives independently and moves to floating. |
 
-Floating: [#179](https://github.com/elfensky/macos-apps-mcp/issues/179) docstring invariants get one owner (prose-only, from the 2026-08-13 review) — offered a seat in the 2026-08-16 plumbing cut and declined per its own caution: the VERBATIM clauses are hand-tuned per tool, not byte-identical; only the ×3 autosave line qualifies. Attach to whichever cut is light, dedupe only what is actually identical. (#177 was floating; landed in the plumbing cut on 2026-08-16.) (#162 was floating; landed in the polish-and-cleanup cut on 2026-08-13.) (#157/#160 were floating; slotted into 0.9.4 on 2026-08-04. #161 was floating; landed with #171 in the small-hygiene cut on 2026-08-11.) [#126](https://github.com/elfensky/macos-apps-mcp/issues/126)'s dashboard scope grew the human control panel for what the model can't touch: backup meter + clean-up button, dedupe report + runner. (Superseded 2026-09-28 by sketches 003 and 004, recorded in Phase 5's context on 2026-10-21: recovery on the dashboard is read-only — no clean-up button, no dedupe runner; retention stays keep-forever (#163); the dashboard's only writes are the adapter toggle and the daemon restart.)
+Floating: [#179](https://github.com/elfensky/macos-apps-mcp/issues/179) (closed) docstring invariants get one owner (prose-only, from the 2026-08-13 review) — offered a seat in the 2026-08-16 plumbing cut and declined per its own caution: the VERBATIM clauses are hand-tuned per tool, not byte-identical; only the ×3 autosave line qualifies. Attach to whichever cut is light, dedupe only what is actually identical. (#177 was floating; landed in the plumbing cut on 2026-08-16.) (#162 was floating; landed in the polish-and-cleanup cut on 2026-08-13.) (#157/#160 were floating; slotted into 0.9.4 on 2026-08-04. #161 was floating; landed with #171 in the small-hygiene cut on 2026-08-11.) [#126](https://github.com/elfensky/macos-apps-mcp/issues/126)'s dashboard scope grew the human control panel for what the model can't touch: backup meter + clean-up button, dedupe report + runner. (Superseded 2026-09-28 by sketches 003 and 004, recorded in Phase 5's context on 2026-10-21: recovery on the dashboard is read-only — no clean-up button, no dedupe runner; retention stays keep-forever (#163); the dashboard's only writes are the adapter toggle and the daemon restart.)
 
 ### The 2026-08-03 architecture review
 
@@ -140,56 +141,30 @@ rows in Mail's Envelope Index; `send_mail` must **not** sleep to sweep its own D
 would block the single serialized `run_native` worker and still race an unsuppressable async
 autosave); and "`sent: True` ≠ delivered" is already handled by `_with_outbox_pending`.
 
-## 0.10.x — Adapter depth parity ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/8))
+## Prior art by candidate (2026-07-14 survey)
 
-Depth for adapters we already ship, stealing the best single feature from each specialist. Cut per
-adapter — Calendar (#89, #90) as `0.10.0`, Reminders (#91, #92) as `0.10.1`, and so on — rather
-than one release waiting on all nine.
+The survey's candidates and the specialist each one borrows from. Scope and order live in
+`.planning/`: the requirement ids are in `.planning/REQUIREMENTS.md`, and the "Not planned" list
+is its "Out of Scope" table. Issue state as of 2026-11-02.
 
-| Issue | What | Prior art |
-|---|---|---|
-| [#89](https://github.com/elfensky/macos-apps-mcp/issues/89) | Calendar alarms | mcp-ical |
-| [#90](https://github.com/elfensky/macos-apps-mcp/issues/90) | Extended recurrence (`BYDAY`, …) | mcp-ical |
-| [#91](https://github.com/elfensky/macos-apps-mcp/issues/91) | Reminders tags + subtasks | FradSer |
-| [#92](https://github.com/elfensky/macos-apps-mcp/issues/92) | Reminders delete + list management | FradSer |
-| [#93](https://github.com/elfensky/macos-apps-mcp/issues/93) | Notes semantic search sidecar (evaluate) | RafalWilinski (dead — niche is open) |
-| [#94](https://github.com/elfensky/macos-apps-mcp/issues/94) | Contacts full cards, `contacts_me`, update | iMCP |
-| [#95](https://github.com/elfensky/macos-apps-mcp/issues/95) | Contacts sqlite fast search | apple-mcp-pro |
-| [#96](https://github.com/elfensky/macos-apps-mcp/issues/96) | Photos albums, metadata, export | sweetrb, osxphotos |
-| [#97](https://github.com/elfensky/macos-apps-mcp/issues/97) | Safari bookmarks, reading list, history | apple-mcp-pro; history = survey gap |
-
-## 0.11.x — New domains ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/9))
-
-Domains we don't cover; iMCP parity is the anchor. Each is a new adapter module per the
-one-adapter-per-app rule.
-
-| Issue | What | Prior art / caveat |
-|---|---|---|
-| [#98](https://github.com/elfensky/macos-apps-mcp/issues/98) | Maps — search, directions, ETA | iMCP (MapKit) |
-| [#99](https://github.com/elfensky/macos-apps-mcp/issues/99) | Location — current, geocode | iMCP; headless CoreLocation TCC is the spike |
-| [#100](https://github.com/elfensky/macos-apps-mcp/issues/100) | Weather | iMCP uses WeatherKit — **entitlement-blocked for us**; decide keyless HTTP vs Shortcuts first |
-| [#101](https://github.com/elfensky/macos-apps-mcp/issues/101) | Capture — screenshot (camera/audio maybe) | iMCP, apple-mcp-pro |
-| [#102](https://github.com/elfensky/macos-apps-mcp/issues/102) | System utilities cluster — cherry-pick | apple-mcp-pro (12 tools; most are skips) |
-| [#103](https://github.com/elfensky/macos-apps-mcp/issues/103) | Generic AppleScript escape hatch — **likely wontfix** | steipete, peakmojo; bypasses our typed-safety design |
-
-## Platform & DX ([milestone](https://github.com/elfensky/macos-apps-mcp/milestone/10))
-
-Cross-cutting, unversioned — pulled into whichever release needs them first
-([#104](https://github.com/elfensky/macos-apps-mcp/issues/104) gated 0.9.0's sends; [#143](https://github.com/elfensky/macos-apps-mcp/issues/143) is the daemon-drift guard's blind spot).
-
-| Issue | What | Prior art |
-|---|---|---|
-| [#104](https://github.com/elfensky/macos-apps-mcp/issues/104) | Granular capability gating (read < draft < send/destructive) | patrickfreyer `--read-only`; iMCP#161 demand |
-| [#105](https://github.com/elfensky/macos-apps-mcp/issues/105) | User-preferences env context | patrickfreyer |
-| [#106](https://github.com/elfensky/macos-apps-mcp/issues/106) | Companion skill + Claude Code plugin packaging | patrickfreyer |
-| [#107](https://github.com/elfensky/macos-apps-mcp/issues/107) | Distribution polish — .mcpb, brew tap | iMCP, patrickfreyer |
-
-## Not planned
-
-- **Journal** — no API at all (settled in [DESIGN.md](../DESIGN.md)).
-- **Raw script execution by default** — see [#103](https://github.com/elfensky/macos-apps-mcp/issues/103);
-  run [steipete/macos-automator-mcp](https://github.com/steipete/macos-automator-mcp) alongside if needed.
-- **Becoming a GUI app (iMCP-shaped)** — the stdio server stays; a signed helper *binary* ([#71](https://github.com/elfensky/macos-apps-mcp/issues/71))
-  is as far as we go. Run iMCP alongside for anything only an app can do.
-- **Contributing Mail support to iMCP** — evaluated 2026-07-14: would be a from-scratch Swift rewrite
-  into a sandbox that structurally resists Mail access, against a bursty review queue. Declined.
+| Issue | What | Prior art | Requirement | Issue state |
+|---|---|---|---|---|
+| [#89](https://github.com/elfensky/macos-apps-mcp/issues/89) | Calendar alarms | mcp-ical | CAL-01, CAL-02 | closed |
+| [#90](https://github.com/elfensky/macos-apps-mcp/issues/90) | Extended recurrence (`BYDAY`, …) | mcp-ical | CAL-03 | closed |
+| [#91](https://github.com/elfensky/macos-apps-mcp/issues/91) | Reminders tags + subtasks | FradSer | REM-03, REM-04 | closed |
+| [#92](https://github.com/elfensky/macos-apps-mcp/issues/92) | Reminders delete + list management | FradSer | REM-01, REM-02 | closed |
+| [#93](https://github.com/elfensky/macos-apps-mcp/issues/93) | Notes semantic search sidecar (evaluate) | RafalWilinski (dead — niche is open) | NOTE-01, NOTE-02 | closed |
+| [#94](https://github.com/elfensky/macos-apps-mcp/issues/94) | Contacts full cards, `contacts_me`, update | iMCP | CON-01–CON-03 (v2) | open |
+| [#95](https://github.com/elfensky/macos-apps-mcp/issues/95) | Contacts sqlite fast search | apple-mcp-pro | CON-04 (v2) | open |
+| [#96](https://github.com/elfensky/macos-apps-mcp/issues/96) | Photos albums, metadata, export | sweetrb, osxphotos | PHO-01–PHO-04 | closed |
+| [#97](https://github.com/elfensky/macos-apps-mcp/issues/97) | Safari bookmarks, reading list, history | apple-mcp-pro; history = survey gap | SAF-01, SAF-02 (v2) | open |
+| [#98](https://github.com/elfensky/macos-apps-mcp/issues/98) | Maps — search, directions, ETA | iMCP (MapKit) | MAP-01 (v2) | open |
+| [#99](https://github.com/elfensky/macos-apps-mcp/issues/99) | Location — current, geocode | iMCP; headless CoreLocation TCC is the spike | LOC-01, LOC-02 (v2) | open |
+| [#100](https://github.com/elfensky/macos-apps-mcp/issues/100) | Weather | iMCP uses WeatherKit — **entitlement-blocked for us** | WX-01 (v2) | open |
+| [#101](https://github.com/elfensky/macos-apps-mcp/issues/101) | Capture — screenshot (camera/audio maybe) | iMCP, apple-mcp-pro | Out of Scope | open |
+| [#102](https://github.com/elfensky/macos-apps-mcp/issues/102) | System utilities cluster — cherry-pick | apple-mcp-pro (12 tools; most are skips) | Out of Scope | open |
+| [#103](https://github.com/elfensky/macos-apps-mcp/issues/103) | Generic AppleScript escape hatch | steipete, peakmojo; bypasses our typed-safety design | Out of Scope — run steipete/macos-automator-mcp alongside | open |
+| [#104](https://github.com/elfensky/macos-apps-mcp/issues/104) | Granular capability gating (read < draft < send/destructive) | patrickfreyer `--read-only`; iMCP#161 demand | shipped as the three capability tiers (0.9.0) | closed |
+| [#105](https://github.com/elfensky/macos-apps-mcp/issues/105) | User-preferences env context | patrickfreyer | PLAT-03 (v2) | open |
+| [#106](https://github.com/elfensky/macos-apps-mcp/issues/106) | Companion skill + Claude Code plugin packaging | patrickfreyer | DIST-05 (Phase 6) | open |
+| [#107](https://github.com/elfensky/macos-apps-mcp/issues/107) | Distribution polish — .mcpb, brew tap | iMCP, patrickfreyer | DIST-03, DIST-04 (Phase 6) | open |
