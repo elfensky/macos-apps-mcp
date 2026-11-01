@@ -907,6 +907,24 @@ def test_compose_insert_refuses_a_changed_clipboard_before_writing(monkeypatch):
     assert "write" not in events and keys == []
 
 
+def test_compose_insert_checks_the_clipboard_last_before_the_write(monkeypatch):
+    # facts 4e `Insert` (3) -> (4): nothing sits between the changeCount check and the
+    # write. A copy made while the body is read for the "before" text must be caught;
+    # with the read after the check, the old snapshot would be restored over it.
+    events, clip, keys = _compose_rig(monkeypatch, ["x"])
+    real_read = runtime._read_body
+
+    def read(el):
+        if "write" not in events:
+            clip.count += 1  # the owner copies while the pre-write body read runs
+        return real_read(el)
+
+    monkeypatch.setattr(runtime, "_read_body", read)
+    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+        _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    assert "write" not in events and keys == []
+
+
 def test_compose_insert_restores_only_after_the_paste_settles(monkeypatch):
     # the text shows on the third read: the restore comes after that read
     events, _, _ = _compose_rig(
@@ -979,6 +997,35 @@ def test_focused_body_wants_a_web_area_inside_the_bound_window(monkeypatch):
         runtime._focused_body(4242, 5001)  # not a body
 
 
+def test_focused_body_refuses_when_the_window_cannot_be_proven(monkeypatch):
+    # the bound window is proven or the call refuses: a body with no AXWindow, a window
+    # number the SPI cannot read (an error code, even with a number beside it) and a
+    # system without the SPI all refuse; none of them reads as "inside the window"
+    attrs = {
+        ("app", 4242): {"AXFocusedUIElement": "body"},
+        "body": {"AXRole": "AXWebArea", "AXWindow": "win"},
+    }
+    ax = _FakeAx(attrs, {"win": 5001})
+    lib = ax.lib()
+    monkeypatch.setattr(runtime, "_ax_lib", lambda: lib)
+    assert runtime._focused_body(4242, 5001) == "body"  # the good case holds
+
+    spi = lib["_AXUIElementGetWindow"]
+    lib["_AXUIElementGetWindow"] = lambda win, _: (-25204, 5001)  # err beside a number
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)
+    lib["_AXUIElementGetWindow"] = lambda win, _: (0, 0)  # no window number
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)
+    del lib["_AXUIElementGetWindow"]  # the SPI is gone
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)
+    lib["_AXUIElementGetWindow"] = spi
+    del attrs["body"]["AXWindow"]  # the body names no window
+    with pytest.raises(runtime.ComposeRefused, match="focus check"):
+        runtime._focused_body(4242, 5001)
+
+
 def test_focused_body_waits_up_to_three_seconds_for_a_fresh_reply(monkeypatch):
     ax = _FakeAx({("app", 4242): {}, "body": {}}, {})
     clock = [0.0]
@@ -1011,31 +1058,40 @@ def test_read_body_walks_the_static_text_parts(monkeypatch):
 # --- the live frontmost read and the Activation rule (facts 4e `Activation`) ----------
 
 
-def test_frontmost_pid_is_the_owner_of_the_top_layer_zero_window(monkeypatch):
-    # front-to-back list: a menu-bar window (layer 25), then the app windows
-    calls: list = []
-    windows = [
-        {"kCGWindowLayer": 25, "kCGWindowOwnerPID": 111},
-        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 222},
-        {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 333},
-    ]
+def test_mail_active_is_mails_own_live_frontmost_attribute(monkeypatch):
+    # asked of Mail's process through AX, so it is live on any thread and follows the
+    # ACTIVE app, not the window order
+    ax = _FakeAx({("app", 4242): {"AXFrontmost": True}}, {})
+    monkeypatch.setattr(runtime, "_ax_lib", ax.lib)
+    assert runtime._mail_active(4242) is True
+    ax.attrs[("app", 4242)]["AXFrontmost"] = False
+    assert runtime._mail_active(4242) is False
+    ax.attrs[("app", 4242)]["AXFrontmost"] = 1  # a number counts as the flag
+    assert runtime._mail_active(4242) is True
+    # an unreadable attribute (an error, or no value) is "not active", never "active"
+    ax.failing = {(("app", 4242), "AXFrontmost")}
+    assert runtime._mail_active(4242) is False
+    del ax.attrs[("app", 4242)]["AXFrontmost"]
+    ax.failing = set()
+    assert runtime._mail_active(4242) is False
+    # the AX element asked is Mail's own pid
+    asked: list = []
+    lib = ax.lib()
+    lib["AXUIElementCreateApplication"] = lambda pid: asked.append(pid) or ("app", pid)
+    monkeypatch.setattr(runtime, "_ax_lib", lambda: lib)
+    runtime._mail_active(777)
+    assert asked == [777]
 
-    def listing(option, relative_to):
-        calls.append((option, relative_to))
-        return windows
 
-    monkeypatch.setitem(runtime._WINDOW_LIB, "CGWindowListCopyWindowInfo", listing)
-    assert runtime._frontmost_pid() == 222
-    assert calls == [(1 | 16, 0)]  # on-screen only, desktop elements excluded
-    windows.clear()
-    assert runtime._frontmost_pid() is None
-
-
-def test_frontmost_is_not_read_from_nsworkspace():
+def test_frontmost_is_not_read_from_nsworkspace_or_the_window_order():
     # NSWorkspace.frontmostApplication caches until the MAIN run loop turns, which the
-    # daemon never runs: the worker thread read a frozen app (review of #348)
+    # daemon never runs: the worker thread read a frozen app (review of #348). The top
+    # layer-0 window is the window order, not the active app (two displays: 152 of 557
+    # reads named another app than `lsappinfo front`).
     source = pathlib.Path(runtime.__file__).read_text("utf-8")
     assert "sharedWorkspace" not in source and "frontmostApplication()" not in source
+    assert "CGWindowListCopyWindowInfo" not in source
+    assert "kCGWindowLayer" not in source
 
 
 class _Front:
@@ -1044,7 +1100,7 @@ class _Front:
     def __init__(self, monkeypatch, *, front=1, index=1, after=None):
         self.front, self.index, self.after = front, index, after
         self.osa: list = []
-        monkeypatch.setattr(runtime, "_frontmost_pid", lambda: self.front)
+        monkeypatch.setattr(runtime, "_mail_active", lambda pid: self.front == pid)
         monkeypatch.setattr(runtime, "_mail_pid", lambda: 4242)
         monkeypatch.setattr(runtime, "_window_index", lambda wid: self.index)
         monkeypatch.setattr(runtime, "run_osascript", self._osa)
@@ -1057,6 +1113,19 @@ class _Front:
         if self.after is not None:  # activating Mail changes what the next read says
             self.front, self.index = self.after
         return "activated"
+
+
+@pytest.mark.parametrize(
+    "front, index, held",
+    [(4242, 1, True), (4242, 2, False), (999, 1, False), (None, 1, False)],
+)
+def test_window_held_needs_mail_active_and_the_reply_at_index_1(
+    monkeypatch, front, index, held
+):
+    # both halves: an active Mail whose reply is behind another Mail window, and a
+    # reply at index 1 of a Mail that is not the active app, are both "not held"
+    _Front(monkeypatch, front=front, index=index)
+    assert runtime._window_held(77) is held
 
 
 def test_hold_window_does_nothing_when_mail_is_in_front_with_the_reply_at_index_1(

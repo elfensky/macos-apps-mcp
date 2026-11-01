@@ -781,32 +781,19 @@ def _mail_pid() -> int:
     return int(apps[0].processIdentifier())
 
 
-# kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements
-_ON_SCREEN_WINDOWS = 1 | 16
-_WINDOW_LIB: dict = {}
-
-
-def _frontmost_pid() -> int | None:
-    """The pid of the front app: the owner of the topmost on-screen layer-0 window (the
-    list is front to back). A live WindowServer read that works on any thread.
-
-    NOT ``NSWorkspace.frontmostApplication``: it caches its answer until the MAIN run
-    loop turns, and the daemon never runs one (asyncio holds the main thread), so on the
-    worker thread it froze at its first answer (measured stale 43 of 44 reads, review of
-    #348). The CGWindowList read matched ``lsappinfo front`` in 25 of 25 samples. Needs
-    no Screen Recording grant: only the window title is withheld, not owner or layer."""
-    if not _WINDOW_LIB:
-        import CoreFoundation  # noqa: F401 - registers CFArrayRef for the bound call
-        import objc
-
-        cg = objc.loadBundle("CoreGraphics", {}, bundle_path=_COREGRAPHICS)
-        objc.loadBundleFunctions(
-            cg, _WINDOW_LIB, [("CGWindowListCopyWindowInfo", b"^{__CFArray=}II")]
-        )
-    for info in _WINDOW_LIB["CGWindowListCopyWindowInfo"](_ON_SCREEN_WINDOWS, 0) or []:
-        if info.get("kCGWindowLayer") == 0:
-            return int(info["kCGWindowOwnerPID"])
-    return None
+def _mail_active(pid: int) -> bool:
+    """Whether Mail is the ACTIVE app, read live from Mail's own process: its
+    AXFrontmost attribute. The earlier live reads were each wrong somewhere.
+    NSWorkspace's ``frontmostApplication`` caches until the MAIN run loop turns, which
+    the daemon never runs (stale in 43 of 44 reads on the worker, review of #348). The
+    owner of the top layer-0 window follows window order, not activity: with two
+    displays the app that was active had its window under the other display's (152 of
+    557 reads wrong against ``lsappinfo front``), and an active app with no layer-0
+    window (a panel or menu-bar app, Spotlight) is invisible to it. Needs
+    Accessibility, which the flow already requires. The reply being at index 1 is a
+    separate check (``_window_held``)."""
+    app = _ax_lib()["AXUIElementCreateApplication"](pid)
+    return bool(_ax_get(app, "AXFrontmost"))  # unreadable: not active
 
 
 def _window_index(window_id: int) -> int | None:
@@ -815,7 +802,7 @@ def _window_index(window_id: int) -> int | None:
 
 
 def _window_held(window_id: int) -> bool:
-    return _frontmost_pid() == _mail_pid() and _window_index(window_id) == 1
+    return _mail_active(_mail_pid()) and _window_index(window_id) == 1
 
 
 def _hold_window(window_id: int) -> None:
