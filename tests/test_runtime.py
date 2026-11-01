@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import pathlib
 import re
 import subprocess
@@ -605,22 +606,80 @@ def test_runtime_public_surface_is_the_native_door(monkeypatch):
 # pasteboard call: every private loader and helper is replaced.
 
 
+def _fake_child(monkeypatch, *answers):
+    """Replace ``runtime.tracked_run``: each call answers the next item of ``answers``
+    (a stdout string, a ``CompletedProcess``, or an exception to raise). Returns the
+    call log of ``(cmd, timeout, thread name)``."""
+    calls: list[tuple] = []
+    queue = list(answers)
+
+    def fake(cmd, *, timeout, **_):
+        calls.append((cmd, timeout, threading.current_thread().name))
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, subprocess.CompletedProcess):
+            return item
+        return subprocess.CompletedProcess(cmd, 0, item, "")
+
+    monkeypatch.setattr(runtime, "tracked_run", fake)
+    return calls
+
+
 def test_accessibility_trusted_reads_the_switch_without_a_prompt(monkeypatch):
-    threads: list[str] = []
-
-    def trust():
-        threads.append(threading.current_thread().name)
-        return True
-
-    monkeypatch.setattr(runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": trust})
+    calls = _fake_child(monkeypatch, "1\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is True
-    assert threads and all(n.startswith("mac-native") for n in threads)
-    monkeypatch.setattr(
-        runtime, "_ax_lib", lambda: {"AXIsProcessTrusted": lambda: False}
+    cmd, timeout, thread = calls[0]
+    assert cmd[:3] == [sys.executable, "-I", "-c"]
+    assert (
+        "AXIsProcessTrusted" in cmd[3] and runtime._HISERVICES + "/HIServices" in cmd[3]
     )
+    assert timeout == runtime._AX_CHILD_TIMEOUT
+    assert thread.startswith("mac-native")
+    _fake_child(monkeypatch, "0\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is False
     # only the non-prompting trust read exists in the runtime source (T-05.2-38)
     assert "WithOptions" not in pathlib.Path(runtime.__file__).read_text("utf-8")
+
+
+def test_accessibility_trusted_spawns_a_fresh_child_every_call(monkeypatch):
+    # the G2 regression pin (05.2-13): a daemon kept its first in-process answer
+    calls = _fake_child(monkeypatch, "1\n", "0\n")
+    assert _REAL_ACCESSIBILITY_TRUSTED() is True
+    assert _REAL_ACCESSIBILITY_TRUSTED() is False
+    assert len(calls) == 2
+
+
+def test_accessibility_trusted_never_reads_in_process(monkeypatch):
+    _fake_child(monkeypatch, "1\n")
+    monkeypatch.setattr(
+        runtime, "_ax_lib", lambda: pytest.fail("the in-process trust read is gone")
+    )
+    assert _REAL_ACCESSIBILITY_TRUSTED() is True
+    assert "AXIsProcessTrusted" not in inspect.getsource(runtime._ax_lib)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(subprocess.CompletedProcess([], 1, "1\n", ""), id="exit-1"),
+        pytest.param("x\n", id="junk"),
+        pytest.param("", id="empty"),
+        pytest.param(OSError("no exec"), id="oserror"),
+        pytest.param(subprocess.TimeoutExpired("c", 5), id="timeout"),
+    ],
+)
+def test_accessibility_trusted_child_failure_is_a_native_error(monkeypatch, answer):
+    _fake_child(monkeypatch, answer)
+    with pytest.raises(NativeError, match="Accessibility check could not run"):
+        _REAL_ACCESSIBILITY_TRUSTED()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "darwin", reason="reads the macOS switch")
+def test_accessibility_trusted_real_child_returns_a_bool():
+    # read-only: a real child reads the switch; run by hand, never in CI
+    assert isinstance(_REAL_ACCESSIBILITY_TRUSTED(), bool)
 
 
 class _Clip:

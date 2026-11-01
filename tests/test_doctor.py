@@ -224,6 +224,27 @@ def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, statu
         assert "remediation" in s
 
 
+def test_accessibility_surface_follows_the_seam_across_reports(monkeypatch):
+    # G2 (05.2-13): two reports in one process follow the switch, no cached answer
+    answers = iter([True, False])
+    monkeypatch.setattr(runtime, "accessibility_trusted", lambda: next(answers))
+    first = doc._accessibility_surface()["status"]
+    second = doc._accessibility_surface()["status"]
+    assert (first, second) == ("granted", "not_granted")
+
+
+def test_note_names_the_permissions_that_need_a_restart(monkeypatch, tmp_path):
+    _all_granted(monkeypatch, tmp_path)
+    _fake_trusted(monkeypatch, True)
+    note = doc.diagnose(request=False)["note"]
+    assert note == (
+        "Grant each permission to the launching app (above). Automation and "
+        "Accessibility need no restart; Full Disk Access, Calendars and Reminders "
+        "may need one."
+    )
+    assert "Only" not in note and "then restart" not in note
+
+
 def test_accessibility_surface_is_off_with_the_mail_adapter(monkeypatch):
     monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
     calls = _fake_trusted(monkeypatch, False)
