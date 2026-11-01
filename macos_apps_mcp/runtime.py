@@ -764,7 +764,9 @@ def accessibility_trusted() -> bool:
     def work() -> bool:
         try:
             done = tracked_run(
-                [sys.executable, "-I", "-c", _AX_CHILD], timeout=_AX_CHILD_TIMEOUT
+                [sys.executable, "-I", "-c", _AX_CHILD],
+                timeout=_AX_CHILD_TIMEOUT,
+                errors="replace",  # junk output becomes the "unexpected answer" error
             )
         except (OSError, subprocess.SubprocessError) as e:
             raise NativeError(
@@ -850,7 +852,9 @@ def _mail_pid() -> int:
             read_ok += 1
             if path.value == _MAIL_EXECUTABLE:
                 matches.append(pid)
-        elif ctypes.get_errno() != errno.ESRCH:  # ESRCH: exited between the calls
+        elif ctypes.get_errno() not in (errno.ESRCH, errno.ENOENT):
+            # ESRCH: exited between the calls; ENOENT: executable deleted (an update),
+            # never Mail, whose binary sits on the sealed system volume
             failed += 1
     if not matches and (failed or not read_ok):
         raise unreadable
