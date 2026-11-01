@@ -541,11 +541,11 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "deployment",
     }
     assert set(report["libs"]) == {"mcp", "fastmcp"}
-    # 2 EventKit + 6 Automation + shortcuts + FDA + mail_index
-    assert len(report["surfaces"]) == 11
+    # 2 EventKit + 6 Automation + shortcuts + FDA + Accessibility + mail_index
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 11 surfaces OK"
+    assert report["summary"] == "all 12 surfaces OK"
 
 
 def test_version_reads_any_distribution():
@@ -574,7 +574,7 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 11 surfaces need attention")
+    assert report["summary"].startswith("2 of 12 surfaces need attention")
 
 
 def test_default_summary_reads_live_automation(monkeypatch, tmp_path):
@@ -582,7 +582,7 @@ def test_default_summary_reads_live_automation(monkeypatch, tmp_path):
     fake_automation(monkeypatch, 0)
     report = doc.diagnose(request=False)
     assert report["probed_automation"] is False
-    assert report["summary"] == "all 11 surfaces OK"
+    assert report["summary"] == "all 12 surfaces OK"
     fake_automation(monkeypatch, -600)
     report = doc.diagnose(request=False)
     assert report["summary"].startswith("no denied surfaces; 6 unverified:")
@@ -597,7 +597,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 11 surfaces OK" not in report["summary"]
+    assert "all 12 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -637,11 +637,14 @@ def _budget_cases():
 def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, probes):
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
-    # request=False live report (daemon, not-built state) measures, per status of the
-    # six Automation surfaces: not_running 7138, denied 7127 (7301 before the restart
-    # clause left its remediation, #516 follow-up), not_asked 7120, probe_error 7072
-    # (OSStatus -1708). not_running is the worst case, so 7500 keeps 362 chars of
-    # margin; a `ps` executable name longer by 362 chars would fail it.
+    # request=False live report (daemon, not-built state), with the Accessibility
+    # surface NOT granted (#348, FIX-16) measures, per status of the six Automation
+    # surfaces: not_running 7467, denied 7456, not_asked 7449, probe_error 7401
+    # (OSStatus -1708); with Accessibility granted the same cases read 7226, 7215,
+    # 7208 and 7160. not_running is the worst case, so 7500 keeps 33 chars of margin
+    # (the Accessibility remediation names both panes, as the reply tools' refusal
+    # does): a `ps` executable name longer by 33 chars would fail it. The next text
+    # added to a surface must shorten something here, never raise 7500.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).
@@ -702,7 +705,7 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, pro
     monkeypatch.setattr(doc.deploy, "_TCC_DB", db)
     monkeypatch.setattr(doc.deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
     # O14: the live path (request=False) with every app denied, the longest live text.
-    fake_automation(monkeypatch, -1743)
+    fake_automation(monkeypatch, -1743, trusted=False)
     report = doc.diagnose(request=probes)
     assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
     assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once

@@ -227,8 +227,10 @@ class FakeMail:
         )
 
 
-def fake_automation(monkeypatch, rc: int = -600) -> list[str]:
-    """The shared fake for the live Automation seam (``runtime.automation_permission``).
+def fake_automation(monkeypatch, rc: int = -600, *, trusted: bool = True) -> list[str]:
+    """The shared fake for the two live grant checks: ``runtime.automation_permission``
+    (Automation) and ``runtime.accessibility_trusted`` (Accessibility, answers
+    ``trusted``).
 
     Returns the list the fake appends each bundle id to. ``-600`` reads as "not
     running", the neutral default."""
@@ -239,4 +241,5 @@ def fake_automation(monkeypatch, rc: int = -600) -> list[str]:
         return rc
 
     monkeypatch.setattr(runtime, "automation_permission", _fake)
+    monkeypatch.setattr(runtime, "accessibility_trusted", lambda: trusted)
     return calls

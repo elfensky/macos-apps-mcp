@@ -287,7 +287,10 @@ def test_summary_counts_only_probed_surfaces(monkeypatch):
     report = doctor.diagnose(request=True)
     names = [s["surface"] for s in report["surfaces"]]
     assert "mail" in names  # listed, as adapter_off
-    assert report["summary"] == f"all {len(names) - 1} surfaces OK"
+    # the Accessibility surface follows the Mail adapter (#348): also adapter_off
+    off = [s for s in report["surfaces"] if s["status"] == "adapter_off"]
+    assert {s["surface"] for s in off} == {"mail", "accessibility"}
+    assert report["summary"] == f"all {len(names) - len(off)} surfaces OK"
 
 
 def test_request_access_each_skips_an_off_entity(monkeypatch):

@@ -62,6 +62,7 @@ def make_report(ids="default", **surface_overrides):
         "calendar": ("eventkit", True, "full_access"),
         "reminders": ("eventkit", True, "full_access"),
         "full_disk_access": ("fda", True, "ok"),
+        "accessibility": ("accessibility", True, "granted"),
     }
     surfaces.update(surface_overrides)
     return {

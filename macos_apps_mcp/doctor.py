@@ -33,7 +33,7 @@ else:
 
 from . import deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
-from .errors import PRIVACY_PANE, NativeError, SchemaDrift
+from .errors import ACCESSIBILITY_PANE, PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
 from .runtime import app_process_info, run_native
 
@@ -298,6 +298,36 @@ def _fda_surface() -> dict:
     )
 
 
+# No restart clause: facts 4e shows the switch reads back with no restart of the probe.
+_AX_REMEDIATION = (
+    "Accessibility is off for macos-apps-mcp, so mail_reply and reply_all refuse: "
+    f"switch it on in {ACCESSIBILITY_PANE}."
+)
+
+
+def _accessibility_surface() -> dict:
+    """The Accessibility grant the Mail reply tools need (FIX-16, #348). Only the plain
+    trust read through the seam: it never prompts and sends no Apple Event (D-14)."""
+    if not tiers.adapter_enabled("mail"):
+        return _surface("accessibility", "accessibility", None, "adapter_off")
+    try:
+        trusted = runtime.accessibility_trusted()
+    except (OSError, AttributeError) as e:
+        return _surface(
+            "accessibility",
+            "accessibility",
+            None,
+            "probe_error",
+            f"Accessibility check failed ({type(e).__name__}); mail_reply and "
+            "reply_all may refuse.",
+        )
+    if trusted:
+        return _surface("accessibility", "accessibility", True, "granted")
+    return _surface(
+        "accessibility", "accessibility", False, "not_granted", _AX_REMEDIATION
+    )
+
+
 def _mail_index_surface() -> dict:
     """The Envelope Index schema (#199) — read-only and prompt-free, like the sqlite
     reads it stands for. A pre-Tahoe macOS reports ok=False carrying the platform-
@@ -412,6 +442,7 @@ def diagnose(request: bool = False) -> dict:
         *_automation_surfaces(request),
         _shortcuts_surface(),
         _fda_surface(),
+        _accessibility_surface(),
         _mail_index_surface(),
     ]
     # An OFF adapter's surface is not probed, so it is neither a need nor unverified.
