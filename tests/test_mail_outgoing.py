@@ -111,58 +111,6 @@ def test_forward_builder_has_no_body_parameter():
     assert set(params) == {"message_id", "mailbox", "to"}
 
 
-def test_the_quote_preamble_exists_once(monkeypatch):
-    """reply and reply_all each carried a copy of fetch/guard/partition/sanitize/build.
-    ``reply_all`` goes through ``quoted_body`` — proved by patching that one function
-    and seeing the path change. ``reply`` no longer builds a plain-text quote at all
-    (#348: Mail's own quote stays); 05.2-11 moves ``reply_all`` off it too."""
-    seen = []
-    monkeypatch.setattr(
-        mail_outgoing,
-        "quoted_body",
-        lambda body, mid, mb: seen.append(mid) or (body + " [QUOTE]"),
-    )
-    bodies = []
-
-    class _FakeFile:
-        def __init__(self, text):
-            bodies.append(text)
-
-        def __enter__(self):
-            return "/tmp/fake"
-
-        def __exit__(self, *a):
-            return False
-
-    def fake(script, *argv, **_):
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            return f"to{US}a@x{RS}sender{US}s@x{RS}subject{US}Re: hi{RS}"
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "0"
-        return "sent"
-
-    _patch_run(monkeypatch, fake)
-    monkeypatch.setattr(runtime, "body_file", _FakeFile)
-    mail.MailAdapter().reply_all("<b@x>", "inbox", "hello", dry_run=False)
-    assert seen == ["b@x"]
-    assert bodies == ["hello [QUOTE]"]
-
-
-def test_quoted_body_reads_the_original_with_a_120s_cap(monkeypatch):
-    """#230: a body that is not downloaded makes the content read an IMAP fetch that
-    ran past the 30s default on device. 120.0 equals the script's own backstop
-    (GATE-10's >= invariant passes on equality; D-13)."""
-    seen = {}
-
-    def fake(script, *argv, **kw):
-        seen["kw"] = kw
-        return ""
-
-    _patch_run(monkeypatch, fake)
-    mail_outgoing.quoted_body("hi", "a@b", ("ACCT", "inbox"))
-    assert seen["kw"] == {"timeout": 120.0}
-
-
 # --- #157: send an approved draft by id ----------------------------------------------
 
 
@@ -490,7 +438,7 @@ def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
     still be on the IMAP server. On device the fetch ran past the 30s default with Mail
     idle — first in `_ORIGINAL` (fixed in 0.13.0), then in the reply script. Every such
     call must carry the 120s cap that equals its script's own backstop."""
-    acting = {"_ORIGINAL", "_REPLY_ALL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
+    acting = {"_ORIGINAL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
     found = set()
     for module in (mail_outgoing, mail_drafts):
         for node in ast.walk(ast.parse(inspect.getsource(module))):
@@ -600,7 +548,7 @@ def test_quote_tail_refuses_an_original_with_no_letter_or_digit_to_compare(
 
 def test_reply_flow_scripts_wait_as_long_as_their_backstop():
     found = set()
-    names = set(_REPLY_FLOW) | {"_SWEEP_DELETE"}
+    names = set(_REPLY_FLOW) | {"_SWEEP_DELETE", "_SEND_OUTGOING"}
     for node in ast.walk(ast.parse(inspect.getsource(mail_outgoing))):
         if not (
             isinstance(node, ast.Call)
@@ -615,7 +563,7 @@ def test_reply_flow_scripts_wait_as_long_as_their_backstop():
             node.args[0].id
         )
         found.add(node.args[0].id)
-    assert found >= set(_REPLY_FLOW)
+    assert found >= set(_REPLY_FLOW) | {"_SEND_OUTGOING"}  # the send waits 120 s too
     for name in found:
         assert "with timeout of 120 seconds" in getattr(mail_outgoing, name), name
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from contextlib import nullcontext
-from datetime import datetime
 
 import pytest
 
@@ -25,7 +24,7 @@ from macos_apps_mcp.adapters.mail import (
     _summary,
 )
 from macos_apps_mcp.contracts import Pointer
-from macos_apps_mcp.errors import BatchTooLarge, NativeTimeout
+from macos_apps_mcp.errors import BatchTooLarge, NativeError, NativeTimeout
 from macos_apps_mcp.text import RS, US
 from tests._fakes import FakeMail
 
@@ -237,9 +236,6 @@ def test_get_body_huge_body_overflows(monkeypatch):
 from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
     _ORIGINAL,
 )
-from macos_apps_mcp.adapters.mail_outgoing import (  # noqa: E402
-    build_quote as _build_quote,
-)
 
 
 def _original_reply(body="original body", sender="Jane <j@x.com>"):
@@ -248,59 +244,35 @@ def _original_reply(body="original body", sender="Jane <j@x.com>"):
     return US.join([sender, "2026", "7", "1", "14", "39", body])
 
 
-def test_build_quote_uses_mails_attribution_format():
-    q = _build_quote("Jane <j@x.com>", ("13 Oct 2026", "14:39"), "line one\nline two")
-    assert q.startswith(
-        "On 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> line one\n> line two"
+def test_attribution_line_uses_mails_format():
+    # what is left of the plain quote (#348): the sweep's ownership proof allows Mail's
+    # attribution line after the call's text, built from the original's sender and date
+    line = mail_outgoing.build_attribution("Jane <j@x.com>", ("13 Oct 2026", "14:39"))
+    assert line == "On 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:"
+    # no stamp (unreadable date): the line says who wrote, with no date
+    assert mail_outgoing.build_attribution("Jane <j@x.com>", None) == (
+        "Jane <j@x.com> wrote:"
     )
-    # no stamp (unreadable date): the header says who wrote, with no date
-    assert _build_quote("Jane <j@x.com>", None, "x").startswith(
-        "Jane <j@x.com> wrote:\n> x"
+
+
+def test_quote_facts_keep_a_us_char_inside_the_original(monkeypatch):
+    # PM-19: only the first six US split, so a US inside the original stays in the tail
+    _patch_run(monkeypatch, lambda *a, **k: _original_reply(f"a{US}b gamma"))
+    tail, attribution = mail_outgoing._quote_facts("<abc@x>", ("ACCT", "inbox"))
+    assert tail.endswith("gamma")
+    assert attribution.endswith("Jane <j@x.com> wrote:")
+
+
+def test_quote_facts_sanitize_control_chars_from_the_sender(monkeypatch):
+    # Defense in depth: run_osascript is replaced outright, so the AppleScript
+    # stripFraming never runs; the Python-side sanitize_line guard is what is tested.
+    # BEL (\x07), not the US separator: a US in a field would desync the split first.
+    _patch_run(
+        monkeypatch,
+        lambda *a, **k: _original_reply("hello", sender="Jane\x07 <j@x.com>"),
     )
-
-
-def test_build_quote_keeps_the_whole_original():
-    # 10,000+ chars with non-ASCII lines (U+202F built with chr, never a raw glyph):
-    # the quote carries every line, in order, the last included, with no marker.
-    nnbsp = chr(0x202F)
-    assert len(nnbsp.encode("utf-8")) == 3
-    lines = [f"line {i} caf\u00e9 Zo\u00eb{nnbsp}end" for i in range(500)]
-    original = "\n".join(lines)
-    assert len(original) > 10_000
-    q = _build_quote("Jane", ("13 Oct 2026", "14:39"), original)
-    assert q.splitlines()[1:] == ["> " + line for line in lines]
-    assert "truncated" not in q
-
-
-def test_build_quote_adds_no_empty_line_for_a_trailing_newline():
-    q = _build_quote("Jane", None, "one\ntwo\n")
-    assert q == "Jane wrote:\n> one\n> two"
-
-
-def test_build_quote_drops_every_trailing_blank_line():
-    # PM-16: two or more trailing breaks must not leave empty `> ` lines
-    for original in ("one\ntwo\n\n", "one\r\n\r\n"):
-        want = "> one\n> two" if "two" in original else "> one"
-        assert _build_quote("Jane", None, original) == "Jane wrote:\n" + want
-
-
-def test_quoted_body_keeps_a_us_char_inside_the_original(monkeypatch):
-    # PM-19: only the first six US split, so a US inside the original keeps the quote
-    _patch_run(monkeypatch, lambda *a, **k: _original_reply(f"a{US}b"))
-    out = mail_outgoing.quoted_body("hi", "<abc@x>", ("ACCT", "inbox"))
-    assert out.startswith("hi\n\nOn ") and "Jane <j@x.com> wrote:\n> a" in out
-    assert out.rstrip().endswith("b")
-
-
-def test_reply_all_quote_keeps_a_huge_original(monkeypatch):
-    # The quote reaches the draft by tempfile, never the model's context: a huge
-    # original is not cut and does not abort the reply.
-    from macos_apps_mcp.text import BODY_HARD_MAX
-
-    huge = "z" * (BODY_HARD_MAX + 100)
-    _patch_run(monkeypatch, lambda *a, **k: _original_reply(huge))
-    out = mail_outgoing.quoted_body("thanks", "abc@x", ("", "inbox"))
-    assert out.endswith("> " + huge)
+    _, attribution = mail_outgoing._quote_facts("abc@x", ("", "inbox"))
+    assert "\x07" not in attribution and attribution.endswith("wrote:")
 
 
 # --- _ORIGINAL sender/date framing hazard (#42/#46 review) ---------------------------
@@ -309,7 +281,7 @@ def test_reply_all_quote_keeps_a_huge_original(monkeypatch):
 def test_original_strips_framing_from_sender():
     # MEDIUM fix: _ORIGINAL must apply the SAME stripFraming handler _ATTACHMENTS uses
     # to the sender, so a display name containing a literal US/RS char can't desync
-    # the seven-field split in quoted_body.
+    # the seven-field split in _quote_facts.
     assert "my stripFraming(snd)" in _ORIGINAL
     assert "on stripFraming" in _ORIGINAL
 
@@ -327,30 +299,6 @@ def test_original_returns_the_date_as_integers():
     ):
         assert part in _ORIGINAL
     assert "as text" not in _ORIGINAL.split("on run argv")[1]
-
-
-def test_quoted_body_builds_the_header_from_the_stamp(monkeypatch):
-    seen = []
-
-    def stamp(when):
-        seen.append(when)
-        return ("13 Oct 2026", "14:39")
-
-    monkeypatch.setattr(runtime, "mail_attribution_stamp", stamp)
-    _patch_run(monkeypatch, lambda script, *a, **kw: _original_reply("hello"))
-    out = mail_outgoing.quoted_body("my reply", "a@b", ("ACCT", "inbox"))
-    assert seen == [datetime(2026, 7, 1, 14, 39)]
-    assert out == "my reply\n\nOn 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:\n> hello"
-
-
-def test_quoted_body_without_a_readable_date_says_who_wrote(monkeypatch):
-    monkeypatch.setattr(
-        runtime, "mail_attribution_stamp", lambda when: pytest.fail("no stamp")
-    )
-    raw = US.join(["Jane <j@x.com>", "", "", "", "", "", "hello"])
-    _patch_run(monkeypatch, lambda script, *a, **kw: raw)
-    out = mail_outgoing.quoted_body("my reply", "a@b", ("ACCT", "inbox"))
-    assert out == "my reply\n\nJane <j@x.com> wrote:\n> hello"
 
 
 # --- US/RS framing contract (#68) -----------------------------------------------------
@@ -427,31 +375,6 @@ def test_framing_literals_live_only_in_the_contract_block():
         and "RS =" not in line
     ]
     assert offenders == []
-
-
-def test_quoted_body_sanitizes_control_chars_from_sender_and_date(monkeypatch):
-    # Behavioral defense-in-depth: this mock bypasses the AppleScript stripFraming
-    # entirely (run_osascript is replaced outright), so it specifically tests the
-    # Python-side sanitize_line guard. The stray control char is BEL (\x07), not the
-    # \x1f field separator itself — a literal \x1f in a field would desync the
-    # partition-based parsing before sanitize_line ever runs, which is the scenario
-    # stripFraming (tested above) guards against; sanitize_line's job is catching
-    # OTHER control chars stripFraming doesn't touch.
-    _patch_run(
-        monkeypatch,
-        lambda *a, **k: _original_reply(sender="Jane\x07 <j@x.com>"),
-    )
-    body = mail_outgoing.quoted_body("my reply", "abc@x", ("", "inbox"))
-    header_line = next(line for line in body.splitlines() if line.startswith("On "))
-    assert "\x07" not in header_line
-
-
-def test_quoted_body_skips_the_quote_for_a_missing_value_original(monkeypatch):
-    # AppleScript coerces an unset property to the "missing value" literal — same guard
-    # as get_body (#62): must not surface it as sender/date/body, and must not blow up
-    # the reply — the quote is silently skipped.
-    _patch_run(monkeypatch, lambda *a, **k: "missing value")
-    assert mail_outgoing.quoted_body("my reply", "abc@x", ("", "inbox")) == "my reply"
 
 
 def test_reply_empty_id_raises():
@@ -734,7 +657,7 @@ def test_send_rejects_empty_subject_and_body():
 def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
     # #129: reply_all's dry run is a documented exception to the "no native call" rule
     # — it reads the original message's recipients (a read strands nothing) but must
-    # NEVER reach the send script (_REPLY_ALL) itself.
+    # NEVER reach the reply flow (accessibility, window, send) at all.
     seen = []
 
     def fake(script, *argv, **_):
@@ -771,56 +694,6 @@ def test_reply_all_dry_run_reads_recipients_only(monkeypatch):
     }
     # exactly one call — the read, only
     assert seen == [mail_outgoing._REPLY_ALL_RECIPIENTS]
-
-
-def test_reply_all_sends_with_quote(monkeypatch):
-    seen = {}
-    bodies = {}
-
-    def fake(script, *argv, **kw):
-        seen[script] = argv
-        if script is mail_outgoing._ORIGINAL:
-            return _original_reply("Original text", "Boss <boss@corp.com>")
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            # #160: the envelope is resolved for the REAL send too, so the result
-            # reports who it actually reached rather than echoing the caller.
-            return (
-                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
-                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
-                f"subject{US}Quarterly numbers{RS}self{US}bob@corp.com{RS}"
-            )
-        # #134: reply_all now also runs the outbox truth-check (_OUTBOX_COUNT)
-        # after _REPLY_ALL — return a real count for it, "sent" for _REPLY_ALL.
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "0"
-        return "sent"
-
-    def fake_body_file(text):
-        bodies["text"] = text
-        return nullcontext("/tmp/fake-body")
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, fake_body_file)
-    out = mail.MailAdapter().reply_all(
-        "<orig@x>", "inbox", "Sounds good", dry_run=False
-    )
-    assert "Mail's own reply-all decides" in out.pop("recipients_note")
-    assert out == {
-        "sent": True,
-        "action": "reply_all",
-        "to": ["orig-sender@corp.com"],
-        "cc": ["alice@corp.com", "carol@corp.com"],
-        "bcc": [],
-        "from": mail_outgoing.REPLY_SENDER,
-        "subject": "Quarterly numbers",
-        "source": "<orig@x>",
-        "outbox_pending": 0,
-    }
-    assert "note" not in out  # zero pending: no caveat needed
-    assert bodies["text"].startswith("Sounds good")
-    assert "> Original text" in bodies["text"]
-    assert seen[mail_outgoing._REPLY_ALL] == ("orig@x", "/tmp/fake-body", "", "inbox")
-    assert seen[mail_outgoing._OUTBOX_COUNT] == ()  # the truth-check ran, with no args
 
 
 def _recipients_payload(**kinds):
@@ -992,57 +865,17 @@ def test_reply_all_result_labels_the_computed_recipients(monkeypatch):
     assert "Mail's own reply-all decides" in out["would_send"]["recipients_note"]
     assert "could not be read" not in out["would_send"]["recipients_note"]
 
-    def fake(script, *argv, **kw):
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            return _recipients_payload(**kinds)
-        if script is mail_outgoing._ORIGINAL:
-            return _original_reply("Original text", "Boss <boss@corp.com>")
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "2"
-        return "sent"
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
+    _SweepRig(
+        monkeypatch,
+        answers={
+            "_REPLY_ALL_RECIPIENTS": _recipients_payload(**kinds),
+            "_OUTBOX_COUNT": "2",
+        },
+    )
     sent = mail.MailAdapter().reply_all("<orig@x>", "inbox", "ok", dry_run=False)
     assert sent["to"] == ["boss@corp.com"]
     assert sent["recipients_note"] == out["would_send"]["recipients_note"]
     assert "not confirmed" in sent["note"].lower()  # the outbox note is kept
-
-
-def test_reply_all_quote_uses_mails_attribution_format(monkeypatch):
-    # #348: reply_all reaches the same quote as mail_reply, through quoted_body.
-    bodies = {}
-
-    def fake(script, *argv, **kw):
-        if script is mail_outgoing._ORIGINAL:
-            return _original_reply("Original text", "Jane <j@x.com>")
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            return f"to{US}alice@corp.com{RS}sender{US}jane@x.com{RS}"
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "0"
-        return "sent"
-
-    def fake_body_file(text):
-        bodies["text"] = text
-        return nullcontext("/tmp/fake-body")
-
-    monkeypatch.setattr(
-        runtime, "mail_attribution_stamp", lambda when: ("13 Oct 2026", "14:39")
-    )
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, fake_body_file)
-    mail.MailAdapter().reply_all("<orig@x>", "inbox", "Sounds good", dry_run=False)
-    header = "On 13 Oct 2026, at 14:39, Jane <j@x.com> wrote:"
-    assert bodies["text"].startswith(f"Sounds good\n\n{header}\n> Original text")
-
-
-def test_reply_all_reads_body_through_shared_handler():
-    # Bug 1: same -39-on-empty-file hazard — _REPLY_ALL must compose the shared
-    # readBody handler rather than reading the tempfile directly.
-    assert "on readBody(p)" in mail_outgoing._REPLY_ALL
-    assert "my readBody(item 2 of argv)" in mail_outgoing._REPLY_ALL
-    # only inside the handler itself
-    assert mail_outgoing._REPLY_ALL.count("read (POSIX file") == 1
 
 
 def test_reply_all_rejects_empty_body():
@@ -1113,10 +946,12 @@ def test_forward_script_never_touches_content():
 
 # --- #135: never delete after send; verify the pre-send rollback ------------------
 
-# the three scripts that hand a message to Mail's `send` verb, vs. the two that roll
-# back but never send. Every one of them must roll back through the verifying handler.
-_SENDING_SCRIPTS = ("_SEND", "_REPLY_ALL", "_FORWARD")
-_ROLLING_BACK_SCRIPTS = _SENDING_SCRIPTS + ("_CREATE_DRAFT", "_REPLY_OPEN")
+# the scripts that hand a message to Mail's `send` verb. `_SEND_OUTGOING` sends a reply
+# that is already built and rolls nothing back (the discard runs before it, never
+# after).
+_SENDING_SCRIPTS = ("_SEND", "_FORWARD", "_SEND_OUTGOING")
+# the scripts that build a message and roll it back through the verifying handler
+_ROLLING_BACK_SCRIPTS = ("_SEND", "_FORWARD", "_CREATE_DRAFT", "_REPLY_OPEN")
 
 
 @pytest.mark.parametrize("name", _SENDING_SCRIPTS)
@@ -1553,7 +1388,6 @@ _MAILBOX_SCOPED_SCRIPTS = (
     "_ORIGINAL",
     "_REPLY_OPEN",
     "_DISCARD_NEW_REPLY",
-    "_REPLY_ALL",
     "_REPLY_ALL_RECIPIENTS",
 )
 
@@ -1619,37 +1453,6 @@ def test_reply_all_dry_run_reads_recipients_from_the_named_mailbox(monkeypatch):
     out = mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "Sounds good")
     assert out["would_send"]["to"] == ["orig@corp.com"]
     assert out["would_send"]["cc"] == ["alice@corp.com"]
-
-
-def test_reply_all_send_passes_the_mailbox(monkeypatch):
-    seen = {}
-
-    def fake(script, *argv, **kw):
-        seen[script] = argv
-        if script is mail_outgoing._ORIGINAL:
-            return _original_reply("Original text", "Boss <boss@corp.com>")
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            # #160: the envelope is resolved for the REAL send too, so the result
-            # reports who it actually reached rather than echoing the caller.
-            return (
-                f"to{US}alice@corp.com{RS}to{US}bob@corp.com{RS}"
-                f"cc{US}carol@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
-                f"subject{US}Quarterly numbers{RS}"
-            )
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "0"
-        return "sent"
-
-    _patch_run(monkeypatch, fake)
-    _patch_body_file(monkeypatch, lambda text: nullcontext("/tmp/fake-body"))
-    mail.MailAdapter().reply_all("<orig@x>", _SPAM_URL, "ok", dry_run=False)
-    assert seen[mail_outgoing._ORIGINAL] == ("orig@x", _GMAIL_UUID, "[Gmail]/Spam")
-    assert seen[mail_outgoing._REPLY_ALL] == (
-        "orig@x",
-        "/tmp/fake-body",
-        _GMAIL_UUID,
-        "[Gmail]/Spam",
-    )
 
 
 def test_forward_passes_the_mailbox(monkeypatch):
@@ -2337,6 +2140,10 @@ from macos_apps_mcp.errors import (  # noqa: E402
 
 _REAL_FIND_OWN_DRAFT = mail_reply_cleanup.find_own_draft
 _OPEN_OK = f"28{US}15927"
+_RECIPIENTS_OK = (
+    f"to{US}alice@corp.com{RS}sender{US}orig-sender@corp.com{RS}"
+    f"subject{US}Quarterly numbers{RS}self{US}bob@corp.com{RS}"
+)
 _ORIGINAL_TEXT = "alpha beta gamma delta epsilon zeta eta theta"
 _TAIL = "gamma delta epsilon zeta eta theta"  # the last six words
 
@@ -2353,6 +2160,9 @@ class _ReplyRig:
             "_DISCARD_OUTGOING": "dead",
             "_DISCARD_NEW_REPLY": "dead",
             "_SWEEP_DELETE": "deleted",
+            "_SEND_OUTGOING": "sent",
+            "_OUTBOX_COUNT": "0",
+            "_REPLY_ALL_RECIPIENTS": _RECIPIENTS_OK,
         }
         self.answers.update(kw.pop("answers", {}))
         self.trusted = kw.pop("trusted", True)
@@ -2417,6 +2227,9 @@ class _ReplyRig:
                 "_DISCARD_OUTGOING",
                 "_DISCARD_NEW_REPLY",
                 "_SWEEP_DELETE",
+                "_SEND_OUTGOING",
+                "_OUTBOX_COUNT",
+                "_REPLY_ALL_RECIPIENTS",
             )
         }
 
@@ -3144,3 +2957,360 @@ def test_sweep_delete_reads_the_result_once_after_the_asynchronous_delete():
     assert body.index("delay 3") < body.index("count of (messages of mb")
     assert body.count("count of (messages of mb whose message id is mid)") == 1
     assert 'return "deleted"' in body and 'return "alive"' in body
+
+
+# --- FIX-16 (#348): reply_all keeps Mail's own quote, sends after a confirmed insert --
+#
+# The same flow as mail_reply (one run_native closure, THE DISCARD RULE), then the send
+# by outgoing message id (facts 3 and 4e `Send after insert`: no delete after the send
+# verb), then the owner's rule of 2026-11-01: wait until 45 s after the window opened
+# and sweep the call's own Drafts copy, whose outcome rides beside `sent`.
+
+_SENT_URL = f"imap://{_GMAIL_UUID}/Sent%20Messages"
+_ALL_MAIL_URL = f"imap://{_GMAIL_UUID}/%5BGmail%5D/All%20Mail"
+_REPLY_ALL_SENT_ORDER = [
+    "_REPLY_ALL_RECIPIENTS",  # the envelope, read before anything is built
+    "accessibility_trusted",
+    "_ORIGINAL",
+    "_OUTGOING_IDS",
+    "index_top",
+    "_REPLY_OPEN",
+    "compose_insert",
+    "_SEND_OUTGOING",
+    "index_top",  # right after the send answers: the window is gone
+    "_SWEEP_DELETE",
+    "_OUTBOX_COUNT",
+]
+
+
+def _reply_all(folder=_REPLY_FOLDER, text="Hi", **kw):
+    return mail.MailAdapter().reply_all("<abc@x>", folder, text, dry_run=False, **kw)
+
+
+def _sent_reply(monkeypatch, *stored, **kw):
+    """A reply_all whose Drafts sweep runs the REAL selector over ``stored`` rows."""
+    rig = _SweepRig(monkeypatch, **kw)
+    if stored:
+        _real_selector(monkeypatch, *stored)
+    return rig, _reply_all()
+
+
+def test_reply_all_sends_only_after_the_insert_is_confirmed(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    monkeypatch.setattr(
+        runtime, "body_file", lambda text: pytest.fail("no tempfile on this path")
+    )
+    out = _reply_all()
+    assert rig.names() == _REPLY_ALL_SENT_ORDER
+    assert rig.call("_REPLY_OPEN")[1] == ("abc@x", _GMAIL_UUID, "INBOX", "1")
+    _, window_id, text, ikw = rig.call("compose_insert")
+    assert (window_id, text) == (15927, "Hi")
+    assert ikw["replace_all"] is False and ikw["quote_tail"] == _TAIL
+    _, argv, kw = rig.call("_SEND_OUTGOING")
+    assert argv == ("28",) and kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    # the send is the only thing after the insert that talks to the reply: no discard
+    assert "_DISCARD_OUTGOING" not in rig.names()
+    assert "_ORIGINAL" in rig.names() and "set content" not in mail_outgoing._REPLY_OPEN
+    assert out["sent"] is True and out["outbox_pending"] == 0
+    assert out["to"] == ["orig-sender@corp.com"] and out["cc"] == ["alice@corp.com"]
+
+
+def test_reply_all_waits_until_45_s_after_the_window_opened_then_sweeps(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    out = _reply_all()
+    assert rig.waits == [145.0]  # owner decision 2026-11-01: opened at 100, +45 s
+    attribution = "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"
+    assert rig.found_args == [(7, "abc@x", "Hi", attribution)]
+    # the index top read right after the send answers bounds what is the window's own
+    assert rig.found_kw == [{"tail": _TAIL, "landed_by": 1000, "sent_twins": True}]
+    _, argv, kw = rig.call("_SWEEP_DELETE")
+    assert argv == ("d@x", _GMAIL_UUID, "Drafts")
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    names = rig.names()
+    assert names.index("_SEND_OUTGOING") < names.index("_SWEEP_DELETE")
+    assert out["sent"] is True and out["drafts_copy"] == "removed"
+    assert "deleted" in out["drafts_copy_note"] and "sent" in out["drafts_copy_note"]
+
+
+def test_reply_all_without_a_quote_replaces_the_body_and_sweeps_with_no_tail(
+    monkeypatch,
+):
+    rig = _SweepRig(monkeypatch)
+    out = _reply_all(text="Just this", include_quote=False)
+    assert "_ORIGINAL" not in rig.names()  # no quote, so no tail to look up
+    _, _, text, ikw = rig.call("compose_insert")
+    assert text == "Just this" and ikw["replace_all"] is True
+    assert ikw["quote_tail"] is None
+    assert rig.found_kw[0]["tail"] is None and rig.found_args[0][3] is None
+    assert out["sent"] is True
+
+
+def test_reply_all_discards_and_never_sends_on_refusal(monkeypatch):
+    rig = _SweepRig(
+        monkeypatch, insert_error=ComposeRefused("confirmation: the text did not land")
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "reply_all did not complete" in msg and "confirmation" in msg
+    assert "nothing was sent" in msg and "nothing was created" in msg
+    assert rig.call("_DISCARD_OUTGOING")[1] == ("28",)
+    names = rig.names()
+    assert "_SEND_OUTGOING" not in names and "_OUTBOX_COUNT" not in names
+
+
+def test_reply_all_refusal_after_an_unproven_discard_is_loud_and_sends_nothing(
+    monkeypatch,
+):
+    rig = _SweepRig(
+        monkeypatch,
+        insert_error=ComposeRefused("insert: refused"),
+        answers={"_DISCARD_OUTGOING": "alive"},
+    )
+    with pytest.raises(ComposeRefused) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "nothing was created" not in msg and "nothing was sent" in msg.lower()
+    assert "_SEND_OUTGOING" not in rig.names()
+
+
+def test_reply_all_discards_without_an_id_and_never_sends(monkeypatch):
+    # facts 4e `Id-free discard: works`: the open timed out, so the id is unknown
+    rig = _SweepRig(monkeypatch, answers={"_REPLY_OPEN": NativeTimeout("no answer")})
+    with pytest.raises(ComposeRefused) as exc:
+        _reply_all()
+    _, argv, kw = rig.call("_DISCARD_NEW_REPLY")
+    assert argv == ("", "abc@x", _GMAIL_UUID, "INBOX")
+    assert kw == {"timeout": mail_outgoing.ORIGINAL_TIMEOUT}
+    names = rig.names()
+    assert "_SEND_OUTGOING" not in names and "compose_insert" not in names
+    assert "nothing was sent" in str(exc.value)
+
+
+def test_reply_all_refuses_without_accessibility_before_any_write(monkeypatch):
+    rig = _SweepRig(monkeypatch, trusted=False)
+    with pytest.raises(AccessibilityDenied) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "reply_all needs Accessibility" in msg
+    assert "Device Control and Data Access" in msg and "Accessibility" in msg
+    assert "nothing was sent" in msg.lower() and "restart" not in msg.lower()
+    # the only Mail script that ran is the recipients read (a read, strands nothing)
+    assert rig.names() == ["_REPLY_ALL_RECIPIENTS", "accessibility_trusted"]
+
+
+def test_reply_all_refuses_an_unreadable_original_before_opening_anything(monkeypatch):
+    rig = _SweepRig(monkeypatch, answers={"_ORIGINAL": "missing value"})
+    with pytest.raises(ComposeRefused) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "reply_all cannot confirm" in msg and "include_quote=False" in msg
+    assert "mail_reply" not in msg and "nothing was sent" in msg.lower()
+    assert "_REPLY_OPEN" not in rig.names() and "_SEND_OUTGOING" not in rig.names()
+
+
+def test_reply_all_dry_run_makes_no_gui_call(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    out = mail.MailAdapter().reply_all("<abc@x>", _REPLY_FOLDER, "Hi")
+    assert out["dry_run"] is True
+    assert rig.names() == ["_REPLY_ALL_RECIPIENTS"]  # no seam, no window, no message
+    assert rig.waits == [] and rig.threads == [threading.current_thread().name]
+
+
+def test_reply_all_runs_open_insert_and_send_in_one_run_native_closure(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    entered: list[str] = []
+    real = runtime.run_native
+    monkeypatch.setattr(
+        runtime, "run_native", lambda fn: entered.append("run_native") or real(fn)
+    )
+    _reply_all()
+    assert entered == ["run_native"]
+    # everything between the trust check and the sweep ran on the one worker
+    between = rig.names()[1:-1]
+    assert "_SEND_OUTGOING" in between
+    worker = [t for t in rig.threads if t.startswith("mac-native")]
+    assert len(worker) >= 7
+
+
+def test_a_send_that_fails_is_reported_as_possibly_sent_and_never_rolled_back(
+    monkeypatch,
+):
+    # the send call is outside every rollback (facts 3): a timeout may mean Mail
+    # accepted it after all, so the error says to look before a retry
+    rig = _SweepRig(monkeypatch, answers={"_SEND_OUTGOING": NativeTimeout("slow")})
+    with pytest.raises(NativeTimeout) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "Outbox" in msg and "Sent" in msg and "before retrying" in msg
+    assert "may have been sent" in msg
+    names = rig.names()
+    assert "_DISCARD_OUTGOING" not in names and "_DISCARD_NEW_REPLY" not in names
+    assert "_SWEEP_DELETE" not in names and "_OUTBOX_COUNT" not in names
+
+
+def test_a_foreign_failure_of_the_send_is_wrapped_without_its_text(monkeypatch):
+    _SweepRig(monkeypatch, answers={"_SEND_OUTGOING": RuntimeError("the secret text")})
+    with pytest.raises(NativeError) as exc:
+        _reply_all()
+    msg = str(exc.value)
+    assert "secret" not in msg and "RuntimeError" in msg and "before retrying" in msg
+
+
+def test_send_outgoing_has_no_delete_after_send():
+    script = mail_outgoing._SEND_OUTGOING
+    assert "outgoing message id ((item 1 of argv) as integer)" in script
+    assert re.search(r"^\s*send r\s*$", script, re.M)
+    assert "delete" not in script[script.index("send r") :]
+    assert "delete" not in script and "on rollback" not in script
+    assert "with timeout of 120 seconds" in script
+
+
+# --- the sweep after a send (owner decision 2026-11-01; facts 4e `Send after insert`)
+
+_OWN_COPY = ("imap://" + _GMAIL_UUID + "/Drafts", _OWN_BODY, "html")
+
+
+def test_send_then_sweep_deletes_the_own_drafts_copy(monkeypatch):
+    rig, out = _sent_reply(monkeypatch, _OWN_COPY)
+    _, argv, _ = rig.call("_SWEEP_DELETE")
+    assert argv == ("own8@x", _GMAIL_UUID, "Drafts")  # by its own id, in its own Drafts
+    assert out["sent"] is True and out["drafts_copy"] == "removed"
+    # facts 3: nothing is deleted off the outgoing message after the send verb
+    assert "_DISCARD_OUTGOING" not in rig.names()
+
+
+@pytest.mark.parametrize("twin_url", [_SENT_URL, _ALL_MAIL_URL])
+def test_send_then_sweep_ignores_the_sent_messages_own_copies(monkeypatch, twin_url):
+    # the sent message itself creates new rows threaded to the original: its Sent copy,
+    # and on Gmail an All Mail twin. They are the send, not a leftover: never touched.
+    rig, out = _sent_reply(monkeypatch, _OWN_COPY, (twin_url, _OWN_BODY, "html"))
+    calls = rig.calls_of("_SWEEP_DELETE")
+    assert [c[1] for c in calls] == [("own8@x", _GMAIL_UUID, "Drafts")]
+    assert out["sent"] is True and out["drafts_copy"] == "removed"
+
+
+def test_send_then_sweep_with_only_the_sent_copy_finds_no_drafts_copy(monkeypatch):
+    rig, out = _sent_reply(monkeypatch, (_SENT_URL, _OWN_BODY, "html"))
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "none"
+    assert "45 s" in out["drafts_copy_note"]
+
+
+@pytest.mark.parametrize(
+    "stranger",
+    [
+        # another reply to the same original, different text, in Sent
+        (_SENT_URL, "<div>Something else</div>" + _QUOTE_HTML, "html"),
+        # the same text in the Inbox with the quote trimmed away
+        (f"imap://{_GMAIL_UUID}/INBOX", "<div>Hi</div>", "html"),
+        # a second Drafts copy (a hand draft with the same text)
+        (f"imap://{_GMAIL_UUID}/Drafts", _OWN_BODY, "html"),
+    ],
+)
+def test_send_then_sweep_with_another_threaded_row_deletes_nothing(
+    monkeypatch, stranger
+):
+    rig, out = _sent_reply(monkeypatch, _OWN_COPY, stranger)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"  # send still ok
+    assert "Drafts" in out["drafts_copy_note"]
+    assert out["outbox_pending"] == 0
+
+
+def test_send_then_sweep_with_an_unknown_row_alone_is_unproven(monkeypatch):
+    rig, out = _sent_reply(
+        monkeypatch, (_SENT_URL, "<div>Not ours</div>" + _QUOTE_HTML, "html")
+    )
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+
+
+def test_send_then_sweep_deletes_nothing_beside_an_open_compose_window(monkeypatch):
+    # an earlier call's window is still open (a non-empty `_OUTGOING_IDS` baseline): its
+    # autosave could hold the same text, so no copy is provably this call's own
+    rig, out = _sent_reply(monkeypatch, _OWN_COPY, answers={"_OUTGOING_IDS": "21"})
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+
+
+def test_send_then_sweep_never_claims_a_row_that_landed_after_the_send(monkeypatch):
+    rig, out = _sent_reply(monkeypatch, _OWN_COPY, top_after=7)
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+
+
+def test_send_then_sweep_whose_delete_is_not_confirmed_says_so(monkeypatch):
+    _, out = _sent_reply(monkeypatch, _OWN_COPY, answers={"_SWEEP_DELETE": "alive"})
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+
+
+@pytest.mark.parametrize("failure", [NativeTimeout("slow"), RuntimeError("boom")])
+def test_send_then_sweep_whose_delete_raises_still_reports_the_send(
+    monkeypatch, failure
+):
+    _, out = _sent_reply(monkeypatch, _OWN_COPY, answers={"_SWEEP_DELETE": failure})
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["outbox_pending"] == 0
+
+
+@pytest.mark.parametrize(
+    "found, outcome",
+    [
+        (mail_reply_cleanup.Draft("none"), "none"),
+        (mail_reply_cleanup.Draft("unproven"), "unproven"),
+        (NativeTimeout("gone"), "unavailable"),
+        (UnboundLocalError("pos"), "unproven"),
+        (OSError("gone"), "unproven"),
+    ],
+)
+def test_send_then_sweep_outcomes_never_turn_the_send_into_an_error(
+    monkeypatch, found, outcome
+):
+    rig = _SweepRig(monkeypatch, found=found)
+    out = _reply_all()
+    assert out["sent"] is True and out["drafts_copy"] == outcome
+    assert out["drafts_copy_note"] and "_SWEEP_DELETE" not in rig.names()
+
+
+def test_send_then_sweep_is_unavailable_without_an_index_baseline(monkeypatch):
+    rig = _SweepRig(monkeypatch, top=None)
+    out = _reply_all()
+    assert rig.waits == [] and rig.found_args == []  # no point waiting
+    assert out["sent"] is True and out["drafts_copy"] == "unavailable"
+    assert "up to about a minute" in out["drafts_copy_note"]
+
+
+def test_send_then_sweep_that_reads_too_soon_after_the_send_cannot_say_none(
+    monkeypatch,
+):
+    # the send answered 25 s before the read: under the proven 30 s gap, so a copy that
+    # has not landed cannot be ruled out (a slow Mail, the same rule as a late discard)
+    rig = _SweepRig(monkeypatch, found=mail_reply_cleanup.Draft("none"))
+    real = rig._osa
+
+    def osa(script, *argv, **kw):
+        out = real(script, *argv, **kw)
+        if script is mail_outgoing._SEND_OUTGOING:
+            rig.clock[0] += 20.0
+        return out
+
+    _patch_run(monkeypatch, osa)
+    out = _reply_all()
+    assert out["sent"] is True and out["drafts_copy"] == "late"
+    assert "again in a minute" in out["drafts_copy_note"]
+
+
+def test_send_then_sweep_counts_45_s_from_when_the_open_returned(monkeypatch):
+    rig = _SweepRig(monkeypatch)
+    real = rig._osa
+
+    def osa(script, *argv, **kw):
+        out = real(script, *argv, **kw)
+        if script is mail_outgoing._REPLY_OPEN:
+            rig.clock[0] += 30.0
+        return out
+
+    _patch_run(monkeypatch, osa)
+    _reply_all()
+    assert rig.waits == [175.0]
