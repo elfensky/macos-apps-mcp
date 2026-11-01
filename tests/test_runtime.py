@@ -616,8 +616,8 @@ def _fake_child(monkeypatch, *answers):
     calls: list[tuple] = []
     queue = list(answers)
 
-    def fake(cmd, *, timeout, **_):
-        calls.append((cmd, timeout, threading.current_thread().name))
+    def fake(cmd, *, timeout, errors=None, **_):
+        calls.append((cmd, timeout, threading.current_thread().name, errors))
         item = queue.pop(0) if len(queue) > 1 else queue[0]
         if isinstance(item, BaseException):
             raise item
@@ -632,17 +632,30 @@ def _fake_child(monkeypatch, *answers):
 def test_accessibility_trusted_reads_the_switch_without_a_prompt(monkeypatch):
     calls = _fake_child(monkeypatch, "1\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is True
-    cmd, timeout, thread = calls[0]
+    cmd, timeout, thread, errors = calls[0]
     assert cmd[:3] == [sys.executable, "-I", "-c"]
     assert (
         "AXIsProcessTrusted" in cmd[3] and runtime._HISERVICES + "/HIServices" in cmd[3]
     )
+    # a hung child would hold the one native worker (T-05.2-51): pin the bound
+    assert 0 < runtime._AX_CHILD_TIMEOUT <= 5
     assert timeout == runtime._AX_CHILD_TIMEOUT
+    assert (
+        errors == "replace"
+    )  # non-UTF-8 child output must not raise UnicodeDecodeError
     assert thread.startswith("mac-native")
     _fake_child(monkeypatch, "0\n")
     assert _REAL_ACCESSIBILITY_TRUSTED() is False
     # only the non-prompting trust read exists in the runtime source (T-05.2-38)
     assert "WithOptions" not in pathlib.Path(runtime.__file__).read_text("utf-8")
+
+
+def test_accessibility_trusted_on_the_worker_does_not_redispatch(monkeypatch):
+    # compose_insert and the mail_outgoing work call the seam FROM the worker: a
+    # re-dispatch would make the one worker wait on itself
+    _fake_child(monkeypatch, "1\n")
+    fut = runtime._executor.submit(_REAL_ACCESSIBILITY_TRUSTED)
+    assert fut.result(timeout=5) is True
 
 
 def test_accessibility_trusted_spawns_a_fresh_child_every_call(monkeypatch):
@@ -815,6 +828,7 @@ def test_mail_pid_reads_the_process_table(monkeypatch):
             11: b"/Applications/Other.app/Contents/MacOS/Other",
             22: _MAIL,
             33: b"/opt/helper/Mail.app/Contents/MacOS/Mail",  # a suffix is no match
+            55: b"/System/Applications/mail.app/Contents/MacOS/Mail",  # no case folding
             44: b"/System/Applications/Mail.app/Contents/MacOS/MailHelper",
         },
     )
@@ -864,6 +878,9 @@ def test_mail_pid_refuses_when_the_process_list_cannot_be_read(monkeypatch, rig)
     ("paths", "expect"),
     [
         pytest.param({11: errno.ESRCH, 22: _MAIL}, 22, id="beside-mail"),
+        # a deleted executable (an in-place update) is never Mail on the sealed volume
+        pytest.param({11: errno.ENOENT, 22: _MAIL}, 22, id="deleted-beside-mail"),
+        pytest.param({11: errno.ENOENT, 12: b"/bin/zsh"}, None, id="deleted-no-mail"),
         pytest.param({11: errno.ESRCH, 12: b"/bin/zsh"}, None, id="beside-unrelated"),
     ],
 )
