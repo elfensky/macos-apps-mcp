@@ -14,6 +14,8 @@ surface may still shift between minor versions.
   dependencies now install only on macOS. On any other system every tool that needs a Mac
   answers `unsupported_platform` ("macos-apps-mcp runs only on macOS"). Nothing changes on a
   Mac. A Linux CI job keeps it that way.
+- **`doctor` and the Health page show the Accessibility grant** (#348) — the reply tools need it
+  to keep Mail's own quote; the Health row links to the Settings pane when it is off.
 
 ### Fixed
 

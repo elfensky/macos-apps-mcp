@@ -72,7 +72,7 @@ The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `u
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
-- **Accessibility** (no dialog: turn it on in System Settings → Privacy & Security → Device Control and Data Access, called Accessibility before macOS 27, for the app that starts the server): `mail_reply` only. It puts your text above Mail's own quote. Without it `mail_reply` refuses and creates nothing.
+- **Accessibility** (optional, no dialog: turn it on in System Settings → Privacy & Security → Device Control and Data Access, called Accessibility before macOS 27, for the app that starts the server): `mail_reply` and `reply_all` put your text above Mail's own quote. Without it, those two refuse and create nothing. `doctor` and the Health page show whether it is on.
 - **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access, for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
 
 Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
