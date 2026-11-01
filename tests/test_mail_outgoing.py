@@ -475,7 +475,9 @@ def test_reply_open_never_writes_content():
     script = mail_outgoing._REPLY_OPEN
     assert "opening window yes" in script and "reply to all" in script
     assert "my rollback(" in script and "with timeout of 120 seconds" in script
-    assert "set content" not in script and "content of" not in script
+    # the only `content of` is the read of the reply's signature (never the body)
+    assert "set content" not in script and "content of r" not in script
+    assert script.count("content of") == 1 and "content of sg" in script
     assert "on rollback(msg)" in script  # composes ROLLBACK
     assert "on mailboxFor(" in script
     discard = mail_outgoing._DISCARD_OUTGOING
@@ -498,6 +500,45 @@ def test_reply_open_binds_the_new_window():
     assert "(id of r)" in script  # returns the outgoing id beside the window id
     # ... and the From of the reply, read while the reply exists (never a failure)
     assert "sender of r" in script
+
+
+def test_reply_open_reads_the_replys_own_signature():
+    # G4: read inside its own try after the window count check, before the return, and
+    # returned as the LAST field (a US character inside it cannot shift the others)
+    script = mail_outgoing._REPLY_OPEN
+    read = script.index("message signature of r")
+    assert script.index("count of found) is not 1") < read
+    assert read < script.index("return ((id of r)")
+    block = script[script.rindex("try", 0, read) : script.index("end try", read)]
+    assert "set sig to" in block and "missing value" in block
+    assert script.index('set sig to ""') < script.rindex("try", 0, read)
+    ret = script[script.index("return ((id of r)") :].split("on error")[0]
+    assert ret.rstrip().endswith("us & sig")
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (f"28{US}15927{US}s{US}sig", (28, 15927, "s", "sig")),
+        (f"28{US}15927{US}{US}sig", (28, 15927, "", "sig")),
+        (f"28{US}15927{US}s{US}", (28, 15927, "s", "")),
+        (f"28{US}15927{US}s", (28, 15927, "s", "")),
+        (f"28{US}15927", (28, 15927, "", "")),
+        (f"28{US}15927{US}s{US}a{US}b", (28, 15927, "s", f"a{US}b")),
+    ],
+)
+def test_parse_open_returns_the_signature_last(raw, expected):
+    assert mail_outgoing._parse_open(raw) == expected
+
+
+def test_reply_open_strips_framing_from_the_sender_and_guards_a_missing_content():
+    # a US in the sender must not shift into the signature field; a signature whose
+    # `content` is missing value must not become the text "missing value"
+    script = mail_outgoing._REPLY_OPEN
+    assert "set snd to my stripFraming((sender of r) as text)" in script
+    assert "on stripFraming(t)" in script
+    assert "if sc is not missing value then set sig to sc as text" in script
+    assert "(content of sg) as text" not in script
 
 
 def test_reply_open_binds_only_from_closeable_new_windows():
@@ -590,3 +631,24 @@ def test_outgoing_ids_reads_only_ids():
     assert "id of every outgoing message" in script
     assert "with timeout of 120 seconds" in script
     assert "messages of" not in script  # does not touch the original
+
+
+def test_reply_all_recipients_reads_the_account_addresses_into_a_variable_first():
+    # G1 (05.2-13): a `repeat with ea in (email addresses of …)` loop gives an
+    # application reference; `ea as text` raised -1700 inside the try, so the preview
+    # subtracted nothing. Read the list into a variable first (device-proven form).
+    import re
+    from pathlib import Path
+
+    script = mail_outgoing._REPLY_ALL_RECIPIENTS
+    read = script.index("set addrs to (email addresses of (account of (mailbox of m)))")
+    loop = script.index("repeat with ea in addrs")
+    assert script.rindex("try", 0, read) > script.index("set rt to reply to of m")
+    assert read < loop < script.index("end try", read)
+    root = Path(mail_outgoing.__file__).resolve().parents[1]
+    bad = [
+        str(p)
+        for p in root.rglob("*.py")
+        if re.search(r"repeat with \w+ in \(email addresses", p.read_text())
+    ]
+    assert bad == []

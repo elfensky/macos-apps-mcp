@@ -31,6 +31,12 @@ ATTR_HTML = "On 1 Jul 2026, at 14:39, Jane &lt;j@x.com&gt; wrote:"
 # Mail's quote: it carries the original's last six words (the tail the insert confirmed)
 QUOTE = f'<blockquote type="cite"><div>{ATTR_HTML}</div>{_ORIGINAL_TEXT}</blockquote>'
 OWN = f"<div>Hi</div>{QUOTE}"
+# the signature Mail put into the reply (read by `_REPLY_OPEN`) and its stored HTML
+SIGNATURE = "Jane Doe\nExample Corp"
+SIG_HTML = '<div id="AppleMailSignature">Jane Doe<br>Example Corp</div>'
+SIGNED = f"<div>Hi</div>{SIG_HTML}{QUOTE}"
+US = "\x1f"
+OPEN_WITH_SIGNATURE = f"28{US}15927{US}Bob <bob@corp.com>{US}{SIGNATURE}"
 
 
 def _emlx(body: str, mid: str) -> bytes:
@@ -74,12 +80,18 @@ def world(blank_envelope, tmp_path, monkeypatch):
     return w
 
 
-def run(monkeypatch, *, during=None, on_insert=(), on_wait=(), top=None):
+def run(
+    monkeypatch, *, during=None, on_insert=(), on_wait=(), top=None, open_answer=None
+):
     """One refused ``mail_reply`` over the real index. ``during``: ``{script name:
     callable}`` run INSIDE that script's call; ``on_insert``: rows landing before the
     discard; ``on_wait``: rows landing during the 45 s wait, after the discard.
-    ``top``: replaces ``index_top`` (called with the real one)."""
-    rig = _SweepRig(monkeypatch, insert_error=ComposeRefused("confirmation: no"))
+    ``top``: replaces ``index_top`` (called with the real one). ``open_answer``:
+    the ``_REPLY_OPEN`` answer (default: the rig's, which holds no signature)."""
+    answers = {"_REPLY_OPEN": open_answer} if open_answer is not None else {}
+    rig = _SweepRig(
+        monkeypatch, insert_error=ComposeRefused("confirmation: no"), answers=answers
+    )
     monkeypatch.setattr(mail_reply_cleanup, "index_top", top or _REAL_TOP)
     monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
     rig.insert_hook = lambda _kw: [land() for land in on_insert]
@@ -190,3 +202,90 @@ def test_a_top_that_cannot_be_read_after_the_discard_claims_nothing(world, monke
         top=top,
     )
     assert_left_loudly(rig, msg)
+
+
+def test_a_copy_with_the_replys_own_signature_is_the_calls_own(world, monkeypatch):
+    # G4 (05.2-13): the account's signature sits between the text and the quote; the
+    # copy is the call's own when it is exactly the text, THIS reply's signature, quote
+    rig, msg = run(
+        monkeypatch,
+        open_answer=OPEN_WITH_SIGNATURE,
+        on_insert=[lambda: world.land(DRAFTS, SIGNED, "own@x")],
+    )
+    assert [a[0] for a in deleted(rig)] == ["own@x"]
+    assert "found and deleted" in msg and "nothing was created" in msg
+
+
+def test_a_copy_with_another_signature_is_left_loudly(world, monkeypatch):
+    other = SIGNED.replace("Example Corp", "Other Corp")
+    rig, msg = run(
+        monkeypatch,
+        open_answer=OPEN_WITH_SIGNATURE,
+        on_insert=[lambda: world.land(DRAFTS, other, "hand@x")],
+    )
+    assert_left_loudly(rig, msg)
+
+
+def test_a_signature_that_did_not_read_claims_no_copy_with_a_signature(
+    world, monkeypatch
+):
+    # `message signature` unreadable: today's rules, nothing deleted (fail-safe)
+    rig, msg = run(
+        monkeypatch,
+        on_insert=[lambda: world.land(DRAFTS, SIGNED, "own@x")],
+    )
+    assert_left_loudly(rig, msg)
+
+
+def test_residual_a_same_text_same_signature_hand_draft_inside_the_window(
+    world, monkeypatch
+):
+    # facts 4e (3) Residual, extended by the signature (owner decision 2026-11-01): a
+    # hand draft with the call's text, the same signature and the full quote that
+    # lands before the discard cannot be told from the call's own
+    rig, _ = run(
+        monkeypatch,
+        open_answer=OPEN_WITH_SIGNATURE,
+        during={"_REPLY_OPEN": lambda: world.land(DRAFTS, SIGNED, "hand@x")},
+    )
+    assert [a[0] for a in deleted(rig)] == ["hand@x"]
+
+
+def test_a_hand_draft_with_symbols_before_the_signature_is_left_loudly(
+    world, monkeypatch
+):
+    # owner rule 2026-11-01: owner content without a letter or a digit (emoji,
+    # punctuation) is still content: the draft is not the call's own
+    hand = f"<div>Hi</div><div>\U0001f44d !!</div>{SIG_HTML}{QUOTE}"
+    rig, msg = run(
+        monkeypatch,
+        open_answer=OPEN_WITH_SIGNATURE,
+        on_insert=[lambda: world.land(DRAFTS, hand, "hand@x")],
+    )
+    assert_left_loudly(rig, msg)
+
+
+def _sweep_kw(monkeypatch, **kw):
+    rig = _SweepRig(
+        monkeypatch,
+        insert_error=ComposeRefused("confirmation: no"),
+        answers={"_REPLY_OPEN": OPEN_WITH_SIGNATURE},
+    )
+    with pytest.raises(ComposeRefused):
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi", **kw)
+    return rig.found_kw[0]
+
+
+def test_a_reply_without_a_quote_gets_no_signature_shape(monkeypatch):
+    # gui-replace replaces Mail's signature too: nothing may follow the text
+    assert "signature" not in _sweep_kw(monkeypatch, include_quote=False)
+    assert _sweep_kw(monkeypatch)["signature"] == SIGNATURE
+
+
+def test_find_own_draft_without_a_quote_does_not_claim_text_plus_signature(
+    world, monkeypatch
+):
+    world.land(DRAFTS, f"<div>Hi</div>{SIG_HTML}", "hand@x")
+    monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: [(1, DRAFTS)])
+    found = _REAL_FIND_OWN_DRAFT(0, "abc@x", "Hi", None, tail=None, landed_by=10**6)
+    assert found.kind != "one"

@@ -646,3 +646,97 @@ def test_sent_mailbox_names(monkeypatch):
     assert sent(f"imap://{_ACCT}/%5BGoogle%20Mail%5D/All%20Mail")
     for name in ("Verzonden", "Projects/Sent", "All%20Mail", "%5BArchive%5D/Sent"):
         assert not sent(f"imap://{_ACCT}/{name}"), name
+
+
+# --- the reply's own signature (FIX-16 gap G4, owner decision 2026-11-01) ---------
+
+_SIG = "Jane Doe\nExample Corp"
+_SIG_HTML = '<div id="AppleMailSignature">Jane Doe<br>Example Corp</div>'
+# the same words, broken into lines and links differently: white space only
+_SIG_WS = '<div>Jane  Doe<br>\n<a href="https://x.example">Example&nbsp;Corp</a></div>'
+
+
+def _signed(before: str, **kw):
+    """The kind of the one Drafts copy whose HTML is ``before`` + the quote."""
+    return _find_kind_with_signature(before + _QUOTE_HTML, **kw)
+
+
+def _find_kind_with_signature(body, *, signature=_SIG, own="Hi there"):
+    return mail_reply_cleanup._is_own(
+        mail_reply_cleanup._split_quote(
+            email.message_from_string(
+                "Content-Type: text/html; charset=utf-8\r\n\r\n" + body,
+                policy=email.policy.default,
+            )
+        )[0],
+        own,
+        _ATTRIBUTION,
+        signature,
+    )
+
+
+@pytest.mark.parametrize(
+    "before, accepted",
+    [
+        ("<div>Hi there</div>", True),
+        (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>", True),
+        (f"<div>Hi there</div>{_SIG_HTML}", True),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>{_ATTRIBUTION}</div>", True),
+        (f"<div>Hi there</div>{_SIG_WS}", True),  # differs in white space only
+        (f"<div>Hi there</div>{_SIG_WS}<div>{_ATTRIBUTION}</div>", True),
+        # owner content without a letter or a digit is still owner content
+        (f"<div>Hi there</div><div>!!!</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div><div>\U0001f44d \U0001f600</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>?? :-)</div>", False),
+        (
+            f"<div>Hi there</div><div>\u2014 \u2014 \u2014</div>{_SIG_HTML}"
+            f"<div>\u2014 \u2713</div><div>{_ATTRIBUTION}</div>",
+            False,
+        ),
+        ("<div>Hi there</div><div>Jane Doe - Example Corp</div>", False),
+        (_SIG_HTML, False),  # the signature alone
+        (f"<div>Hi there</div><div>and more</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>and more</div>", False),
+        (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>{_SIG_HTML}", False),
+        (f"<div>{_ATTRIBUTION}</div><div>Hi there</div>{_SIG_HTML}", False),
+        ("<div>Hi there</div><div>Jane Doe Other Corp</div>", False),
+        ("<div>Hi there Jane Doe Example Corp</div>", True),  # same squashed text
+        ("<div>Hi thereJane Doe Example Corp</div>", False),  # glued, no space
+    ],
+)
+def test_is_own_accepts_the_replys_own_signature_and_nothing_else(before, accepted):
+    assert _signed(before) is accepted
+
+
+def test_is_own_accepts_no_signature_when_the_signature_read_was_empty():
+    assert _signed(f"<div>Hi there</div>{_SIG_HTML}", signature="") is False
+    assert _signed("<div>Hi there</div>", signature="") is True
+
+
+@pytest.mark.parametrize("own", ["", "   ", "\n\t "])
+@pytest.mark.parametrize(
+    "before",
+    [
+        _SIG_HTML,
+        f"{_SIG_HTML}<div>{_ATTRIBUTION}</div>",
+        "",
+        f"<div>{_ATTRIBUTION}</div>",
+    ],
+)
+def test_is_own_never_matches_an_empty_or_blank_call_text(own, before):
+    # owner decision 2026-11-01: a draft that holds only the signature is not the call's
+    assert _signed(before, own=own) is False
+
+
+def test_find_own_draft_after_a_send_sets_aside_a_sent_copy_with_the_signature(
+    mailroot, monkeypatch
+):
+    signed = "<div>Hi there</div>" + _SIG_HTML + _QUOTE_HTML
+    mailroot(20, _ORIGINAL, "d@x", signed)
+    mailroot(21, _ORIGINAL, "d@x", signed, url=_SENT)
+    mailroot(22, _ORIGINAL, "d@x", signed, url=_ALL_MAIL)
+    rows = [(20, _URL), (21, _SENT), (22, _ALL_MAIL)]
+    got = _find(monkeypatch, rows, sent_twins=True, signature=_SIG)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # without the signature read the same rows stay unproven (today's rule)
+    assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"

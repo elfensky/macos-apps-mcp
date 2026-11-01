@@ -30,7 +30,8 @@ after the discard answered (``landed_by``: a row that landed after the window wa
 is not proven the window's own); it has a Message-ID; it sits in a mailbox that is named
 ``Drafts`` / ``Draft`` (directly under the account or under ``[Gmail]`` /
 ``[Google Mail]``); the squashed text before its quote EQUALS the call's own full
-squashed text, optionally followed by Mail's own attribution line for this original; AND
+squashed text, optionally followed by the signature Mail put into this reply (equal
+except for white space), then by Mail's own attribution line for this original; AND
 it carries the original's quote and nothing after it (its tail, by letters and digits,
 as the insert's confirmation compares it, is the LAST thing in the draft), or, for a
 reply without a quote, nothing at all after the text. Anything else is ``unproven``:
@@ -64,6 +65,7 @@ import email.parser
 import email.policy
 import html
 import re
+import unicodedata
 from pathlib import Path
 from typing import NamedTuple
 
@@ -267,18 +269,45 @@ def _read_draft(url: str, rowid: int):
     )
 
 
-def _is_own(before_quote: str, own_text: str, attribution: str | None) -> bool:
-    """The text before the quote EQUALS the call's full text, optionally followed by
-    Mail's attribution line for this original. Empty text and the attribution alone are
-    not proof (a hand reply opened and saved looks the same), and neither is text that
-    merely starts with the call's (a hand reply that begins "Hi" is not "Hi")."""
+def _bare(text: str) -> str:
+    """``text`` after NFC with every white-space character and U+FFFC removed. The
+    signature branch compares with this and nothing looser: punctuation, symbols and
+    emoji count."""
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFC", str(text or ""))
+        if not c.isspace() and c != "\ufffc"
+    )
+
+
+def _is_own(
+    before_quote: str, own_text: str, attribution: str | None, signature: str = ""
+) -> bool:
+    """The text before the quote is the call's full text (exact), then optionally the
+    signature Mail put into THIS reply, then optionally Mail's attribution line for this
+    original: four shapes, in that order only. The signature (and the attribution
+    after it) must equal the text after the call's text EXCEPT FOR WHITE SPACE (the
+    stored HTML and the signature's own text break lines differently); punctuation,
+    symbols and emoji are never ignored, so a hand draft with any other content there
+    is not proof. Empty or blank text, the attribution or signature alone, and text
+    that merely starts with the call's (a hand reply that
+    begins "Hi" is not "Hi") are not proof; neither is any other text between the call's
+    and the quote, nor a signature that did not read (``""`` adds no shape).
+    Residual (owner decision 2026-11-01): a hand draft with the same text, the same
+    signature and the full quote cannot be told from the call's own."""
     own = squash_text(own_text)
     if not own:
         return False
     if before_quote == own:
         return True
     line = squash_text(attribution)
-    return bool(line) and before_quote == f"{own} {line}"
+    if line and before_quote == f"{own} {line}":
+        return True
+    sig = _bare(signature)
+    if not sig or not before_quote.startswith(f"{own} "):
+        return False
+    rest = _bare(before_quote[len(own) + 1 :])
+    return rest in (sig, sig + _bare(line))
 
 
 def _has_quote(after_quote: str, tail: str | None) -> bool:
@@ -300,6 +329,7 @@ def find_own_draft(
     tail: str | None,
     landed_by: int | None,
     sent_twins: bool = False,
+    signature: str = "",
 ) -> Draft:
     """The call's own Drafts copy among the rows new since ``top``, if there is one.
     ``tail``: the original's last words (None: a reply without a quote). ``landed_by``:
@@ -310,9 +340,12 @@ def find_own_draft(
     too. A threaded row in a ``Sent`` mailbox (or Gmail's ``All Mail``) that carries a
     Message-ID, the call's exact text and the original's quote is such a copy and is set
     aside, never claimed and never a reason for ``unproven``; any other threaded row
-    still is one (a localized Sent or Drafts, a user folder). After a refusal
-    nothing was sent, so nothing is set aside. Raises ``NativeError`` when the index
-    cannot be read now (the caller treats that as unavailable)."""
+    still is one (a localized Sent or Drafts, a user folder). ``signature``: the
+    signature Mail put into this reply ("" when it did not read), accepted between the
+    text and the attribution (``_is_own``), for the Drafts copy and the sent twins
+    alike. After a refusal nothing was sent, so nothing is set aside. Raises
+    ``NativeError`` when the index cannot be read now (the caller treats that as
+    unavailable)."""
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven")  # too many new rows to read them all
@@ -334,9 +367,9 @@ def find_own_draft(
         twin = sent_twins and _is_sent_url(url) and bool(_norm_mid(mid))
         if own or twin:
             before, after = _split_quote(body())
-            says_ours = _is_own(before, own_text, attribution) and _has_quote(
-                after, tail
-            )
+            says_ours = _is_own(
+                before, own_text, attribution, signature
+            ) and _has_quote(after, tail)
             if twin and says_ours:
                 continue  # the send itself, not a leftover; it is never touched
             own = own and says_ours
