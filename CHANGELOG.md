@@ -24,8 +24,8 @@ surface may still shift between minor versions.
   attribution line, formatting, inline images and the whole original stay. Without
   Accessibility, or when Mail's reply window or its quote cannot be confirmed, the call
   refuses and leaves no draft. A refusal after the reply window opened waits 45 seconds
-  for Mail's autosave and deletes that Drafts copy, and the error says if anything may be
-  left. `include_quote=False` replaces the whole body with your text. `reply_all` still
+  for Mail's autosave and deletes that Drafts copy, only when it sits in the reply
+  account's own Drafts and starts with your text; the error says if anything may be left. `include_quote=False` replaces the whole body with your text. `reply_all` still
   sends a plain-text quote.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
   the first write, so a name that already exists, or two ids that derive one file name,
