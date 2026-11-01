@@ -11,15 +11,22 @@ call's own. The delete is a Mail script in ``mail_outgoing`` (``_SWEEP_DELETE``)
 Reading the Envelope Index and the ``.emlx`` files is not a Mail call, so the wait
 before the read adds no load on Mail.
 
-**Selector** (a design rule, run as one step on device only in 05.2-13): a Drafts row
-that is NEW since the call's own baseline, whose ``In-Reply-To`` header is the original.
-A hand reply to the same original matches too, so the copy is claimed only when exactly
-one row matches AND the text before its quote is empty or starts with the call's own
-text. Anything else is ``unproven`` and nothing is deleted.
+**Scope** (owner rule "never touch what is not ours"): only the reply account's own
+Drafts mailbox is read, never another account's (family accounts live on this Mac).
+That mailbox is the shallowest mailbox of the account named ``Drafts`` / ``Draft`` (the
+probe's rule). An account whose Drafts has another name (a localized or renamed one)
+has none we can identify, so the read raises ``NativeError`` and the caller reports the
+sweep as unavailable ("may be left"), never "nothing was created". The same holds when
+the original was named by an alias (``inbox``), which names no account.
 
-Limits, all fail-safe (an unproven copy is reported to the caller, never deleted): the
-Drafts mailbox is recognised by the English names ``Drafts`` / ``Draft`` (the probe's
-rule), and only an English ``On <date> … wrote:`` attribution line counts as empty text.
+**Selector** (a design rule, run as one step on device only in 05.2-13): a row of that
+Drafts mailbox that is NEW since the call's own baseline, whose ``In-Reply-To`` header
+is the original. A hand reply to the same original matches too, so the copy is claimed
+only when exactly one row matches AND the squashed text before its quote STARTS WITH the
+call's own full squashed text. An empty copy or one with only Mail's attribution line is
+not provably the call's own (a hand reply opened and saved looks the same), so it is
+``unproven``: reported with the refusal, never deleted. Anything else is ``unproven``
+too, and nothing is deleted.
 """
 
 from __future__ import annotations
@@ -44,15 +51,19 @@ _FINGERPRINT: dict[str, set[str]] = {
     "mailboxes": {"ROWID", "url"},
 }
 
-_DRAFTS_SQL = """
-SELECT m.ROWID, mb.url
-FROM messages m
-JOIN mailboxes mb ON mb.ROWID = m.mailbox
-WHERE m.deleted = 0 AND (mb.url LIKE '%/Drafts' OR mb.url LIKE '%/Draft')
+# The account's Drafts mailbox: the shallowest url named Drafts/Draft (a nested
+# `Projects/Drafts` is a user folder; the `build_trash_query` rule).
+_DRAFTS_MAILBOX_SQL = """
+SELECT url FROM mailboxes
+WHERE url LIKE ? ESCAPE '\\' AND (url LIKE '%/Drafts' OR url LIKE '%/Draft')
+ORDER BY length(url) ASC LIMIT 1
 """
 
-# The whole text before the quote is Mail's attribution line and nothing else.
-_ATTRIBUTION_ONLY = re.compile(r"On .{3,200} wrote:")
+_DRAFTS_ROWS_SQL = """
+SELECT m.ROWID FROM messages m
+JOIN mailboxes mb ON mb.ROWID = m.mailbox
+WHERE m.deleted = 0 AND mb.url = ?
+"""
 
 
 class Draft(NamedTuple):
@@ -65,24 +76,36 @@ class Draft(NamedTuple):
     mid: str = ""
 
 
-def drafts_rows() -> list[tuple[int, str]]:
-    """``(ROWID, mailbox url)`` of every live Drafts row in every account. Raises a
-    ``NativeError`` (Full Disk Access, schema drift, no index) when it cannot read."""
+def drafts_rows(account: str) -> list[tuple[int, str]]:
+    """``(ROWID, mailbox url)`` of every live row in ``account``'s own Drafts mailbox.
+    Raises a ``NativeError`` when it cannot read (Full Disk Access, schema drift, no
+    index) or when it cannot say which mailbox is that account's Drafts (no account, or
+    no mailbox named Drafts/Draft): the caller must then treat the sweep as unavailable,
+    never as "no copy"."""
     path = mail_index.envelope_index_path()
     if path is None:
         raise NativeError("Mail's Envelope Index does not exist on this Mac")
+    if not account or account == "local":
+        raise NativeError(
+            "the reply's account is not known, so its Drafts is not known"
+        )
 
     def query(conn) -> list[tuple[int, str]]:
-        return [(int(r), str(u)) for r, u in conn.execute(_DRAFTS_SQL)]
+        pattern = f"%://{mail_index.like_escape(account)}/%"
+        mailbox = conn.execute(_DRAFTS_MAILBOX_SQL, (pattern,)).fetchone()
+        if mailbox is None:
+            raise NativeError("the reply account has no mailbox named Drafts or Draft")
+        url = str(mailbox[0])
+        return [(int(r[0]), url) for r in conn.execute(_DRAFTS_ROWS_SQL, (url,))]
 
     return runtime.read_via_sqlite(path, _FINGERPRINT, query)
 
 
-def drafts_baseline() -> frozenset[int] | None:
-    """The Drafts ROWIDs now, or None when the index cannot be read (the sweep is then
-    unavailable and the refusal says so)."""
+def drafts_baseline(account: str) -> frozenset[int] | None:
+    """The ROWIDs of ``account``'s Drafts now, or None when they cannot be read (the
+    sweep is then unavailable and the refusal says so)."""
     try:
-        return frozenset(rowid for rowid, _ in drafts_rows())
+        return frozenset(rowid for rowid, _ in drafts_rows(account))
     except NativeError:
         return None
 
@@ -148,19 +171,21 @@ def _read_draft(url: str, rowid: int) -> tuple[str, str, str] | None:
 
 
 def _is_own(before_quote: str, own_text: str) -> bool:
-    return (
-        before_quote == ""
-        or before_quote.startswith(squash_text(own_text))
-        or _ATTRIBUTION_ONLY.fullmatch(before_quote) is not None
-    )
+    """The text before the quote starts with the call's full text. Empty text and
+    Mail's attribution line alone are not proof (a hand reply looks the same)."""
+    own = squash_text(own_text)
+    return bool(own) and before_quote.startswith(own)
 
 
-def find_own_draft(baseline: frozenset[int], original_mid: str, own_text: str) -> Draft:
-    """The call's own Drafts copy, if there is one. Raises ``NativeError`` when the
-    index cannot be read now (the caller treats that as unavailable)."""
+def find_own_draft(
+    account: str, baseline: frozenset[int], original_mid: str, own_text: str
+) -> Draft:
+    """The call's own Drafts copy in ``account``'s Drafts, if there is one. Raises
+    ``NativeError`` when the index cannot be read now or the account's Drafts cannot be
+    identified (the caller treats that as unavailable)."""
     found: list[Draft] = []
     unreadable = False
-    for rowid, url in drafts_rows():
+    for rowid, url in drafts_rows(account):
         if rowid in baseline:
             continue
         draft = _read_draft(url, rowid)
