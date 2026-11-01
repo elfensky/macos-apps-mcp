@@ -19,7 +19,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 ### Validated
 
-<!-- Shipped and relied upon — see docs/ROADMAP.md "Shipped" and .planning/codebase/. -->
+<!-- Shipped and relied upon — see docs/landscape.md "Shipped" and .planning/codebase/. -->
 
 - ✓ Calendar + Reminders read/write via EventKit, RRULE subset, EKSpan, verify-after-write — v1 / 0.3.0
 - ✓ Typed errors, `doctor`, `now`, output hygiene, dry-run + batch caps, untrusted-data notice, id-only writes, tool annotations — 0.3.0 / 0.4.0
@@ -70,7 +70,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 ## Context
 
 - **Codebase map:** `.planning/codebase/` (2026-08-28) — ARCHITECTURE, STRUCTURE, STACK, INTEGRATIONS, CONVENTIONS, TESTING, CONCERNS. CONCERNS.md records the spiked review's findings with file:line evidence.
-- **Primary architecture sources:** `CLAUDE.md` ("Architecture (don't drift)"), `DESIGN.md`, `docs/DAEMON.md`, `docs/ROADMAP.md` (including the 2026-08-03 and 2026-08-13 review write-ups), `docs/mail-applescript-facts.md`.
+- **Primary architecture sources:** `CLAUDE.md` ("Architecture (don't drift)"), `DESIGN.md`, `docs/DAEMON.md`, `docs/landscape.md` (including the 2026-08-03 and 2026-08-13 review write-ups), `docs/mail-applescript-facts.md`.
 - **The 2026-08-28 spiked architecture review** (develop @ d9ac75f, 0.10.1): nine cards, each spiked in an isolated worktree with the unit suite (baseline 1196) + ruff run and the diff measured. Cards 1, 7, 5 are pure moves, byte-identical bodies, green; card 2 has a real precedent (`usage` shipped mis-classified; nine writes audit as `"write"`); card 3 found `query_duplicate_rows` (the #140 byte-identity gate) has never run through sqlite in a unit test; card 8 withdrawn on trial; card 9's wrapper withdrawn, replaced by a 25-line tripwire. Every card re-landed in Phase 1 (2026-09-26); the `spike/arch-review-*` branches and worktrees are deleted. Before that, 16 commits (the #199/#201 Sequoia plane) landed on `develop` and touch files every card changes — so each card re-landed against current `develop`, not the spike base.
 - **Caller:** the life-cockpit Obsidian vault's Claude Code session; the mail-vs-vault debate (2026-08-02) established that citation *rendering* was never the gap — reads must carry `id + folder + account`.
 - **Landscape (2026-07-14 survey):** apple-mcp (3.1k★) archived; iMCP is the only maintained multi-app suite and ships no Mail/Notes/Photos/Safari. No surveyed server combines uniform bounded reads across Mail + Messages + Notes + Calendar + Reminders — that combination is this repo.
