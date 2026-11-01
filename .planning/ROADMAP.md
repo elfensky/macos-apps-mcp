@@ -425,9 +425,9 @@ Plans:
   2. `export_mail` never hides a written file: a collision on a later id either refuses the whole batch before the first write, or every id reports its own status (`written` / `exists` / `absent`) and the call returns the files it wrote, so a retry writes no duplicate; a unit test covers the later-id collision (#399).
   3. A `mail_reply` or `reply_all` reply keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, on a route settled by a device probe recorded in `docs/mail-applescript-facts.md` — (a) the reply text pasted on top of Mail's untouched native reply through the Accessibility API, tested first; (b) a self-built styled HTML quote only if (a) fails. The plain-text `> ` quote is removed (owner verdict, 2026-10-27). When the route cannot run, the tool refuses, leaves no draft and sends nothing, and names the setting; `doctor()` and the Health page report the route's permission. The resulting draft and one delivered `reply_all` are inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
-  5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
+  5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15) — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
 
-**Plans:** 13/13 plans executed
+**Plans:** 13/16 plans executed
 
 Plans:
 **Wave 1**
@@ -460,6 +460,15 @@ Plans:
 
 **Gap Wave 4** *(blocked on Gap Wave 3 completion)*
 - [x] 05.2-13-PLAN.md — device acceptance on the rebuilt `.app`: an inspected `mail_reply` draft, one delivered `reply_all`, the refusals, the preview and the wording; closes #348 and #516 with evidence or records the gaps (FIX-16, FIX-18, FIX-14)
+
+**Gap closure, round 2** (from the 05.2-13 device sitting, 2026-11-01: gaps G1-G4 and doctor's restart note; the two other observations are #543)
+
+**Round 2 · Gap Wave 1**
+- [ ] 05.2-14-PLAN.md — the Accessibility grant is read live in a fresh child process on every call, Mail's pid comes from the kernel process table (libproc), and doctor's note says which permissions may need a restart (FIX-16, FIX-14; #348)
+- [ ] 05.2-15-PLAN.md — the reply-all preview reads the account's own addresses into a variable first, and the Drafts sweep accepts the reply's own signature between the text and the quote (FIX-18, FIX-16; #516, #348)
+
+**Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
+- [ ] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540) (INSERTED)
 
@@ -583,7 +592,7 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 13/13 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 13/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540 (INSERTED) | 0/TBD | Not started | - |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

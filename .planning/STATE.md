@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.2"
 current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
 status: executing
-stopped_at: "Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 device acceptance done 2026-11-01 on build 873b553 — verdict failed (C2 dry run FIX-18, C3 live grant read); gaps G1-G4 in 05.2-13-SUMMARY.md; next /gsd-plan-phase 05.2 --gaps"
-last_updated: "2026-11-01T20:10:53.453Z"
-last_activity: 2026-11-01
-last_activity_desc: "05.2-13 owner sitting: FIX-16 quote route holds on draft and delivered reply-all; FIX-18 preview and the live Accessibility read fail; 4 gaps"
-state_head: 4af6a5d5b977331519b8a45b8e36711791283069
+stopped_at: "Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6"
+last_updated: "2026-11-01T22:49:28.071Z"
+last_activity: 2026-11-02
+last_activity_desc: "Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed"
+state_head: 9f9a5e08fc9e774a310fbf090f9e567182eeb48c
 progress:
   total_phases: 20
   completed_phases: 9
-  total_plans: 85
-  completed_plans: 84
+  total_plans: 88
+  completed_plans: 85
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 
 ## Current Position
 
-Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — EXECUTING
-Plan: 13 of 13 (05.2-13 done; gaps G1-G4 open)
-Status: Executing Phase 05.2
-Last activity: 2026-11-01 — 05.2-13 owner sitting: FIX-16 quote route holds on draft and delivered reply-all; FIX-18 preview and the live Accessibility read fail; 4 gaps
+Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
+Plan: 13 of 16 merged (05.2-14, 05.2-15 executed as draft PRs #547, #546; 05.2-16 waits for the owner)
+Status: Ready to execute
+Last activity: 2026-11-02 — Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed
 
 Progress: [█████████░] 92%
 
@@ -87,6 +87,9 @@ Progress: [█████████░] 92%
 - [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
 - [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
 - [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.
+- [Phase 05.2]: Owner decisions 2026-11-01 (gap round 2 planning): plan without CONTEXT.md; targeted research on G2/G3 first (05.2-RESEARCH.md D5); scope G1-G4 plus doctor's restart note; the two other 05.2-13 observations go to #543.
+- [Phase 05.2]: Owner decision 2026-11-01 (G4): the Drafts sweep may take the reply's own signature between the call's text and the quote as its own copy — it deletes a draft only when the draft holds nothing the owner wrote (the call's own text, this reply's signature, Mail's attribution, the quote); an empty call text matches nothing (05.2-15, facts §4e).
+- [Phase 05.2]: Orchestrator decision 2026-11-01 (unattended, owner may veto): the reply-all preview keeps subtracting the account that HOLDS the original as the proxy for the sending account — the dry run builds no reply, so Mail's own pick cannot be read; known limit: an original addressed to another account's alias can preview that alias in cc (FIX-18 text clarified).
 - [Roadmap]: Grill session 2026-11-01 (owner, nine answers; decision page `.planning/reports/2026-11-01-phase-plan-grill.html`): plans are written one phase at a time, right before each runs; 05.6 runs in its own lane while 05.2-13 waits for the acceptance sitting; the testers get the brief after 05.10 and 05.3 cut 1 (release 0.18.0), so 05.3 sits right after 05.10; the paged reads (#508) are additive and become Phase 05.11 after 05.3; a release is cut at every phase close that changes the daemon; the rename is 0.17.0 and 1.0.0 is the launch release; one `instructions` builder, started by 05.3 cut 2 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (DIST-04); #521 joins 05.6.
 - [Phase 05.6]: Owner decisions 2026-11-01 (discuss, assumptions mode): Mail's Trash, Sent, Junk and Archive are found by translated names in `mailbox_url.py`, not by the private `.mboxCache.plist` role bits; `update_note` backups are kept like Mail backups (until deleted by hand, `0600`/`0700`), which bounds Phase 4 D-13 to the search index; the state folder permissions bug is #540, folded into 05.6. The 05.6 release waits until 05.2 has closed and shipped its own release (05.6-CONTEXT.md D-27).
 Decisions are logged in PROJECT.md Key Decisions table.
@@ -238,5 +241,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-01T20:10:52.589Z
-Stopped at: Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6; Phase 05.2: 05.2-13 device acceptance done 2026-11-01 on build 873b553 — verdict failed (C2 dry run FIX-18, C3 live grant read); gaps G1-G4 in 05.2-13-SUMMARY.md; next /gsd-plan-phase 05.2 --gaps
+Stopped at: Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6
 Resume file: .planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md
