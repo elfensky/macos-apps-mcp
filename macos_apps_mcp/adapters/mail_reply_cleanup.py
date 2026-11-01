@@ -79,16 +79,12 @@ class Draft(NamedTuple):
 def drafts_rows(account: str) -> list[tuple[int, str]]:
     """``(ROWID, mailbox url)`` of every live row in ``account``'s own Drafts mailbox.
     Raises a ``NativeError`` when it cannot read (Full Disk Access, schema drift, no
-    index) or when it cannot say which mailbox is that account's Drafts (no account, or
-    no mailbox named Drafts/Draft): the caller must then treat the sweep as unavailable,
-    never as "no copy"."""
+    index) or cannot say which mailbox is that account's Drafts: an empty or ``local``
+    account matches no mailbox, and neither does a Drafts with another name. The caller
+    must then treat the sweep as unavailable, never as "no copy"."""
     path = mail_index.envelope_index_path()
     if path is None:
         raise NativeError("Mail's Envelope Index does not exist on this Mac")
-    if not account or account == "local":
-        raise NativeError(
-            "the reply's account is not known, so its Drafts is not known"
-        )
 
     def query(conn) -> list[tuple[int, str]]:
         pattern = f"%://{mail_index.like_escape(account)}/%"

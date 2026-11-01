@@ -2654,6 +2654,14 @@ def test_reply_sweep_read_that_raises_anything_still_ends_in_the_loud_refusal(
     assert type(failure).__name__ not in msg  # a foreign error text is never echoed
 
 
+def test_reply_refusal_never_echoes_a_foreign_exceptions_text(monkeypatch):
+    # an unexpected exception could carry the reply text: only its type name is said
+    _SweepRig(monkeypatch, insert_error=RuntimeError("the secret reply text"))
+    with pytest.raises(ComposeRefused) as exc:
+        mail.MailAdapter().reply("<abc@x>", _REPLY_FOLDER, "Hi")
+    assert "secret" not in str(exc.value) and "RuntimeError" in str(exc.value)
+
+
 def test_reply_sweep_waits_from_the_failed_open_when_the_window_time_is_unknown(
     monkeypatch,
 ):
