@@ -728,12 +728,17 @@ def mail_reply(
     Accessibility is needed for macos-apps-mcp (System Settings > Privacy & Security >
     Device Control and Data Access; called Accessibility before macOS 27). Mail comes
     to the front for about a second, and the clipboard is borrowed and restored. The
-    call REFUSES, and leaves no draft, when Accessibility is off, when Mail's reply
-    window cannot be confirmed, when the text does not land first, or when Mail's own
-    reply has no quote (Mail's setting "Quote the text of the original message" is off,
-    or a text selection is left in Mail's message viewer). A refusal after the reply
-    window opened takes about 45 seconds, because it waits for Mail's autosave and then
-    deletes that Drafts copy; the error says if anything may be left.
+    call REFUSES when Accessibility is off, when Mail's reply window cannot be
+    confirmed, when the text does not land first, or when Mail's own reply has no quote
+    (Mail's setting "Quote the text of the original message" is off, or a text
+    selection is left in Mail's message viewer). A refusal before the reply window
+    opened leaves nothing. A refusal after it opened takes about 45 seconds: the call
+    discards the reply, waits for Mail's autosave, and deletes a Drafts copy only when
+    that copy is provably its own (the text above Mail's quote is exactly yours). A
+    copy it cannot prove, or cannot look for (not exactly your text, a localized
+    Drafts, no Full Disk Access), is left alone: the error then says a copy MAY be
+    left. Look in the Drafts of the account the reply is sent from, and again after a
+    minute, because Mail saves its copy late. Only "nothing was created" is clean.
     Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
     stable message-id.
 

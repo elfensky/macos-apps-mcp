@@ -1389,9 +1389,12 @@ class MailAdapter:
         replaces the whole body with the text, also through Accessibility. Accessibility
         must be on for macos-apps-mcp; Mail comes to the front for about a second and
         the clipboard is borrowed and restored. Without Accessibility, or when the
-        reply window, the text or Mail's quote cannot be confirmed, the call raises and
-        leaves no draft (``AccessibilityDenied`` / ``ComposeRefused``): there is no
-        plain-text fallback. Atomic (#44). Returns the same locator dict as
+        reply window, the text or Mail's quote cannot be confirmed, the call raises
+        (``AccessibilityDenied`` / ``ComposeRefused``): there is no plain-text
+        fallback. It leaves no draft only when the error says "nothing was created": a
+        refusal after the window opened discards the reply and deletes a Drafts copy
+        that is provably its own, and otherwise reports where a copy may be (facts
+        §4e `Refusal cleanup`). Atomic (#44). Returns the same locator dict as
         create_draft — save it to Drafts and it gets a stable message-id, addressable
         via drafts()/delete_draft().
 

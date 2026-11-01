@@ -867,16 +867,22 @@ def split_addrs(value) -> list[str]:
     return [s for a in items if (s := sanitize_line(a))]
 
 
+def build_attribution(sender: str, stamp: tuple[str, str] | None) -> str:
+    """Mail's attribution line (#348): `On <date>, at <time>, <sender> wrote:`
+    (`<sender> wrote:` when the date is unknown)."""
+    when = f"On {stamp[0]}, at {stamp[1]}, " if stamp else ""
+    return f"{when}{sender} wrote:"
+
+
 def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) -> str:
-    """Mail's reply quote as plain text (#348): `On <date>, at <time>, <sender> wrote:`
-    (`<sender> wrote:` when the date is unknown), then the whole original, each line
-    `> `-prefixed. No cap: the quote reaches the draft by tempfile and never the
-    model's context, so a cap protects nothing and only cuts the reply's tail."""
+    """Mail's reply quote as plain text (#348): the attribution line, then the whole
+    original, each line `> `-prefixed. No cap: the quote reaches the draft by tempfile
+    and never the model's context, so a cap protects nothing and only cuts the
+    reply's tail."""
     quoted = "\n".join(
         "> " + line for line in sanitize_block(original_body).rstrip().splitlines()
     )
-    when = f"On {stamp[0]}, at {stamp[1]}, " if stamp else ""
-    return f"{when}{sender} wrote:\n{quoted}"
+    return f"{build_attribution(sender, stamp)}\n{quoted}"
 
 
 # #230: every script that acts on the ORIGINAL message (read it, reply to it, forward
@@ -887,6 +893,15 @@ def build_quote(sender: str, stamp: tuple[str, str] | None, original_body: str) 
 # script's own `with timeout of 120 seconds` backstop (GATE-10 is >=, so equality
 # passes).
 ORIGINAL_TIMEOUT = 120.0
+
+
+def _stamp(date_parts: list[str]) -> tuple[str, str] | None:
+    """The attribution's ``(date, time)`` from ``_ORIGINAL``'s five date fields; None
+    when the date cannot be read (the line is then written without one)."""
+    try:
+        return runtime.mail_attribution_stamp(datetime(*map(int, date_parts)))
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> str:
@@ -908,11 +923,7 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
     if len(parts) != 7:  # "missing value", empty: nothing readable to quote
         return body
     sender, *date_parts, original = parts
-    try:
-        stamp = runtime.mail_attribution_stamp(datetime(*map(int, date_parts)))
-    except (ValueError, OverflowError, OSError):  # unreadable date: no date in header
-        stamp = None
-    quote = build_quote(sanitize_line(sender), stamp, original)
+    quote = build_quote(sanitize_line(sender), _stamp(date_parts), original)
     return body + "\n\n" + quote
 
 
@@ -923,10 +934,12 @@ def quoted_body(body: str, message_id: str, mailbox_args: tuple[str, str]) -> st
 _TAIL_WORDS = 6
 
 
-def _quote_tail(message_id: str, mailbox_args: tuple[str, str]) -> str:
-    """The last words of the original, squashed: what must follow the reply text for
-    Mail's quote to count as confirmed. An original with no readable text has no tail,
-    and the flow refuses before it creates anything."""
+def _quote_facts(message_id: str, mailbox_args: tuple[str, str]) -> tuple[str, str]:
+    """``(tail, attribution)`` of the original. The tail is its last words, squashed:
+    what must follow the reply text for Mail's quote to count as confirmed. An original
+    with no readable text has no tail, and the flow refuses before it creates anything.
+    The attribution is Mail's line for this original, which the Drafts sweep allows
+    after the call's text (facts 4e `Refusal cleanup`)."""
     raw = runtime.run_osascript(
         _ORIGINAL, message_id, *mailbox_args, timeout=ORIGINAL_TIMEOUT
     )
@@ -941,7 +954,8 @@ def _quote_tail(message_id: str, mailbox_args: tuple[str, str]) -> str:
             "created and nothing was sent. To reply without the quote, call "
             "mail_reply with include_quote=False."
         )
-    return tail
+    sender, *date_parts, _ = parts
+    return tail, build_attribution(sanitize_line(sender), _stamp(date_parts))
 
 
 def _parse_open(raw: str) -> tuple[int, int]:
@@ -953,7 +967,9 @@ def _parse_open(raw: str) -> tuple[int, int]:
 _LEFT_OVER = (
     " The reply may NOT be fully removed: a reply window or a Drafts copy may be "
     "left. Look for the open reply window to that message and in the Drafts mailbox "
-    "of the account that holds it (delete_draft removes a draft). Nothing was sent."
+    "of the account the reply is sent from (usually the account that holds the "
+    "original; delete_draft removes a draft). Mail saves the copy up to about a "
+    "minute after the window opened, so look again after that. Nothing was sent."
 )
 
 # Said when the discard ran so late that the Drafts read followed it too closely to
@@ -962,7 +978,8 @@ _LEFT_OVER = (
 _STILL_LAND = (
     " The reply was discarded, but the discard ran too long after the window opened to "
     "rule out a Drafts copy that may still land: look in the Drafts mailbox of the "
-    "account that holds the original again in a minute. Nothing was sent."
+    "account the reply is sent from (usually the account that holds the original) "
+    "again in a minute. Nothing was sent."
 )
 
 # Owner decision 2026-11-01 (rollback-sweep): a refusal after the window opened waits
@@ -994,10 +1011,14 @@ class _ReplyFlow:
         mailbox_args: tuple[str, str],
         text: str,
         baseline: str,
-        drafts_before: frozenset[int] | None,
+        index_top: int | None,
+        attribution: str | None,
     ):
         self.message_id, self.mailbox_args = message_id, mailbox_args
-        self.text, self.baseline, self.drafts_before = text, baseline, drafts_before
+        self.text, self.baseline = text, baseline
+        # the highest message row before the window opened (None: index unreadable) and
+        # Mail's attribution line for the original (None: a reply without a quote)
+        self.index_top, self.attribution = index_top, attribution
         self.outgoing_id: int | None = None
         self.opened_at: float | None = None
         self.discarded_at: float | None = None
@@ -1036,17 +1057,18 @@ class _ReplyFlow:
         ``late`` (no copy, but the discard ended too close to the read to rule out one
         that has not landed), ``unproven`` (a copy is there that cannot be proven the
         call's own, the delete was not confirmed, or the read failed) or
-        ``unavailable`` (the index cannot be read or the account's Drafts is unknown).
-        Only the reply account's own Drafts is read."""
-        if self.drafts_before is None:
+        ``unavailable`` (the index cannot be read). Every new message row is read, in
+        any mailbox: the copy lands in the Drafts of the account the reply is sent
+        from."""
+        if self.index_top is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)
         try:
             found = mail_reply_cleanup.find_own_draft(
-                self.mailbox_args[0],
-                self.drafts_before,
+                self.index_top,
                 bare_id(self.message_id),
                 self.text,
+                self.attribution,
             )
         except NativeError:
             return "unavailable"
@@ -1124,14 +1146,17 @@ def open_reply_with_text(
                 f"in {ACCESSIBILITY_PANE}. Nothing was created and nothing was sent. "
                 "Do not retry until the next user message."
             )
-        tail = None if replace_all else _quote_tail(message_id, mailbox_args)
+        tail, attribution = (
+            (None, None) if replace_all else _quote_facts(message_id, mailbox_args)
+        )
         baseline = runtime.run_osascript(_OUTGOING_IDS, timeout=ORIGINAL_TIMEOUT)
         flow = _ReplyFlow(
             message_id,
             mailbox_args,
             text,
             baseline.strip(),
-            mail_reply_cleanup.drafts_baseline(mailbox_args[0]),
+            mail_reply_cleanup.index_top(),
+            attribution,
         )
         try:
             try:
