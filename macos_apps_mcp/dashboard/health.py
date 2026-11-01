@@ -95,6 +95,7 @@ _SETTINGS = "x-apple.systempreferences:com.apple.preference.security?"
 _PANES = {
     "automation": "Privacy_Automation",
     "fda": "Privacy_AllFiles",
+    "accessibility": "Privacy_Accessibility",
     "calendar": "Privacy_Calendars",
     "reminders": "Privacy_Reminders",
 }
@@ -150,6 +151,22 @@ def _fda_row(report: dict) -> Safe:
         sub,
         action=_settings("fda"),
     )
+
+
+def _accessibility_row(report: dict, active: list[str]) -> Safe:
+    """The grant the two Mail reply tools need. No banner and no sidebar dot: it blocks
+    two tools, not an adapter (Phase 05 contract)."""
+    s = _surfaces(report).get("accessibility", {})
+    if "mail" not in active or s.get("status") == "adapter_off":
+        return _row(
+            "", "Accessibility", "The Mail adapter is off, so this does not matter"
+        )
+    if s.get("ok") is True:
+        return _row("ok", "Accessibility", "Granted")
+    if s.get("ok") is None:
+        return _row("", "Accessibility", "Could not be read")
+    sub = s.get("remediation") or s.get("status") or "unknown"
+    return _row("bad", "Accessibility", sub, action=_settings("accessibility"))
 
 
 def _eventkit_row(report: dict) -> Safe:
@@ -359,6 +376,7 @@ def _render(request, got: dict | None, failure: str | None):
             _daemon_row(),
             _adapters_row(),
             _fda_row(report),
+            _accessibility_row(report, active),
             _eventkit_row(report),
             *_automation_rows(got, active),
             _outbound_row(),
