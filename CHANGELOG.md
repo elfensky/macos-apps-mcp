@@ -26,11 +26,15 @@ surface may still shift between minor versions.
   confirmed in place. Without Accessibility, or when Mail's reply window or its quote cannot be
   confirmed, both refuse and send nothing. A refusal after the reply window opened waits 45
   seconds for Mail's autosave and deletes that Drafts copy, only when it is provably the call's
-  own: a new reply to the same message, in a mailbox named Drafts (of whichever account the reply
-  is sent from), that landed before the discard, whose text above the quote is exactly yours and
-  that still carries the original's quote, and only when no other reply window was open when the
-  call started (a retry cannot delete the first call's copy). Anything else is left alone and the
-  error says where a copy may be left; only "nothing was created" is clean. After a `reply_all`
+  own: a new reply to the same message, in a mailbox named Drafts of the account the reply is sent
+  from (the call reads the reply's From address and matches it to the one account that holds it;
+  another account's Drafts is never touched), that landed between the reply verb and the discard
+  (within the 120 second open timeout), whose text above the quote is exactly yours and that still
+  carries the original's quote with nothing below it, and only when no other reply window to that
+  message was open when the call started (a retry cannot delete the first call's copy). The
+  original is found before the reply opens and the reply is opened by Mail's own id for it, so
+  the slow search for the message is not part of that window. Anything else is left alone and
+  the error says where a copy may be left; only "nothing was created" is clean. After a `reply_all`
   send the call does the same sweep once the window is 45 seconds old (the call takes about a
   minute) and reports it as `drafts_copy` beside `sent`; the sent message's own Sent and All Mail
   copies are never touched, and a Drafts copy that cannot be proven this reply's own is left
