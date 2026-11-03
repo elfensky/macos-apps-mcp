@@ -124,14 +124,39 @@ def test_startup_hardens_state_before_serving(state, monkeypatch, role):
     assert audit.state_dir_repaired_mode() == 0o755
 
 
-def test_startup_failure_does_not_serve(state, monkeypatch):
+@pytest.mark.parametrize("role", [None, "daemon"])
+def test_startup_failure_warns_and_keeps_diagnostics(state, monkeypatch, capsys, role):
     state.write_bytes(b"not a directory")
     served = []
-    monkeypatch.setattr("macos_apps_mcp.daemon.serve", lambda: served.append(True))
+
+    def serve():
+        served.append(doctor._state_directory_status())
+        assert audit.audit_write({"private": "data"}) is False
+
+    name = "macos_apps_mcp.daemon.serve" if role else "macos_apps_mcp.server.main"
+    monkeypatch.setattr(name, serve)
+    monkeypatch.setattr("sys.argv", ["macos-apps-mcp"] + ([role] if role else []))
+    cli.main()
+    assert len(served) == 1 and "unsafe path" in served[0]
+    assert state.read_bytes() == b"not a directory"
+    captured = capsys.readouterr()
+    assert "cannot protect state storage" in captured.err
+    assert captured.out == ""
+
+
+def test_named_role_checks_platform_before_state(monkeypatch, capsys):
+    from macos_apps_mcp.errors import UnsupportedPlatform
+
+    def refuse():
+        raise UnsupportedPlatform("macOS required")
+
+    monkeypatch.setattr("macos_apps_mcp.runtime.require_macos", refuse)
+    monkeypatch.setattr(audit, "state_dir", lambda: pytest.fail("state was touched"))
     monkeypatch.setattr("sys.argv", ["macos-apps-mcp", "daemon"])
-    with pytest.raises(OSError):
+    with pytest.raises(SystemExit) as error:
         cli.main()
-    assert served == []
+    assert error.value.code == 1
+    assert "macOS required" in capsys.readouterr().err
 
 
 @pytest.fixture
@@ -167,6 +192,37 @@ def test_backup_has_private_modes_and_exact_bytes_before_act(
         os.umask(mask)
     assert observed == [(0o600, b"Subject: private\r\n\r\nbody")]
     assert result["succeeded"] == 1
+
+
+def test_completed_action_keeps_its_receipt_after_backup_mode_changes(
+    state, source, monkeypatch
+):
+    monkeypatch.setattr(mail_recover, "locate", lambda items: items)
+    acted = []
+
+    def act(targets):
+        acted.append(targets[0].id)
+        Path(targets[0].backup).parent.chmod(0o755)
+
+        def denied(*args):
+            raise PermissionError("later chmod denied")
+
+        monkeypatch.setattr(audit.os, "fchmod", denied)
+        return {source.id: "ok"}
+
+    result = mail_recover.recoverable("move", [source], act)
+    assert acted == [source.id]
+    assert result["succeeded"] == 1
+    assert result["receipt"]
+    assert result["backup_dir"] == str(Path(result["targets"][0]["backup"]).parent)
+    assert [entry["phase"] for entry in audit.read_all()] == ["plan", "done"]
+
+
+def test_backup_page_path_does_not_create_state(state):
+    from macos_apps_mcp.dashboard.recovery import backup_root
+
+    assert backup_root() == state / "backup" / "mail"
+    assert not state.exists()
 
 
 def test_existing_backup_directories_are_narrowed_only_on_the_write_path(state):

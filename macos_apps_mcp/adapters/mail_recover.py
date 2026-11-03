@@ -489,6 +489,7 @@ def recoverable(
     receipt_id = _receipt_id(op)
     if backup:
         located = _backup(op, receipt_id, located)
+    backup_directory = str(_backup_dir(receipt_id)) if backup else None
     plan = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "tool": "mail_recover",
@@ -496,7 +497,7 @@ def recoverable(
         "phase": "plan",
         "receipt": receipt_id,
         "destination": destination,
-        "backup_dir": str(_backup_dir(receipt_id)) if backup else None,
+        "backup_dir": backup_directory,
         "targets": [t.as_dict() for t in located],
     }
     # Logged BEFORE acting, deliberately: if the process dies mid-act, the log still
@@ -550,7 +551,7 @@ def recoverable(
     if destination is not None:
         out["destination"] = destination
     if backup:
-        out["backup_dir"] = str(_backup_dir(receipt_id))
+        out["backup_dir"] = backup_directory
     lossy = [t.id for t in done if t.fidelity != _FULL]
     if lossy:
         out["partial_backups"] = lossy

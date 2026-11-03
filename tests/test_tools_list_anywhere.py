@@ -13,6 +13,7 @@ import asyncio
 import os
 import sys
 
+import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
@@ -30,7 +31,8 @@ def _listed_by_a_real_start() -> set[str]:
         # unmodified there.
         args = [
             "-c",
-            "import macos_apps_mcp.server as s; s.bootstrap = lambda: None; s.main()",
+            "import macos_apps_mcp.server as s; s.bootstrap = lambda: None; "
+            "from macos_apps_mcp.cli import main; main()",
         ]
     transport = StdioTransport(command=sys.executable, args=args, env=dict(os.environ))
 
@@ -46,3 +48,21 @@ def test_tools_list_matches_the_registry():
     expected = {n for n, r in reg.TOOLS.items() if r.registered}
     assert expected
     assert _listed_by_a_real_start() == expected
+
+
+@pytest.mark.parametrize("unavailable", ["file", "read-only-directory"])
+def test_tools_list_survives_unavailable_state(tmp_path, monkeypatch, unavailable):
+    path = tmp_path / "state-home"
+    if unavailable == "file":
+        path.write_text("not a directory")
+    else:
+        if os.geteuid() == 0:
+            pytest.skip("root bypasses directory write permissions")
+        path.mkdir(mode=0o555)
+    monkeypatch.setenv("XDG_STATE_HOME", str(path))
+    try:
+        expected = {n for n, r in reg.TOOLS.items() if r.registered}
+        assert _listed_by_a_real_start() == expected
+    finally:
+        if path.is_dir():
+            path.chmod(0o700)
