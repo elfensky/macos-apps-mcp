@@ -8,6 +8,7 @@ import email
 import shutil
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import pytest
 
@@ -51,8 +52,8 @@ def mailroot(tmp_path, monkeypatch):
     def put(rowid, in_reply_to, mid, body, *, url=_URL, kind="html", partial=False):
         account, _, path = url.partition("://")[2].partition("/")
         folder = tmp_path / "V10" / account
-        for segment in path.replace("%5B", "[").replace("%5D", "]").split("/"):
-            folder = folder / f"{segment.replace('%20', ' ')}.mbox"
+        for segment in unquote(path).split("/"):
+            folder = folder / f"{segment}.mbox"
         shard = "/".join(reversed(str(rowid // 1000))) if rowid >= 1000 else ""
         box = folder / "GUID" / "Data" / shard / "Messages"
         box.mkdir(parents=True, exist_ok=True)
@@ -596,7 +597,9 @@ def test_find_own_draft_after_a_send_with_only_the_sent_copy_finds_no_draft(
         ("<div>Hi there, Jane</div>" + _QUOTE_HTML, _SENT),  # only starts with ours
         ("<div>Hi there</div>", _SENT),  # the quote is gone
         (_OWN, f"imap://{_ACCT}/Projects/Drafts"),  # a user folder, still not ours
-        (_OWN, f"imap://{_ACCT}/Verzonden"),  # a localized Sent is not matched
+        (_OWN, f"imap://{_ACCT}/verzonden"),  # case variant stays unproven (D-14)
+        (_OWN, f"imap://{_ACCT}/E%CC%81le%CC%81ments%20envoye%CC%81s"),  # NFD
+        (_OWN, f"imap://{_ACCT}/Projects/Verzonden"),  # nested user folder
         (_OWN, f"imap://{_ACCT}/Concepten"),  # a localized Drafts leftover is reported
         (_OWN, f"imap://{_ACCT}/Projects/Sent"),  # a user folder named Sent
         (_OWN, f"imap://{_ACCT}/All%20Mail"),  # All Mail only under Google's root
@@ -641,11 +644,37 @@ def test_find_own_draft_after_a_send_never_calls_a_localized_drafts_leftover_non
 
 def test_sent_mailbox_names(monkeypatch):
     sent = mail_reply_cleanup._is_sent_url
-    for name in ("Sent", "Sent%20Messages", "Sent%20Items", "%5BGmail%5D/Sent%20Mail"):
+    for name in (
+        "Sent",
+        "Sent%20Messages",
+        "Sent%20Items",
+        "%5BGmail%5D/Sent%20Mail",
+        "Verzonden",
+        "%5BGoogle%20Mail%5D/%C3%89l%C3%A9ments%20envoy%C3%A9s",
+    ):
         assert sent(f"imap://{_ACCT}/{name}"), name
     assert sent(f"imap://{_ACCT}/%5BGoogle%20Mail%5D/All%20Mail")
-    for name in ("Verzonden", "Projects/Sent", "All%20Mail", "%5BArchive%5D/Sent"):
+    for name in (
+        "verzonden",
+        "Projects/Sent",
+        "All%20Mail",
+        "%5BArchive%5D/Sent",
+        "E%CC%81le%CC%81ments%20envoye%CC%81s",
+        "Projects/Verzonden",
+    ):
         assert not sent(f"imap://{_ACCT}/{name}"), name
+
+
+@pytest.mark.parametrize("name", ["Verzonden", "Éléments envoyés", "Отправленные"])
+def test_localized_sent_twin_uses_exact_shared_vocabulary(mailroot, monkeypatch, name):
+    url = f"imap://{_ACCT}/" + quote(name)
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "s@x", _OWN, url=url)
+    rows = [(20, _URL), (21, url)]
+    assert _find(monkeypatch, rows).kind == "unproven"  # nothing was sent
+    assert _find(monkeypatch, rows, sent_twins=True) == mail_reply_cleanup.Draft(
+        "one", _URL, "<d@x>"
+    )
 
 
 # --- the reply's own signature (FIX-16 gap G4, owner decision 2026-11-01) ---------

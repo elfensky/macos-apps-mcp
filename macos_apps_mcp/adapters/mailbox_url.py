@@ -17,9 +17,8 @@ NOT one list:
 Collapsing them would re-break the false-match bugs the rank patterns encode: patterns
 anchor to the FINAL path segment because both-side wrapping ('%Junk%', '%All%Mail')
 matched real user folders ('Junkyard', 'Wallets/Old Mail') and demoted them, and
-Junk/Spam take a '<name>' or '<name>%20…' segment because Exchange spells the folder
-``Junk%20E-mail``, which a bare end-anchored '%/Junk' would rank as a preferred filed
-folder and let beat a real Archive copy.
+Exchange Junk spellings are explicit: a prefix such as 'Junk …' would also demote
+a user folder named 'Junk research'. Names remain heuristics, not server role proof.
 
 Pure by design — stdlib only, no native imports, no sibling-adapter imports — so
 mail_index, mail_addressing, mail and dedupe can all use it without ordering concerns.
@@ -27,36 +26,79 @@ mail_index, mail_addressing, mail and dedupe can all use it without ordering con
 
 from __future__ import annotations
 
-from urllib.parse import unquote
+import unicodedata
+from urllib.parse import quote, unquote
 
-# One row per special mailbox spelling: (decoded leaf, is_trash, prefix_ok).
-# ``prefix_ok`` also matches '<leaf> …' (encoded: '<leaf>%20…') — Exchange's
-# `Junk E-mail`. Spellings device-verified 2026-08-05 across four account types:
-# IMAP `Trash`, iCloud `Deleted Messages`, Gmail `[Gmail]/Trash` (leaf: `Trash`) —
-# plus `Bin`, the spelling the drifted vocabularies disagreed about.
+# One row per exact special mailbox spelling: (decoded leaf, is_trash).
+# English names have recorded device evidence; nl/de/fr/ru names come from Google,
+# Microsoft and Apple resources. See .planning/phases/05.6-*/05.6-02-SUMMARY.md.
+# Match only whole leaves: neither translated stems nor arbitrary word suffixes.
+# Gmail roots ([Gmail] and [Google Mail]) do not change the final leaf.
 _SPECIALS = (
-    ("Trash", True, False),
-    ("Deleted Messages", True, False),
-    ("Bin", True, False),
-    ("All Mail", False, False),
-    ("Archive", False, False),
-    ("Junk", False, True),
-    ("Spam", False, True),
+    ("Trash", True),
+    ("Deleted Messages", True),
+    ("Deleted Items", True),
+    ("Bin", True),
+    ("Prullenbak", True),
+    ("Prullenmand", True),
+    ("Verwijderde items", True),
+    ("Papierkorb", True),
+    ("Gelöschte Elemente", True),
+    ("Corbeille", True),
+    ("Éléments supprimés", True),
+    ("Корзина", True),
+    ("Удаленные", True),
+    ("All Mail", False),
+    ("Alle e-mail", False),
+    ("Alle Nachrichten", False),
+    ("Tous les messages", False),
+    ("Вся почта", False),
+    ("Archive", False),
+    ("Archief", False),
+    ("Archiv", False),
+    ("Архив", False),
+    ("Junk", False),
+    ("Spam", False),
+    ("Junk E-mail", False),
+    ("Junk Email", False),
+    ("Junk-E-Mail", False),
+    ("Ongewenste e-mail", False),
+    ("Ongewenste Email", False),
+    ("Courrier indésirable", False),
+    ("Indésirables", False),
+    ("Спам", False),
+    ("Нежелательная почта", False),
 )
 
-# Decoded, lowercased trash leaves — dedupe's is-this-a-trash membership test.
-TRASH_LEAVES = frozenset(leaf.lower() for leaf, is_trash, _ in _SPECIALS if is_trash)
+# Normalize only classification keys, never mailbox addressing strings.
+TRASH_LEAVES = frozenset(
+    unicodedata.normalize("NFC", leaf).casefold()
+    for leaf, is_trash in _SPECIALS
+    if is_trash
+)
 
 
 def _like_leaf(leaf: str) -> str:
-    """A raw mailboxes.url is percent-ENCODED, so the space in a leaf is a literal
-    '%20' — the '%' must be LIKE-escaped or it reads as a wildcard."""
-    return "%/" + leaf.replace(" ", r"\%20")
+    """Mail stores uppercase percent-encoded UTF-8, leaving &() literal (D-13).
+    Escape SQL wildcards AFTER encoding, including every literal percent sign."""
+    encoded = quote(leaf, safe="&()")
+    return "%/" + encoded.replace("%", r"\%").replace("_", r"\_")
+
+
+def _leaf_patterns(names: tuple[str, ...]) -> tuple[str, ...]:
+    """Both recorded Unicode storage forms, without duplicate ASCII patterns."""
+    return tuple(
+        dict.fromkeys(
+            _like_leaf(unicodedata.normalize(form, name))
+            for name in names
+            for form in ("NFC", "NFD")
+        )
+    )
 
 
 # LIKE patterns (final-segment-anchored, ESCAPE '\\') for "is this a Trash?" in SQL —
 # bound as params by mail_index.build_trash_query.
-TRASH_SUFFIXES = tuple(_like_leaf(leaf) for leaf, is_trash, _ in _SPECIALS if is_trash)
+TRASH_SUFFIXES = _leaf_patterns(tuple(leaf for leaf, trash in _SPECIALS if trash))
 
 # Sent-role leaves (#192) — device-verified 2026-08-20 across this Mac's account
 # types: IMAP/Yahoo `Sent`, iCloud `Sent Messages`, Gmail `[Gmail]/Sent Mail`
@@ -64,19 +106,31 @@ TRASH_SUFFIXES = tuple(_like_leaf(leaf) for leaf, is_trash, _ in _SPECIALS if is
 # an Exchange account doesn't silently vanish from the awaiting-reply scan.
 # Final-segment-anchored like TRASH_SUFFIXES, and for the same reason: a user
 # folder named `Sentimental` must not read as a Sent mailbox.
-SENT_LEAVES = ("Sent", "Sent Messages", "Sent Mail", "Sent Items")
-SENT_SUFFIXES = tuple(_like_leaf(leaf) for leaf in SENT_LEAVES)
+SENT_LEAVES = (
+    "Sent",
+    "Sent Messages",
+    "Sent Mail",
+    "Sent Items",
+    "Verzonden",
+    "Verzonden berichten",
+    "Verzonden items",
+    "Gesendet",
+    "Gesendete Elemente",
+    "Messages envoyés",
+    "Éléments envoyés",
+    "Отправленные",
+)
+SENT_SUFFIXES = _leaf_patterns(SENT_LEAVES)
 
 
 def rank_case(col: str) -> str:
     """The copy-rank CASE expression over ``col`` (a mailboxes.url column): a live
     INBOX copy (0) beats a filed copy (1), which beats any special-mailbox copy (2).
     Fixed literals from ``_SPECIALS`` — never user input."""
-    demoted = []
-    for leaf, _is_trash, prefix_ok in _SPECIALS:
-        demoted.append(f"{col} LIKE '{_like_leaf(leaf)}' ESCAPE '\\'")
-        if prefix_ok:
-            demoted.append(f"{col} LIKE '{_like_leaf(leaf)}\\%20%' ESCAPE '\\'")
+    demoted = [
+        f"{col} LIKE '{pattern}' ESCAPE '\\'"
+        for pattern in _leaf_patterns(tuple(leaf for leaf, _ in _SPECIALS))
+    ]
     branches = "\n             OR ".join(demoted)
     return f"""CASE
            WHEN {col} LIKE '%/INBOX' THEN 0
@@ -125,4 +179,4 @@ def make(scheme: str, uuid: str, mailbox_path: str) -> str:
 def is_trash(url: str) -> bool:
     """Is this mailbox a Trash? Compared on the DECODED final segment, so
     ``%5BGmail%5D/Trash`` and ``Deleted%20Messages`` both resolve."""
-    return leaf(url).strip().lower() in TRASH_LEAVES
+    return unicodedata.normalize("NFC", leaf(url)).casefold() in TRASH_LEAVES
