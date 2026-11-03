@@ -3,8 +3,8 @@ gsd_state_version: "1.0"
 milestone: v0.11.0
 current_phase: "05.4"
 current_phase_name: "Migration — mcp 2 and fastmcp 4 (#470)"
-status: researching
-stopped_at: "Owner priority 2026-11-03: migrate MCP first, then reassess remaining bugs and architecture. Migration research and cross-model review in progress. PRs #545, #547 and #546 merged on 2026-11-02. Phase 05.2-16 device acceptance remains incomplete."
+status: executing
+stopped_at: "Owner priority 2026-11-03: migrate MCP first, then reassess remaining bugs and architecture. Migration research and cross-model review complete; implementation next. PRs #545, #547 and #546 merged on 2026-11-02. Phase 05.2-16 device acceptance remains incomplete."
 last_updated: "2026-11-03"
 last_activity: 2026-11-03
 last_activity_desc: "MCP migration takes priority; baseline suite, lint and formatting pass."
@@ -12,7 +12,7 @@ state_head: 926ec99
 progress:
   total_phases: 20
   completed_phases: 9
-  total_plans: 88
+  total_plans: 89
   completed_plans: 87
 ---
 
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-25)
 ## Current Position
 
 Phase: 05.4 — Migration to MCP 2 and FastMCP 4
-Plan: Research and cross-model review before implementation.
+Plan: 05.4-01 is ready for implementation; cross-model decisions are recorded.
 Status: In progress, by the owner's 2026-11-03 priority change.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Baseline verification: 3078 tests passed; 105 integration tests deselected; lint and formatting passed.
 
-Progress: 87 of 88 previously planned tasks completed; migration planning is in progress.
+Progress: 87 of 89 plans completed; migration implementation is next.
 
 ## Performance Metrics
 
@@ -243,5 +243,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-03
-Stopped at: Phase 05.4 research and cross-model debate. Owner priority: migrate MCP before remaining bug work. PRs #545, #547 and #546 merged; 05.2-16 device acceptance remains incomplete.
+Stopped at: Phase 05.4 implementation dispatch; research and cross-model debate complete. Owner priority: migrate MCP before remaining bug work. PRs #545, #547 and #546 merged; 05.2-16 device acceptance remains incomplete.
 Resume file: .planning/overnight/2026-11-03.md

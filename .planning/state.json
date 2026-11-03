@@ -105,9 +105,9 @@
     }
   ],
   "next": {
-    "command": "/gsd-plan-phase 05.4",
-    "label": "Migrate MCP first",
-    "reason": "Owner priority 2026-11-03; research and cross-model review in progress"
+    "command": "/gsd-execute-phase 05.4",
+    "label": "Implement MCP migration",
+    "reason": "Accepted cross-model decisions; plan 05.4-01 ready"
   },
   "updated_at": "2026-11-03"
 }
