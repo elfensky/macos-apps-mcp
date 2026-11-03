@@ -417,6 +417,7 @@ def test_missing_folder_type_falls_back_with_translated_names(
             "Zuletzt gelöscht",
             "Suppressions récentes",
             "Недавно удаленные",
+            "المحذوفة مؤخرًا",
         )
         return RS.join(
             f"id-{i}{US}iCloud / {folder}{US}Fixture"
