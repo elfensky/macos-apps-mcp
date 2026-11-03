@@ -219,16 +219,29 @@ def _uds_client_factory(path: Path):
 
 
 class _InterruptedToolWarning(Middleware):
-    """Add outcome guidance to MCP 2 abandoned-stream errors; never replay a call."""
+    """Warn when dispatch may have succeeded but its response was lost. Never retry."""
 
     async def on_call_tool(self, context, call_next):
         try:
             return await call_next(context)
         except ToolError as error:
             cause = error.__cause__
-            if isinstance(cause, MCPError) and cause.error.code == CONNECTION_CLOSED:
+            # Modern calls can execute before sending response headers. A lost
+            # connection then raises httpx2 directly, before an SSE stream exists.
+            # Connect failures remain definite refusals and must not match here.
+            interrupted = isinstance(cause, MCPError) and (
+                cause.error.code == CONNECTION_CLOSED
+            )
+            if interrupted or isinstance(
+                cause,
+                httpx2.RemoteProtocolError
+                | httpx2.ReadError
+                | httpx2.ReadTimeout
+                | httpx2.WriteError
+                | httpx2.WriteTimeout,
+            ):
                 raise ToolError(
-                    "daemon response stream ended without a result — "
+                    "daemon connection ended without a result — "
                     "the operation MAY HAVE COMPLETED; check the audit log "
                     "before retrying anything destructive"
                 ) from error

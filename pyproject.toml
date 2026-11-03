@@ -41,7 +41,7 @@ dependencies = [
     "httpx2>=2.10.0",                      # imported directly (daemon.py: shim's UDS transport)
     "starlette>=1.0.1",                   # imported directly (dashboard/)
     # #322: 49+ has no Intel macOS wheel. MCP 2 imports it for request-state encryption.
-    # The cap remains; the earlier no-import advisory rationale needs review: docs/DAEMON.md.
+    # Reviewed API reachability and known advisories: docs/DAEMON.md.
     "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     # Photos (D-01): library read at rest + export; <0.78: 0.x, export defaults gate D-09
     "osxphotos>=0.77.2,<0.78; sys_platform == 'darwin'",
