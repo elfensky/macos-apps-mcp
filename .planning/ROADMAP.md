@@ -19,6 +19,10 @@ tracked in REQUIREMENTS.md but are out of this milestone. The milestone closes b
 people run it safely: per-adapter toggles and a loopback dashboard, then distribution via `uvx`,
 `.mcpb`, a Homebrew cask and a companion plugin.
 
+**Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
+Then reassess the remaining bugs and architecture against the migrated server.
+Phase 05.2 device acceptance remains incomplete; migration does not establish Mail acceptance.
+
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
 by default, its own audit verb, and verification by running it on device and inspecting the result.
 
@@ -29,7 +33,7 @@ by default, its own audit verb, and verification by running it on device and ins
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-Decimal phases appear between their surrounding integers in numeric order.
+Execution follows the dependency order below, rather than numeric phase identifiers.
 
 - [x] **Phase 1: Gate — Land the Spiked Architecture Cuts** - Native seam fail-closed, module boundaries settled, one registration record, Mail's fixture and recoverable preflight fixed (completed 2026-09-26)
 - [x] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes (completed 2026-10-01)
@@ -40,9 +44,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
+- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
-- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -414,6 +418,17 @@ Plans:
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #430` with no closing keyword
 
+### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
+
+**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Runs before remaining bug work so the new SDK can inform fixes and architecture (owner, 2026-11-03). Later middleware, proxy and registration work uses the migrated server.
+**Requirements**: TBD (planned from #470)
+**Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
+**Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
+**Plans:** 0 plans; migration research and cross-model review in progress
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
+
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
 **Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464); `reply_all`'s dry-run preview lists the original's header, not the reply's recipients (#516, found at the 05.2-07 device sitting). Bugs and errors come before any feature (owner, 2026-10-11).
@@ -427,7 +442,7 @@ Plans:
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
   5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15) — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
 
-**Plans:** 13/16 plans executed
+**Plans:** 15/16 plans executed; device acceptance remains incomplete
 
 Plans:
 **Wave 1**
@@ -464,8 +479,8 @@ Plans:
 **Gap closure, round 2** (from the 05.2-13 device sitting, 2026-11-01: gaps G1-G4 and doctor's restart note; the two other observations are #543)
 
 **Round 2 · Gap Wave 1**
-- [ ] 05.2-14-PLAN.md — the Accessibility grant is read live in a fresh child process on every call, Mail's pid comes from the kernel process table (libproc), and doctor's note says which permissions may need a restart (FIX-16, FIX-14; #348)
-- [ ] 05.2-15-PLAN.md — the reply-all preview reads the account's own addresses into a variable first, and the Drafts sweep accepts the reply's own signature between the text and the quote (FIX-18, FIX-16; #516, #348)
+- [x] 05.2-14-PLAN.md — the Accessibility grant is read live in a fresh child process on every call, Mail's pid comes from the kernel process table (libproc), and doctor's note says which permissions may need a restart (FIX-16, FIX-14; #348)
+- [x] 05.2-15-PLAN.md — the reply-all preview reads the account's own addresses into a variable first, and the Drafts sweep accepts the reply's own signature between the text and the quote (FIX-18, FIX-16; #516, #348)
 
 **Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
 - [ ] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
@@ -480,21 +495,11 @@ Plans:
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.6 to break down)
 
-### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
-
-**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed right after the bug phases and before every phase built on the middleware, proxy and registration it changes (05.10, 05.3, 05.7), so nothing is built on fastmcp 3 and migrated after (owner, 2026-10-31; first slot 2026-10-25).
-**Requirements**: TBD (planned from #470)
-**Depends on:** Phase 05.6
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
-
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 
 **Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The paged reads (#508) are additive and are Phase 05.11. One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. The breaking release is 0.17.0; 1.0.0 is the launch release after the testers (owner, 2026-11-01). Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.3, 05.11, 05.9, 05.8, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
 **Requirements**: TBD (planned from #514, #502)
-**Depends on:** Phase 05.4
+**Depends on:** Phase 05.6, after the completed MCP migration
 **Plans:** 0 plans
 
 Plans:
@@ -579,7 +584,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-10-31; 2026-11-01): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.6 → 05.4 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6
+Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-11-03): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.4 → 05.2 → 05.6 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -592,9 +597,9 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 13/16 | In Progress | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Research and debate | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540 (INSERTED) | 0/TBD | Not started | - |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |

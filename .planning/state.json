@@ -49,6 +49,11 @@
       "status": "complete"
     },
     {
+      "number": "05.4",
+      "name": "Migration — mcp 2 and fastmcp 4 (INSERTED)",
+      "status": "in_progress"
+    },
+    {
       "number": "05.2",
       "name": "Bug Fixes — every open bug before Phase 6 (INSERTED)",
       "status": "in_progress"
@@ -56,11 +61,6 @@
     {
       "number": "05.6",
       "name": "Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540 (INSERTED)",
-      "status": "pending"
-    },
-    {
-      "number": "05.4",
-      "name": "Migration — mcp 2 and fastmcp 4 (INSERTED)",
       "status": "pending"
     },
     {
@@ -105,9 +105,9 @@
     }
   ],
   "next": {
-    "command": "/gsd-progress --next",
-    "label": "Advance to the next step",
-    "reason": "Phase 10 of 20 · executing"
+    "command": "/gsd-plan-phase 05.4",
+    "label": "Migrate MCP first",
+    "reason": "Owner priority 2026-11-03; research and cross-model review in progress"
   },
-  "updated_at": "2026-11-01T22:49:28.087Z"
+  "updated_at": "2026-11-03"
 }
