@@ -55,8 +55,9 @@ No source from the prior-art projects above is copied into this repository: each
 architectural influence. **`griches/apple-mcp` has no license, so nothing may be copied from it.** The
 dependencies are installed packages. The `.app` build retains their installed licence files.
 It also copies version-specific fallbacks into `Contents/Resources/THIRD_PARTY_NOTICES/` before signing.
-The build checks both architecture trees and the final bundle. It fails if any distribution lacks nonempty
+The build checks both architecture site-packages trees and the final site-packages tree. It fails if any distribution lacks nonempty
 licence material or a verified fallback. Metadata licence names and empty directories do not pass.
+Legacy `.egg-info` metadata is rejected because the inventory supports `.dist-info` distributions.
 
 [Fallback sources and maintenance](packaging/licenses/README.md) document the release artifacts,
 copyright notices and hashes. The resource index identifies each bundled distribution's notice location

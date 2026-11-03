@@ -62,6 +62,10 @@ def load_fallbacks(root: Path) -> tuple[dict, dict]:
 
 
 def inspect_site(site: Path, manifest: dict, packages: dict) -> tuple[list, set]:
+    if legacy := sorted(site.glob("*.egg-info")):
+        raise ValueError(
+            f"Unsupported legacy distribution metadata: {[p.name for p in legacy]}"
+        )
     distributions = sorted(site.glob("*.dist-info"))
     if not distributions:
         raise ValueError(f"No distributions found: {site}")
@@ -117,7 +121,6 @@ def bundle_licenses(sites: list[Path], fallbacks: Path, resources: Path) -> list
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(fallbacks / relative, target)
     shutil.copyfile(fallbacks / "manifest.json", destination / "manifest.json")
-    shutil.copyfile(fallbacks / "README.md", destination / "README.md")
     (destination / "index.json").write_text(json.dumps(reports, indent=2) + "\n")
     return reports
 

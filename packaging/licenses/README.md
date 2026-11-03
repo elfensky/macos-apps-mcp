@@ -8,6 +8,12 @@ The build requires nonempty files under `licenses/`, or named `LICENSE*`, `COPYI
 A metadata licence name, empty file, empty directory, or external symlink does not satisfy the check.
 The fallback manifest pins distribution versions and SHA256 hashes of every copied file.
 The check refuses missing texts, changed bytes, version drift, removed distributions, and redundant fallback groups.
+Legacy `.egg-info` metadata is refused instead of being omitted from the inventory.
+The check covers installed distribution metadata, not the bundled Python interpreter or its native libraries.
+Nonempty material is a presence check. It does not establish that arbitrary file contents satisfy a licence.
+
+This internal evidence README stays in the repository. The shipped manifest contains upstream source URLs and hashes.
+Home-only archive links are not copied into the app.
 
 **eli14:** Each dependency is a parcel with a permission slip.
 The build checks every parcel and supplies a verified replacement when its slip is missing.
