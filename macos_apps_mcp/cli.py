@@ -22,6 +22,10 @@ _ROLES = (
 
 def main() -> None:
     args = sys.argv[1:]
+    if not args or args[0] in ("daemon", "dedupe-mail", "index-mail-ids"):
+        from .audit import state_dir
+
+        state_dir()  # #540: protect existing private data before serving or writing
     if not args:
         from . import server
 

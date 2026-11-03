@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -31,7 +32,7 @@ if sys.platform == "darwin":
 else:
     EK = None
 
-from . import deploy, registry, runtime, tiers
+from . import audit, deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
 from .errors import ACCESSIBILITY_PANE, PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
@@ -430,6 +431,27 @@ def _tcc_note(reasons: dict[str, str | None]) -> str:
     return f"TCC.db unreadable ({detail}) — not an FDA denial; see the reason codes."
 
 
+def _state_directory_status() -> str:
+    """Inspect without repair, including a repair made before doctor (#540)."""
+    try:
+        info = audit.state_path().lstat()
+    except FileNotFoundError:
+        return "absent; created private on use"
+    except OSError as e:
+        reason = e.strerror or type(e).__name__
+        return f"unverified: {reason}; check state directory access"
+    if not stat.S_ISDIR(info.st_mode):
+        return "unsafe path; state directory must be a real directory, not a symlink"
+    if info.st_uid != os.geteuid():
+        return "unsafe owner; state directory must belong to this account"
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o077:
+        return f"exposed ({mode:04o}); restrict the state directory to 0700"
+    if (old := audit.state_dir_repaired_mode()) is not None:
+        return f"private ({mode:04o}); repaired from {old:04o} by this process"
+    return f"private ({mode:04o})"
+
+
 def diagnose(request: bool = False) -> dict:
     """Per-surface macOS permission + health report with exact remediation (#48).
 
@@ -438,6 +460,8 @@ def diagnose(request: bool = False) -> dict:
     macOS with ``UnsupportedPlatform``.
     """
     runtime.require_macos()
+    # Read before other probes: they can call state_dir() and repair it.
+    state_storage = _state_directory_status()
     surfaces = [
         *_eventkit_surfaces(request),
         *_automation_surfaces(request),
@@ -472,6 +496,7 @@ def diagnose(request: bool = False) -> dict:
     ob = _outbound_state()
     outbound = ob["registered"]  # what this process actually serves, not the config
     deployment = {
+        "state_directory": state_storage,
         # argv, not the env var alone — see deploy.is_daemon_role()
         "mode": "daemon" if deploy.is_daemon_role() else "stdio",
         "agent": agent,
@@ -490,11 +515,10 @@ def diagnose(request: bool = False) -> dict:
         "note": (
             _tcc_note(grants["reasons"])
             if ids is None
-            else "grants listed per identity; the daemon identity is "
-            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
-            'granted=False plus status="limited" — not a plain denial. A '
-            'reason="prompt-timeout" entry is a consent prompt nobody answered, which '
-            "macOS keeps as a denial (#318): run its `remediation` command, then "
+            else "Daemon identity: ren.lav.macos-apps-mcp. A limited(3) grant has "
+            'granted=False and status="limited" (partial access). A '
+            'reason="prompt-timeout" entry is an unanswered consent prompt, stored '
+            "as denial (#318). Run its `remediation` command, then "
             "doctor(request=True) with someone at the screen."
         ),
     }

@@ -54,7 +54,7 @@ from datetime import datetime
 from itertools import count
 from pathlib import Path
 
-from ..audit import audit_read, audit_write, state_dir
+from ..audit import audit_read, audit_write, private_directory, state_dir, state_path
 from ..errors import BatchTooLarge, NativeError, NativeTimeout
 from . import mail_addressing, mail_index
 
@@ -283,10 +283,9 @@ def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
     and by anything else — ``emlx_payload`` drops Mail's byte-count line and trailing
     plist, which are the two things that make an ``.emlx`` un-openable elsewhere.
 
-    A per-file failure downgrades that target to ``absent`` rather than aborting: the
-    op's own safety does not depend on the copy (a move leaves the message intact), and
-    a batch that refuses to run because one file was expunged mid-flight is worse than
-    one that runs and says which target it could not preserve.
+    An unreadable source downgrades that target to ``absent`` (Mail can expunge it
+    mid-flight). A destination failure aborts before acting: private storage must
+    succeed before a backup can be claimed.
 
     Uses the ``path`` ``locate`` stamped (#177): the store used to be rglob'd a second
     time here to re-find the very files ``locate`` had just found — ~2 s of duplicate
@@ -302,13 +301,21 @@ def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
             if not payload:
                 out.append(replace(t, fidelity=_ABSENT))
                 continue
-            dest = _backup_dir(receipt_id) / f"{t.rowid}.eml"
-            dest.write_bytes(payload)
         except OSError:
             # Mail can expunge/rename a file between the rglob and the read — same
             # race build_body_index documents. Record the miss, keep going.
             out.append(replace(t, fidelity=_ABSENT))
             continue
+        dest = _backup_dir(receipt_id) / f"{t.rowid}.eml"
+        # Exclusive creation refuses existing files and symlinks. Set the mode at
+        # creation, before any private bytes; umask can only remove permissions.
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(payload)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
         out.append(replace(t, backup=str(dest)))
     return out
 
@@ -317,8 +324,14 @@ def _backup_dir(receipt_id: str) -> Path:
     """``state_dir()/backup/mail/<receipt-id>/`` — the existing convention
     (``audit.jsonl``, ``allow_send`` and the FTS sidecar already live under
     ``state_dir()``), never a new dot-dir."""
-    d = state_dir() / "backup" / "mail" / receipt_id
-    d.mkdir(parents=True, exist_ok=True)
+    if not receipt_id or receipt_id in (".", "..") or "/" in receipt_id:
+        raise ValueError("receipt id must be one directory name")
+    d = state_dir()
+    # mkdir(parents=True, mode=0700) applies its mode only to the last directory.
+    # Check each owned component, including existing directories and symlinks.
+    for name in ("backup", "mail", receipt_id):
+        d /= name
+        private_directory(d)
     return d
 
 
@@ -667,7 +680,7 @@ def backup_usage() -> dict:
     diagnostic. ``oldest`` is read from the receipt id, which is a sortable timestamp by
     design — no stat call, and it survives a copy that rewrote mtimes.
     """
-    root = state_dir() / "backup" / "mail"
+    root = state_path() / "backup" / "mail"
     out = {"path": str(root), "bytes": 0, "receipts": 0, "oldest": None}
     try:
         receipts = sorted(d.name for d in root.iterdir() if d.is_dir())

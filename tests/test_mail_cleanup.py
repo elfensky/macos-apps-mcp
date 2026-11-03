@@ -476,7 +476,7 @@ def test_dedupe_previews_by_default():
 
 
 def test_backup_usage_reports_size_receipts_and_oldest(monkeypatch, tmp_path):
-    monkeypatch.setattr(mail_recover, "state_dir", lambda: tmp_path)
+    monkeypatch.setattr(mail_recover, "state_path", lambda: tmp_path)
     root = tmp_path / "backup" / "mail"
     for name, size in [("20260101-000000-0-move", 10), ("20260805-000000-0-trash", 20)]:
         d = root / name
@@ -490,14 +490,14 @@ def test_backup_usage_reports_size_receipts_and_oldest(monkeypatch, tmp_path):
 
 def test_backup_usage_never_raises_on_a_missing_tree(monkeypatch, tmp_path):
     # It rides in every doctor() report; a storage read must not fail a diagnostic.
-    monkeypatch.setattr(mail_recover, "state_dir", lambda: tmp_path / "nope")
+    monkeypatch.setattr(mail_recover, "state_path", lambda: tmp_path / "nope")
     assert mail_recover.backup_usage()["bytes"] == 0
 
 
 def test_advisory_is_silent_under_the_threshold_and_names_the_remedy_over_it(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(mail_recover, "state_dir", lambda: tmp_path)
+    monkeypatch.setattr(mail_recover, "state_path", lambda: tmp_path)
     d = tmp_path / "backup" / "mail" / "20260805-000000-0-trash"
     d.mkdir(parents=True)
     (d / "1.eml").write_bytes(b"x" * 5000)
