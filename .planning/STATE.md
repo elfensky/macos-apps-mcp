@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "05.2"
-current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
-status: executing
-stopped_at: "Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6"
-last_updated: "2026-11-01T22:49:28.071Z"
-last_activity: 2026-11-02
-last_activity_desc: "Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed"
-state_head: 9f9a5e08fc9e774a310fbf090f9e567182eeb48c
+current_phase: "05.4"
+current_phase_name: "Migration — mcp 2 and fastmcp 4 (#470)"
+status: researching
+stopped_at: "Owner priority 2026-11-03: migrate MCP first, then reassess remaining bugs and architecture. Migration research and cross-model review in progress. PRs #545, #547 and #546 merged on 2026-11-02. Phase 05.2-16 device acceptance remains incomplete."
+last_updated: "2026-11-03"
+last_activity: 2026-11-03
+last_activity_desc: "MCP migration takes priority; baseline suite, lint and formatting pass."
+state_head: 926ec99
 progress:
   total_phases: 20
   completed_phases: 9
   total_plans: 88
-  completed_plans: 85
+  completed_plans: 87
 ---
 
 # Project State
@@ -23,16 +23,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-25)
 
 **Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348)
+**Current focus:** Phase 05.4 — MCP 2 and FastMCP 4 migration (#470), before remaining bug work.
 
 ## Current Position
 
-Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
-Plan: 13 of 16 merged (05.2-14, 05.2-15 executed as draft PRs #547, #546; 05.2-16 waits for the owner)
-Status: Ready to execute
-Last activity: 2026-11-02 — Wave 1 of 05.2 gap round 2 ready as draft PRs #547 and #546 (not merged); probe reviews PM-121..125, PM-141..145 fixed
+Phase: 05.4 — Migration to MCP 2 and FastMCP 4
+Plan: Research and cross-model review before implementation.
+Status: In progress, by the owner's 2026-11-03 priority change.
+Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
+Baseline verification: 3078 tests passed; 105 integration tests deselected; lint and formatting passed.
 
-Progress: [█████████░] 92%
+Progress: 87 of 88 previously planned tasks completed; migration planning is in progress.
 
 ## Performance Metrics
 
@@ -82,6 +83,7 @@ Progress: [█████████░] 92%
 
 ### Decisions
 
+- [Roadmap]: Owner decision 2026-11-03: migrate to the new MCP server first. Reassess bugs and architecture after migration, because the new SDK may provide different fixes and supported interfaces.
 - [Phase 05.2]: Owner decision 2026-11-01 (05.2-13 sitting): the device acceptance verdict is failed (C2 dry run FIX-18, C3 live Accessibility read); #348 and #516 stay open; gaps G1-G4 (05.2-13-SUMMARY.md) go to /gsd-plan-phase 05.2 --gaps; build 873b553 stays installed, 0.15.1 kept in ~/p052-gaps-rollback/.
 - [Phase 05.2]: Owner decision 2026-11-01: the reply sweep's residual is accepted as documented (facts §4e `Refusal cleanup` (3)): the owner's own hand draft with the same text and the full quote, in the sending account, saved inside the claim window (at most 120 s), can be taken for the call's copy.
 - [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
@@ -240,6 +242,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-01T20:10:52.589Z
-Stopped at: Phase 05.2 gap round 2: plans 05.2-14..16 (records PR #545, draft); wave 1 executed overnight 2026-11-02 as DRAFT PRs #547 (05.2-14) and #546 (05.2-15), stacked on #545, probe-reviewed, review findings fixed, not merged; next: owner merges #545, rebases and merges #547/#546, then /gsd-execute-phase 05.2 --gaps-only for the 05.2-16 re-sitting; Phase 05.6 context gathered (assumptions mode), next /gsd-plan-phase 05.6
-Resume file: .planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md
+Last session: 2026-11-03
+Stopped at: Phase 05.4 research and cross-model debate. Owner priority: migrate MCP before remaining bug work. PRs #545, #547 and #546 merged; 05.2-16 device acceptance remains incomplete.
+Resume file: .planning/overnight/2026-11-03.md
