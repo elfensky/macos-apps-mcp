@@ -136,6 +136,11 @@ uv build -q --wheel --python "$STD/bin/python${PYVER}" \
   --build-constraints "$WORK/build-reqs" --require-hashes \
   --out-dir "$WORK/wheel" "$REPO"
 uv pip install -q --python "$STD/bin/python${PYVER}" --target "$SITE" --no-deps "$WORK"/wheel/*.whl
+# #471: inspect BOTH wheel trees and the final site (including PBS/project metadata).
+# Copy exact, version-pinned fallback notices into Resources before codesign seals it.
+"$STD/bin/python${PYVER}" -E -s -P "$REPO/scripts/bundle_licenses.py" \
+  --site "$WORK/site-aarch64" --site "$WORK/site-x86_64" --site "$SITE" \
+  --fallbacks "$REPO/packaging/licenses" --resources "$APP/Contents/Resources"
 # Build stamp (#143): doctor().build reports which BUILD serves a call — version
 # alone cannot see a same-version rebuild. describe --dirty so an uncommitted-tree
 # build cannot masquerade as its commit.

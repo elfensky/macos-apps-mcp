@@ -40,18 +40,24 @@ and depends on. Corrections welcome — open an issue.
 
 - **[Model Context Protocol](https://modelcontextprotocol.io)** — the open standard macos-apps-mcp
   implements (stewarded by Anthropic).
-- **[FastMCP](https://github.com/PrefectHQ/fastmcp)** (2.0) by **Jeremiah Lowin** / **PrefectHQ**
+- **[FastMCP](https://github.com/PrefectHQ/fastmcp)** (4.1.6) by **Jeremiah Lowin** / **PrefectHQ**
   (Apache-2.0) — the server framework macos-apps-mcp is built on.
 - **[PyObjC](https://github.com/ronaldoussoren/pyobjc)** by **Ronald Oussoren** and contributors
   (MIT) — the EventKit bindings the Calendar/Reminders adapters call into.
-- **[bpylist2](https://github.com/parabolala/bpylist2)** 4.1.1 by **Jenia Varavva** (MIT, declared
-  only in the package metadata; upstream ships no licence text) — bundled in the `.app` as an
-  osxphotos dependency.
+- **[bpylist2](https://github.com/parabolala/bpylist2)** 4.1.1, maintained by **Jenia Varavva**,
+  derives from **Marketcircle Inc.** (MIT) — bundled as an osxphotos dependency.
+  Its release README carries the MIT text and Marketcircle copyright notice.
+  The app supplies the CPython licence for bpylist2's bundled Python 3.8 `plistlib` copy.
 
 ## License notes
 
 No source from the prior-art projects above is copied into this repository: each one is a reference or an
 architectural influence. **`griches/apple-mcp` has no license, so nothing may be copied from it.** The
-dependencies are installed packages. The signed `.app` bundles them as installed, and each bundled package
-must carry its licence text: FastMCP and osxphotos do, PyObjC and bpylist2 do not yet
+dependencies are installed packages. The `.app` build retains their installed licence files.
+It also copies version-specific fallbacks into `Contents/Resources/THIRD_PARTY_NOTICES/` before signing.
+The build checks both architecture trees and the final bundle. It fails if any distribution lacks nonempty
+licence material or a verified fallback. Metadata licence names and empty directories do not pass.
+
+[Fallback sources and maintenance](packaging/licenses/README.md) document the release artifacts,
+copyright notices and hashes. The resource index identifies each bundled distribution's notice location
 ([#471](https://github.com/elfensky/macos-apps-mcp/issues/471)).
