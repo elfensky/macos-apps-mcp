@@ -1117,12 +1117,13 @@ def test_attributedbody_decoder_matches_foundation():
 # ids of notes AppleScript currently holds in Recently Deleted (across accounts) — the
 # subset check excuses these, since sqlite lags AppleScript's delete (see the test).
 _RECENTLY_DELETED_IDS = """on run argv
+  set trashNames to argv
   set theIds to {}
   with timeout of 120 seconds
   tell application "Notes"
     repeat with acc in accounts
       repeat with f in folders of acc
-        if name of f is "Recently Deleted" then
+        if name of f is in trashNames then
           set theIds to theIds & (id of notes of f)
         end if
       end repeat
@@ -1158,7 +1159,9 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     applescript_ids = {
         p.id
         for p in notes_mod._parse_all(
-            notes_mod.runtime.run_osascript(notes_mod._LIST_ALL)
+            notes_mod.runtime.run_osascript(
+                notes_mod._LIST_ALL, *notes_mod.RECENTLY_DELETED_NAMES
+            )
         )
     }
     if not applescript_ids:
@@ -1168,7 +1171,9 @@ def test_notes_sqlite_is_subset_of_applescript_real_store():
     # sqlite hasn't caught up on lives here, and is NOT a leak.
     recently_deleted = {
         i
-        for i in notes_mod.runtime.run_osascript(_RECENTLY_DELETED_IDS).splitlines()
+        for i in notes_mod.runtime.run_osascript(
+            _RECENTLY_DELETED_IDS, *notes_mod.RECENTLY_DELETED_NAMES
+        ).splitlines()
         if i
     }
     phantom = sqlite_ids - applescript_ids - recently_deleted

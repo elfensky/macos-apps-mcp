@@ -141,7 +141,7 @@ def row_to_pointer(row) -> Pointer | None:
 # which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
 # every *filter* value is still a bound param. The patterns and their hard-won anchoring
 # rules (final-segment anchoring against 'Junkyard'/'Wallets/Old Mail' false matches,
-# the Junk/Spam '%20' prefix for Exchange's `Junk%20E-mail`) live in mailbox_url (#175),
+# explicit Exchange Junk spellings) live in mailbox_url (#175),
 # the ONE table behind this rank, build_trash_query and dedupe's is_trash — which is
 # what closed the Bin gap: a `Bin`-spelling trash used to rank as a FILED copy and beat
 # an Archive copy for keeper and citation.
@@ -212,18 +212,27 @@ mailbox_membership(message_rowid, mailbox_id) AS (
 )
 """
 
+# Classify the small mailbox table once (#501, D-13), not each message/label row.
+# Materialize ONLY this projection; materializing mailbox_membership itself caused
+# a recorded sent-triage regression (#299). Keep membership's query plan unchanged.
+_RANKED_MEMBERSHIP_CTE = f"""{_MAILBOX_MEMBERSHIP_CTE},
+ranked_mailboxes AS MATERIALIZED (
+    SELECT mb.ROWID, mb.url, {_MAILBOX_RANK} AS copy_rank FROM mailboxes mb
+)
+"""
+
 # With label membership one stored row appears once per label (#251), so m.ROWID ties
 # across equal-rank labels; mb.ROWID makes the cited folder independent of the plan.
-_BASE_SQL = f"""{_MAILBOX_MEMBERSHIP_CTE}
+_BASE_SQL = f"""{_RANKED_MEMBERSHIP_CTE}
 SELECT {_DEDUP_SELECT_COLS},
        ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                          ORDER BY {_MAILBOX_RANK},
+                          ORDER BY mb.copy_rank,
                                    m.date_received DESC, m.ROWID, mb.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
   AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -370,18 +379,18 @@ def build_thread_query(message_id: str, limit: int):
     front of an oldest-first transcript and would be the first message dropped under
     truncation.
     """
-    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
+    sql = f"""{_RANKED_MEMBERSHIP_CTE}
 SELECT message_id_header, subject, mailbox_url, date_received FROM (
   SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
     SELECT {_DEDUP_SELECT_COLS},
            COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
            ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                              ORDER BY {_MAILBOX_RANK},
+                              ORDER BY mb.copy_rank,
                                        m.date_received DESC, m.ROWID, mb.ROWID) AS rn
     FROM messages m
     JOIN subjects s ON s.ROWID = m.subject
     JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-    JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+    JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
     JOIN message_global_data gd ON gd.ROWID = m.global_message_id
     WHERE m.deleted = 0
       AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -658,7 +667,10 @@ def build_sent_triage_query(limit: int):
     stripped subject and the "Re: "/"Fwd: " lives in subject_prefix — concatenated so
     the record reads like AppleScript's ``subject of m`` did."""
     clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
-    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}, sent AS (
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE},
+sent_mailboxes AS MATERIALIZED (
+  SELECT mb.ROWID FROM mailboxes mb WHERE {clauses}
+), sent AS (
   SELECT m.message_id AS mid_int,
          MIN(m.ROWID) AS rowid,
          MIN(g.message_id_header) AS mid,
@@ -666,10 +678,10 @@ def build_sent_triage_query(limit: int):
          MAX(m.date_sent) AS date_sent
   FROM messages m
   JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-  JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+  JOIN sent_mailboxes mb ON mb.ROWID = mm.mailbox_id
   JOIN subjects s ON s.ROWID = m.subject
   LEFT JOIN message_global_data g ON g.message_id = m.message_id
-  WHERE m.deleted = 0 AND m.message_id != 0 AND ({clauses})
+  WHERE m.deleted = 0 AND m.message_id != 0
   GROUP BY m.message_id
   ORDER BY date_sent DESC LIMIT ?
 )
@@ -757,11 +769,11 @@ SELECT lower(COALESCE(a.address, ''))            AS sender,
        m.date_received                           AS date_received,
        ROW_NUMBER() OVER (PARTITION BY {key}
                           ORDER BY m.date_received DESC, m.ROWID,
-                                   {_MAILBOX_RANK}, mb.ROWID) AS rn
+                                   mb.copy_rank, mb.ROWID) AS rn
 FROM messages m
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0 AND m.date_received >= ?
 """
@@ -772,7 +784,7 @@ WHERE m.deleted = 0 AND m.date_received >= ?
         inner += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
         params.append(like_escape(account))
     sql = (
-        f"{_MAILBOX_MEMBERSHIP_CTE}"
+        f"{_RANKED_MEMBERSHIP_CTE}"
         "SELECT sender, mailbox_url, is_read, flagged, has_document, date_received"
         f" FROM ({inner}) WHERE rn = 1"
     )

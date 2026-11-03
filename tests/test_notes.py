@@ -210,7 +210,8 @@ from macos_apps_mcp.adapters.notes import (  # noqa: E402
 _NS_COLS = (
     "Z_PK INTEGER PRIMARY KEY, ZTITLE1 TEXT, ZSNIPPET TEXT, ZFOLDER INTEGER, "
     "ZNOTEDATA INTEGER, ZMARKEDFORDELETION INTEGER, ZISPINNED INTEGER, "
-    "ZISPASSWORDPROTECTED INTEGER, ZTITLE2 TEXT, ZOWNER INTEGER, ZNAME TEXT"
+    "ZISPASSWORDPROTECTED INTEGER, ZTITLE2 TEXT, ZOWNER INTEGER, ZNAME TEXT, "
+    "ZFOLDERTYPE INTEGER"
 )
 
 
@@ -306,7 +307,8 @@ def _make_notestore(path, *, uuid="STORE-UUID", bodies=None, extra_notes=()):
         for pk, title, snippet in extra_notes
     ]
     conn.executemany(
-        f"INSERT INTO ZICCLOUDSYNCINGOBJECT VALUES ({','.join('?' * 11)})", rows
+        f"INSERT INTO ZICCLOUDSYNCINGOBJECT VALUES ({','.join('?' * 12)})",
+        [(*row, 1 if row[0] == 6 else None) for row in rows],
     )
     conn.commit()
     conn.close()
@@ -356,6 +358,80 @@ def test_sqlite_all_excludes_recently_deleted(notestore):
         "x-coredata://STORE-UUID/ICNote/p3",
         "x-coredata://STORE-UUID/ICNote/p4",
     }
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Recent verwijderd",
+        "Zuletzt gelöscht",
+        "Suppressions récentes",
+        "Недавно удаленные",
+        "Unknown translation",
+    ],
+)
+def test_sqlite_trash_type_excludes_notes_in_any_language(notestore, name):
+    with sqlite3.connect(notestore) as conn:
+        conn.execute(
+            "UPDATE ZICCLOUDSYNCINGOBJECT SET ZTITLE2 = ? WHERE Z_PK = 6", (name,)
+        )
+        conn.execute(
+            "INSERT INTO ZICNOTEDATA VALUES(96, ?)",
+            (_note_proto(b"trashedbodyneedle"),),
+        )
+    assert {p.id.rsplit("/", 1)[-1] for p in NotesAdapter().get_all()} == {"p3", "p4"}
+    # Search shares the same filter, including body-only search.
+    assert NotesAdapter().get_pointers("Trashed") == []
+    assert NotesAdapter().get_pointers("trashedbodyneedle") == []
+
+
+@pytest.mark.parametrize("folder_type", [None, 0, 2])
+def test_sqlite_keeps_nontrash_types_even_with_a_trash_name(notestore, folder_type):
+    with sqlite3.connect(notestore) as conn:
+        conn.execute(
+            "UPDATE ZICCLOUDSYNCINGOBJECT SET ZFOLDERTYPE = ? WHERE Z_PK = 6",
+            (folder_type,),
+        )
+    assert "x-coredata://STORE-UUID/ICNote/p7" in {
+        p.id for p in NotesAdapter().get_all()
+    }
+    assert NotesAdapter().get_pointers("Trashed")[0].id.endswith("/p7")
+
+
+@pytest.mark.parametrize("search", [False, True])
+def test_missing_folder_type_falls_back_with_translated_names(
+    notestore, monkeypatch, search
+):
+    with sqlite3.connect(notestore) as conn:
+        conn.execute("ALTER TABLE ZICCLOUDSYNCINGOBJECT DROP COLUMN ZFOLDERTYPE")
+    calls = []
+
+    def fallback(script, *names):
+        calls.append(script)
+        assert names == notes_mod.RECENTLY_DELETED_NAMES
+        # Synthetic native boundary: a missing translated argument leaks the
+        # corresponding folder. This tests argv wiring, not Apple's execution.
+        folders = (
+            "Notes",
+            "Recent verwijderd",
+            "Zuletzt gelöscht",
+            "Suppressions récentes",
+            "Недавно удаленные",
+        )
+        return RS.join(
+            f"id-{i}{US}iCloud / {folder}{US}Fixture"
+            for i, folder in enumerate(folders)
+            if folder not in names
+        )
+
+    monkeypatch.setattr(runtime, "run_osascript", fallback)
+    result = (
+        NotesAdapter().get_pointers("Fixture") if search else NotesAdapter().get_all()
+    )
+    assert [p.id for p in result] == ["id-0"]
+    assert calls == [notes_mod._LIST_ALL]
+    assert "set trashNames to argv" in calls[0]
+    assert "if name of f is not in trashNames then" in calls[0]
 
 
 def test_get_all_caps_at_max_notes(tmp_path, monkeypatch):

@@ -48,6 +48,61 @@ from ..text import (
 MAX_NOTES = 25
 MAX_BODIES = 50
 
+# Recently Deleted translations for the AppleScript read fallback (#501, D-11).
+# Notes.sdef exposes no folder type. Source: nucleus' pinned 27-name list, with
+# additional spellings from Apple's Notes Localizable.loctable (2026-11-03).
+# Provenance and device limits: .planning/phases/05.6-*/05.6-02-SUMMARY.md.
+# Keep these as argv data, never interpolated into AppleScript source.
+RECENTLY_DELETED_NAMES = (
+    "Recently Deleted",
+    "Nylig slettet",
+    "Senast raderade",
+    "Senest slettet",
+    "Slettet for nylig",
+    "Zuletzt gelöscht",
+    "Supprimés récemment",
+    "Suppressions récentes",
+    "Suppr. récentes",
+    "Eliminados recientemente",
+    "Recién eliminado",
+    "Eliminadas",
+    "Eliminati di recente",
+    "Eliminate",
+    "Recent verwijderd",
+    "Ostatnio usunięte",
+    "Недавно удалённые",
+    "Недавно удаленные",
+    "Apagados recentemente",
+    "Apagadas recentemente",
+    "Apagadas",
+    "最近删除",
+    "最近刪除",
+    "最近削除した項目",
+    "최근 삭제된 항목",
+    "Son Silinenler",
+    "Äskettäin poistetut",
+    "Nedávno smazané",
+    "Πρόσφατα διαγραμμένα",
+    "Πρόσφατες διαγραφές",
+    "Nemrég töröltek",
+    "Nemrég törölt",
+    "Șterse recent",
+    "Nedávno vymazané",
+    "เพิ่งลบ",
+    "ที่ลบล่าสุด",
+    "Đã xóa gần đây",
+    "Нещодавно видалені",
+    "Недавно видалені",
+    "محذوفة مؤخرًا",
+    "Eliminades fa poc",
+    "נמחקו לאחרונה",
+    "हालिया डिलीट किए गए",
+    "Nedavno obrisano",
+    "Baru Dihapus",
+    "Terbaru Dipadam",
+    "Nedavno izbrisano",
+)
+
 NOTESTORE = (
     Path.home() / "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"
 )
@@ -64,6 +119,7 @@ _FINGERPRINT = {
         "ZTITLE1",  # note title
         "ZSNIPPET",  # Apple's precomputed preview → Pointer.summary
         "ZFOLDER",  # → folder row's Z_PK
+        "ZFOLDERTYPE",  # folder role: 1 = Recently Deleted, independent of name
         "ZNOTEDATA",  # note-row discriminator AND fk → ZICNOTEDATA.Z_PK (body decode)
         "ZMARKEDFORDELETION",  # tombstone flag
         "ZISPINNED",
@@ -104,6 +160,7 @@ _LIST_ALL = (
     + """
 
 on run argv
+  set trashNames to argv
   set us to character id 31
   set rs to character id 30
   set theLines to {}
@@ -112,7 +169,7 @@ on run argv
     repeat with acc in accounts
       set accName to name of acc
       repeat with f in folders of acc
-        if name of f is not "Recently Deleted" then
+        if name of f is not in trashNames then
           set {theIds, theNames} to ({id, name} of (notes of f))
           set fName to name of f
           set folder_label to my stripFraming(accName & " / " & fName)
@@ -318,12 +375,9 @@ def _compose_html(title: str, body: str) -> str:
 #
 # Recently Deleted: a trashed note is NOT ZMARKEDFORDELETION=1 (that flag is the
 # CloudKit PERMANENT-purge tombstone) — it stays a live row that just MOVES to the
-# "Recently Deleted" folder for ~30 days. So we also exclude notes whose folder is named
-# "Recently Deleted", exactly as the AppleScript reader does — otherwise the sqlite path
-# leaks trashed notes the AppleScript path hides (#60 review). ponytail: matching by the
-# English folder name mirrors the AppleScript path's own localization limitation, so the
-# two backends AGREE (the @integration cross-check needs that); a locale-independent
-# ZFOLDERTYPE-based exclusion is the upgrade path if a non-English store needs it.
+# trash folder for ~30 days. ZFOLDERTYPE=1 identifies that folder independently of
+# language (#501, D-10; recorded device evidence 2026-11-01). NULL types remain live.
+# A store without ZFOLDERTYPE fails the fingerprint and uses the translated fallback.
 #
 # Live consistency: reads open mode=ro WITHOUT immutable=1. NoteStore is a WAL-mode
 # database (there is a -wal alongside it), and WAL permits concurrent readers, so a
@@ -335,22 +389,21 @@ def _compose_html(title: str, body: str) -> str:
 # matching AppleScript (and matching Messages, #59). If a read ever can't open, the
 # adapter's AppleScript fallback still sees current state — so mode=ro is strictly safer
 # than a silently-stale immutable snapshot.
-_TRASH = "Recently Deleted"
 _COLS = """o.Z_PK, o.ZTITLE1, o.ZSNIPPET, o.ZISPINNED, o.ZISPASSWORDPROTECTED,
        f.ZTITLE2, a.ZNAME"""
 # A real, user-visible note always belongs to a folder. A row with ZNOTEDATA set but
 # ZFOLDER NULL is an orphaned/deleted remnant (empty title, no container) that
 # AppleScript never enumerates — but it is NOT tombstoned (ZMARKEDFORDELETION=0) and its
-# NULL folder slips past the trash-name check, so without an explicit ZFOLDER filter the
+# NULL folder slips past the trash-type check, so without an explicit ZFOLDER filter the
 # sqlite path leaks it (real store: 25 such orphans surfaced once FDA enabled the sqlite
 # path). Require a folder so sqlite matches what AppleScript shows.
-_FROM = f"""FROM ZICCLOUDSYNCINGOBJECT o
+_FROM = """FROM ZICCLOUDSYNCINGOBJECT o
     LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON o.ZFOLDER = f.Z_PK
     LEFT JOIN ZICCLOUDSYNCINGOBJECT a ON f.ZOWNER = a.Z_PK
     WHERE o.ZNOTEDATA IS NOT NULL
       AND o.ZFOLDER IS NOT NULL
       AND (o.ZMARKEDFORDELETION IS NULL OR o.ZMARKEDFORDELETION = 0)
-      AND (f.ZTITLE2 IS NULL OR f.ZTITLE2 <> '{_TRASH}')"""
+      AND (f.ZFOLDERTYPE IS NULL OR f.ZFOLDERTYPE <> 1)"""
 
 # One enumeration query; search folds in Python (no _SEARCH_SQL LIKE — SQLite LIKE is
 # ASCII-only, so it can't do the diacritic/smart-punctuation fold #64 needs).
@@ -641,7 +694,9 @@ class NotesAdapter:
             # review). An empty raw title folds to "" and matches nothing, like the
             # sqlite path (raw ZTITLE1 → "") and the old `whose name contains`.
             recs = parse_framed(
-                runtime.run_osascript(_LIST_ALL), _ALL_FIELDS, min_fields=1
+                runtime.run_osascript(_LIST_ALL, *RECENTLY_DELETED_NAMES),
+                _ALL_FIELDS,
+                min_fields=1,
             )
             kept = [r for r in recs if needle in fold_text(r["title"])]
             return _all_pointers(kept[:MAX_NOTES]), "applescript", _TITLES_ONLY
@@ -692,7 +747,9 @@ class NotesAdapter:
             NOTESTORE,
             _FINGERPRINT,
             read,
-            fallback=lambda: _parse_all(runtime.run_osascript(_LIST_ALL))[:MAX_NOTES],
+            fallback=lambda: _parse_all(
+                runtime.run_osascript(_LIST_ALL, *RECENTLY_DELETED_NAMES)
+            )[:MAX_NOTES],
             immutable=False,  # mode=ro reads the -wal (live); see module note
         )
 
