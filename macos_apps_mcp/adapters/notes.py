@@ -50,7 +50,8 @@ MAX_BODIES = 50
 
 # Recently Deleted translations for the AppleScript read fallback (#501, D-11).
 # Notes.sdef exposes no folder type. Source: nucleus' pinned 27-name list, with
-# additional spellings from Apple's Notes Localizable.loctable (2026-11-03).
+# additional spellings from NotesShared.framework's Localizable.loctable,
+# key "Recently Deleted" (2026-11-04).
 # Provenance and device limits: .planning/phases/05.6-*/05.6-02-SUMMARY.md.
 # Keep these as argv data, never interpolated into AppleScript source.
 RECENTLY_DELETED_NAMES = (
@@ -94,6 +95,7 @@ RECENTLY_DELETED_NAMES = (
     "Нещодавно видалені",
     "Недавно видалені",
     "محذوفة مؤخرًا",
+    "المحذوفة مؤخرًا",
     "Eliminades fa poc",
     "נמחקו לאחרונה",
     "हालिया डिलीट किए गए",

@@ -213,8 +213,8 @@ mailbox_membership(message_rowid, mailbox_id) AS (
 """
 
 # Classify the small mailbox table once (#501, D-13), not each message/label row.
-# Materialize ONLY this projection; materializing mailbox_membership itself caused
-# a recorded sent-triage regression (#299). Keep membership's query plan unchanged.
+# Materialize only this ranking projection. Materializing the small bare_label
+# set caused a recorded sent-triage regression (#299); keep its definition unchanged.
 _RANKED_MEMBERSHIP_CTE = f"""{_MAILBOX_MEMBERSHIP_CTE},
 ranked_mailboxes AS MATERIALIZED (
     SELECT mb.ROWID, mb.url, {_MAILBOX_RANK} AS copy_rank FROM mailboxes mb
@@ -629,17 +629,33 @@ def build_trash_query(account: str):
     accessor is not a substitute: a `move` OUT of it moved the messages and then crashed
     Mail (facts doc §5c), so `trash_mail`'s undo has to name the account's own Trash.
 
-    Ordered so the shortest url wins — a nested user folder like `Trash/2019` would
-    match `%/Trash`'s sibling patterns on some stores, and the account's real Trash is
-    always the shallowest of them.
+    Prefer shallow paths, treating a leading Google container as an account
+    namespace. At equal depth prefer the original English vocabulary, then the
+    shortest URL. A binary tie-break keeps the answer independent of row order.
+    Names remain a heuristic: a user folder can have the same name as real Trash.
     """
     clauses = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in _TRASH_SUFFIXES)
+    root = f"%://{like_escape(account)}/"
+    google_roots = [f"{root}{like_escape(name)}/%" for name in mailbox_url.GOOGLE_ROOTS]
+    google = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in google_roots)
+    english = " OR ".join(
+        "url LIKE ? ESCAPE '\\'" for _ in mailbox_url.ENGLISH_TRASH_SUFFIXES
+    )
     sql = f"""
 SELECT url FROM mailboxes
 WHERE url LIKE ? ESCAPE '\\' AND ({clauses})
-ORDER BY length(url) ASC LIMIT 1
+ORDER BY length(url) - length(replace(url, '/', '')) - 2
+           - CASE WHEN {google} THEN 1 ELSE 0 END,
+         CASE WHEN {english} THEN 0 ELSE 1 END,
+         length(url), url COLLATE BINARY
+LIMIT 1
 """
-    return sql, [f"%://{like_escape(account)}/%", *_TRASH_SUFFIXES]
+    return sql, [
+        f"{root}%",
+        *_TRASH_SUFFIXES,
+        *google_roots,
+        *mailbox_url.ENGLISH_TRASH_SUFFIXES,
+    ]
 
 
 # Sent-role spellings, one per account type — same one-table sourcing as
@@ -668,7 +684,7 @@ def build_sent_triage_query(limit: int):
     the record reads like AppleScript's ``subject of m`` did."""
     clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
     sql = f"""{_MAILBOX_MEMBERSHIP_CTE},
-sent_mailboxes AS MATERIALIZED (
+sent_mailboxes AS (
   SELECT mb.ROWID FROM mailboxes mb WHERE {clauses}
 ), sent AS (
   SELECT m.message_id AS mid_int,

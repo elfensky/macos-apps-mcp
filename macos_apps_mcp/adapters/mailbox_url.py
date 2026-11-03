@@ -34,11 +34,9 @@ from urllib.parse import quote, unquote
 # Microsoft and Apple resources. See .planning/phases/05.6-*/05.6-02-SUMMARY.md.
 # Match only whole leaves: neither translated stems nor arbitrary word suffixes.
 # Gmail roots ([Gmail] and [Google Mail]) do not change the final leaf.
+_ENGLISH_TRASH_LEAVES = ("Trash", "Deleted Messages", "Deleted Items", "Bin")
 _SPECIALS = (
-    ("Trash", True),
-    ("Deleted Messages", True),
-    ("Deleted Items", True),
-    ("Bin", True),
+    *((leaf, True) for leaf in _ENGLISH_TRASH_LEAVES),
     ("Prullenbak", True),
     ("Prullenmand", True),
     ("Verwijderde items", True),
@@ -99,6 +97,11 @@ def _leaf_patterns(names: tuple[str, ...]) -> tuple[str, ...]:
 # LIKE patterns (final-segment-anchored, ESCAPE '\\') for "is this a Trash?" in SQL —
 # bound as params by mail_index.build_trash_query.
 TRASH_SUFFIXES = _leaf_patterns(tuple(leaf for leaf, trash in _SPECIALS if trash))
+# Keep the previous vocabulary ahead of new aliases at equal logical depth.
+ENGLISH_TRASH_SUFFIXES = _leaf_patterns(_ENGLISH_TRASH_LEAVES)
+
+# Google account containers count as a namespace, not a user-folder nesting level.
+GOOGLE_ROOTS = ("[Gmail]", "%5BGmail%5D", "[Google Mail]", "%5BGoogle%20Mail%5D")
 
 # Sent-role leaves (#192) — device-verified 2026-08-20 across this Mac's account
 # types: IMAP/Yahoo `Sent`, iCloud `Sent Messages`, Gmail `[Gmail]/Sent Mail`

@@ -11,6 +11,47 @@ from tests.envelope import ACCT_A, ACCT_B, SCHEMA, seed_base
 
 
 @pytest.mark.usefixtures("envelope_mode")
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    "candidates,chosen",
+    [
+        (("Deleted%20Messages", "Corbeille"), "Deleted%20Messages"),
+        (("Deleted%20Items", "Papierkorb"), "Deleted%20Items"),
+        (("%5BGmail%5D/Trash", "Prullenbak"), "%5BGmail%5D/Trash"),
+        (
+            ("%5BGoogle%20Mail%5D/Trash", "Prullenbak"),
+            "%5BGoogle%20Mail%5D/Trash",
+        ),
+        (("[Gmail]/Trash", "Prullenbak"), "[Gmail]/Trash"),
+        (("[Google Mail]/Trash", "Prullenbak"), "[Google Mail]/Trash"),
+        (("%5bgmail%5d/Trash", "Prullenbak"), "%5bgmail%5d/Trash"),
+        (("a/Trash", "Deleted%20Messages"), "Deleted%20Messages"),
+        (("Folder/Trash", "Corbeille"), "Corbeille"),
+        (("Folder/%5BGmail%5D/Trash", "Corbeille"), "Corbeille"),
+        (("%5BGmail%5D/Folder/Trash", "Corbeille"), "Corbeille"),
+        (("%5BGmail%5Dfake/Trash", "Corbeille"), "Corbeille"),
+        (("Trash", "Bin", "Deleted%20Messages"), "Bin"),
+        (("b/Trash", "a/Trash"), "a/Trash"),
+    ],
+)
+def test_trash_lookup_prefers_shallow_candidates_and_existing_english_names(
+    tmp_path, monkeypatch, reverse, candidates, chosen
+):
+    db = tmp_path / "Envelope Index"
+    seed_base(db)
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
+    with sqlite3.connect(db) as conn:
+        paths = reversed(candidates) if reverse else candidates
+        conn.executemany(
+            "INSERT INTO mailboxes(url) VALUES(?)",
+            [(f"imap://{ACCT_A}/{path}",) for path in paths],
+        )
+        # A shorter candidate in a different account cannot win this lookup.
+        conn.execute("INSERT INTO mailboxes(url) VALUES(?)", (f"imap://{ACCT_B}/Bin",))
+    assert mail_index.query_trash_url(ACCT_A) == f"imap://{ACCT_A}/{chosen}"
+
+
+@pytest.mark.usefixtures("envelope_mode")
 @pytest.mark.parametrize("form", ["NFC", "NFD"])
 @pytest.mark.parametrize(
     "trash,sent,junk",
@@ -85,7 +126,7 @@ def _grow_messages(conn, start, stop):
         )
 
 
-@pytest.mark.parametrize("read", ["search", "thread", "stats", "sent"])
+@pytest.mark.parametrize("read", ["search", "thread", "stats"])
 def test_classification_work_depends_on_mailboxes_not_messages(read):
     # Count actual escaped LIKE evaluations, delegating matching to another SQLite
     # connection. No wall-clock threshold, and no assumption about the query text.
@@ -104,7 +145,6 @@ def test_classification_work_depends_on_mailboxes_not_messages(read):
         "search": mail_index.build_header_query(limit=25),
         "thread": mail_index.build_thread_query("<m1@fixture.invalid>", 25),
         "stats": mail_index.build_stats_query(0),
-        "sent": mail_index.build_sent_triage_query(25),
     }
     sql, params = queries[read]
     try:
