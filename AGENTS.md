@@ -39,8 +39,12 @@ AppleScript count there (#291).
   and it is a local socket with no network to time out on. Per-operation limits belong in the
   adapter, which knows what it asked for. Never "fix" a hang by adding a timeout here: that is
   #170, where httpx's own 5s default silently killed every destructive Mail call over ~5s. A
-  dead stream must ANSWER (`fail_loud_on_dead_stream`) — silence is what a model misreads as
-  failure, then retries a destructive call that already succeeded.
+  dead stream must ANSWER: MCP 2 reports abandoned streams, and the shim middleware adds
+  the uncertain-outcome warning. Never replay a destructive request.
+- **MCP 2 / FastMCP 4 public interfaces only.** Use httpx2 on the local transport, unlimited
+  SSE event size, and public protocol-era mirroring. The upstream HTTP request-body limit
+  is 4 MiB including its envelope. Shim IDs travel in an advisory header, never model extras.
+- **Bundle all locked runtime dependencies.** MCP 2 imports cryptography for request-state encryption even without auth; do not prune it.
 - **Three capability tiers, all gated at registration** (a gated-off tool is *absent*, never
   registered-and-erroring): read → write (`@_write_tool`/`@_additive_tool`, skipped by
   `MACOS_APPS_READ_ONLY`) → **outbound** (`@_send_tool("<adapter>")`, registered only when

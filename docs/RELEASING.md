@@ -134,7 +134,7 @@ not close a milestone just because a same-numbered release went out.
 - [ ] MCP Registry lists X.Y.Z (the `/v0.1` search check in step 4)
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
-- [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed the import and stream smokes (#205, #286)
+- [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed imports and actual-shim smokes for both protocol eras, notifications, large responses and abandoned streams (#205, #286, #470)
 - [ ] Build log shows `entitlements ok: x86_64 has the exception, arm64 is strict` — only the Intel slice carries `allow-unsigned-executable-memory` (#205)
 - [ ] Build log shows `signed smoke ok: arm64` and `signed smoke ok: x86_64` — each signed slice loads the server and allocates a ctypes closure under the hardened runtime (#205)
 - [ ] Build log shows `universal2 gate ok` — every binary is arm64 + x86_64 and needs no newer macOS than `LSMinimumSystemVersion` (#205)

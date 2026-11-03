@@ -27,19 +27,21 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
-    "fastmcp>=2.0,<4",                    # <4: tested major (#286)
+    "fastmcp>=4.1.6,<5",                   # tested with MCP 2 (#470)
     "anyio>=4",                           # imported directly (audit.py)
-    "mcp>=1.26,<2",                       # imported directly (server.py: mcp.types); <2: tested major (#286)
+    "mcp>=2.3.0,<3",                      # imported directly (server.py: mcp.types)
+    "mcp-types>=2.0,<3",                   # public protocol-era constants (daemon.py)
+    "pydantic>=2.11,<3",                   # imported directly (audit.py)
     # Linux installs only the pure dependencies, so the server starts and lists its tools
     # there (Glama's build test); the bundle install evaluates sys_platform as darwin.
     "pyobjc-framework-EventKit>=10.0; sys_platform == 'darwin'",    # Calendar + Reminders (v1)
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",       # Foundation, imported directly (runtime.py)
     "pyobjc-framework-ServiceManagement>=10.0; sys_platform == 'darwin'",  # SMAppService agent registration (deploy.py)
     "uvicorn>=0.30",                      # imported directly (daemon.py: fd-based UDS serving)
-    "httpx>=0.27",                        # imported directly (daemon.py: shim's UDS transport)
-    "starlette>=0.48",                    # imported directly (dashboard/)
-    # #322: transitive (mcp -> pyjwt[crypto]), never imported; 49+ has no Intel macOS wheel.
-    # Its advisories are accepted while nothing imports it: docs/DAEMON.md.
+    "httpx2>=2.10.0",                      # imported directly (daemon.py: shim's UDS transport)
+    "starlette>=1.0.1",                   # imported directly (dashboard/)
+    # #322: 49+ has no Intel macOS wheel. MCP 2 imports it for request-state encryption.
+    # The cap remains; the earlier no-import advisory rationale needs review: docs/DAEMON.md.
     "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     # Photos (D-01): library read at rest + export; <0.78: 0.x, export defaults gate D-09
     "osxphotos>=0.77.2,<0.78; sys_platform == 'darwin'",
@@ -64,13 +66,15 @@ Issues = "https://github.com/elfensky/macos-apps-mcp/issues"
 Changelog = "https://github.com/elfensky/macos-apps-mcp/blob/main/CHANGELOG.md"
 
 # Dev deps with >=major,<next pins mirror the sibling repos' uv discipline (lintle, descent-engine).
-# Runtime deps stay unbounded above except mcp/fastmcp, capped at the majors CI tests:
-# the shim's #170 wrapper is mcp-1.x-only (#286). The second exception is cryptography<49
-# on Intel Macs only (#322): 49+ ships no Intel macOS wheel. The third is osxphotos<0.78
+# SDK/model packages use tested majors: fastmcp, mcp, mcp-types and pydantic.
+# The shim uses the public MCP 2 / FastMCP 4 transport interfaces (#470).
+# cryptography<49 applies on Intel Macs only (#322): 49+ has no Intel macOS wheel.
+# osxphotos<0.78 is the other runtime cap
 # (0.x; its export must never start a download, D-09). Other caps once downgraded
 # EventKit/fastmcp, so do not add more.
 [dependency-groups]
 dev = [
+    "httpx>=0.27,<1",  # dashboard ASGI test client; runtime uses httpx2
     "pytest>=8,<10",
     "pytest-cov>=6,<8",
     "python-dateutil>=2.9.0.post0",

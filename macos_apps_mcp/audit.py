@@ -29,10 +29,8 @@ from datetime import datetime
 from pathlib import Path
 
 import anyio
+from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.middleware import Middleware
-
-# pydantic arrives through mcp's declared `pydantic>=2.11,<3` (>=2.12 on Python 3.14).
-# pyproject.toml is not edited: version.yml fails a PR that edits it without a bump.
 from pydantic import TypeAdapter, ValidationError
 
 from .contracts import Snapshotter
@@ -262,6 +260,7 @@ def _safe_snapshot(source: Snapshotter, ident: str) -> dict | None:
 
 _BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to dry_run
 _FALLBACK_CALLER = "unknown-client"
+SHIM_ID_HEADER = "x-macos-apps-shim-id"
 
 
 def resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
@@ -286,17 +285,19 @@ def _label(text: object) -> str:
 
 
 def _caller(context) -> tuple[str, str | None]:
-    """``("<name> <version>", shim id | None)`` from the MCP client's ``clientInfo``.
+    """Client name/version and the local transport's optional shim header.
 
     Advisory labels, reported by the client: never an identity check, never a gate.
     A context without ``fastmcp_context`` (in-process call, test double), without a
-    session, or without ``clientInfo`` gives the fixed fallback."""
+    session, or without ``client_info`` gives the fixed fallback."""
     try:
-        info = context.fastmcp_context.session.client_params.clientInfo
+        info = context.fastmcp_context.session.client_params.client_info
         caller = _label(f"{info.name} {info.version}")
-        session = _label(getattr(info, "session", None) or "")
     except (AttributeError, RuntimeError):
-        return _FALLBACK_CALLER, None
+        caller = _FALLBACK_CALLER
+    # The public accessor returns {} outside HTTP requests. Keep the shim label
+    # independent of client_info, including during initialization and fallback.
+    session = _label(get_http_headers().get(SHIM_ID_HEADER, ""))
     return caller or _FALLBACK_CALLER, session or None
 
 

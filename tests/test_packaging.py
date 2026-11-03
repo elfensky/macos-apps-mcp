@@ -201,13 +201,14 @@ def test_build_script_gates_universal2():
     """A missing slice or a too-new binary installs fine and fails only on the user's
     Mac; only the build gate sees it (#205)."""
     src = (ROOT / "scripts" / "build_app.sh").read_text()
+    # MCP 2 imports cryptography for request state even without configured auth (#470).
+    assert "--prune cryptography" not in src
     install = '--target "$WORK/site-$a" -r "$WORK/reqs"'
     rm_dylibs = 'rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib'
     guard = 'if grep -q platform_release "$WORK/reqs"; then'
     for needle in (
         "plutil -extract LSMinimumSystemVersion raw",
         'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
-        "--prune cryptography",
         "lipo -archs",
         '"x86_64 arm64"',
         "vtool -arch",

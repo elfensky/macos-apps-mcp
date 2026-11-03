@@ -6,6 +6,14 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP 2 and FastMCP 4** (#470): the local shim uses httpx2, preserves unlimited read duration,
+  and mirrors the frontend protocol era. Caller identity uses public model fields and an advisory shim header.
+  Abandoned streams return a tool error with the uncertain-outcome warning; requests are never replayed automatically.
+  The former `-32001` wire code is not preserved. Local SSE responses have no size limit.
+  HTTP request bodies retain the upstream 4 MiB limit, including the serialized envelope.
+
 ### Added
 
 - **The server starts and lists its tools on Linux.** Glama scores an MCP server only after

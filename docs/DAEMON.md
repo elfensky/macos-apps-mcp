@@ -42,9 +42,11 @@ macOS). The build needs full Xcode, because the Command Line Tools have no `acto
 `xcode-select` points at the Command Line Tools, the build uses `/Applications/Xcode.app`.
 For an Xcode at a different path, set `DEVELOPER_DIR` to its `Contents/Developer`.
 
-The build installs the exact versions in `uv.lock`, except cryptography (see below), then
+The build installs the exact versions in `uv.lock`, including cryptography (see below), then
 runs `scripts/smoke_stream.py` on
-each slice of the bundled interpreter (one streamed tool call through the shim's transport).
+each slice of the bundled interpreter through the actual stdio shim.
+The synthetic checks cover both protocol eras, six-second calls, log/progress notifications,
+large responses, abandoned streams and no replay. They also check for asyncio teardown errors.
 A failing smoke fails the build; a good build log shows `stream smoke ok` (#286).
 The build drops osxphotos's two thin `libdisclaim` dylibs (CLI only) from both trees, and
 both smokes import osxphotos.
@@ -69,29 +71,23 @@ reported 0.14.2 in daemon mode with Calendar, Reminders and Full Disk Access gra
 `ren.lav.macos-apps-mcp`; Mail, Calendar and Reminders reads worked through the shim; and
 `codesign --verify --strict` was valid after the daemon ran.
 
-**No cryptography in the `.app`** (#205). The build leaves out cryptography only.
-cffi and pycparser ship, because osxphotos → osxmetadata → xattr needs cffi (cffi has per-arch
-cp314 wheels, which the build joins with `lipo`). Only auth code uses cryptography: mcp's
-`pyjwt[crypto]`, fastmcp's auth modules, authlib and joserfc. The daemon configures no auth,
-so no daemon, shim or tool path imports it.
-cryptography 49 and later ship no x86_64 macOS wheel. If fastmcp auth is ever turned on in
-the daemon, the bundle fails with `ModuleNotFoundError`. `uv.lock` still lists it, so the
-dev venv keeps it. On an Intel Mac, `pyproject.toml` caps cryptography below 49 (#322).
-The dev venv and a PyPI install (`uvx`) get 48.x, the last release with an Intel wheel, so
-nothing is built from source.
+**cryptography ships in the `.app`** (#470). MCP 2 imports it for request-state encryption,
+even when authentication is disabled. Its public request-state codec uses AES-GCM, HKDF and SHA-256.
+The bundle includes the locked package and its native extensions in both architecture slices.
+cffi and pycparser also ship for osxphotos → osxmetadata → xattr.
 
-**cryptography 48.0.1 and its known advisories are accepted** (owner, 2026-10-25). Intel
-Macs stay supported. `uv.lock` holds one entry, 48.0.1, for every platform. Three advisories
-are fixed only in 49 and later: GHSA-m2h6-j472-rp4c and GHSA-jwv3-5hgf-82ww (X.509
-certificate verification) and GHSA-g6cj-pr64-35w5 (PKCS#7 decryption). They do not apply,
-because nothing imports cryptography: the full suite passes with it blocked
-(`sys.modules["cryptography"] = None`, 2026-10-25). Dependabot alerts #2, #17 and #18 track
-these advisories, and the Dependabot security run reports `security_update_not_possible`
-for cryptography; both follow from the cap.
-This holds only while nothing imports cryptography. Resolve the cap before any change that
-turns on FastMCP or mcp auth (OAuth, JWT), verifies certificates or decrypts PKCS#7. The
-mcp 2 migration does not change this: mcp 2 still requires `pyjwt[crypto]`. Revisit an
-arm64-only PyPI install in 2028.
+**Intel cap:** `pyproject.toml` retains `cryptography<49` on Intel Macs (#322).
+Versions 49 and later have no x86_64 macOS wheel. The lock currently selects 48.0.1 for every platform.
+The bundle and PyPI installation therefore retain Intel support without compiling that package from source.
+
+**Advisory review remains open.** The earlier acceptance depended on cryptography never being imported.
+That condition does not hold with MCP 2. The recorded advisories concern X.509 certificate verification
+(GHSA-m2h6-j472-rp4c, GHSA-jwv3-5hgf-82ww) and PKCS#7 decryption (GHSA-g6cj-pr64-35w5).
+The new request-state codec uses different primitives, but this migration does not establish a fresh security acceptance.
+Dependabot alerts #2, #17 and #18 remain relevant to the retained cap.
+
+**eli14:** The bundle now needs an encryption component to protect returned request state.
+The Intel-compatible version remains available, but its earlier exemption requires a new review.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
@@ -467,10 +463,11 @@ build:
   transport error to its client (not a silent hang) — launchd's `KeepAlive` restarts the daemon
   (`ThrottleInterval` 10s) automatically, and a client reconnects simply by respawning the shim
   (a fresh `shim` invocation), which re-probes the socket from scratch. That "not a silent hang"
-  is `daemon.fail_loud_on_dead_stream()` doing it, not the SDK — see the next two bullets.
+  uses MCP 2 abandoned-stream handling and the shim warning middleware.
+  The warning is a frontend tool error; the former `-32001` wire code is not preserved.
 
 - **A tool call takes as long as it takes: there is NO read deadline on the shim↔daemon hop.**
-  `_uds_client_factory` sets `httpx.Timeout(None, connect=10.0)` on purpose. A call's duration
+  `_uds_client_factory` sets `httpx2.Timeout(None, connect=10.0)` on purpose. A call's duration
   is the *daemon's* business — a bulk Mail pass runs for **hours**, because a `whose` lookup is
   an O(mailbox) scan — and this hop is a local unix socket with no network to time out on. Only
   connect keeps a deadline. Adapters enforce their own per-operation limits (the AppleScript
@@ -481,20 +478,32 @@ build:
   still working, and every destructive Mail call over ~5s died. The cliff moves with the value:
   4.5s returned and 6s did not; set it to 2s and 3s died; set it to `None` and 12s returned.
 
-- **A call that never returns at all.** The MCP SDK's `StreamableHTTPTransport` catches *every*
-  error on a request's SSE stream, logs it at DEBUG (`SSE stream ended: `, empty message for a
-  read timeout) and returns **without answering** — the pending request is never resolved and
-  never errored, so the client waits to its own idle timeout (1800s in Claude Code) on work that
-  may have finished in seconds. `daemon.fail_loud_on_dead_stream()`, installed by `run_shim()`,
-  answers such a stream with a JSON-RPC error instead. If you see
+- **A response stream ends without an answer.** MCP 2 reports the abandoned request.
+  The shim recognizes `ToolError` caused by `MCPError(CONNECTION_CLOSED)` and adds this warning:
 
-  > daemon response stream ended without a result — the operation may have COMPLETED; check the
+  > daemon response stream ended without a result — the operation MAY HAVE COMPLETED; check the
   > audit log before retrying anything destructive
 
-  take it literally: the transport died, the *operation* may well have succeeded. The `done`
-  record in `~/.local/state/macos-apps-mcp/audit.jsonl` is authoritative and is written **before**
-  the response is sent — read it before retrying, because a blind retry of a `move_mail` that
-  already ran moves a message that is no longer where the retry expects it.
+  Inspect `~/.local/state/macos-apps-mcp/audit.jsonl` before repeating a destructive call.
+  Completed audit records precede the response. A missing record does not prove that nothing changed.
+  The shim retains the exception cause and never repeats the request automatically.
+  Refused connections before dispatch and HTTP 413 responses do not receive this warning.
+
+- **Large local messages.** The UDS transport sets `max_sse_event_size=None` through the public API.
+  This permits responses larger than the SDK's default 1 MiB SSE limit.
+  The peer is the application's own daemon behind a restricted socket.
+  HTTP request bodies retain MCP 2's **4 MiB limit, including the serialized request envelope**.
+  An oversized request receives HTTP 413 before tool execution. No private request handler is patched.
+  Direct stdio mode has no HTTP envelope limit.
+
+- **Caller identity and protocol.** The daemon reads name/version from public `client_info`.
+  Each shim sends a stable `X-Macos-Apps-Shim-Id` header. Audit sanitizes it and caps it at 200 characters.
+  These labels are advisory and never grant permission. Backend clients mirror each frontend's protocol era.
+  Legacy ping works; the modern protocol removes ping. Without request context, the backend uses legacy mode.
+
+**eli14:** The SDK is the cable between the client and server.
+A broken cable does not prove that the command stopped. Repeating it could repeat a completed change.
+The request-size limit rejects a large command before the server executes it.
 
 ## Uninstall
 
