@@ -85,8 +85,9 @@ def test_copies_exact_license_and_notice_for_both_trees(tmp_path):
     resources = tmp_path / "Resources"
     reports = bundle_licenses(sites, source, resources)
     output = resources / "THIRD_PARTY_NOTICES"
-    for path in ["example/LICENSE", "example/NOTICE", "manifest.json", "README.md"]:
+    for path in ["example/LICENSE", "example/NOTICE", "manifest.json"]:
         assert (output / path).read_bytes() == (source / path).read_bytes()
+    assert not (output / "README.md").exists()  # internal archive links stay in repo
     assert json.loads((output / "index.json").read_text()) == reports
     assert all(len(r["distributions"]) == 2 for r in reports)
     assert all(r["distributions"][0]["fallback"] == "example" for r in reports)
@@ -174,6 +175,22 @@ def test_empty_site_fails_instead_of_reporting_coverage(tmp_path):
             fallbacks(tmp_path / "fallbacks", ()),
             tmp_path / "Resources",
         )
+
+
+@pytest.mark.parametrize("directory", [False, True])
+def test_legacy_distribution_metadata_cannot_escape_inventory(tmp_path, directory):
+    site = tmp_path / "site"
+    distribution(site, notices={"LICENSE": NOTICE})
+    legacy = site / "legacy-1.0.egg-info"
+    if directory:
+        legacy.mkdir()
+    else:
+        legacy.write_text("Name: legacy\nVersion: 1.0\n")
+    with pytest.raises(ValueError, match="Unsupported legacy distribution metadata"):
+        bundle_licenses(
+            [site], fallbacks(tmp_path / "fallbacks", ()), tmp_path / "Resources"
+        )
+    assert not (tmp_path / "Resources").exists()
 
 
 def test_external_symlink_is_not_shipped_material(tmp_path):
