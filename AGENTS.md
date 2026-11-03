@@ -125,8 +125,10 @@ opening/closing issues and PRs as usual — the cockpit pulls from the tracker o
 Nothing to update in the vault; don't mirror cockpit state (milestones, due dates) here.
 GSD projects: after `/gsd-new-project`, run `/cockpit-gsd-profile` once in this repo before planning the first slice.
 Roadmap: this repo owns its roadmap. `.planning/ROADMAP.md` (GSD) is the one roadmap file here; no second
-roadmap file lives in this repo. A session in this repo publishes it to projects.static.lav.ren through
-keijiban (`elfensky/keijiban`); the vault keeps the enrollment only, never a copy of the plan.
+roadmap file lives in this repo; `docs/landscape.md` is the prior-art survey, not a plan. The Garage page at
+projects.static.lav.ren is a plain HTML display copy, published from the ordinary checkout with the vault's
+`publish-page` skill and `knowledge/developer/stack/page-kit.md` recipe. Until the vault cutover gives this project
+a repo enrollment, the vault roadmap folder stays a copy and its scheduled refresh owns the page.
 
 **Bugs before features** (owner, 2026-10-11): an open bug or error goes on the GSD roadmap in an
 inserted phase ahead of the next feature phase (precedent: Phase 03.1).

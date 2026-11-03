@@ -21,4 +21,3 @@ graphify-out/
 .gsd/
 .planning/state.json
 .planning/milestone.lock
-# GSD debug sessions (local scratch; a finding worth keeping moves to .planning/research/)
