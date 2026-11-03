@@ -424,10 +424,10 @@ Plans:
 **Requirements**: TBD (planned from #470)
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 0 plans; migration research and cross-model review in progress
+**Plans:** 1 plan; ready for implementation after cross-model review
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
+- [ ] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
@@ -597,7 +597,7 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Research and debate | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/1 | Ready to implement | - |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540 (INSERTED) | 0/TBD | Not started | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
