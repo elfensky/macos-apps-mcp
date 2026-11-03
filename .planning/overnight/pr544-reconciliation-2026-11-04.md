@@ -58,3 +58,14 @@ This PR does not publish. It is not a technical prerequisite of `publish`. After
 1. The owner clears the four files from the ordinary checkout, after `git pull --ff-only`.
 2. The separate vault cutover MR changes the enrollment to `{mode: repo}` and deletes the vault roadmap folder.
 3. A session in the ordinary checkout runs the page-kit recipe and uploads the whole project folder once.
+
+## GPT review correction
+
+- The independent GPT review found no blocking defect at `480e966`.
+- One P3 citation named the new path in a report explicitly based on commit `8378ab8`.
+  That commit contains `docs/ROADMAP.md`, not `docs/landscape.md`.
+  The report now retains the historical name and identifies its current name separately.
+- Candidate requirements remain represented; the moved debug record is byte-identical.
+  The removed JSON contains no unique planning decision. All 26 changed Markdown/HTML files have valid relative Markdown targets.
+- Corrected-head validation: 3167 passed, 105 integration tests deselected, seven upstream warnings, 60.09 seconds.
+  Ruff lint and formatting passed; 141 files were already formatted. `git diff --check` passed.
