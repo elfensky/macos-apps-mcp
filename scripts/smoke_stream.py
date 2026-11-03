@@ -90,9 +90,10 @@ def serve_probe(root: Path) -> None:
     @app.tool
     async def disconnect(ctx: Context, kind: str = "eof") -> dict:
         record("disconnect")
-        await ctx.info("dispatched")
+        if kind != "silent-kill":
+            await ctx.info("dispatched")
         await asyncio.sleep(0.1)
-        if kind == "kill":
+        if kind in {"kill", "silent-kill"}:
             os._exit(23)  # This synthetic child only; never the installed daemon.
         return {"done": True}
 
@@ -258,6 +259,16 @@ def main() -> None:
             )
             assert result.is_error and WARNING in result.content[0].text
             assert executions(root, "disconnect") == 2  # One per explicit call.
+            # Modern requests can execute before opening an SSE response. This
+            # child dies before sending any notification or response headers.
+            result = await asyncio.wait_for(
+                client.call_tool(
+                    "disconnect", {"kind": "silent-kill"}, raise_on_error=False
+                ),
+                15,
+            )
+            assert result.is_error and WARNING in result.content[0].text
+            assert executions(root, "disconnect") == 3
 
     for mode in ("legacy", "auto"):
         with probe_server() as (root, _process):
@@ -266,7 +277,7 @@ def main() -> None:
         raise AssertionError(f"stream smoke FAILED: {len(leaked)} asyncio leaks (#302)")
     print(
         "stream smoke ok: legacy + modern, notifications, "
-        "large response, EOF, no replay"
+        "large response, EOF, silent termination, no replay"
     )
 
 

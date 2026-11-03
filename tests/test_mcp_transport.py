@@ -3,6 +3,7 @@
 import asyncio
 import json
 
+import httpx2
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
@@ -125,7 +126,7 @@ def test_long_call_forwards_logs_and_progress_through_stdio_shim(mode):
 
 
 @pytest.mark.parametrize("mode", MODES)
-@pytest.mark.parametrize("kind", ["eof", "kill"])
+@pytest.mark.parametrize("kind", ["eof", "kill", "silent-kill"])
 def test_abandoned_stream_warns_once_without_replaying(mode, kind):
     with probe_server() as (root, process):
         shim = daemon.build_shim(root / "s.sock")
@@ -144,7 +145,7 @@ def test_abandoned_stream_warns_once_without_replaying(mode, kind):
                 assert result.is_error and len(result.content) == 1
                 assert WARNING in result.content[0].text
                 assert "audit log" in result.content[0].text
-                if kind == "kill":
+                if kind in {"kill", "silent-kill"}:
                     assert process.wait(5) == 23
                     refused = await client.call_tool("disconnect", raise_on_error=False)
                     assert refused.is_error and WARNING not in refused.content[0].text
@@ -152,10 +153,12 @@ def test_abandoned_stream_warns_once_without_replaying(mode, kind):
         asyncio.run(go())
         assert executions(root, "disconnect") == 1
         assert executions(root, "discarded_result") == (1 if kind == "eof" else 0)
+        causes = list(_causes(errors.errors[0]))
         assert any(
-            isinstance(cause, MCPError) and cause.error.code == CONNECTION_CLOSED
-            for cause in _causes(errors.errors[0])
-        ), "upstream abandoned-stream exception chain changed"
+            (isinstance(cause, MCPError) and cause.error.code == CONNECTION_CLOSED)
+            or isinstance(cause, httpx2.RemoteProtocolError)
+            for cause in causes
+        ), "upstream interrupted-response exception chain changed"
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -185,10 +188,20 @@ def test_large_response_and_oversized_request(mode):
         assert executions(root, "http_413") == 1
 
 
-def test_warning_preserves_cause_and_leaves_other_errors_alone():
+@pytest.mark.parametrize(
+    "cause",
+    [
+        MCPError(code=CONNECTION_CLOSED, message="closed"),
+        httpx2.RemoteProtocolError("disconnected"),
+        httpx2.ReadError("disconnected"),
+        httpx2.ReadTimeout("no response"),
+        httpx2.WriteError("partial request"),
+        httpx2.WriteTimeout("partial request"),
+    ],
+)
+def test_warning_preserves_cause_and_leaves_other_errors_alone(cause):
     async def go():
         mw = daemon._InterruptedToolWarning()
-        cause = MCPError(code=CONNECTION_CLOSED, message="closed")
         error = ToolError("upstream")
         error.__cause__ = cause
 
@@ -199,9 +212,15 @@ def test_warning_preserves_cause_and_leaves_other_errors_alone():
             await mw.on_call_tool(None, fail)
         assert caught.value.__cause__ is error
         assert caught.value.__cause__.__cause__ is cause
-        error.__cause__ = ValueError("tool validation")
-        with pytest.raises(ToolError) as caught:
-            await mw.on_call_tool(None, fail)
-        assert caught.value is error
+        for definite in (
+            ValueError("tool validation"),
+            httpx2.ConnectError("refused"),
+            httpx2.ConnectTimeout("not connected"),
+            httpx2.PoolTimeout("no connection available"),
+        ):
+            error.__cause__ = definite
+            with pytest.raises(ToolError) as caught:
+                await mw.on_call_tool(None, fail)
+            assert caught.value is error
 
     asyncio.run(go())

@@ -80,14 +80,17 @@ cffi and pycparser also ship for osxphotos → osxmetadata → xattr.
 Versions 49 and later have no x86_64 macOS wheel. The lock currently selects 48.0.1 for every platform.
 The bundle and PyPI installation therefore retain Intel support without compiling that package from source.
 
-**Advisory review remains open.** The earlier acceptance depended on cryptography never being imported.
-That condition does not hold with MCP 2. The recorded advisories concern X.509 certificate verification
-(GHSA-m2h6-j472-rp4c, GHSA-jwv3-5hgf-82ww) and PKCS#7 decryption (GHSA-g6cj-pr64-35w5).
-The new request-state codec uses different primitives, but this migration does not establish a fresh security acceptance.
-Dependabot alerts #2, #17 and #18 remain relevant to the retained cap.
+**Limited compatibility exception (2026-11-03).** No reachable vulnerability was found in the reviewed
+local, unauthenticated AES-GCM/HKDF path. The retained package is affected by X.509 verification advisories
+(GHSA-m2h6-j472-rp4c, GHSA-jwv3-5hgf-82ww; fixed in 49.0.0) and a PKCS#7 decryption advisory
+(GHSA-g6cj-pr64-35w5; fixed in 50.0.0). The application does not call those affected operations.
+X.509 modules are imported indirectly, so absence of imports is not the justification.
+Keep Dependabot alerts #2, #17 and #18 open. Reassess before enabling authentication, certificate-chain
+verification or PKCS#7 processing, or changing the relevant dependencies.
+[Evidence, primary advisories and verification limits](../.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-SECURITY.md).
 
-**eli14:** The bundle now needs an encryption component to protect returned request state.
-The Intel-compatible version remains available, but its earlier exemption requires a new review.
+**eli14:** The toolbox contains defective attachments. The current job uses a different attachment, which passed its checks.
+Future jobs must not assume that every attachment works.
 
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
@@ -479,9 +482,11 @@ build:
   4.5s returned and 6s did not; set it to 2s and 3s died; set it to `None` and 12s returned.
 
 - **A response stream ends without an answer.** MCP 2 reports the abandoned request.
-  The shim recognizes `ToolError` caused by `MCPError(CONNECTION_CLOSED)` and adds this warning:
+  The shim recognizes `ToolError` caused by `MCPError(CONNECTION_CLOSED)` or an interrupted
+  httpx2 read/write. This also covers a modern call that ran before sending response headers.
+  Connect and pool failures retain their original error. Interrupted calls receive this warning:
 
-  > daemon response stream ended without a result — the operation MAY HAVE COMPLETED; check the
+  > daemon connection ended without a result — the operation MAY HAVE COMPLETED; check the
   > audit log before retrying anything destructive
 
   Inspect `~/.local/state/macos-apps-mcp/audit.jsonl` before repeating a destructive call.
