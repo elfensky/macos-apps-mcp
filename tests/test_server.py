@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
-from fastmcp.tools.tool import ToolResult
+from fastmcp.tools import ToolResult
 from mcp.types import TextContent
 
 import macos_apps_mcp.notices as notices

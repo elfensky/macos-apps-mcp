@@ -95,15 +95,13 @@ for f in AppIcon.icns Assets.car; do
 done
 
 # 2. Locked deps (#286), one tree per arch, then lipo the thin .so files.
-# cryptography is reached only via mcp's pyjwt[crypto] and fastmcp's auth modules; no
-# auth is configured, so the bundle never imports it, and 49+ has no x86_64 wheel
-# (#205). --prune cryptography still drops it from the export, but cffi and pycparser
-# now ship, because osxphotos -> osxmetadata -> xattr needs cffi. --no-deps
-# stops uv re-resolving cryptography unpinned from PyPI. --no-build: a cross-arch sdist
+# MCP 2 imports cryptography for request-state encryption even without auth (#470).
+# Ship its locked version; the Intel <49 cap remains in pyproject.toml (#322).
+# cffi and pycparser also ship for osxphotos -> osxmetadata -> xattr. --no-deps
+# stops uv re-resolving dependencies unpinned from PyPI. --no-build: a cross-arch sdist
 # build would compile for the HOST arch. MACOSX_DEPLOYMENT_TARGET applies only
 # with --python-platform (else uv takes the build host's macOS tags).
-uv export --project "$REPO" --frozen --no-dev --no-emit-project \
-  --prune cryptography > "$WORK/reqs"
+uv export --project "$REPO" --frozen --no-dev --no-emit-project > "$WORK/reqs"
 # D-16: --python-platform drops a requirement that carries a platform_release marker and
 # still exits 0, so a silent hole would reach the bundle; refuse the export instead.
 if grep -q platform_release "$WORK/reqs"; then
@@ -168,7 +166,7 @@ for a in arm64 x86_64; do
     -E -s -P -c "import macos_apps_mcp, macos_apps_mcp.dashboard, osxphotos, UniformTypeIdentifiers" \
     || { echo "BUNDLE SMOKE FAILED ($a): import failed (getpath layout, or a" \
          "slice-specific extension)"; exit 1; }
-  # one streamed tool call through the shim's transport, on the bundled libraries (#286)
+  # Actual shim, both protocol eras, streamed success and failure (#286, #470).
   /usr/bin/arch "-$a" "$APP/Contents/MacOS/macos-apps-mcp" -E -s -P \
     "$REPO/scripts/smoke_stream.py" \
     || { echo "STREAM SMOKE FAILED ($a): bundled mcp/fastmcp break the shim (#286)"; exit 1; }

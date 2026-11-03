@@ -15,24 +15,20 @@ import socket
 import sys
 import threading
 import uuid
-from dataclasses import replace
 from pathlib import Path
 
-import httpx
+import httpx2
 import uvicorn
-from fastmcp import Client as _Client
 from fastmcp.client.transports import StreamableHttpTransport as _HttpTransport
+from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_context
-from fastmcp.server.providers.proxy import FastMCPProxy
-from mcp.shared.message import SessionMessage
-from mcp.types import (
-    ErrorData,
-    Implementation,
-    JSONRPCError,
-    JSONRPCMessage,
-    JSONRPCResponse,
-)
+from fastmcp.server.middleware import Middleware
+from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
+from mcp.shared.exceptions import MCPError
+from mcp.types import CONNECTION_CLOSED, Implementation
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 
+from .audit import SHIM_ID_HEADER
 from .text import sanitize_line
 
 log = logging.getLogger(__name__)
@@ -170,7 +166,7 @@ def make_dispatcher(mcp_app, dash_app):
 # Mail pass is HOURS: a `whose` lookup is an O(mailbox) scan), and this hop is a local
 # unix socket with no network to time out on, so the read has no deadline at all. Only
 # connect keeps one — the daemon must accept promptly or say why it cannot.
-_UDS_TIMEOUT = httpx.Timeout(None, connect=10.0)
+_UDS_TIMEOUT = httpx2.Timeout(None, connect=10.0)
 
 
 def _drop_cancelled_wait(loop, context):
@@ -201,7 +197,7 @@ def _drop_cancelled_wait(loop, context):
 
 
 def _uds_client_factory(path: Path):
-    """httpx AsyncClient factory routing all requests over the unix socket. The URL
+    """httpx2 AsyncClient factory routing all requests over the unix socket. The URL
     host is a dummy — never resolved. It also installs `_drop_cancelled_wait` on the
     client's running loop, unless the loop already has a handler (#302)."""
 
@@ -215,72 +211,28 @@ def _uds_client_factory(path: Path):
                 loop.set_exception_handler(_drop_cancelled_wait)
         kwargs.pop("transport", None)
         kwargs["timeout"] = _UDS_TIMEOUT
-        return httpx.AsyncClient(
-            transport=httpx.AsyncHTTPTransport(uds=str(path)), **kwargs
+        return httpx2.AsyncClient(
+            transport=httpx2.AsyncHTTPTransport(uds=str(path)), **kwargs
         )
 
     return factory
 
 
-class _WatchedWriter:
-    """Read-stream writer that remembers whether a JSON-RPC *answer* went through it
-    (progress notifications on the same stream don't count)."""
+class _InterruptedToolWarning(Middleware):
+    """Add outcome guidance to MCP 2 abandoned-stream errors; never replay a call."""
 
-    def __init__(self, inner):
-        self._inner = inner
-        self.answered = False
-
-    async def send(self, item) -> None:
-        root = getattr(getattr(item, "message", None), "root", None)
-        if isinstance(root, JSONRPCResponse | JSONRPCError):
-            self.answered = True
-        await self._inner.send(item)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-
-def fail_loud_on_dead_stream() -> None:
-    """#170, second bug: mcp's StreamableHTTPTransport catches EVERY error on a
-    request's SSE stream, logs it at DEBUG (`SSE stream ended: …`) and returns without
-    answering — so the caller waits forever on a request that will never come back,
-    indistinguishable from a hang. That is what turned a 5s timeout into a 1800s
-    client abort. Answer the dead stream with a JSON-RPC error instead: loud, and
-    pointing at the record that says whether the work actually happened.
-
-    Written against mcp 1.x; mcp 2 changed `_handle_sse_response` and
-    `JSONRPCMessage`, so `pyproject.toml` caps mcp below 2 and the build's stream
-    smoke catches drift (#286)."""
-    from mcp.client import streamable_http
-
-    original = streamable_http.StreamableHTTPTransport._handle_sse_response
-
-    async def _handle_sse_response(self, response, ctx, is_initialization=False):
-        watched = _WatchedWriter(ctx.read_stream_writer)
-        await original(
-            self, response, replace(ctx, read_stream_writer=watched), is_initialization
-        )
-        request_id = getattr(ctx.session_message.message.root, "id", None)
-        if watched.answered or request_id is None:  # answered, or a notification
-            return
-        await ctx.read_stream_writer.send(
-            SessionMessage(
-                JSONRPCMessage(
-                    JSONRPCError(
-                        jsonrpc="2.0",
-                        id=request_id,
-                        error=ErrorData(
-                            code=-32001,
-                            message="daemon response stream ended without a result — "
-                            "the operation may have COMPLETED; check the audit log "
-                            "before retrying anything destructive",
-                        ),
-                    )
-                )
-            )
-        )
-
-    streamable_http.StreamableHTTPTransport._handle_sse_response = _handle_sse_response
+    async def on_call_tool(self, context, call_next):
+        try:
+            return await call_next(context)
+        except ToolError as error:
+            cause = error.__cause__
+            if isinstance(cause, MCPError) and cause.error.code == CONNECTION_CLOSED:
+                raise ToolError(
+                    "daemon response stream ended without a result — "
+                    "the operation MAY HAVE COMPLETED; check the audit log "
+                    "before retrying anything destructive"
+                ) from error
+            raise
 
 
 _restart_armed = (
@@ -401,39 +353,57 @@ _SHIM_NAME = "macos-apps-mcp-shim"
 _SHIM_VERSION = "0"
 
 
-def _shim_client_factory(transport, shim_id: str):
-    """The proxy's per-request client factory (#222): each upstream client carries the
-    REAL client's ``clientInfo`` (name, version) plus ``shim_id`` as an extra field, so
-    the daemon's audit record names who called and which shim carried it. Without it
-    the daemon saw ``mcp 0.1.0`` and a new session on every call.
+def _shim_client_factory(transport):
+    """Forward public client identity and mirror the frontend protocol era.
 
-    Two paths have no client params and use the fixed shim identity: ``initialize``
-    (``proxy.py:90`` — the front client's params are not stored yet) and ``ping``
-    (``proxy.py:921`` — ``get_context()`` raises outside a request)."""
+    Initialization can precede client_params. Legacy ping has no FastMCP request
+    context. Both use the shim identity and a legacy backend by default. Modern
+    requests pin their exact public protocol version; modern MCP has no ping.
+    """
 
-    def f():
+    def factory():
+        info = Implementation(name=_SHIM_NAME, version=_SHIM_VERSION)
+        mode = "legacy"
         try:
-            info = get_context().session.client_params.clientInfo
-            name, version = info.name, info.version
-        except Exception:  # noqa: BLE001 — either fallback path above
-            name, version = _SHIM_NAME, _SHIM_VERSION
-        return _Client(
-            transport,
-            client_info=Implementation(name=name, version=version, session=shim_id),
+            ctx = get_context()
+        except RuntimeError:
+            ctx = None
+        if ctx is not None:
+            try:
+                front = ctx.session.client_params.client_info
+                info = Implementation(name=front.name, version=front.version)
+            except (AttributeError, RuntimeError):
+                pass
+            request = ctx.request_context
+            if (
+                request is not None
+                and request.protocol_version in MODERN_PROTOCOL_VERSIONS
+            ):
+                mode = request.protocol_version
+        return ProxyClient(
+            transport, client_info=info, mode=mode, forward_incoming_headers=False
         )
 
-    return f
+    return factory
+
+
+def build_shim(path: Path) -> FastMCPProxy:
+    """Build one shim with a stable advisory ID and the local transport policy."""
+    transport = _HttpTransport(
+        "http://daemon/mcp",
+        httpx_client_factory=_uds_client_factory(path),
+        headers={SHIM_ID_HEADER: uuid.uuid4().hex},
+        # This is our own daemon over a restricted UDS. Keep large local responses.
+        max_sse_event_size=None,
+    )
+    return FastMCPProxy(
+        client_factory=_shim_client_factory(transport),
+        middleware=[_InterruptedToolWarning()],
+    )
 
 
 def run_shim() -> None:
-    """Bridge the client's stdio to the daemon over the UDS (FastMCP proxy — the
-    fork-resolved ~15-line shim). No TCC surface: this process only moves bytes."""
+    """Bridge the client's stdio to the daemon. No native app access in this process."""
     path = socket_path()
     shim_check(path)
-    fail_loud_on_dead_stream()
-    transport = _HttpTransport(
-        "http://daemon/mcp", httpx_client_factory=_uds_client_factory(path)
-    )
-    shim_id = uuid.uuid4().hex[:8]  # once per shim process
-    proxy = FastMCPProxy(client_factory=_shim_client_factory(transport, shim_id))
-    proxy.run()  # stdio transport
+    build_shim(path).run()
