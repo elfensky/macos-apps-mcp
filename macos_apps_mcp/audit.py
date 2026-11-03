@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import stat
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
@@ -42,14 +43,50 @@ log = logging.getLogger("macos_apps_mcp")
 
 AUDIT_LIMIT = 50
 _AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate past ~5 MB; one backup
+_STATE_DIR_REPAIRS: dict[Path, int] = {}
+
+
+def state_path() -> Path:
+    """Resolve the state path without creating or repairing it (doctor's read path)."""
+    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
+    return Path(base) / "macos-apps-mcp"
+
+
+def private_directory(path: Path) -> int | None:
+    """Create at 0700; narrow wider modes. Return the old mode only after repair.
+
+    Only this directory is changed. Refuse symlinks and foreign ownership before
+    chmod; the descriptor binds the check and chmod to the same directory.
+    Existing owner-only modes are preserved. Any failure stops the caller's write.
+    """
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid():
+            raise PermissionError(f"private directory is owned by another user: {path}")
+        mode = stat.S_IMODE(info.st_mode)
+        if mode & 0o077:
+            os.fchmod(fd, 0o700)
+            return mode
+    finally:
+        os.close(fd)
+    return None
 
 
 def state_dir() -> Path:
-    """The XDG state dir for this server, created on use."""
-    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
-    d = Path(base) / "macos-apps-mcp"
-    d.mkdir(parents=True, exist_ok=True)
+    """The state directory, private before use. Never sweep existing contents."""
+    d = state_path()
+    if (old_mode := private_directory(d)) is not None:
+        # Startup and usage logging can run before doctor. Keep that repair visible
+        # for this process, without writing another file into the state directory.
+        _STATE_DIR_REPAIRS[d] = old_mode
     return d
+
+
+def state_dir_repaired_mode() -> int | None:
+    """The last exposed mode repaired by this process at the configured state path."""
+    return _STATE_DIR_REPAIRS.get(state_path())
 
 
 def _audit_path() -> Path:
@@ -91,10 +128,10 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     back to the old lexical compare. Malformed lines are skipped; a missing log is
     empty. NEVER raises: an unreadable log yields a single explicit error entry —
     never a raw ``OSError``, and never an empty list masquerading as "no writes"."""
-    path = _audit_path()
-    if not path.exists():
-        return []
     try:
+        path = _audit_path()
+        if not path.exists():
+            return []
         text = path.read_text(encoding="utf-8")
     except OSError as e:
         log.debug("audit_read failed: %s", e)
@@ -128,7 +165,10 @@ def read_all() -> list[dict]:
     unreadable file adds one ``{"error": …}`` entry so the page can say so (never an
     empty list masquerading as "no writes"). ``audit_read`` and the ``audit`` tool are
     deliberately unchanged."""
-    live = _audit_path()
+    try:
+        live = _audit_path()
+    except OSError as e:
+        return [{"error": f"audit log unreadable: {e}"}]
     out: list[dict] = []
     for path in (live.with_name(live.name + ".1"), live):
         if not path.exists():
@@ -176,11 +216,11 @@ def usage_read() -> dict[str, dict]:
     """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
     Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
     log reads as empty (logged) — a lost tally must not fail the ``usage`` tool."""
-    path = _usage_path()
     out: dict[str, dict] = {}
-    if not path.exists():
-        return out
     try:
+        path = _usage_path()
+        if not path.exists():
+            return out
         text = path.read_text(encoding="utf-8")
     except OSError as e:
         log.debug("usage_read failed: %s", e)

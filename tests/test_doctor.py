@@ -660,6 +660,11 @@ def _budget_cases():
 )
 @pytest.mark.parametrize(("role", "state"), _budget_cases())
 def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, probes):
+    monkeypatch.setattr(
+        doc,
+        "_state_directory_status",
+        lambda: "unsafe path; state directory must be a real directory, not a symlink",
+    )
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
     # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
     # request=False live report (daemon, not-built state), with the Accessibility
