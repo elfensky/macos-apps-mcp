@@ -22,17 +22,7 @@ _ROLES = (
 
 def main() -> None:
     args = sys.argv[1:]
-    if not args or args[0] in ("daemon", "dedupe-mail", "index-mail-ids"):
-        from .audit import state_dir
-
-        state_dir()  # #540: protect existing private data before serving or writing
-    if not args:
-        from . import server
-
-        server.main()  # stdio — bootstrap + lifecycle guards, unchanged
-        return
-    role = args[0]
-    if role in _ROLES:  # every role needs macOS; off it, say so instead of a traceback
+    if args and args[0] in _ROLES:  # named roles require macOS, before storage access
         from . import runtime
         from .errors import UnsupportedPlatform
 
@@ -41,6 +31,23 @@ def main() -> None:
         except UnsupportedPlatform as e:
             print(e, file=sys.stderr)
             raise SystemExit(1) from None
+    if not args or args[0] in ("daemon", "dedupe-mail", "index-mail-ids"):
+        from .audit import state_dir
+        from .text import sanitize_line
+
+        try:
+            state_dir()  # #540: attempt repair before serving; each writer rechecks
+        except OSError as e:
+            # Keep tools/list and doctor available. Private storage still refuses
+            # unsafe paths; audit persistence retains its existing best-effort policy.
+            reason = sanitize_line(str(e))[:400]
+            print(f"cannot protect state storage: {reason}", file=sys.stderr)
+    if not args:
+        from . import server
+
+        server.main()  # stdio — bootstrap + lifecycle guards, unchanged
+        return
+    role = args[0]
     if role == "daemon":
         from . import daemon
 
