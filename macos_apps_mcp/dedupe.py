@@ -54,6 +54,8 @@ import sys
 from .adapters import mail_addressing, mail_index, mailbox_url
 from .adapters.mail import MailAdapter
 from .adapters.mail_recover import MAX_TARGETS
+from .errors import AmbiguousTarget
+from .text import clean_summary
 
 _USAGE = """usage: macos-apps-mcp dedupe-mail [options]
 
@@ -288,11 +290,41 @@ def _chunks(items: list[str]):
         yield items[i : i + size]
 
 
+def _preflight_trash(urls: list[str]) -> None:
+    """Refuse the whole planned pass before any batch, previews included (#556).
+
+    This is an initial check, not a lock on Mail's index. Each adapter batch still
+    resolves Trash again. Unrelated index and mid-pass failures retain their behavior.
+    """
+    accounts = {mail_index.account_of(url) for url in urls}
+    if None in accounts:
+        print(
+            "dedupe needs target mailboxes that name their accounts. "
+            "Nothing was changed by this call.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    for account in sorted(accounts):
+        try:
+            trash = mail_index.query_trash_url(account)
+        except AmbiguousTarget as exc:
+            print(exc, file=sys.stderr)
+            raise SystemExit(2) from None
+        if trash is None:
+            print(
+                f"no Trash mailbox found for account {clean_summary(account)!r}; "
+                "cannot verify or undo this dedupe pass. Nothing was changed by "
+                "this call. Confirm the account's Trash in Mail. "
+                "Do not retry unchanged.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+
+
 def _run_mailbox(
-    adapter, url: str, execute: bool, verbose: bool
+    adapter, url: str, rows: list[dict], execute: bool, verbose: bool
 ) -> tuple[int, int, int]:
     """Preview or collapse one mailbox. Returns (safe sets, sets collapsed, skipped)."""
-    rows = mail_index.query_duplicate_rows(url)
     safe, skipped = _sets(rows)
     redundant = len(rows) - len({str(r["message_id"]) for r in rows})
     name = mailbox_url.leaf(url)
@@ -414,6 +446,7 @@ def _run_cross_account(opts: dict) -> None:
         }
 
     total_losers = sum(len(v) for v in losers.values())
+    _preflight_trash([url for url, mids in losers.items() if mids])
 
     mode = "EXECUTING" if opts["execute"] else "PREVIEW (nothing will change)"
     print(
@@ -526,16 +559,21 @@ def dedupe_mail(argv: list[str]) -> None:
             )
             return
 
+    # Read every target set before the first act. A later account's ambiguity must
+    # not leave an earlier account partially processed, nor produce a false preview.
+    planned = [
+        (r["mailbox_url"], mail_index.query_duplicate_rows(r["mailbox_url"]))
+        for r in summary
+    ]
+    _preflight_trash([url for url, rows in planned if _sets(rows)[0]])
     total_redundant = sum(r["redundant"] for r in summary)
     mode = "EXECUTING" if opts["execute"] else "PREVIEW (nothing will change)"
     print(
         f"{mode} — {total_redundant} redundant rows across {len(summary)} mailboxes\n"
     )
     sets = removed = skipped = 0
-    for row in summary:
-        s, r, k = _run_mailbox(
-            adapter, row["mailbox_url"], opts["execute"], opts["verbose"]
-        )
+    for url, rows in planned:
+        s, r, k = _run_mailbox(adapter, url, rows, opts["execute"], opts["verbose"])
         sets += s
         removed += r
         skipped += k

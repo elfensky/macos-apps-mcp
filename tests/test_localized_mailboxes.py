@@ -7,36 +7,42 @@ from urllib.parse import quote
 import pytest
 
 from macos_apps_mcp.adapters import mail_index, mailbox_url
+from macos_apps_mcp.errors import AmbiguousTarget
 from tests.envelope import ACCT_A, ACCT_B, SCHEMA, seed_base
 
 
 @pytest.mark.usefixtures("envelope_mode")
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize(
-    "candidates,chosen",
+    "candidates",
     [
-        (("Deleted%20Messages", "Corbeille"), "Deleted%20Messages"),
-        (("Deleted%20Items", "Papierkorb"), "Deleted%20Items"),
-        (("%5BGmail%5D/Trash", "Prullenbak"), "%5BGmail%5D/Trash"),
-        (
-            ("%5BGoogle%20Mail%5D/Trash", "Prullenbak"),
-            "%5BGoogle%20Mail%5D/Trash",
+        ("Deleted%20Messages", "Corbeille"),
+        ("Deleted%20Items", "Papierkorb"),
+        ("%5BGmail%5D/Trash", "Prullenbak"),
+        ("%5BGoogle%20Mail%5D/Trash", "Prullenbak"),
+        ("[Gmail]/Trash", "Prullenbak"),
+        ("[Google Mail]/Trash", "Prullenbak"),
+        ("%5bgmail%5d/Trash", "Prullenbak"),
+        ("a/Trash", "Deleted%20Messages"),
+        ("Folder/Trash", "Corbeille"),
+        ("Folder/%5BGmail%5D/Trash", "Corbeille"),
+        ("%5BGmail%5D/Folder/Trash", "Corbeille"),
+        ("%5BGmail%5Dfake/Trash", "Corbeille"),
+        ("Trash", "Bin", "Deleted%20Messages"),
+        ("b/Trash", "a/Trash"),
+        ("Trash", "%5BGmail%5D/Papierkorb"),
+        ("Deleted%20Messages", "Trash"),
+        ("Trash", "trash"),
+        tuple(
+            quote(unicodedata.normalize(form, "Gelöschte Elemente"))
+            for form in ("NFC", "NFD")
         ),
-        (("[Gmail]/Trash", "Prullenbak"), "[Gmail]/Trash"),
-        (("[Google Mail]/Trash", "Prullenbak"), "[Google Mail]/Trash"),
-        (("%5bgmail%5d/Trash", "Prullenbak"), "%5bgmail%5d/Trash"),
-        (("a/Trash", "Deleted%20Messages"), "Deleted%20Messages"),
-        (("Folder/Trash", "Corbeille"), "Corbeille"),
-        (("Folder/%5BGmail%5D/Trash", "Corbeille"), "Corbeille"),
-        (("%5BGmail%5D/Folder/Trash", "Corbeille"), "Corbeille"),
-        (("%5BGmail%5Dfake/Trash", "Corbeille"), "Corbeille"),
-        (("Trash", "Bin", "Deleted%20Messages"), "Bin"),
-        (("b/Trash", "a/Trash"), "a/Trash"),
     ],
 )
-def test_trash_lookup_prefers_shallow_candidates_and_existing_english_names(
-    tmp_path, monkeypatch, reverse, candidates, chosen
+def test_trash_lookup_refuses_distinct_candidates_regardless_of_rank(
+    tmp_path, monkeypatch, reverse, candidates
 ):
+    # #556 replaces the old depth/English ranking contract deliberately.
     db = tmp_path / "Envelope Index"
     seed_base(db)
     monkeypatch.setattr(mail_index, "envelope_index_path", lambda: db)
@@ -46,9 +52,12 @@ def test_trash_lookup_prefers_shallow_candidates_and_existing_english_names(
             "INSERT INTO mailboxes(url) VALUES(?)",
             [(f"imap://{ACCT_A}/{path}",) for path in paths],
         )
-        # A shorter candidate in a different account cannot win this lookup.
         conn.execute("INSERT INTO mailboxes(url) VALUES(?)", (f"imap://{ACCT_B}/Bin",))
-    assert mail_index.query_trash_url(ACCT_A) == f"imap://{ACCT_A}/{chosen}"
+    with pytest.raises(AmbiguousTarget) as err:
+        mail_index.query_trash_url(ACCT_A)
+    assert "Nothing was changed by this call" in str(err.value)
+    for candidate in candidates:
+        assert mailbox_url.path(f"imap://{ACCT_A}/{candidate}") in str(err.value)
 
 
 @pytest.mark.usefixtures("envelope_mode")
