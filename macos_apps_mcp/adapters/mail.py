@@ -2057,7 +2057,7 @@ class MailAdapter:
             recovery = (
                 f"The messages came from {clean_summary(source)!r}. Find them with "
                 "mail_search, confirm their current location, and restore them in "
-                "Mail by hand. Do not retry unchanged."
+                "Mail by hand."
             )
             try:
                 current = mail_index.query_trash_url(mail_index.account_of(dest))
@@ -2069,7 +2069,7 @@ class MailAdapter:
                 raise WriteRefused(
                     "Cannot undo this receipt: the account's current Trash is absent "
                     "or differs from the recorded destination. Nothing was changed "
-                    f"by this call. {recovery}"
+                    f"by this call. {recovery} Do not retry unchanged."
                 )
         return self.move_mail(
             [t.id for t in targets],
