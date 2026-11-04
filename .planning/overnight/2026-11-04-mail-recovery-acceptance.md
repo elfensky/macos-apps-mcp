@@ -40,7 +40,7 @@ The existing periodic Mail watchdog was loaded; it was not changed.
 - The Gmail Trash persistence gate remains untested. This is not localized-folder acceptance.
 - PR #559 was not installed. Its ambiguity refusal, dedupe preflight, and undo guards remain outside this test.
 - No failure injection, interrupted destructive call, replay measurement, or real Claude frontend acceptance occurred.
-- Notarization, the updated Intel installation, and release remain pending.
+- [Notarization and Intel installation](2026-11-04-notarization-intel-acceptance.md) subsequently passed. Release remains pending.
 
 **eli14:** One marked test letter went to the bin and returned to its original drawer.
 Two locked safety copies preserved its text. Later checks found the restored letter in place.

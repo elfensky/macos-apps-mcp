@@ -79,6 +79,8 @@ including the three-file version bump and the mandatory `doctor().version` proof
 [docs/RELEASING.md](docs/RELEASING.md). **The repo is not the daemon** — merging changes nothing
 about what Claude Code sees until the `.app` is rebuilt and reinstalled.
 
+Before requesting notarization credentials, check the existing `notary` profile with `notarytool history`; an account email is not its profile name. See [docs/DAEMON.md](docs/DAEMON.md#notarization-profile).
+
 **Verification.** After completing edits, run these before reporting success — if any fail, report
 the actual output, do not suppress or simplify failures:
 

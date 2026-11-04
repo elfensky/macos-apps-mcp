@@ -67,7 +67,9 @@ That evidence is not signing, notarization, installation, physical Intel accepta
 Fresh [installed evidence](../overnight/2026-11-04-installed-acceptance.md) establishes signed arm64 build 7bc8607, version 0.15.1, native reads, and normal restart recovery.
 Strict signature verification and all 133 distribution notice records passed after installation.
 The [Mail recovery test](../overnight/2026-11-04-mail-recovery-acceptance.md) also passed on this installed build; strict signature verification still passed afterward.
-Notarization, updated physical Intel installation, and remaining native acceptance remain pending.
+[Notarization and physical Intel installation](../overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
+Both protocol eras and bounded native reads passed on Intel; its final signature, staple, and Gatekeeper checks passed.
+Remaining native/frontend acceptance and release stay open.
 
 The latest published release remains `v0.15.1`, verified on 2026-11-04.
 The GSD `v0.11.0` label describes a planning milestone, not the current software release.
