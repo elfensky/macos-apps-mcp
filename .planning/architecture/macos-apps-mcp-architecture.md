@@ -5,7 +5,9 @@ status: implemented
 source_revision: 4a7c26287b108c9c81f42db0bdf5280ed537e986
 source_evidence_date: 2026-11-04
 review_status: source-checked-update
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # macos-apps-mcp architecture
@@ -87,7 +89,7 @@ The source evidence date records source inspection. Earlier architecture content
 Grant-chip additions have source validation; that earlier architecture review does not cover the later wording. User review remains pending.
 `source_revision` identifies the inspected code baseline. The published page commit must be derived separately from Git.
 No `as_of` user-review date is asserted.
-Publication remains pending and has no publication date.
+The Garage roadmap and architecture were first published on 2026-11-04. [Publication evidence](../overnight/garage-publication-2026-11-04.md) records the source and verification.
 
 - [Project scope](../PROJECT.md) and [phase roadmap](../ROADMAP.md).
 - [Tool server](../../macos_apps_mcp/server.py), [transport](../../macos_apps_mcp/daemon.py), and [dependency lock](../../uv.lock).
@@ -98,13 +100,13 @@ Publication remains pending and has no publication date.
 
 - [Implemented grant chips and acceptance limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
 
-## Display contract — planned
+## Display contract
 
 These Markdown files are the local sources. The frontmatter describes content; it does not imply an implemented publisher validator.
-The planned overview path is `/macos-apps-mcp/architecture/`.
+The published overview path is `/macos-apps-mcp/architecture/`.
 Component paths are `/macos-apps-mcp/architecture/<component>/`, using the seven linked filenames without `macos-apps-mcp-` or `.md`.
-These paths are not claimed as published.
+All eight architecture paths were verified after publication.
 
-The parent publication uses the existing plain HTML publisher after merge and vault cutover.
+Publication uses the existing plain HTML publisher after merge and vault cutover.
 The Mermaid block remains source text; the component list provides equivalent navigation without a renderer.
 Display assets must remain local. Working notes are excluded from display content.
