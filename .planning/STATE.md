@@ -245,5 +245,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-04
-Stopped at: Canonical roadmap #558 is merged. Garage first publication serves the roadmap, eight architecture pages and six compatibility paths from 93c7f09. PR #559 at 872577e has 3607 passing tests and green CI; physical compatibility remains required before merge. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
+Stopped at: Canonical roadmap #558 is merged. Garage first publication served the roadmap, eight architecture pages and six compatibility paths from 93c7f09. PR #559 at 872577e has 3607 passing tests and green CI; physical compatibility remains required before merge. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
 Resume file: .planning/overnight/2026-11-03.md

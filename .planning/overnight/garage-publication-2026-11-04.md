@@ -14,6 +14,11 @@ The vault enrollment uses repository mode, so scheduled vault refreshes retain t
 | Live copy | All 15 paths returned HTML with status 200 and matched the local bytes |
 | Metadata | `page.json` matched the project identity, repository source and full-folder hash |
 | Display assets | No external assets or scripts |
+| Live overview refresh | Skipped this project; all 15 pages and metadata stayed byte-identical |
+| Vault completion | MR !2396, head `d3dfdf9`; hub links, completed task and journal entry merged |
+
+The [historical publication audit](garage-publication-audit-2026-11-04.md) records the earlier blocked snapshot.
+This evidence supersedes that publication state.
 
 ## Published paths
 
