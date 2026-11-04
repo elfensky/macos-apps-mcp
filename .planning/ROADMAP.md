@@ -427,7 +427,7 @@ Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; t
 **Requirements**: MIG-01
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation and bounded native reads passed at 7bc8607. Notarization, updated physical Intel installation, broader native acceptance, and release remain pending.
+**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation, Mail recovery, and bounded reads passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) also passed with both protocol eras and bounded native reads. Remaining native/frontend acceptance and release stay open.
 
 Plans:
 - [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03

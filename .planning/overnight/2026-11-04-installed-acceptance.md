@@ -49,8 +49,7 @@ This census establishes index readability for the SSH process, not permissions f
 
 ## Remaining acceptance
 
-- Notarization and stapling need an existing profile or credentials. No profile was found in project configuration or queried Keychain metadata.
-- The signed update is not installed on the Intel Mac. Transfer follows notarization under the daemon runbook.
+- [Notarization, stapling, and physical Intel installation](2026-11-04-notarization-intel-acceptance.md) subsequently passed using the existing `notary` profile. The earlier credential-search failure is resolved.
 - The installed Trash call exceeded five seconds successfully. Real frontend recovery and the original #543 incident remain unproved.
 - Fresh Mail backup modes and the single-message recovery route passed on arm64. Localized trash/undo and applicable Gmail Trash observations remain pending.
 - PR #559 is not installed or merged. Its physical candidate census is complete; its write acceptance remains open.
@@ -58,7 +57,7 @@ This census establishes index readability for the SSH process, not permissions f
 - Dependency advisories remain open under the recorded cryptography exception.
 
 **eli14:** The new toolbox is signed and working on the main Mac. Its labels, locks, and basic tools passed inspection.
-The older Mac's folder inventory is checked. Delivery there still needs Apple's approval stamp, followed by tests on that machine.
+The older Mac now has Apple's approved toolbox too. Its basic read tools passed; specialized routes still need separate checks.
 
 ## Evidence
 

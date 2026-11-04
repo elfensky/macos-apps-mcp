@@ -95,19 +95,49 @@ Future jobs must not assume that every attachment works.
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
 
-```sh
-# one-time: store notary credentials under a keychain profile
-xcrun notarytool store-credentials PROFILE \
-  --apple-id you@example.com --team-id VUMUR696L9 --password APP_SPECIFIC_PW
+#### Notarization profile
 
+The maintainer's existing Keychain profile is **`notary`**. It is a local profile name, not an Apple account email.
+The recorded setup uses an App Store Connect **Team Key**, with the **Developer** role.
+The signing team is `VUMUR696L9`; the signing identity is `Developer ID Application: Andrei M. Lavrenov (VUMUR696L9)`.
+The profile is configured on the build Mac. Its presence on another Mac must be checked separately.
+
+Check the existing setup before requesting or creating credentials:
+
+```sh
+security find-identity -v -p codesigning
+xcrun notarytool history --keychain-profile notary
+```
+
+Both checks passed on 2026-11-04 after the owner accepted Apple's pending Developer agreement.
+The history check proves service access. It does not inspect the stored key or independently confirm its current role.
+The [v0.13.0 record](../.planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/02.1-08-SUMMARY.md) records the same profile and agreement recovery.
+
+- **Missing or expired agreement:** accept it in the Apple Developer account, then repeat the history check.
+- **Keychain access prompt:** approve access to the existing item through macOS. Do not send the Keychain password to an agent.
+- **Missing profile:** check the exact name `notary` and the build Mac's Keychain first. An email-named profile can be absent while `notary` works.
+- **Authentication refusal after those checks:** investigate the existing key's access or revocation. Restore or replace credentials only when needed.
+
+Signing and notarization use different credentials. An Xcode sign-in does not prove that a named `notarytool` profile exists.
+No new app-specific password is needed while the existing team-key profile works.
+Keep secret material in 1Password; use the supported Keychain profile for `notarytool` access. Never put credentials in documentation or command arguments.
+
+**eli14:** Signing stamps the parcel with its sender. The saved `notary` key opens Apple's inspection desk.
+If that key works, no new key is needed. Each new parcel still needs its own inspection.
+
+Build with the verified profile:
+
+```sh
 scripts/build_app.sh \
   --sign "Developer ID Application: Andrei M. Lavrenov (VUMUR696L9)" \
-  --notarize PROFILE \
+  --notarize notary \
   --out dist
 ```
 
 `--notarize` submits `dist/macos-apps-mcp.zip` with `notarytool submit --wait`, then staples the
-ticket onto the `.app`. Local same-Mac builds you never downloaded don't need this step —
+ticket onto the `.app`. Re-create the distribution zip after stapling; the submission zip does not contain the ticket.
+Verify with `xcrun stapler validate dist/macos-apps-mcp.app` and `spctl -a -vv -t install dist/macos-apps-mcp.app`.
+Local same-Mac builds you never downloaded don't need this step —
 notarization only matters once Gatekeeper sees a quarantine xattr.
 
 ### 2. Move it to `/Applications`

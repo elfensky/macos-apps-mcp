@@ -244,7 +244,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-23 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-24 | Phase 05.6 | Implemented (#552); installed arm64 state/socket and fresh Mail backup modes passed |
 | FIX-25 | Phase 05.6 | Reviewed draft #559; both physical inventories complete; localized write acceptance pending before merge |
-| MIG-01 | Phase 05.4 | Implemented (#550, #561); signed arm64 installation, reads, Mail recovery and a >5s call passed; notarization, Intel update, remaining native/frontend acceptance and release pending |
+| MIG-01 | Phase 05.4 | Implemented (#550, #561); signed arm64 Mail recovery and a >5s call passed; notarization, physical Intel installation and bounded reads passed; remaining native/frontend acceptance and release pending |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
