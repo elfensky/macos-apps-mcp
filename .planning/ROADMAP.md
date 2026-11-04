@@ -513,7 +513,7 @@ Plans:
 - [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; real macOS 27 acceptance remains open.
 
 Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
-#556 needs a distinct ambiguity outcome before callers can stop trusting name priority. Prep: plan; branch: pending; blocked by: no implementation dependency.
+#556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. Both physical candidate inventories, a localized scratch trash/undo check, and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)

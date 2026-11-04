@@ -4,11 +4,11 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Migration #550, privacy #552, licences #553, localized folders #554 and roadmap ownership #544 are merged. Architecture #555 and grant chips #557 are merged. Garage cutover and remaining bugs continue. Device acceptance remains incomplete."
+stopped_at: "Migration #550, privacy #552, licences #553, localized folders #554 and roadmap ownership #544 are merged. Architecture #555 and grant chips #557 are merged. Garage cutover and the first roadmap/architecture publication are complete. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
 last_updated: "2026-11-04"
 last_activity: 2026-11-04
-last_activity_desc: "MCP migration and four bug implementations merged; architecture is merged and Garage publication continues."
-state_head: 4a7c262
+last_activity_desc: "MCP migration and four bug implementations are merged. Garage roadmap and architecture are published. PR #559 awaits physical acceptance."
+state_head: 93c7f09
 progress:
   total_phases: 20
   completed_phases: 9
@@ -29,7 +29,7 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 
 Phase: 05.6 — probe-independent bug fixes.
 Plans: 05.4-01 and 05.6-01/02/03/04 are merged after review and green CI.
-Status: Architecture #555 is merged. Canonical roadmap evidence and Garage cutover are in progress. Remaining bugs include #556; Notes and draft changes need device probes.
+Status: Canonical roadmap evidence #558 is merged. Garage cutover and the first publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI; physical acceptance is pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
 Both unsigned bundle slices passed import and stream checks. Installed-device acceptance, signing and release remain pending.
@@ -245,5 +245,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-04
-Stopped at: Grant chips #557 merged as 4a7c262 after architecture #555, roadmap ownership #544 and localized folders #554. Finish canonical roadmap evidence, the separate vault cutover and Garage publication. #556 records unresolved Trash-name ambiguity. Installed-device acceptance remains incomplete.
+Stopped at: Canonical roadmap #558 is merged. Garage first publication serves the roadmap, eight architecture pages and six compatibility paths from 93c7f09. PR #559 at 872577e has 3607 passing tests and green CI; physical compatibility remains required before merge. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
 Resume file: .planning/overnight/2026-11-03.md

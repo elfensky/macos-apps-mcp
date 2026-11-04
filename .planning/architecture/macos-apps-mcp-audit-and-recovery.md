@@ -6,7 +6,9 @@ status: implemented
 source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
 review_status: independent-review-complete
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # Audit and recovery
