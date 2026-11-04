@@ -2,9 +2,9 @@
 kind: architecture
 title: macos-apps-mcp architecture
 status: implemented
-source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
+source_revision: 4a7c26287b108c9c81f42db0bdf5280ed537e986
 source_evidence_date: 2026-11-04
-review_status: independent-review-complete
+review_status: source-checked-update
 publication_status: pending
 ---
 
@@ -70,7 +70,8 @@ Mail recovery does not provide universal undo. Notes write guards and full-body 
 Migration #550, private storage #552, and distribution notices #553 are implemented in the source revision above.
 Localization #554 is merged in this baseline. Notes uses folder types with translated fallback names; Mail names remain heuristics.
 Ambiguous Trash candidates remain tracked in #556. Non-English device acceptance and real-index timing are still open.
-Live grant chips under #497 remain planned.
+Adapters permission chips use the last completed Health report under #497, with its local completion time.
+Explicit Full Disk Access and EventKit refusals override stale grant rows. Real macOS 27 acceptance remains pending.
 The latest published release remains `v0.15.1`. GSD's `v0.11.0` milestone label is not the software version.
 
 The migration evidence covers an unsigned universal bundle and both executable slices on an Apple-silicon host.
@@ -82,7 +83,8 @@ A finished part, a machine tested in its installed position, and a delivered pro
 
 ## Sources and phase links
 
-The source evidence date records source inspection. Independent Claude review is complete; user review remains pending.
+The source evidence date records source inspection. Earlier architecture content has independent Claude review.
+Grant-chip additions have source validation; that earlier architecture review does not cover the later wording. User review remains pending.
 `source_revision` identifies the inspected code baseline. The published page commit must be derived separately from Git.
 No `as_of` user-review date is asserted.
 Publication remains pending and has no publication date.
@@ -92,7 +94,9 @@ Publication remains pending and has no publication date.
 - [Migration implementation and acceptance limits](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md).
 - [Private storage implementation](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-SUMMARY.md).
 - [Distribution notice inventory](../../packaging/licenses/README.md).
-- [Planned Notes safety and grant chips](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md).
+- [Planned Notes safety](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md).
+
+- [Implemented grant chips and acceptance limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
 
 ## Display contract — planned
 

@@ -66,3 +66,12 @@ The parent receives the journal bullet instead of an executed helper call.
 - The parent journal entry already landed through vault MR !2388. No duplicate entry is needed.
 - Corrected combined-baseline validation: 3340 passed, 105 integration tests deselected, seven upstream warnings, 58.36 seconds.
   Ruff lint and 142-file formatting passed. Eight notes, 115 relative links, seven exact component IDs and frontmatter checks passed.
+
+
+## Grant-chip source integration
+
+- #557 merged as `4a7c26287b108c9c81f42db0bdf5280ed537e986` after independent review and its requested refusal correction.
+  The reviewed correction passed 211 focused tests and 3461 full-suite tests; corrected-head CI passed all six checks.
+- Overview and operator-controls notes now describe the completed Health snapshot, time, TCC fallback and explicit probe-refusal precedence.
+  Their source revision identifies the merged implementation. Their metadata distinguishes the earlier architecture review from this source-checked wording update.
+  Real macOS 27 acceptance remains pending. No installed-build or publication claim is added.

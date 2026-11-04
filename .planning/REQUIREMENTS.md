@@ -1,7 +1,7 @@
 # Requirements: macos-apps-mcp
 
 **Defined:** 2026-08-28
-**Core Value:** Safe writes — every write is gated by tier, addressed by id, dry-runnable, audited, and recoverable; the model can never lose, destroy, or send something by accident.
+**Core Value:** Safe writes are the goal. [PROJECT.md](PROJECT.md) and the [architecture](architecture/macos-apps-mcp-architecture.md) distinguish that goal from current guarantees.
 
 ## v1 Requirements
 
@@ -52,6 +52,27 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **FIX-16**: A `mail_reply` or `reply_all` reply keeps Mail's native quote — quote bar, Mail's own attribution line, formatting and inline images, the whole original — with the reply text ahead of it. The plain-text `> ` quote failed the owner's look test on device (2026-10-27) and is removed. A device probe settles the route, and its finding lands in `docs/mail-applescript-facts.md`: (a) first, Mail's untouched native reply with the reply text pasted on top through the Accessibility API, never a write to the reply's `content` (every such write destroys the native quote, facts §4d); (b) only if (a) fails, a self-built styled HTML quote opened as the draft. When the proven route cannot run — its permission is off, the compose window is not the one the tool opened, or the reply text cannot be confirmed in place — the tool refuses, leaves no draft and sends nothing, and the error names the setting to change (owner, 2026-10-27). `doctor()` and the Health page report any new permission the route needs. Verified on device by inspecting the resulting draft and one delivered `reply_all`, with the Mail watchdog running (#348)
 - [ ] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
 - [ ] **FIX-18**: `reply_all(dry_run=True)` previews the reply's own recipients, not the original's header: `to` is the original's sender (its Reply-To when present), `cc` is the original's to + cc, minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15), without duplicates — the set Mail's reply-all addresses; the original's header, if still returned, sits under a separate key; the dry run still builds no outgoing message; a unit test with an original addressed to the account itself pins it (#516)
+
+### Remaining bugs — Phase 05.6
+
+FIX-19–24 come from D-28 in the phase context.
+FIX-25 (#556) and MIG-01 (#470) are proposed in this reconciliation (2026-11-04).
+A merged implementation does not complete a requirement that still needs its recorded device or release checks.
+
+- [ ] **FIX-19**: Notes updates and deletes refuse locked or shared notes before changing them. Updates refuse non-text content unless a device probe proves a complete backup route. A failed guard read refuses the action. Preview uses the same guards (#500; D-01–D-05).
+  Before `set body`, the full HTML body goes to a `0600` backup file in a `0700` folder.
+  A failed backup stops the update. The result and audit `after` field name the backup path; `notes.snapshot` stays title-only (D-06–D-08).
+  Backups remain outside the Mail backup manager in this phase; restoration is manual (D-09).
+- [ ] **FIX-20**: Notes reads exclude Recently Deleted through its schema role, with a translated-name fallback. Mail reads recognize the reviewed localized system-folder names while preserving mailbox URLs. Non-English device checks and real-index timings confirm the change (#501; D-10–D-14).
+- [ ] **FIX-21**: The Adapters page uses the last completed Health report and the existing live/TCC merge for Automation chips. It displays that report's time. Before any report, TCC-only chips and a Health link remain available. Explicit Full Disk Access and EventKit probe refusals override stale TCC rows. Rendering makes no native call and adds no wait state (#497; D-15 and the #557 review correction).
+- [ ] **FIX-22**: Bundled distributions carry nonempty licence material, or verified fallback notices. The build checks both architecture site-packages trees and the final site-packages tree before signing. Missing material, unsupported metadata and fallback drift stop the build. Signed-bundle inspection confirms the notices remain present (#471; D-16–D-17).
+- [ ] **FIX-23**: After per-account device proof, `delete_draft` uses the index to locate a candidate and reuses `_SWEEP_DELETE` unchanged. The scoped fast path requires exactly one live row, or exactly one Drafts row. Otherwise, the existing unified walk remains. Preview and audit use the same lookup and count without deleting. Exactly-one-match checks and explicit sweep outcomes remain (#521; D-18–D-21).
+- [ ] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
+- [ ] **FIX-25**: Ambiguous account Trash candidates produce a distinct outcome before an action relies on a guessed destination. Trash, dedupe and recovery callers handle it explicitly. Synthetic tests cover translated root folders and user-created Google-shaped namespaces; device acceptance remains required for affected Mail writes (#556).
+
+### MCP migration — Phase 05.4
+
+- [ ] **MIG-01**: MCP 2 and FastMCP 4 use public transport APIs while preserving capability gates, audit identity, protocol eras, notices and streamed notifications. Interrupted tools receive an uncertain-outcome warning without replay. The local hop has no read deadline. Transport regressions and both bundle slices pass. Installed-daemon, native, physical Intel and signed-release checks complete the migration (#470).
 
 ### Calendar
 
@@ -216,6 +237,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-16 | Phase 05.2 | Pending |
 | FIX-17 | Phase 05.2 | Pending |
 | FIX-18 | Phase 05.2 | Pending |
+| FIX-19 | Phase 05.6 | Pending device probe, then implementation |
+| FIX-20 | Phase 05.6 | Implementation merged (#554); device acceptance and timing pending |
+| FIX-21 | Phase 05.6 | Implementation merged (#557); real macOS 27 acceptance pending |
+| FIX-22 | Phase 05.6 | Implementation merged (#553); signed-bundle acceptance pending |
+| FIX-23 | Phase 05.6 | Pending device probe, then implementation |
+| FIX-24 | Phase 05.6 | Implementation merged (#552); installed-device stat acceptance pending |
+| FIX-25 | Phase 05.6 | Planning pending |
+| MIG-01 | Phase 05.4 | Implementation merged (#550); installed-device acceptance and release pending |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
@@ -225,14 +254,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 60 total
-- Mapped to phases: 60
+- v1 requirements: 68 total
+- Mapped to phases: 68
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.2: 5 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 5 · Phase 05.6: 7 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-10-31 — DIST-01, DIST-02 and DIST-06 marked complete: landed as quick tasks in October (#113, #111, #205 closed); 60/60 mapped*
+*Last updated: 2026-11-04 — FIX-19–25 and MIG-01 mapped; implementation status remains separate from pending acceptance; 68/68 mapped.*

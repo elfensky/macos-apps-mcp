@@ -119,6 +119,8 @@ session on promotion work starts at its "Next steps — start here" section.
 
 ## Life cockpit
 
+Public notes omit private client identifiers and absolute home-directory links; local evidence addresses stay outside Git.
+
 Tracked in the life-cockpit vault under `#personal` (tracker: `elfensky/macos-apps-mcp`). The cockpit is
 the control plane (what to work on); this repo is where the work happens. Report progress by
 opening/closing issues and PRs as usual — the cockpit pulls from the tracker on its next `/sync`.
