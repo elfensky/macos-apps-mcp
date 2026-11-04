@@ -13,7 +13,7 @@ The prior app is preserved for rollback. No release or issue closure is claimed.
 | Actual stdio shim | Modern and legacy protocol clients each listed 71 annotated tools |
 | Native reads | Calendar enumeration, reminder-list enumeration, and one-day free/busy passed |
 | Result boundary | Each native result retained structured content and exactly one leading untrusted-data notice |
-| Native call duration | Longest selected read: 1.565 seconds; the native call over five seconds remains unproved |
+| Native call duration | Selected reads stayed below five seconds; a later installed Trash call completed in 6.087 seconds |
 | Restart recovery | One existing stdio client listed tools and called doctor after the daemon PID and socket changed |
 | Restart limits | No deliberate stopped interval, destructive interruption, replay count, or real Claude frontend was tested |
 | Private storage | State and daemon directories: `0700`; socket and dashboard key: `0600`; owner matched; no symlinks |
@@ -28,6 +28,8 @@ No permission was revoked to construct a denial. In-flight report replacement re
 
 The evidence branch passed 3475 default tests, with 105 integration tests deselected and seven upstream deprecation warnings.
 Ruff lint and formatting passed. All 98 checked relative Markdown links resolve.
+
+[Later Mail acceptance](2026-11-04-mail-recovery-acceptance.md) proves the one-message recovery route, new backup modes, and a real call exceeding five seconds.
 
 ## Physical Intel compatibility census
 
@@ -49,8 +51,8 @@ This census establishes index readability for the SSH process, not permissions f
 
 - Notarization and stapling need an existing profile or credentials. No profile was found in project configuration or queried Keychain metadata.
 - The signed update is not installed on the Intel Mac. Transfer follows notarization under the daemon runbook.
-- A native call exceeding five seconds, real frontend recovery, and the original #543 incident remain unproved.
-- Fresh Mail backup modes, localized trash/undo, and applicable Gmail observations remain pending.
+- The installed Trash call exceeded five seconds successfully. Real frontend recovery and the original #543 incident remain unproved.
+- Fresh Mail backup modes and the single-message recovery route passed on arm64. Localized trash/undo and applicable Gmail Trash observations remain pending.
 - PR #559 is not installed or merged. Its physical candidate census is complete; its write acceptance remains open.
 - Non-English Notes/Mail behavior, forced permission refusals, and Notes/draft safety probes remain separate acceptance work.
 - Dependency advisories remain open under the recorded cryptography exception.

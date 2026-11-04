@@ -78,5 +78,6 @@ Because [audit persistence is best-effort](macos-apps-mcp-audit-and-recovery.md)
 - [Discovery-error regression](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-SUMMARY.md): both protocol eras, explicit recovery, failed lists, and healthy missing names.
 
 Status is implemented in source. [Installed arm64 evidence](../overnight/2026-11-04-installed-acceptance.md) covers both protocol eras, bounded native reads, notices, and normal restart recovery.
-Controlled absence, a native call exceeding five seconds, and real frontend acceptance remain open.
+A later [installed Mail test](../overnight/2026-11-04-mail-recovery-acceptance.md) completed a real Trash tool call in 6.087 seconds.
+Controlled absence and real frontend acceptance remain open.
 The synthetic reproduction does not prove the original November 1 incident in issue #543.

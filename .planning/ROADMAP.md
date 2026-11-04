@@ -511,13 +511,15 @@ Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptan
 **Plans:** 4 implementation plans; device acceptance and remaining bugs stay open.
 
 Plans:
-- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket modes passed on arm64; fresh Mail backup acceptance remains open.
+- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket and fresh Mail backup modes passed on arm64.
 - [x] [05.6-02-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-PLAN.md) — localized system-folder reads (#501), merged in #554; non-English device checks and real-index timing remain open.
 - [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed installed notice inspection passed on arm64 (133 distributions, 15 fallback users).
 
 - [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; dated Health/Adapters snapshot checks passed on macOS 27; forced-refusal and in-flight device cases remain open.
 
 [Installed build evidence](overnight/2026-11-04-installed-acceptance.md) records the signed deployment and each acceptance limit.
+[Mail recovery evidence](overnight/2026-11-04-mail-recovery-acceptance.md) records one successful self-addressed send, Trash move, and undo, including fresh backup modes and a 6.087-second call.
+The English Trash route passed. Localized behavior and Gmail Trash persistence remain untested.
 
 Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
 #556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.

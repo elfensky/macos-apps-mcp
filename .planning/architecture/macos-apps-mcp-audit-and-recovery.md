@@ -68,7 +68,9 @@ These checks do not constitute a global storage gate for all native writes.
 Doctor reports observed exposure and repairs remembered by the current process.
 The implementation checks POSIX modes, not macOS ACL permissions.
 Installed arm64 state and daemon directories passed 0700 checks; the socket and dashboard key passed 0600 checks.
-Fresh Mail backup-file acceptance remains pending. See [installed evidence](../overnight/2026-11-04-installed-acceptance.md).
+Two new backups from an installed Trash/undo test passed 0600 checks and retained the test Message-ID and body.
+Every directory component through the state directory passed owner-only 0700 checks without symlinks.
+See [Mail recovery evidence](../overnight/2026-11-04-mail-recovery-acceptance.md); Gmail Trash persistence and localized behavior remain untested.
 
 ## Sources and planned work
 

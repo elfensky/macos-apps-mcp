@@ -10,3 +10,8 @@
 - The signed installed build remains 7bc8607. This branch changes an integration assertion and evidence only; it does not imply a rebuilt runtime from the evidence commit.
 
 - Final branch gates: 3475 passed, 105 deselected, seven upstream warnings; Ruff lint/format passed; 98 relative links resolved.
+
+- The owner authorized one self-addressed message. The installed send, Trash, and undo completed; the Trash call took 6.087 seconds. No uncertain response was replayed.
+- The initial provider heuristic saw no Google namespace. A later account probe found a custom IMAP host; provider classification remains unknown, not proven non-Gmail.
+- Delayed observations began after undo. They prove the restored state persisted, not that Trash persisted for two or fifteen minutes. Keep the Gmail Trash gate open.
+- The root checked every new backup directory component through the state directory and reverified the installed signature outside the sandbox after Mail activity.
