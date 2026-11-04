@@ -30,6 +30,7 @@ Selector revision: PR #559 at `872577effc45187d97f1380f932bcb434e82472f`.
 - The query covered every depth, including nested paths and paths inside Trash. Exact decoded aliases collapsed; case and normalization differences stayed distinct.
 - The census read only `mailboxes.url` in one SQLite read transaction, with a bounded progress handler and a read-only connection.
 - The pinned query builder was extracted from the reviewed commit. Runtime and mailbox-vocabulary blob IDs matched that commit before execution.
+  The other helpers came from `4397787`. Independent review confirmed that `like_escape` and `require_index_path` were unchanged from `872577e`.
 - No Message-ID sidecar, message files, native app call, permission change, installation or restart was used. Output omitted account identifiers and mailbox paths.
 - The higher-level selector helpers were deliberately avoided: older macOS sidecar setup can read message files and update the Message-ID cache.
 - The linked-environment tool was unavailable in this session. No physical Intel inventory was attempted through another route.
@@ -38,6 +39,12 @@ The private local evidence files are `mcp-559-local-inventory-classified-2026110
 The physical Intel inventory and localized scratch trash/undo acceptance remain open, with Gmail observations where applicable.
 One candidate proves no ambiguity under this selector; it does not prove the native Mail Trash role.
 PR #559 remains a draft and is not included in the merged plan count.
+
+## Reconciliation review
+
+- Independent Claude review at `75ae718` found no P0–P2 defect and confirmed the counts, links, integration evidence and inventory claims.
+- The parent clarified the helper provenance and retained signing in the requirement's pending acceptance list.
+- A separate journal delegation could not change local projects through T3. The parent retained its existing vault lane for the journal entry.
 
 **eli14:** The inventory counts drawers labelled “bin” without opening letters.
 One label avoids a guessing conflict. It does not prove that Mail uses that drawer.

@@ -431,7 +431,7 @@ Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; t
 
 Plans:
 - [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
-- [x] [05.4-02-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-PLAN.md) — public proxy policy preserves discovery errors and explicit recovery; merged 2026-11-04 in #561.
+- [x] [05.4-02-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-PLAN.md) — public proxy policy preserves discovery errors and explicit recovery; merged 2026-11-04
 
 Failed discovery returns connection errors instead of false missing-tool answers or successful empty lists.
 Synthetic tests cover both protocol eras and exactly one execution after an explicit new call.
