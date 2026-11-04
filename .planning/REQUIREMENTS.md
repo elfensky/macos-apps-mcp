@@ -243,8 +243,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-22 | Phase 05.6 | Implementation merged (#553); signed-bundle acceptance pending |
 | FIX-23 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-24 | Phase 05.6 | Implementation merged (#552); installed-device stat acceptance pending |
-| FIX-25 | Phase 05.6 | Planning pending |
-| MIG-01 | Phase 05.4 | Implementation merged (#550); installed-device acceptance and release pending |
+| FIX-25 | Phase 05.6 | Reviewed draft #559; physical compatibility and write acceptance pending before merge |
+| MIG-01 | Phase 05.4 | Migration and discovery-error follow-up merged (#550, #561); installed/frontend acceptance and release pending |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
