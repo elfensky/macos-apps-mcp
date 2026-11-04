@@ -208,6 +208,32 @@ def _lost_banner() -> Safe:
     return h('<div class="banner warn"><div>{}</div></div>\n', _LOST_NOTE)
 
 
+async def _permissions(known: list[str]) -> tuple[dict[str, str | None], Safe]:
+    """Reuse one completed Health report without scheduling native work (#497)."""
+    from . import health  # local: Health imports the command helpers above
+
+    checked = health.last_permissions(known)
+    if checked is None:
+        report = await run_in_threadpool(deploy.grant_report)
+        complete = all(v is None for v in report["reasons"].values())
+        states = {
+            n: grants.grant_state(report["identities"], n, complete=complete)
+            for n in known
+        }
+        note = Safe(
+            '<p class="muted note">Permission status uses the macOS grant database. '
+            'Open <a href="/health">Health</a> to check Automation access.</p>\n'
+        )
+    else:
+        states, checked_at = checked
+        note = h(
+            '<p class="muted note">Permission status from the last Health check: '
+            '{} (local time). Open <a href="/health">Health</a> to check again.</p>\n',
+            checked_at,
+        )
+    return states, note
+
+
 async def _render(
     request, *, restarting: bool = False, status: int = 200, notice: str | None = None
 ):
@@ -220,19 +246,15 @@ async def _render(
     pending = _pending(known)
     after = dict(pending)
     why = _lock_reason()
-    report = await run_in_threadpool(deploy.grant_report)
+    permissions, permission_note = await _permissions(known)
     calls = await run_in_threadpool(audit.usage_read)
-    complete = all(v is None for v in report["reasons"].values())
     rows = join(
         _row(
             token,
             n,
             n in configured,
             _sub(n, calls),
-            _chips(
-                grants.grant_state(report["identities"], n, complete=complete),
-                after.get(n),
-            ),
+            _chips(permissions[n], after.get(n)),
             restarting or why is not None,
         )
         for n in known
@@ -247,7 +269,7 @@ async def _render(
         "{}<h1>Adapters</h1>\n"
         '<p class="lede">Turn an app off and its tools disappear after the daemon '
         "restarts.</p>\n{}"
-        '<div class="group{}">{}</div>\n{}'
+        '<div class="group{}">{}</div>\n{}{}'
         '<p class="muted note">Toggles write '
         "~/.local/state/macos-apps-mcp/adapters_off. Each change is logged in "
         "audit.jsonl with caller <b>dashboard</b>.</p>\n",
@@ -255,6 +277,7 @@ async def _render(
         join([_banner(notice, why), _lost_banner()]),
         " restarting" if restarting else "",
         rows,
+        permission_note,
         _outbound(),
     )
     return render_page(
