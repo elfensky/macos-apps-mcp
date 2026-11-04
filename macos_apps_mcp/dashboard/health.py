@@ -245,8 +245,11 @@ def last_permissions(known: list[str]) -> tuple[dict[str, str | None], str] | No
     got = _last
     if got is None:
         return None
+    probed = _refused_by_probe(got["report"])
     states = {
-        n: grants.combined_state(
+        n: "denied"
+        if n in probed
+        else grants.combined_state(
             _automation_state(got, n) if svc == grants.EVENTS else _state(got, n, svc)
             for svc, _ in grants.ADAPTER_GRANTS.get(n, ())
         )
