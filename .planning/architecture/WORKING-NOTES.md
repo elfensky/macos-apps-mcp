@@ -88,3 +88,5 @@ The parent receives the journal bullet instead of an executed helper call.
 - Publication metadata records this event separately from source review and installed-device acceptance. The published commit remains derived from Git.
 - The publication-record branch passed 3461 tests, with 105 integration tests deselected and seven upstream warnings. Ruff lint and formatting passed.
   Twelve changed Markdown files passed frontmatter, private-path and relative-link checks; 156 relative links resolved.
+- GSD reported two directories for phase 05.4. The older directory held only a tracked newline placeholder, with no evidence or inbound links.
+  Removing it cleared the warning. Analysis still reported 20 phases, nine historical closures, 93 plans and 92 summaries.
