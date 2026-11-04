@@ -67,7 +67,8 @@ These checks do not constitute a global storage gate for all native writes.
 
 Doctor reports observed exposure and repairs remembered by the current process.
 The implementation checks POSIX modes, not macOS ACL permissions.
-Installed-device state-directory acceptance remains pending.
+Installed arm64 state and daemon directories passed 0700 checks; the socket and dashboard key passed 0600 checks.
+Fresh Mail backup-file acceptance remains pending. See [installed evidence](../overnight/2026-11-04-installed-acceptance.md).
 
 ## Sources and planned work
 

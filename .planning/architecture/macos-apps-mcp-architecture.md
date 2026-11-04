@@ -78,7 +78,8 @@ The latest published release remains `v0.15.1`. GSD's `v0.11.0` milestone label 
 
 The migration evidence covers an unsigned universal bundle and both executable slices on an Apple-silicon host.
 It does not establish signing, notarization, installation, physical Intel acceptance, or native application acceptance for this baseline.
-The currently installed build is unverified here.
+Fresh [installed evidence](../overnight/2026-11-04-installed-acceptance.md) verifies signed arm64 build 7bc8607 and bounded native reads.
+Notarization, updated physical Intel installation, and wider native acceptance remain pending.
 
 **eli14:** A workshop can be active while a machine needs repair.
 A finished part, a machine tested in its installed position, and a delivered product have different completion records.
