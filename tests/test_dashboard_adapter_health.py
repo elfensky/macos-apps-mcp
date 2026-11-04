@@ -179,6 +179,52 @@ def test_automation_cannot_hide_other_required_grants(
     assert _chip(text, "shortcuts") is None
 
 
+def test_refused_full_disk_probe_overrides_old_granted_rows(monkeypatch):
+    ids = _ids()
+    ids["kTCCServiceReminders"] = [{"client": deploy.BUNDLE_ID, "granted": True}]
+    got = _got(ids, mail="granted", messages="granted")
+    got["report"]["surfaces"].append({"surface": "full_disk_access", "ok": False})
+    monkeypatch.setattr(health, "_last", got)
+    affected = ["mail", "messages", "photos", "reminders"]
+    assert health.last_permissions(affected) == (
+        dict.fromkeys(affected, "denied"),
+        STAMP,
+    )
+    assert health._denied(got, affected) == affected
+    response = get("/adapters")
+    assert response.status_code == 200
+    for adapter in affected:
+        assert _chip(response.text, adapter) == "denied"
+    assert _chip(response.text, "notes") is None
+    assert STAMP in response.text
+
+
+@pytest.mark.parametrize(
+    ("adapter", "service"),
+    [
+        ("calendar", "kTCCServiceCalendar"),
+        ("reminders", "kTCCServiceReminders"),
+    ],
+)
+@pytest.mark.parametrize("tcc_granted", [True, None])
+def test_refused_eventkit_probe_overrides_tcc(
+    monkeypatch, adapter, service, tcc_granted
+):
+    ids = _ids()
+    if tcc_granted is not None:
+        ids[service] = [{"client": deploy.BUNDLE_ID, "granted": tcc_granted}]
+    got = _got(ids, complete=True)
+    got["report"]["surfaces"].append(
+        {"surface": adapter, "kind": "eventkit", "status": "denied", "ok": False}
+    )
+    monkeypatch.setattr(health, "_last", got)
+    assert health.last_permissions([adapter]) == ({adapter: "denied"}, STAMP)
+    assert health._denied(got, [adapter]) == [adapter]
+    response = get("/adapters")
+    assert response.status_code == 200
+    assert _chip(response.text, adapter) == "denied"
+
+
 @pytest.mark.parametrize(
     ("states", "expected"),
     [
