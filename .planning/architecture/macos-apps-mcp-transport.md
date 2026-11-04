@@ -57,7 +57,7 @@ Connection refusal before dispatch receives no uncertain-outcome warning.
 A later explicit call can succeed through the same shim after backend replacement; there is no automatic replay or readiness wait.
 
 **eli14:** The workshop cable must report a failed connection instead of an empty inventory.
-This prevents a misleading answer now. Recovery in an installed client still needs its own acceptance test.
+This prevents a misleading answer now. Normal restart recovery passed through one installed stdio client. A deliberately stopped interval and real frontend behavior remain untested.
 
 ## Interrupted operations
 
@@ -77,5 +77,6 @@ Because [audit persistence is best-effort](macos-apps-mcp-audit-and-recovery.md)
 - [Phase 05.4 implementation](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) and [decisions](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md).
 - [Discovery-error regression](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-SUMMARY.md): both protocol eras, explicit recovery, failed lists, and healthy missing names.
 
-Status is implemented in source. Installed-daemon and native application acceptance remain separate from the synthetic transport evidence.
+Status is implemented in source. [Installed arm64 evidence](../overnight/2026-11-04-installed-acceptance.md) covers both protocol eras, bounded native reads, notices, and normal restart recovery.
+Controlled absence, a native call exceeding five seconds, and real frontend acceptance remain open.
 The synthetic reproduction does not prove the original November 1 incident in issue #543.
