@@ -17,8 +17,9 @@ from urllib.parse import quote
 
 from ..audit import state_dir
 from ..contracts import Pointer
-from ..errors import NativeError, SchemaDrift
+from ..errors import AmbiguousTarget, NativeError, SchemaDrift
 from ..runtime import read_via_sqlite
+from ..text import clean_summary
 from . import mail_ids, mailbox_url
 
 # The Envelope Index tables + the exact columns we read/filter on. A macOS schema move
@@ -629,10 +630,9 @@ def build_trash_query(account: str):
     accessor is not a substitute: a `move` OUT of it moved the messages and then crashed
     Mail (facts doc §5c), so `trash_mail`'s undo has to name the account's own Trash.
 
-    Prefer shallow paths, treating a leading Google container as an account
-    namespace. At equal depth prefer the original English vocabulary, then the
-    shortest URL. A binary tie-break keeps the answer independent of row order.
-    Names remain a heuristic: a user folder can have the same name as real Trash.
+    Return every candidate: names do not establish a mailbox's role (#556).
+    The existing order only chooses a stable original URL among exact decoded
+    aliases. Distinct decoded paths must be refused by ``query_trash_url``.
     """
     clauses = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in _TRASH_SUFFIXES)
     root = f"%://{like_escape(account)}/"
@@ -648,7 +648,6 @@ ORDER BY length(url) - length(replace(url, '/', '')) - 2
            - CASE WHEN {google} THEN 1 ELSE 0 END,
          CASE WHEN {english} THEN 0 ELSE 1 END,
          length(url), url COLLATE BINARY
-LIMIT 1
 """
     return sql, [
         f"{root}%",
@@ -1492,11 +1491,26 @@ def body_fingerprints(rowids, *, root: Path | None = None) -> dict[int, str]:
 
 
 def query_trash_url(account: str) -> str | None:
-    """The mailboxes.url of ``account``'s own Trash, or None when the index knows of
-    none (#80). None is a real answer — a freshly added account may have no Trash row
-    yet — and the caller must say so rather than falling back to the unified accessor,
-    which crashes Mail on a move out of it (facts doc §5c)."""
+    """Return an original URL for one distinct decoded Trash path, or None (#80).
+
+    Multiple distinct paths raise AmbiguousTarget (#556). Only exact decoded
+    aliases count once: case and Unicode normalization differences stay distinct.
+    None is a real answer; never substitute the unified accessor, which crashes
+    Mail on a move out of it (facts doc §5c). Index failures propagate unchanged.
+    """
     rows = _dict_rows(*build_trash_query(account))
+    paths = {mailbox_url.path(row["url"]) for row in rows}
+    if len(paths) > 1:
+        shown = ", ".join(repr(clean_summary(p)) for p in sorted(paths)[:5])
+        if len(paths) > 5:
+            shown += f" (and {len(paths) - 5} more)"
+        raise AmbiguousTarget(
+            f"Trash selection is ambiguous for account {clean_summary(account)!r}: "
+            f"{len(paths)} distinct mailbox paths match. Candidates: {shown}. "
+            "Mail's index records no mailbox role. Nothing was changed by this "
+            "call. Confirm the account's Trash in Mail and resolve the extra "
+            "matching folder names. Do not retry unchanged."
+        )
     return rows[0]["url"] if rows else None
 
 

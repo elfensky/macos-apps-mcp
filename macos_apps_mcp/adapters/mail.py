@@ -74,7 +74,13 @@ from functools import partial
 
 from .. import files, runtime
 from ..contracts import Pointer, read_result
-from ..errors import BatchTooLarge, NativeError, OutputOverflow, WriteRefused
+from ..errors import (
+    AmbiguousTarget,
+    BatchTooLarge,
+    NativeError,
+    OutputOverflow,
+    WriteRefused,
+)
 from ..runtime import log
 from ..text import (
     BODY_HARD_MAX,
@@ -1760,6 +1766,9 @@ class MailAdapter:
 
         A Gmail label folder as ``mailbox`` is refused (``WriteRefused``) before any
         native call, dry runs included (#287).
+        Multiple distinct Trash candidates are refused before backup or native
+        access, including previews (#556). Mail's own delete chooses the real Trash;
+        this selector supplies the receipt, verification and already-in-Trash guard.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -1939,6 +1948,8 @@ class MailAdapter:
         it can no longer report "planned" for ids nobody checked, the same preflight
         ``move_mail``/``trash_mail`` get. The CLI (#140/#153) only ever calls this with
         ``dry_run=False``, so that caller's behaviour is unchanged.
+        Ambiguous Trash candidates refuse before backup or native access, including
+        previews (#556); the CLI preflights every planned account before any batch.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -2006,6 +2017,10 @@ class MailAdapter:
         a label is proven (#287), and a unified name cannot be a move source (#291). The
         error names the source folder and how to restore by hand.
 
+        Trash and dedupe receipts also require a unique current Trash whose decoded
+        path equals the recorded destination (#556). The recorded URL is never
+        replaced. Some old receipts therefore require recovery by hand.
+
         ponytail: every receipt today comes from ``move_mail``, which takes ONE source
         mailbox, so a receipt has exactly one source and the undo is one move. Group by
         ``Target.folder`` here if an op ever gathers targets from several mailboxes.
@@ -2038,6 +2053,24 @@ class MailAdapter:
                 f"came from {source!r}, and their backed-up bytes are in {backup}. "
                 "Remove the label, or move them back, in Mail by hand. Do not retry."
             )
+        if rec.get("op") in ("trash", "dedupe"):
+            recovery = (
+                f"The messages came from {clean_summary(source)!r}. Find them with "
+                "mail_search, confirm their current location, and restore them in "
+                "Mail by hand. Do not retry unchanged."
+            )
+            try:
+                current = mail_index.query_trash_url(mail_index.account_of(dest))
+            except AmbiguousTarget as exc:
+                raise WriteRefused(
+                    f"Cannot undo this receipt. {exc} {recovery}"
+                ) from exc
+            if current is None or mailbox_url.path(current) != mailbox_url.path(dest):
+                raise WriteRefused(
+                    "Cannot undo this receipt: the account's current Trash is absent "
+                    "or differs from the recorded destination. Nothing was changed "
+                    f"by this call. {recovery}"
+                )
         return self.move_mail(
             [t.id for t in targets],
             dest,
