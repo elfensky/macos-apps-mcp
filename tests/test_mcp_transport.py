@@ -9,7 +9,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from mcp.shared.exceptions import MCPError
-from mcp.types import CONNECTION_CLOSED, Implementation
+from mcp.types import CONNECTION_CLOSED, INTERNAL_ERROR, Implementation
 from mcp_types.version import LATEST_MODERN_VERSION
 
 from macos_apps_mcp import daemon
@@ -123,6 +123,85 @@ def test_long_call_forwards_logs_and_progress_through_stdio_shim(mode):
         assert any("working" in str(log.data) for log in logs)
         assert progress[-1] == (1, 1, "done")
         assert executions(root, "slow") == 1
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_cold_discovery_refusal_and_explicit_recovery(mode):
+    with probe_server(generation="first") as (root, process):
+        shim = daemon.build_shim(root / "s.sock")
+
+        async def go():
+            async with Client(shim, mode=mode) as client:
+                process.kill()
+                process.wait(5)
+                assert (root / "s.sock").exists()  # A stale path is not readiness.
+                with pytest.raises(
+                    MCPError, match="Client failed to connect"
+                ) as caught:
+                    await asyncio.wait_for(
+                        client.call_tool("doctor", raise_on_error=False), 10
+                    )
+                assert caught.value.error.code == INTERNAL_ERROR
+                assert "Unknown tool" not in str(caught.value)
+                assert WARNING not in str(caught.value)
+                assert executions(root, "doctor") == 0
+
+                with probe_server(root, generation="second"):
+                    assert (root / "ready-second").read_text() == "second"
+                    assert executions(root, "doctor") == 0
+                    result = await asyncio.wait_for(client.call_tool("doctor"), 10)
+                    assert result.structured_content == {"generation": "second"}
+                    assert executions(root, "doctor") == 1
+
+        asyncio.run(go())
+        assert executions(root, "doctor") == 1
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize(
+    "listing",
+    ["list_tools", "list_resources", "list_resource_templates", "list_prompts"],
+)
+def test_discovery_lists_preserve_connection_errors(mode, listing):
+    with probe_server(generation="lists") as (root, process):
+        shim = daemon.build_shim(root / "s.sock")
+
+        async def go():
+            async with Client(shim, mode=mode) as client:
+                process.kill()
+                process.wait(5)
+                with pytest.raises(
+                    MCPError, match="Client failed to connect"
+                ) as caught:
+                    await asyncio.wait_for(getattr(client, listing)(), 10)
+                assert caught.value.error.code == INTERNAL_ERROR
+                assert WARNING not in str(caught.value)
+
+        asyncio.run(go())
+        assert not (root / "calls.jsonl").exists()
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("warm", [False, True], ids=["cold", "warm"])
+def test_healthy_discovery_keeps_unknown_tools_and_empty_lists(mode, warm):
+    with probe_server(generation="healthy") as (root, _):
+        shim = daemon.build_shim(root / "s.sock")
+
+        async def go():
+            async with Client(shim, mode=mode) as client:
+                if warm:
+                    assert "doctor" in {tool.name for tool in await client.list_tools()}
+                result = await client.call_tool("no_such_tool", raise_on_error=False)
+                assert result.is_error
+                assert "Unknown tool: 'no_such_tool'" in result.content[0].text
+                assert WARNING not in result.content[0].text
+                assert "doctor" in {tool.name for tool in await client.list_tools()}
+                assert await client.list_resources() == []
+                assert await client.list_resource_templates() == []
+                assert await client.list_prompts() == []
+
+        asyncio.run(asyncio.wait_for(go(), 15))
+        assert not (root / "calls.jsonl").exists()
 
 
 @pytest.mark.parametrize("mode", MODES)

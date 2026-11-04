@@ -47,6 +47,18 @@ A broken cable can lose an answer after the work finishes.
 The shim uses an HTTP URL routed through the Unix socket; its dummy hostname is not resolved.
 The advisory shim header is not a model extra and grants no permission.
 
+## Discovery failures
+
+The single-backend proxy uses public `provider_error_strategy="raise"`.
+Failed discovery preserves the connection MCP error, including a tool lookup with a cold catalogue.
+Tool, resource, resource-template, and prompt list failures return errors instead of successful empty lists.
+Healthy empty lists and genuine `Unknown tool` responses retain their existing meaning.
+Connection refusal before dispatch receives no uncertain-outcome warning.
+A later explicit call can succeed through the same shim after backend replacement; there is no automatic replay or readiness wait.
+
+**eli14:** The workshop cable must report a failed connection instead of an empty inventory.
+This prevents a misleading answer now. Recovery in an installed client still needs its own acceptance test.
+
 ## Interrupted operations
 
 MCP 2 reports abandoned response streams. `_InterruptedToolWarning` adds an uncertain-outcome warning to relevant connection failures.
@@ -63,5 +75,7 @@ Because [audit persistence is best-effort](macos-apps-mcp-audit-and-recovery.md)
 - [cli.py](../../macos_apps_mcp/cli.py): role dispatch.
 - [Transport regressions](../../tests/test_mcp_transport.py) and [stream smoke](../../scripts/smoke_stream.py): execution counts, long calls, protocol eras, request sizes, and interrupted responses.
 - [Phase 05.4 implementation](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) and [decisions](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md).
+- [Discovery-error regression](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-SUMMARY.md): both protocol eras, explicit recovery, failed lists, and healthy missing names.
 
 Status is implemented in source. Installed-daemon and native application acceptance remain separate from the synthetic transport evidence.
+The synthetic reproduction does not prove the original November 1 incident in issue #543.

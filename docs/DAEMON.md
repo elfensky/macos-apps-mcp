@@ -481,6 +481,19 @@ build:
   still working, and every destructive Mail call over ~5s died. The cliff moves with the value:
   4.5s returned and 6s did not; set it to 2s and 3s died; set it to `None` and 12s returned.
 
+- **Discovery cannot connect to the daemon.** The shim uses public `provider_error_strategy="raise"`.
+  A failed lookup preserves the connection MCP error, including a first call with no cached catalogue.
+  Failed tool, resource, resource-template, and prompt lists return errors instead of successful empty lists.
+  Healthy empty lists remain valid. A missing tool on a healthy backend still returns `Unknown tool`.
+
+  Connection refusal before dispatch receives no `MAY HAVE COMPLETED` warning.
+  A later explicit call can recover through the same shim after the backend returns.
+  The shim adds no readiness wait or automatic replay. A connection error does not establish why the daemon is unavailable.
+  Synthetic tests cover both protocol eras; the original November 1 incident and installed/frontend acceptance remain unproved (#543).
+
+  **eli14:** The receptionist reports a disconnected phone instead of inventing an empty staff list.
+  This prevents a misleading answer now. Actual client recovery still needs its own acceptance test.
+
 - **A response stream ends without an answer.** MCP 2 reports the abandoned request.
   The shim recognizes `ToolError` caused by `MCPError(CONNECTION_CLOSED)` or an interrupted
   httpx2 read/write. This also covers a modern call that ran before sending response headers.

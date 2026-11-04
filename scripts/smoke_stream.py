@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import uvicorn
@@ -38,7 +38,7 @@ def python_command() -> list[str]:
     return [*prefix, sys.executable, "-E", "-s", "-P"]
 
 
-def serve_probe(root: Path) -> None:
+def serve_probe(root: Path, generation: str | None = None) -> None:
     """Serve only synthetic tools in a disposable child process."""
     os.environ["XDG_STATE_HOME"] = str(root)
     calls = root / "calls.jsonl"
@@ -53,6 +53,13 @@ def serve_probe(root: Path) -> None:
     def record(tool: str) -> None:
         with calls.open("a") as out:
             out.write(json.dumps({"tool": tool}) + "\n")
+
+    if generation is not None:
+
+        @app.tool
+        def doctor() -> dict:
+            record("doctor")
+            return {"generation": generation}
 
     @app.tool
     async def write_probe(ctx: Context, id: str, dry_run: bool = True) -> dict:
@@ -99,7 +106,14 @@ def serve_probe(root: Path) -> None:
 
     http_app = app.http_app()
     listener = daemon.bind_socket(root / "s.sock")
-    server = uvicorn.Server(
+
+    class ProbeServer(uvicorn.Server):
+        async def startup(self, sockets=None):
+            await super().startup(sockets=sockets)
+            if self.started and generation is not None:
+                (root / f"ready-{generation}").write_text(generation)
+
+    server = ProbeServer(
         uvicorn.Config(
             drop_result_app(http_app, record),
             log_level="error",
@@ -147,24 +161,40 @@ def drop_result_app(http_app, record):
 
 
 @contextmanager
-def probe_server():
-    """A process that owns only disposable state and a short AF_UNIX path."""
-    with tempfile.TemporaryDirectory(dir="/tmp", prefix="mcp-smoke-") as directory:
+def probe_server(root: Path | None = None, *, generation: str | None = None):
+    """Disposable process; a generation waits for startup, even with a stale socket.
+
+    Pass an existing fixture's root to replace its stopped backend. Its outer
+    context owns the directory; each context reaps only its own child process.
+    """
+    directory_context = (
+        tempfile.TemporaryDirectory(dir="/tmp", prefix="mcp-smoke-")
+        if root is None
+        else nullcontext(root)
+    )
+    with directory_context as directory:
         root = Path(directory)
-        with (root / "server.log").open("w+") as log:
+        ready = root / (f"ready-{generation}" if generation is not None else "s.sock")
+        if generation is not None:
+            ready.unlink(missing_ok=True)
+        log_name = (
+            f"server-{generation}.log" if generation is not None else "server.log"
+        )
+        with (root / log_name).open("w+") as log:
             process = subprocess.Popen(
                 [
                     *python_command(),
                     str(Path(__file__).resolve()),
                     "--serve",
                     str(root),
+                    *([generation] if generation is not None else []),
                 ],
                 stdout=log,
                 stderr=log,
             )
             try:
                 deadline = time.monotonic() + 20
-                while not (root / "s.sock").exists():
+                while not ready.exists():
                     if process.poll() is not None or time.monotonic() > deadline:
                         log.seek(0)
                         raise RuntimeError(f"synthetic server failed: {log.read()}")
@@ -282,7 +312,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--serve":
-        serve_probe(Path(sys.argv[2]))
+    if len(sys.argv) in (3, 4) and sys.argv[1] == "--serve":
+        serve_probe(Path(sys.argv[2]), sys.argv[3] if len(sys.argv) == 4 else None)
     else:
         main()
