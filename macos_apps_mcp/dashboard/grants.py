@@ -8,6 +8,8 @@ installed apps' Info.plist (TCC stores the controlled app's id as the row's targ
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from .. import deploy
 
 _CAL, _REM = "kTCCServiceCalendar", "kTCCServiceReminders"
@@ -26,6 +28,19 @@ ADAPTER_GRANTS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "safari": ((EVENTS, "com.apple.Safari"),),
     "shortcuts": (),
 }
+
+
+def combined_state(states: Iterable[str | None]) -> str | None:
+    """Denied wins, then not asked, then unknown; granted requires every grant.
+
+    No grants, an unreadable grant, and a live ``not running`` answer stay unknown.
+    Both TCC-only and Health-backed adapter chips use this precedence (#497).
+    """
+    states = set(states)
+    for state in ("denied", "not asked"):
+        if state in states:
+            return state
+    return "granted" if states == {"granted"} else None
 
 
 def grant_state(
@@ -63,7 +78,4 @@ def grant_state(
             states.add("unknown")
         else:
             states.add("not asked" if complete else "unknown")
-    for state in ("denied", "not asked", "unknown"):
-        if state in states:
-            return None if state == "unknown" else state
-    return "granted"
+    return combined_state(states)

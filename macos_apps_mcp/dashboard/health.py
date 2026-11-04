@@ -21,6 +21,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 
 import anyio
 
@@ -30,7 +31,7 @@ from .html import Safe, h, join
 from .html import page as render_page
 
 _lock = threading.Lock()  # held by the one thread that is running doctor
-_last: dict | None = None  # the last full report, with the TCC read reasons
+_last: dict | None = None  # last full report, TCC read reasons, and completion time
 _dot: str | None = None  # the sidebar dot of the last full render
 _WAIT = 10.0  # seconds a request waits for doctor before it renders the busy state
 _STARTED = time.time()  # the daemon imports the dashboard at start: uptime
@@ -48,7 +49,12 @@ def _run() -> dict | None:
         report = doctor.diagnose(request=False)
         # doctor reports the identities but not why a TCC database could not be read;
         # the reasons decide between "not asked" and "cannot tell" (PM-20).
-        _last = {"report": report, "reasons": deploy.grant_report()["reasons"]}
+        reasons = deploy.grant_report()["reasons"]
+        _last = {
+            "report": report,
+            "reasons": reasons,
+            "checked_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+        }
         return _last
     finally:
         _lock.release()
@@ -228,6 +234,25 @@ def _automation_state(got: dict, adapter: str) -> str | None:
     if live in ("granted", "denied", "not asked"):
         return live
     return _state(got, adapter, grants.EVENTS) or live
+
+
+def last_permissions(known: list[str]) -> tuple[dict[str, str | None], str] | None:
+    """Adapter grant states and completion time from one report, without native work.
+
+    None before the first completed Health check. An unfinished or failed check
+    leaves the previous report available to the Adapters page (#497).
+    """
+    got = _last
+    if got is None:
+        return None
+    states = {
+        n: grants.combined_state(
+            _automation_state(got, n) if svc == grants.EVENTS else _state(got, n, svc)
+            for svc, _ in grants.ADAPTER_GRANTS.get(n, ())
+        )
+        for n in known
+    }
+    return states, got["checked_at"]
 
 
 def _refused_by_probe(report: dict) -> set[str]:
