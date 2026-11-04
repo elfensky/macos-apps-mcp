@@ -7,8 +7,8 @@ status: executing
 stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
 last_updated: "2026-11-04"
 last_activity: 2026-11-04
-last_activity_desc: "Signed build 7bc8607 installed on arm64; native reads, notices, storage, and normal restart recovery passed. Intel census completed; notarization and write acceptance pending."
-state_head: 7bc8607
+last_activity_desc: "Installed build 7bc8607 passed one Mail send, Trash move, and undo; new backups are private. Notarization, Intel update, localized/Gmail Trash checks, and frontend acceptance remain open."
+state_head: 22701de
 progress:
   total_phases: 20
   completed_phases: 9
@@ -32,7 +32,7 @@ Plans: 05.4-01/02 and 05.6-01/02/03/04 are merged after review and green CI.
 Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
-Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation and bounded native reads passed at 7bc8607. Notarization, updated physical Intel installation, broader native acceptance, and release remain pending.
+Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. Notarization, updated physical Intel installation, broader native acceptance, and release remain pending.
 Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
 The original November 1 incident remains unproved. Normal installed-shim restart recovery passed; controlled absence, real frontend acceptance, and clipboard observation keep #543 open.
 [Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
@@ -249,4 +249,4 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 Last session: 2026-11-04
 Stopped at: Discovery-error follow-up #561 merged as 4397787. Garage publication is complete; its live footer identifies the displayed source. PR #559 retains its localized write acceptance checks; both physical folder inventories are complete. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
-Resume file: .planning/overnight/2026-11-04-installed-acceptance.md
+Resume file: .planning/overnight/2026-11-04-mail-recovery-acceptance.md
