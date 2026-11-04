@@ -9,7 +9,7 @@ Only the eight `macos-apps-mcp-*.md` files belong in the architecture publicatio
 - Baseline: `f91dbed988745ff2d7847907a53d8927b7b2809f`.
 - Source claims were checked against the current Python modules, lock, build scripts, tests, and relevant phase records.
 - The parent publication audit was read at its supplied worktree path. Its #553 status is superseded by the merged baseline.
-- GitHub metadata read on 2026-11-04 confirmed #554 OPEN at `67cfb879407baac3ec12a39d4a0099f17cc1725c`, with no merge date.
+- An initial GitHub snapshot on 2026-11-04 observed #554 OPEN at `67cfb879407baac3ec12a39d4a0099f17cc1725c`, with no merge date.
 - The same read confirmed the latest release is `v0.15.1`, published `2026-10-25T21:04:13Z`.
 - These API reads retrieved repository metadata, not personal app data or web-page bodies.
 - User review remains pending. No `as_of` or publication date was invented.
@@ -51,5 +51,18 @@ Only the eight `macos-apps-mcp-*.md` files belong in the architecture publicatio
 The vault-journal skill's helper creates another worktree. The task prohibits that action and live-vault edits.
 The parent receives the journal bullet instead of an executed helper call.
 
-- Prepared current architecture sources with explicit audit and deployment limits — `elfensky/macos-apps-mcp`, architecture draft PR #personal.
+- Prepared current architecture sources with explicit audit and deployment limits — elfensky/macos-apps-mcp#555 #personal.
 - Architecture evidence distinguishes native-free new-message previews from existing-draft and reply-all reads — architecture working notes #personal.
+
+## Independent review corrections
+
+- Claude reviewed `e1a979c` against `f91dbed`. It found no blocking defect, one factual error, and minor metadata/wording issues.
+- The permanent-operation fidelity gate is inactive: `PERMANENT_OPS` is empty and no tool exposes `allow_lossy`. The architecture now states this.
+- Backup fidelity uses the exact `unknown` value, with its inspection meaning stated separately from per-target outcome status.
+- Component diagram IDs now match the hyphenated component metadata. No renderer or build behavior is claimed.
+- The earlier localization snapshot is historical. #554 merged as `18dcbf6594bbd62330f71c89376a54155dda1d63` on 2026-11-04.
+  The architecture branch is rebased onto that revision and describes the merged read behavior, with #556 and device limitations explicit.
+- `source_revision` is the inspected code baseline. Publication must derive its own page commit from Git; the two must not be confused.
+- The parent journal entry already landed through vault MR !2388. No duplicate entry is needed.
+- Corrected combined-baseline validation: 3340 passed, 105 integration tests deselected, seven upstream warnings, 58.36 seconds.
+  Ruff lint and 142-file formatting passed. Eight notes, 115 relative links, seven exact component IDs and frontmatter checks passed.

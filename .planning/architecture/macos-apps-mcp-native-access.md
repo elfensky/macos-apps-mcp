@@ -3,9 +3,9 @@ kind: component
 title: Native access
 component: native-access
 status: implemented
-source_revision: f91dbed988745ff2d7847907a53d8927b7b2809f
+source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
-review_status: pending
+review_status: independent-review-complete
 publication_status: pending
 ---
 

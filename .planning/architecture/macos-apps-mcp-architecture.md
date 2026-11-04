@@ -2,9 +2,9 @@
 kind: architecture
 title: macos-apps-mcp architecture
 status: implemented
-source_revision: f91dbed988745ff2d7847907a53d8927b7b2809f
+source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
-review_status: pending
+review_status: independent-review-complete
 publication_status: pending
 ---
 
@@ -27,17 +27,17 @@ The diagram describes implemented responsibilities. Arrows show communication or
 ```mermaid
 flowchart TD
     client["MCP client"] --> transport["Transport: stdio or shim and daemon"]
-    transport --> tools_and_policy["Tools and policy"]
-    tools_and_policy --> adapters["App adapters"]
-    tools_and_policy --> audit_and_recovery["Audit and recovery"]
-    adapters --> audit_and_recovery
-    adapters --> native_access["Native access"]
-    native_access --> apps["macOS apps and local stores"]
-    operator["Local operator"] --> operator_controls["Dashboard and CLI"]
-    operator_controls --> audit_and_recovery
-    operator_controls --> native_access
-    operator_controls --> transport
-    packaging_and_release["Packaging and release"] --> transport
+    transport --> tools-and-policy["Tools and policy"]
+    tools-and-policy --> adapters["App adapters"]
+    tools-and-policy --> audit-and-recovery["Audit and recovery"]
+    adapters --> audit-and-recovery
+    adapters --> native-access["Native access"]
+    native-access --> apps["macOS apps and local stores"]
+    operator["Local operator"] --> operator-controls["Dashboard and CLI"]
+    operator-controls --> audit-and-recovery
+    operator-controls --> native-access
+    operator-controls --> transport
+    packaging-and-release["Packaging and release"] --> transport
 ```
 
 - [Transport](macos-apps-mcp-transport.md): client connections, protocol compatibility, and interrupted calls.
@@ -68,7 +68,8 @@ Mail recovery does not provide universal undo. Notes write guards and full-body 
 - Implementation, installed-device acceptance, and release are separate states.
 
 Migration #550, private storage #552, and distribution notices #553 are implemented in the source revision above.
-Localization #554 remains open at `67cfb879407baac3ec12a39d4a0099f17cc1725c`; its behavior is outside this baseline.
+Localization #554 is merged in this baseline. Notes uses folder types with translated fallback names; Mail names remain heuristics.
+Ambiguous Trash candidates remain tracked in #556. Non-English device acceptance and real-index timing are still open.
 Live grant chips under #497 remain planned.
 The latest published release remains `v0.15.1`. GSD's `v0.11.0` milestone label is not the software version.
 
@@ -81,7 +82,9 @@ A finished part, a machine tested in its installed position, and a delivered pro
 
 ## Sources and phase links
 
-The source evidence date records source inspection. User review remains pending; no `as_of` review date is asserted.
+The source evidence date records source inspection. Independent Claude review is complete; user review remains pending.
+`source_revision` identifies the inspected code baseline. The published page commit must be derived separately from Git.
+No `as_of` user-review date is asserted.
 Publication remains pending and has no publication date.
 
 - [Project scope](../PROJECT.md) and [phase roadmap](../ROADMAP.md).
