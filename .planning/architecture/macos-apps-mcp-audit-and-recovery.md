@@ -3,9 +3,9 @@ kind: component
 title: Audit and recovery
 component: audit-and-recovery
 status: implemented
-source_revision: f91dbed988745ff2d7847907a53d8927b7b2809f
+source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
-review_status: pending
+review_status: independent-review-complete
 publication_status: pending
 ---
 
@@ -37,8 +37,10 @@ Where enabled, backup files precede the native action.
 The helper attempts a plan record, performs the action, then attempts an outcome record.
 Both audit attempts remain best-effort; failure to append the plan does not itself prevent the action.
 
-Backup fidelity distinguishes full, partial, absent, and uninspected copies.
-A partial local copy can lack attachments. Permanent operations require full fidelity unless the caller explicitly accepts loss.
+Backup fidelity uses `full`, `partial`, `absent`, and `unknown`. `unknown` means the source has not been inspected.
+A partial local copy can lack attachments.
+A lossy-backup gate exists for permanent operations, but `PERMANENT_OPS` is empty. Mail has no targeted permanent-delete operation.
+No current tool exposes the `allow_lossy` override.
 Selected deduplication paths use log-only recovery because a verified surviving copy provides the preserved content.
 Missing per-target results become `unknown`. A caught native timeout also leaves uncertain targets.
 

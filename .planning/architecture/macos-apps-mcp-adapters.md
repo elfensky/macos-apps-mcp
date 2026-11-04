@@ -3,9 +3,9 @@ kind: component
 title: App adapters
 component: adapters
 status: implemented
-source_revision: f91dbed988745ff2d7847907a53d8927b7b2809f
+source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
-review_status: pending
+review_status: independent-review-complete
 publication_status: pending
 ---
 
@@ -59,10 +59,13 @@ Its snapshots are title pointers, not full-content backups.
 Locked/shared-note guards, non-text preservation checks, and full HTML before-state backups remain planned under #500.
 Notes backup browsing and an undo tool are also not implemented.
 
-Localization #554 remains pending at the source evidence date; its head is `67cfb879407baac3ec12a39d4a0099f17cc1725c`.
-Its proposed system-folder changes are not part of this source baseline.
+Localization #554 is merged. Notes excludes folder type 1 and passes 48 translated names to its AppleScript fallback.
+Mail supports explicit translated system-folder names and preserves the original mailbox address.
+Names remain heuristics; SQLite ASCII case matching differs from Python Unicode casefolding. Ambiguous Trash selection remains tracked in #556.
+Non-English device acceptance and real-index timing remain open.
 Implemented adapters do not imply installed-device acceptance for the current migration.
 
 - [Phase 3 verification](../phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-VERIFICATION.md): EventKit depth.
 - [Phase 4 verification](../phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-VERIFICATION.md): Notes search and Photos.
+- [Localized-folder implementation and limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-SUMMARY.md).
 - [Phase 05.6 context](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md): planned Notes safety and localization.
