@@ -5,10 +5,11 @@ Scope: this project's repository publication and separate vault cutover. No publ
 
 This is a historical working audit. Its PR table records the snapshot above, not current integration state.
 [Current roadmap](../ROADMAP.md) and [integration working notes](2026-11-03.md) supersede its PR statuses.
+[Verified publication evidence](garage-publication-2026-11-04.md) supersedes the blocked publication state recorded here.
 The publication recipe still requires fresh live-source checks.
 
 The existing publisher can deliver the roadmap, architecture overview, and component pages in one project folder.
-Publication is blocked by the legacy enrollment, an outdated ordinary checkout, and uncommitted or untracked planning inputs.
+At this snapshot, publication was blocked by legacy enrollment, an outdated ordinary checkout, and uncommitted or untracked planning inputs.
 No new renderer, Astro project, or keijiban dependency is required.
 
 **eli14:** Garage is a noticeboard. The repository holds the project logbook; the vault keeps its address.
