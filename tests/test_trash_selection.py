@@ -35,6 +35,14 @@ def test_no_candidate_does_not_use_another_accounts_trash(blank_envelope):
     assert mail_index.query_trash_url(ACCT_A) is None
 
 
+@pytest.mark.parametrize("nested", ["Archive/2019/Bin", "Trash/Bin"])
+def test_nested_trash_names_remain_distinct_candidates(blank_envelope, nested):
+    blank_envelope.add_mailbox(f"imap://{ACCT_A}/Trash")
+    blank_envelope.add_mailbox(f"imap://{ACCT_A}/{nested}")
+    with pytest.raises(AmbiguousTarget):
+        mail_index.query_trash_url(ACCT_A)
+
+
 @pytest.mark.parametrize("failure", [NativeError("unreadable"), SchemaDrift("schema")])
 def test_index_errors_propagate_unchanged(monkeypatch, failure):
     monkeypatch.setattr(mail_index, "_dict_rows", Mock(side_effect=failure))
@@ -110,6 +118,7 @@ def test_undo_refuses_an_unproven_recorded_destination(
     assert "mail_search" in reason and "by hand" in reason
     assert SOURCE in reason
     assert "move_mail" not in reason
+    assert reason.count("Do not retry unchanged.") == 1
     assert rec["destination"] == TRASH
     move.assert_not_called()
 

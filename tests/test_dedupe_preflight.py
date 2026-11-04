@@ -10,6 +10,7 @@ import pytest
 
 from macos_apps_mcp import dedupe
 from macos_apps_mcp.adapters import mail_index
+from macos_apps_mcp.errors import AmbiguousTarget
 from tests.envelope import ACCT_A, ACCT_B
 
 KEEP = "CCCCCCCC-1111-2222-3333-444444444444"
@@ -159,3 +160,60 @@ def test_cross_account_limit_precedes_preflight(blank_envelope, monkeypatch, exe
     dedupe.dedupe_mail(_args("cross", execute) + ["--limit=1"])
     selector.assert_called_once_with(ACCT_A)
     assert adapter.trash_mail.call_count == (1 if execute else 0)
+
+
+def test_same_mailbox_refreshes_rows_after_an_earlier_mailbox_acts(
+    blank_envelope, monkeypatch
+):
+    _seed(blank_envelope, "same", monkeypatch)
+    for acct in (ACCT_A, ACCT_B):
+        blank_envelope.add_mailbox(f"imap://{acct}/Trash")
+    adapter = _adapter(monkeypatch)
+    acted = []
+
+    def act(ids, url, *, dry_run):
+        acted.append(url)
+        if len(acted) == 1:
+            # This later set was safe during preflight. One copy changed before
+            # its mailbox's turn, so the old plan must not authorize its deletion.
+            blank_envelope.execute(
+                "UPDATE messages SET size=101 WHERE ROWID="
+                "(SELECT MAX(ROWID) FROM messages WHERE global_message_id=3)"
+            )
+        return {"succeeded": len(ids), "receipt": "synthetic"}
+
+    adapter.dedupe_batch.side_effect = act
+    dedupe.dedupe_mail(["--execute"])
+    assert acted == BOXES[:2]
+
+
+@pytest.mark.parametrize("kind", ["same", "cross"])
+@pytest.mark.parametrize("refused_batch", [1, 2])
+def test_mid_pass_ambiguity_stops_cleanly_and_checks_keepers(
+    blank_envelope, monkeypatch, capsys, kind, refused_batch
+):
+    _seed(blank_envelope, kind, monkeypatch)
+    for acct in (ACCT_A, ACCT_B):
+        blank_envelope.add_mailbox(f"imap://{acct}/Trash")
+    adapter = _adapter(monkeypatch)
+    action = adapter.dedupe_batch if kind == "same" else adapter.trash_mail
+    action.side_effect = [
+        *[{"succeeded": 1, "receipt": "earlier-receipt"}] * (refused_batch - 1),
+        AmbiguousTarget("Trash changed. Nothing was changed by this call."),
+    ]
+
+    with pytest.raises(SystemExit) as err:
+        dedupe.dedupe_mail(_args(kind, True))
+    assert err.value.code == 2
+    assert action.call_count == refused_batch
+    out = capsys.readouterr()
+    assert "Earlier batches may already have changed messages" in out.err
+    assert "Trash changed" in out.err
+    assert "Traceback" not in out.err
+    assert "done —" not in out.out
+    assert ("earlier-receipt" in out.out) == (refused_batch == 2)
+    if kind == "cross":
+        assert "all 3 keeper copies still present" in out.out
+        adapter.presence.assert_called_once()
+    else:
+        adapter.presence.assert_not_called()

@@ -294,7 +294,7 @@ def _preflight_trash(urls: list[str]) -> None:
     """Refuse the whole planned pass before any batch, previews included (#556).
 
     This is an initial check, not a lock on Mail's index. Each adapter batch still
-    resolves Trash again. Unrelated index and mid-pass failures retain their behavior.
+    resolves Trash again. Unrelated index failures retain their behavior.
     """
     accounts = {mail_index.account_of(url) for url in urls}
     if None in accounts:
@@ -321,10 +321,22 @@ def _preflight_trash(urls: list[str]) -> None:
             raise SystemExit(2)
 
 
+def _report_batch_refusal(exc: AmbiguousTarget) -> None:
+    print(
+        "Pass stopped at this batch. Earlier batches may already have changed "
+        f"messages; inspect their receipt lines above.\n{exc}",
+        file=sys.stderr,
+    )
+
+
 def _run_mailbox(
     adapter, url: str, rows: list[dict], execute: bool, verbose: bool
 ) -> tuple[int, int, int]:
     """Preview or collapse one mailbox. Returns (safe sets, sets collapsed, skipped)."""
+    if execute:
+        # A bulk pass can last hours. Preflight rows identify accounts, but must
+        # not replace the current size/date evidence for this mailbox's targets.
+        rows = mail_index.query_duplicate_rows(url)
     safe, skipped = _sets(rows)
     redundant = len(rows) - len({str(r["message_id"]) for r in rows})
     name = mailbox_url.leaf(url)
@@ -485,10 +497,16 @@ def _run_cross_account(opts: dict) -> None:
         return
 
     removed = failed = 0
+    refused = False
     for url, mids in sorted(losers.items()):
         print(f"\n  {url}")
         for batch in _chunks(mids):
-            result = adapter.trash_mail(batch, url, dry_run=False)
+            try:
+                result = adapter.trash_mail(batch, url, dry_run=False)
+            except AmbiguousTarget as exc:
+                _report_batch_refusal(exc)
+                refused = True
+                break
             ok = result.get("succeeded", 0)
             removed += ok
             failed += len(batch) - ok
@@ -498,6 +516,8 @@ def _run_cross_account(opts: dict) -> None:
             for t in result.get("targets", []):
                 if t.get("status") != "ok":
                     print(f"        {t['id']}: {t['status']}")
+        if refused:
+            break
 
     # THE MANDATORY POST-PASS. Everything above deleted from non-keeper mailboxes; this
     # proves the keeper's copy is still there. It is the one check that distinguishes
@@ -528,6 +548,12 @@ def _run_cross_account(opts: dict) -> None:
         )
     else:
         print(f"  all {len(keeper_rows)} keeper copies still present.")
+
+    if refused:
+        print(
+            f"\nstopped — {removed} non-keeper copies reported trashed before refusal."
+        )
+        raise SystemExit(2)
 
     print(
         f"\ndone — {removed} non-keeper copies trashed"
@@ -573,7 +599,11 @@ def dedupe_mail(argv: list[str]) -> None:
     )
     sets = removed = skipped = 0
     for url, rows in planned:
-        s, r, k = _run_mailbox(adapter, url, rows, opts["execute"], opts["verbose"])
+        try:
+            s, r, k = _run_mailbox(adapter, url, rows, opts["execute"], opts["verbose"])
+        except AmbiguousTarget as exc:
+            _report_batch_refusal(exc)
+            raise SystemExit(2) from None
         sets += s
         removed += r
         skipped += k
