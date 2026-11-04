@@ -427,10 +427,15 @@ Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; t
 **Requirements**: MIG-01
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 1 implementation plan merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550). Installed-device acceptance, signing and release remain pending.
+**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Installed-device acceptance, signing and release remain pending.
 
 Plans:
 - [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
+- [x] [05.4-02-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-PLAN.md) — public proxy policy preserves discovery errors and explicit recovery; merged 2026-11-04 in #561.
+
+Failed discovery returns connection errors instead of false missing-tool answers or successful empty lists.
+Synthetic tests cover both protocol eras and exactly one execution after an explicit new call.
+The original November 1 incident remains unproved. Installed/frontend acceptance and the clipboard observation keep #543 open.
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
@@ -513,7 +518,7 @@ Plans:
 - [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; real macOS 27 acceptance remains open.
 
 Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
-#556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. Both physical candidate inventories, a localized scratch trash/undo check, and applicable Gmail timing checks remain open. The plan is not counted as merged.
+#556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory, localized scratch trash/undo acceptance, and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
@@ -621,7 +626,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 1/1 | Implementation merged; device acceptance and release pending | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Implementation merged; device acceptance and release pending | - |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Migration #550, privacy #552, licences #553, localized folders #554 and roadmap ownership #544 are merged. Architecture #555 and grant chips #557 are merged. Garage cutover and the first roadmap/architecture publication are complete. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
+stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
 last_updated: "2026-11-04"
 last_activity: 2026-11-04
-last_activity_desc: "MCP migration and four bug implementations are merged. Garage roadmap and architecture are published. PR #559 awaits physical acceptance."
-state_head: 93c7f09
+last_activity_desc: "Discovery-error follow-up #561 merged after independent review and green CI. PR #559 awaits physical acceptance."
+state_head: 4397787
 progress:
   total_phases: 20
   completed_phases: 9
-  total_plans: 93
-  completed_plans: 92
+  total_plans: 94
+  completed_plans: 93
 ---
 
 # Project State
@@ -28,13 +28,15 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 ## Current Position
 
 Phase: 05.6 — probe-independent bug fixes.
-Plans: 05.4-01 and 05.6-01/02/03/04 are merged after review and green CI.
-Status: Canonical roadmap evidence #558 is merged. Garage cutover and the first publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI; physical acceptance is pending. Notes and draft changes need device probes.
+Plans: 05.4-01/02 and 05.6-01/02/03/04 are merged after review and green CI.
+Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI. Its read-only arm64 inventory found no ambiguity; Intel and write acceptance remain pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
 Both unsigned bundle slices passed import and stream checks. Installed-device acceptance, signing and release remain pending.
+Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
+The original November 1 incident remains unproved. Installed/frontend acceptance and the clipboard observation keep #543 open.
 
-Progress: 92 of 93 recorded plans have completion summaries. The roadmap records nine historical phase closures.
+Progress: 93 of 94 recorded plans have completion summaries. The roadmap records nine historical phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -245,5 +247,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-04
-Stopped at: Canonical roadmap #558 is merged. Garage first publication served the roadmap, eight architecture pages and six compatibility paths from 93c7f09. PR #559 at 872577e has 3607 passing tests and green CI; physical compatibility remains required before merge. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
-Resume file: .planning/overnight/2026-11-03.md
+Stopped at: Discovery-error follow-up #561 merged as 4397787. Garage publication is complete; its live footer identifies the displayed source. PR #559 at 872577e retains its Intel and write acceptance checks. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
+Resume file: .planning/overnight/2026-11-04-integration.md
