@@ -3,9 +3,9 @@ kind: component
 title: Operator controls
 component: operator-controls
 status: implemented
-source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
+source_revision: 4a7c26287b108c9c81f42db0bdf5280ed537e986
 source_evidence_date: 2026-11-04
-review_status: independent-review-complete
+review_status: source-checked-update
 publication_status: pending
 ---
 
@@ -66,6 +66,13 @@ The backup and recovery pages are read-only; they neither invoke undo nor purge 
 - [Phase 5 verification](../phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-VERIFICATION.md) and [Phase 05.1 verification](../phases/05.1-bug-fixes-dashboard-follow-ups-427-428-430/05.1-VERIFICATION.md).
 - [Phase 05.2 acceptance](../phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-13-PLAN.md).
 
-The adapter page currently reads grant information through `deploy.grant_report()`.
-Live macOS 27 Automation grant chips from the latest Health report remain planned under #497 in [Phase 05.6](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md).
+Adapters reads the last completed Health report through `health.last_permissions()`.
+Automation uses Health's existing live/TCC merge; other permissions use the same report's TCC data.
+Explicit Full Disk Access and EventKit probe refusals override those rows.
+Before the first completed report, `deploy.grant_report()` supplies the existing TCC-only fallback.
+The page identifies the report's completion time and links to Health.
+Rendering makes no native call; failed or unfinished checks retain the previous report.
+
+Real macOS 27 acceptance remains pending. The grant-chip additions have source validation after the earlier independent architecture review.
+[Implementation and review limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md) and [regression tests](../../tests/test_dashboard_adapter_health.py) record the evidence.
 The domain-hosted dashboard loader remains planned in Phase 05.5 of the [roadmap](../ROADMAP.md).

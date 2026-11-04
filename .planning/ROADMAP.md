@@ -20,7 +20,8 @@ people run it safely: per-adapter toggles and a loopback dashboard, then distrib
 `.mcpb`, a Homebrew cask and a companion plugin.
 
 **Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
-Then reassess the remaining bugs and architecture against the migrated server.
+The migration and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
+Remaining bugs use the migrated server. Installed-device acceptance and release remain separate from implementation.
 Phase 05.2 device acceptance remains incomplete; migration does not establish Mail acceptance.
 
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
@@ -46,7 +47,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
-- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
+- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -420,14 +421,16 @@ Plans:
 
 ### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
 
-**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Runs before remaining bug work so the new SDK can inform fixes and architecture (owner, 2026-11-03). Later middleware, proxy and registration work uses the migrated server.
-**Requirements**: TBD (planned from #470)
+**Goal**: The server runs on MCP 2 and FastMCP 4 (#470). MCP reports a dead stream; application middleware warns that an interrupted tool may have completed. The UDS transport has no read deadline and uses httpx2. Caller identity, protocol eras, audit and notices retain their behavior.
+
+Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; the Intel compatibility exception and open advisories remain documented. Migration precedes remaining bug work, by the owner's 2026-11-03 instruction.
+**Requirements**: MIG-01
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 1 plan; ready for implementation after cross-model review
+**Plans:** 1 implementation plan merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550). Installed-device acceptance, signing and release remain pending.
 
 Plans:
-- [ ] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates
+- [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
@@ -485,15 +488,33 @@ Plans:
 **Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
 - [ ] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
 
-### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540) (INSERTED)
+### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
 
-**Goal**: Every Notes write keeps the note's content or refuses before it touches the note, and system folders are found in any language. `update_note` and `delete_note` refuse locked and shared notes; a note with attachments or non-text content is refused, or backed up in full first, as a device probe decides; the full body is the before-state (#500). Notes' Recently Deleted is excluded by `ZFOLDERTYPE` on the SQLite path and by a translated name table on the AppleScript fallback; Mail's Trash, Junk, Sent and Archive are found by a language-free signal or by translated names in `mailbox_url.py` (#501). The Adapters page shows the live Automation grants on macOS 27, where the TCC-only chips cannot — from the last Health report or behind a `_WAIT` guard, as the plan decides (#497). The signed `.app` carries the licence text of every bundled package whose wheel ships none (PyObjC, bpylist2), and a build check fails when one is missing (#471). `delete_draft` resolves the draft's account and mailbox from the Envelope Index and deletes with one `whose message id is` query on that mailbox, keeping the dry run and the exactly-one-match check, so a busy Mail no longer times out at 30 s (#521, found at the 05.2-09 sitting). The state folder and its private files — Mail backups, the body index, the audit log, the new Notes backups — are readable only by the account that owns them (`0700` folder, `0600` files), and `doctor()` reports a state folder another account can read (#540, found at the 05.6 discuss session). Placed right after Phase 05.2 and before the next feature phase: bugs come before features (owner, 2026-10-11; slot 2026-10-26; #497 and #471 added at the 2026-10-31 roadmap audit; #521 and #540 on 2026-11-01).
-**Requirements**: TBD (planned from #500, #501, #497, #471, #521, #540)
-**Depends on:** Phase 05.2
-**Plans:** 0 plans
+**Goal**: Notes writes preserve content or refuse before changing it. System-folder reads recognize supported languages, and the dashboard uses observed grants. Storage and bundled licence material satisfy the recorded acceptance checks.
+
+- Notes updates and deletes refuse locked or shared notes. Updates refuse non-text content unless a device probe proves a complete backup route. The full HTML body is backed up before replacement. Backup failure stops the update; the result and audit name the backup path (#500).
+- Notes reads exclude Recently Deleted through `ZFOLDERTYPE`, with translated names as the AppleScript fallback. Mail recognizes reviewed Trash, Junk, Sent and Archive names while preserving mailbox URLs (#501).
+- Adapters shows the last completed Health report's grants and time. Before a report exists, TCC-only chips and a Health link remain. Explicit Full Disk Access and EventKit refusals override stale TCC rows. Rendering makes no native call and adds no wait state (#497, D-15).
+- Both architecture site-packages trees and the final site-packages tree contain licence material or verified fallbacks. Missing material stops the build; signed-bundle inspection remains required (#471).
+- After device proof, `delete_draft` uses a scoped path only for exactly one live index row or one Drafts row. Otherwise, the unified walk remains. Preview and audit share the lookup and exactly-one-match checks (#521).
+- State and backup directories use owner-only POSIX permissions. New Mail backups use `0600`; existing files remain under their private parent without a mode sweep. Doctor reports unsafe storage and repairs (#540, D-22). New Notes backups remain part of the pending Notes implementation.
+- Ambiguous Trash candidates need a distinct outcome before callers rely on a guessed destination (#556).
+
+Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptance; independent implementation can proceed after migration.
+**Requirements**: FIX-19, FIX-20, FIX-21, FIX-22, FIX-23, FIX-24, FIX-25
+**Depends on:** Phase 05.2 acceptance before phase close. Probe-independent implementations proceed after the MCP migration.
+**Plans:** 4 implementation plans; device acceptance and remaining bugs stay open.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.6 to break down)
+- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed-device stat acceptance remains open.
+- [x] [05.6-02-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-PLAN.md) — localized system-folder reads (#501), merged in #554; non-English device checks and real-index timing remain open.
+- [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed-bundle acceptance remains open.
+
+- [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; real macOS 27 acceptance remains open.
+
+Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
+#556 needs a distinct ambiguity outcome before callers can stop trusting name priority. Prep: plan; branch: pending; blocked by: no implementation dependency.
+Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 
@@ -586,6 +607,9 @@ Plans:
 **Execution Order:**
 Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-11-03): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.4 → 05.2 → 05.6 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6
 
+The nine completed phases below are historical closures. Their verification fingerprints are stale against current source.
+Plan summaries record implemented work; they do not prove current-build acceptance. No percentage is inferred from these counts.
+
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Gate — Land the Spiked Architecture Cuts | 14/14 | Complete    | 2026-09-26 |
@@ -597,9 +621,9 @@ Phases execute in roadmap order — a decimal insertion sits where its dependenc
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/1 | Ready to implement | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 1/1 | Implementation merged; device acceptance and release pending | - |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
-| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540 (INSERTED) | 0/TBD | Not started | - |
+| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |

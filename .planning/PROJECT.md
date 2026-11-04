@@ -5,15 +5,19 @@
 One consolidated MCP server (Python + FastMCP, `uv`) that gives a Claude session citable, bounded
 access to native macOS apps — Mail, Messages, Notes, Calendar, Reminders, Contacts, Photos,
 Safari, Music, Shortcuts — through a signed launchd daemon so one TCC grant serves every client.
-Its primary caller is a Claude Code session rooted in the life-cockpit Obsidian vault; every read
-returns Pointers (id + summary + deeplink), never payload dumps, and every write is gated,
-id-addressed, dry-runnable, audited and recoverable.
+Its primary caller is a Claude Code session rooted in the life-cockpit Obsidian vault.
+Discovery reads return bounded pointers; explicit detail and body tools return requested content.
+Capability gates control write access. Audit persistence is best effort, and recovery applies to selected Mail operations.
+The [current architecture](architecture/macos-apps-mcp-architecture.md) records the implementation and its limits.
 
 ## Core Value
 
-**Safe writes.** Every write is gated by tier, addressed by id, dry-runnable, audited, and
-recoverable — the model can never lose, destroy, or send something by accident. If reads slow
-down or a domain is missing, that is a gap; if a write is unsafe, that is a failure.
+**Safe writes are the design goal.** Writes should be gated by tier, addressed by id, previewable, audited, and recoverable.
+This goal is not a guarantee that every current write can be undone or that every audit record persists.
+An unsafe write is a failure; missing read coverage is a gap.
+
+**eli14:** The safety equipment reduces mistakes. It does not provide an undo button for every action.
+Each operation's documented checks and recovery limits still apply.
 
 ## Requirements
 
@@ -42,17 +46,13 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 ### Active
 
-<!-- Current scope, in the order the phases run. -->
+The [roadmap](ROADMAP.md) owns execution order and plan status.
+The [requirements](REQUIREMENTS.md) own acceptance criteria and their phase mapping.
 
-**Mail fixes — email work comes before any new or additional feature (owner, 2026-09-24)**
-- (none open — #206/#208 shipped in 0.13.0; #229/#230/#261 in 0.13.1)
-
-**Adapter depth parity — every adapter we ship is stable and as fully featured as Mail**
-- [ ] Calendar: alarms on create/update, correct for all-day/recurring in non-UTC timezones (#89); extended recurrence — BYDAY and friends, unsupported shapes rejected loudly (#90); event and reminder Pointers name their calendar or list (#207)
-- [ ] Reminders: delete + list management (#92); subtasks and tags read-only from the Reminders sqlite store — no public write route exists (spike 002, 2026-09-28) (#91)
-
-**Platform & distribution — let others use it, safely**
-- [ ] Distribution: README leads with `uvx` (#113), `[project.urls]` (#111), `.mcpb` per release + Homebrew cask for the notarized `.app` (#107), companion skill + Claude Code plugin whose `skills/` layout is also `npx skills`-installable (#106), the bundle builds on Intel Macs (#205)
+- MCP 2 and FastMCP 4 implementation is merged. Installed-device acceptance and release remain pending.
+- Phase 05.2 Mail acceptance remains incomplete. Phase 05.6 continues the remaining bugs before features.
+- Privacy, localized system-folder reads, bundled notices and dated grant chips are implemented. Their recorded acceptance checks remain open.
+- Later phases cover tool naming, feedback, paged reads, CLI access, Notes depth, agent guidance and distribution.
 
 **Deferred to v2 (tracked in REQUIREMENTS.md):** Contacts depth (#94/#95) and Messages depth (#86–#88) — owner's call at the 2026-08-28 roadmap review; Safari bookmarks/reading list/history (#97); Maps, geocode, current position, Weather (#98–#100, low priority); user-preferences env context (#105); menubar companion (Swift `MenuBarExtra`, pure client of the daemon); network transport + auth + SSE bridge for Home Assistant (#127); alarms on reminders.
 
@@ -69,6 +69,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 ## Context
 
+- **Current architecture:** [overview and seven component notes](architecture/macos-apps-mcp-architecture.md), reviewed against the November 2026 source.
 - **Codebase map:** `.planning/codebase/` (2026-08-28) — ARCHITECTURE, STRUCTURE, STACK, INTEGRATIONS, CONVENTIONS, TESTING, CONCERNS. CONCERNS.md records the spiked review's findings with file:line evidence.
 - **Primary architecture sources:** `CLAUDE.md` ("Architecture (don't drift)"), `DESIGN.md`, `docs/DAEMON.md`, `docs/landscape.md` (including the 2026-08-03 and 2026-08-13 review write-ups), `docs/mail-applescript-facts.md`.
 - **The 2026-08-28 spiked architecture review** (develop @ d9ac75f, 0.10.1): nine cards, each spiked in an isolated worktree with the unit suite (baseline 1196) + ruff run and the diff measured. Cards 1, 7, 5 are pure moves, byte-identical bodies, green; card 2 has a real precedent (`usage` shipped mis-classified; nine writes audit as `"write"`); card 3 found `query_duplicate_rows` (the #140 byte-identity gate) has never run through sqlite in a unit test; card 8 withdrawn on trial; card 9's wrapper withdrawn, replaced by a 25-line tripwire. Every card re-landed in Phase 1 (2026-09-26); the `spike/arch-review-*` branches and worktrees are deleted. Before that, 16 commits (the #199/#201 Sequoia plane) landed on `develop` and touch files every card changes — so each card re-landed against current `develop`, not the spike base.
@@ -80,7 +81,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 
 - **Tech stack**: Python 3.12+ (D-16: osxphotos cannot be locked beside pyobjc 10+ on 3.11) + FastMCP, `uv`, `ruff` (E, F, I, UP, B, SIM; line-length 88), no mypy — same setup as the sibling repos; the Protocol seam keeps the tool layer testable without it.
 - **Architecture**: tools are thin dispatch; adapters are typed `Protocol`s (reads uniform → `list[Pointer]`, writes per-adapter typed); one adapter module per app, no cross-adapter reach; all native access through `runtime.run_native()` on the single serialized worker (`max_workers=1`, never widened) — EventKit thread affinity + TCC.
-- **Safety tiers**: read → write (`@_write_tool`/`@_additive_tool`, skipped by `MACOS_APPS_READ_ONLY`) → outbound (`@_send_tool("<adapter>")`, only when `MACOS_APPS_ALLOW_SEND` names the adapter; `READ_ONLY` wins). A gated-off tool is absent, never registered-and-erroring. Outbound defaults `dry_run=True` and its dry-run path makes no native call.
+- **Safety tiers**: read → write (`@_write_tool`/`@_additive_tool`, skipped by `MACOS_APPS_READ_ONLY`) → outbound (`@_send_tool("<adapter>")`, only when `MACOS_APPS_ALLOW_SEND` names the adapter; `READ_ONLY` wins). A gated-off tool is absent, never registered-and-erroring. Outbound defaults `dry_run=True`. New-message and forward previews make no native call. Stored-draft and reply-all previews retain native reads; they create no outgoing message.
 - **Shim↔daemon hop**: no read deadline (`Timeout(None, connect=10.0)`); per-operation limits belong in the adapter.
 - **Testing**: `uv run pytest` mocks at the adapter boundary with Protocol fakes and fails closed on the native seam; `uv run pytest -m integration` touches real apps/TCC and is run manually, never in CI. Every Mail write is verified on device with the watchdog running.
 - **Branches & releases**: `develop` is the trunk, every PR rebase-merged (linear); `main` is release-only, `--no-ff` cuts tagged `vX.Y.Z`; three-file version bump + `doctor().version` proof per `docs/RELEASING.md`. Merging changes nothing until the `.app` is rebuilt and reinstalled. Ship in small cuts; milestones and releases need not line up.
@@ -116,7 +117,7 @@ down or a domain is missing, that is a gap; if a write is unsafe, that is a fail
 | Owner defaults O3/O4/O5 of Phase 05.1 confirmed; O1 overturned (2026-10-24) | A lost dashboard audit line is a sticky in-memory banner (O3); a preview row is muted by colour, not opacity (O4); Restart locks with the switches (O5); the Mail account-name cache SHOULD survive a restart — a file beside the Mail backups, refreshed at start only when Mail already runs (#450) | O3–O5 shipped in Phase 05.1; #450 open |
 | A phase that changes UI files carries a pointer UI-SPEC (the sketches plus the plans' truths), never a second design source | `ui.safety-gate` halts a wave without one; the owner chose the pointer form for Phase 5 (2026-10-22) and it held for 05.1 | 05-UI-SPEC.md, 05.1-UI-SPEC.md |
 | Every merged PR gets an independent probe review in a scratch copy before the phase closes | Executors' self-reviews passed real defects in Phase 5 (6 of 7 PRs) and 05.1 (2 of 7); the ledger (`*-POSTMERGE-REVIEW.md`) feeds the security register and the close review | PM-01..28 in 05.1; fix PRs #441, #448 |
-| Pending phases run in dependency order, not insertion order (2026-10-31) | The mcp 2/fastmcp 4 migration changes the middleware, proxy and registration every later phase builds on, so it goes first; the rename, error codes and cursors ship in one breaking release; the skills and instructions are written once, after the last tool; the domain loader blocks nothing and goes last | — Pending (05.2 → 05.6 → 05.4 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6, revised 2026-11-01) |
+| Pending phases run in dependency order, not insertion order (2026-10-31) | The mcp 2/fastmcp 4 migration changes the middleware, proxy and registration every later phase builds on, so it goes first; the rename, error codes and cursors ship in one breaking release; the skills and instructions are written once, after the last tool; the domain loader blocks nothing and goes last | Migration implementation merged first by the 2026-11-03 owner instruction; current order is in ROADMAP.md |
 | One release at every phase close that changes the daemon; the `verb_noun` rename is 0.17.0 and 1.0.0 is the launch release after the testers (2026-11-01) | A migration regression has one suspect only when it ships alone; the testers test a 0.x, so a fix they force costs a minor, not a major; 1.0 promises the names and codes outside users have already used | — Pending |
 | Testers after 05.10 and 05.3 cut 1; the paged reads (#508) split out as Phase 05.11; one `instructions` builder started by 05.3 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (2026-11-01, grill session) | The rename (#514) and a report path (#465) precede outside users; cursors are additive and would only delay the breaking release; one builder keeps the text written once; the cask matches iMCP and costs one bump per release | — Pending |
 
@@ -138,4 +139,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-25 after Phase 05.1 — the three dashboard follow-up bugs fixed, probe-reviewed and device-proven on the installed build 6e4aee5 (FIX-11..13, #427/#428/#430); next: Phase 6, distribution*
+*Last updated: 2026-11-04 — MCP migration and four bug implementations merged; architecture reviewed; installed-device acceptance and release remain pending.*
