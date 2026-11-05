@@ -48,6 +48,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
+- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and a private advisory** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisory GHSA-7772-4pjg-72m4 is fixed
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -525,11 +526,26 @@ Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft
 #556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
+### Phase 05.12: Bug fixes — the app after an upgrade (#568) and a private advisory (INSERTED)
+
+**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisory GHSA-7772-4pjg-72m4 is fixed.
+
+- When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
+- The private advisory GHSA-7772-4pjg-72m4 is fixed. Its details stay in the advisory until the fix is released.
+
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found both; the owner put them in one phase before Phase 05.10 (2026-11-05).
+**Requirements**: TBD (planned from #568 and GHSA-7772-4pjg-72m4)
+**Depends on:** Phase 05.6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.12 to break down)
+
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 
 **Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The paged reads (#508) are additive and are Phase 05.11. One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. The breaking release is 0.17.0; 1.0.0 is the launch release after the testers (owner, 2026-11-01). Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.3, 05.11, 05.9, 05.8, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
 **Requirements**: TBD (planned from #514, #502)
-**Depends on:** Phase 05.6, after the completed MCP migration
+**Depends on:** Phase 05.12, after the completed MCP migration
 **Plans:** 0 plans
 
 Plans:

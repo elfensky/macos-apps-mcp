@@ -5,12 +5,12 @@ current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
 stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
-last_updated: "2026-11-04"
-last_activity: 2026-11-04
-last_activity_desc: "Build 7bc8607 is notarized and installed on physical Intel; both protocol eras and bounded native reads passed. The notary profile is documented. Localized/Gmail Trash, frontend and release checks remain open."
+last_updated: "2026-11-05"
+last_activity: 2026-11-05
+last_activity_desc: "PR #566 merged: opening the app opens the dashboard and links the CLI. Phase 05.12 inserted before 05.10: #568 and a private advisory."
 state_head: 3e98de6
 progress:
-  total_phases: 20
+  total_phases: 21
   completed_phases: 9
   total_plans: 94
   completed_plans: 93
@@ -132,9 +132,11 @@ Recent decisions affecting current work:
 - [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
 - [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
+- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published; #569 takes option 1 (a CLI row on Health); #568 and advisory GHSA-7772-4pjg-72m4 share bug Phase 05.12 before Phase 05.10.
 
 ### Pending Todos
 
+- Next release: run the five open-app device checks from PR #566 ("Not run on device") on the signed candidate in /Applications (owner, 2026-11-05).
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
 - Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
@@ -236,6 +238,7 @@ Recent decisions affecting current work:
 - Phase 05.9 edited: depends_on (05.11); Phase 05.7 edited: goal, depends_on (05.8) (2026-11-01)
 - Release rule (owner, 2026-11-01): one release at every phase close that changes the daemon; no per-phase release decision from now on
 - Phase 05.6 edited: edited fields: title, goal, requirements (+#540 the state folder and its private files are readable by other local accounts, found at the 05.6 discuss session) (owner, 2026-11-01)
+- Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and a private advisory; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
 
 ## Deferred Items
 
