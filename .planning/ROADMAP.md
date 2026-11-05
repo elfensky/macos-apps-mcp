@@ -48,7 +48,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
-- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and a private advisory** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisory GHSA-7772-4pjg-72m4 is fixed
+- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -526,15 +526,15 @@ Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft
 #556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
-### Phase 05.12: Bug fixes — the app after an upgrade (#568) and a private advisory (INSERTED)
+### Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories (INSERTED)
 
-**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisory GHSA-7772-4pjg-72m4 is fixed.
+**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed.
 
 - When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
-- The private advisory GHSA-7772-4pjg-72m4 is fixed. Its details stay in the advisory until the fix is released.
+- The private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. Their details stay in the advisories until each fix is released.
 
-Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found both; the owner put them in one phase before Phase 05.10 (2026-11-05).
-**Requirements**: TBD (planned from #568 and GHSA-7772-4pjg-72m4)
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found all three; the owner put them in one phase before Phase 05.10 (2026-11-05).
+**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp)
 **Depends on:** Phase 05.6
 **Plans:** 0 plans
 
