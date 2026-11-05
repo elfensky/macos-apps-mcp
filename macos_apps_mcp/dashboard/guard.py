@@ -47,6 +47,8 @@ HEADERS = [
 MAX_BODY = 8 * 1024
 KEY_COOKIE = "macos_apps_mcp_key"
 KEY_PATH = "/key"
+# Where the /key link may redirect: one lowercase segment, never "//host" or "https:".
+_PAGE_RE = re.compile(r"/[a-z]+")
 KEY_MAX_AGE = 400 * 24 * 3600  # the link sets it once; 400 days is Chrome's cap
 KEY_UNUSABLE = (
     "The dashboard key file ~/.local/state/macos-apps-mcp/daemon/dashboard_key cannot "
@@ -55,7 +57,7 @@ KEY_UNUSABLE = (
 )
 NEEDS_KEY = (
     "This dashboard needs its page key. "
-    "Open it with `macos-apps-mcp dashboard` in Terminal."
+    "Open the app, or run `macos-apps-mcp dashboard` in Terminal."
 )
 
 
@@ -116,13 +118,12 @@ class Guard:
 
     def _link(self, scope: Scope) -> Response:
         """``/key?k=<key>``: the right key sets the cookie and redirects to ``/``, or
-        to ``to`` when that is one lowercase path segment (``//host`` or ``https:``
-        would be an open redirect)."""
+        to ``to`` when ``_PAGE_RE`` allows it."""
         got = parse_qs(scope.get("query_string", b"").decode("utf-8", "replace"))
         if not hmac.compare_digest(got.get("k", [""])[0].encode(), self.key):
             return PlainTextResponse(NEEDS_KEY, 403)
         to = got.get("to", [""])[0]
-        r = RedirectResponse(to if re.fullmatch(r"/[a-z]+", to) else "/", 303)
+        r = RedirectResponse(to if _PAGE_RE.fullmatch(to) else "/", 303)
         r.set_cookie(
             KEY_COOKIE,
             self.key.decode(),
