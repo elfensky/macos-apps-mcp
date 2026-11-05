@@ -5,8 +5,8 @@ Two separate leaks, isolated two different ways — the difference matters:
 * ``audit.state_dir()`` (audit log, the FTS body sidecar) resolves
   ``$XDG_STATE_HOME/macos-apps-mcp`` per call, so pointing that env var at a tmp dir
   moves everything routed through it off the developer's real state dir.
-* ``deploy._ALLOW_SEND_FILE``, ``deploy._ADAPTERS_OFF_FILE`` and
-  ``deploy._DASHBOARD_KEY_FILE`` are home-anchored ON
+* ``deploy._ALLOW_SEND_FILE``, ``deploy._ADAPTERS_OFF_FILE``,
+  ``deploy._DASHBOARD_KEY_FILE`` and ``deploy._CLI_LINK`` are home-anchored ON
   PURPOSE and must stay that way (the
   launchd daemon, the shell that writes the toggle and a client-spawned shim have to
   agree on one path — see the comment on the constant). So they are isolated by
@@ -44,6 +44,7 @@ def _isolated_state(tmp_path_factory):
     mp.setattr(deploy, "_ALLOW_SEND_FILE", state_home / "allow_send")
     mp.setattr(deploy, "_ADAPTERS_OFF_FILE", state_home / "adapters_off")
     mp.setattr(deploy, "_DASHBOARD_KEY_FILE", state_home / "daemon" / "dashboard_key")
+    mp.setattr(deploy, "_CLI_LINK", state_home / "bin" / "macos-apps-mcp")
     tcc_user = state_home / "absent-tcc-user" / "TCC.db"
     tcc_system = state_home / "absent-tcc-system" / "TCC.db"
     mp.setattr(deploy, "_TCC_DB", tcc_user)

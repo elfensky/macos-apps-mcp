@@ -150,6 +150,11 @@ sed "s|__APP__|/Applications/macos-apps-mcp.app|" \
   "$REPO/packaging/ren.lav.macos-apps-mcp.plist" \
   > "$APP/Contents/Library/LaunchAgents/ren.lav.macos-apps-mcp.plist"
 cp "$REPO/packaging/Info.plist" "$APP/Contents/Info.plist"
+# Opening the app starts it with no arguments; the hook turns that start into the
+# `launch` role. Bundle only: the wheel never ships it. Before compileall and signing.
+cp "$REPO/packaging/sitecustomize.py" "$SITE/sitecustomize.py"
+mkdir -p "$APP/Contents/Resources/bin"
+install -m 755 "$REPO/packaging/cli.sh" "$APP/Contents/Resources/bin/macos-apps-mcp"
 
 # Gate: every Mach-O is universal2 and no slice needs a newer macOS than MACOS_MIN.
 # Before the smokes, so a thin or too-new extension is named here, not as a smoke
