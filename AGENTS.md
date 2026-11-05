@@ -73,6 +73,10 @@ uv run macos-apps-mcp            # run the server (stdio)
 `E, F, I, UP, B, SIM` — same setup as the sibling repos (`lintle`, `descent-engine`). No mypy
 (neither sibling uses one); the Protocol seam keeps the tool layer testable without it.
 
+**Hermetic tests.** A test never touches a real home path. `tests/conftest.py` (`_isolated_state`)
+patches every home-anchored constant and sets `MACOS_APPS_MCP_SOCKET`; add a new one there. A test
+that reached `uninstall_agent()` once unlinked the live daemon's socket.
+
 **Branches & releases.** `develop` is the trunk — every PR **rebase-merged**, so it stays linear.
 `main` is release-only: nothing but `--no-ff` release cuts, each tagged `vX.Y.Z`. Full procedure,
 including the three-file version bump and the mandatory `doctor().version` proof, is in
