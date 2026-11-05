@@ -151,7 +151,8 @@ file's modification time, so a build made before #297 rewrites its `.pyc` inside
 on the first run and breaks the code seal. If an older `/Applications/macos-apps-mcp.app` is
 there, move it away first: `ditto` merges into an existing bundle, and a stale file breaks the seal.
 
-The bundle **must** live in `/Applications` (or `~/Applications`) before registering — a
+The bundle **must** live at `/Applications/macos-apps-mcp.app` before registering: the agent
+plist names that path, so `~/Applications` does not work either. A
 quarantined app run from `~/Downloads` executes under App Translocation (a randomized read-only
 mount), which breaks the agent's on-disk path. `install-agent` verifies the staple and clears
 quarantine for you, but it still expects the app to already be in a real `/Applications` location
