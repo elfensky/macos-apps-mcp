@@ -16,15 +16,16 @@ surface may still shift between minor versions.
 
 ### Added
 
-- **Opening the app opens the dashboard.** Before, opening `macos-apps-mcp.app` from Finder,
-  the Dock or Spotlight did nothing. The first open registers the daemon, shows the consent
-  dialogs once and opens the Health page; later opens go to the dashboard. A bundle-only
-  `sitecustomize.py` turns the start with no arguments into the new `launch` role, so the
+- **Opening the app opens the dashboard** (#126). Before, opening `macos-apps-mcp.app` from
+  Finder, the Dock or Spotlight did nothing. The first open registers the daemon and shows the
+  consent dialogs once. Then it opens the Health page. A first open that stops early runs again
+  on the next open. Later opens go to the dashboard home. When the app starts with no
+  arguments, a `sitecustomize.py` that only the bundle carries runs the new `launch` role. The
   daemon keeps its executable and its grants.
-- **The CLI on PATH.** The app carries a CLI wrapper. Opening the app and `install-agent` link
-  it as `~/.local/bin/macos-apps-mcp`, and `uninstall-agent` removes the link. A file at that
-  name that is not this link is left as it is. `macos-apps-mcp dashboard <page>` opens a named
-  page.
+- **The CLI on PATH** (#126). The app carries a CLI wrapper. Opening the app and
+  `install-agent` link it as `~/.local/bin/macos-apps-mcp`. `uninstall-agent` removes the link.
+  The link never replaces another file of that name.
+- **`macos-apps-mcp dashboard <page>` opens a named page** (#126), for example `health`.
 - **The server starts and lists its tools on Linux.** Glama scores an MCP server only after
   a build test in a Linux container that starts it and reads `tools/list`, and the
   awesome-mcp-servers list requires a scored Glama listing. The PyObjC and osxphotos
