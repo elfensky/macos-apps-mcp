@@ -7,7 +7,7 @@ status: executing
 stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
 last_updated: "2026-11-05"
 last_activity: 2026-11-05
-last_activity_desc: "PR #566 merged: opening the app opens the dashboard and links the CLI. Phase 05.12 inserted before 05.10: #568 and a private advisory."
+last_activity_desc: "PR #566 merged: opening the app opens the dashboard and links the CLI. Phase 05.12 inserted before 05.10: #568 and two private advisories."
 state_head: 3e98de6
 progress:
   total_phases: 21
@@ -132,7 +132,7 @@ Recent decisions affecting current work:
 - [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
 - [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
-- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published; #569 takes option 1 (a CLI row on Health); #568 and advisory GHSA-7772-4pjg-72m4 share bug Phase 05.12 before Phase 05.10.
+- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published, and joins Phase 05.12; #569 takes option 1 (a CLI row on Health); #568 and advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp share bug Phase 05.12 before Phase 05.10.
 
 ### Pending Todos
 
@@ -238,7 +238,7 @@ Recent decisions affecting current work:
 - Phase 05.9 edited: depends_on (05.11); Phase 05.7 edited: goal, depends_on (05.8) (2026-11-01)
 - Release rule (owner, 2026-11-01): one release at every phase close that changes the daemon; no per-phase release decision from now on
 - Phase 05.6 edited: edited fields: title, goal, requirements (+#540 the state folder and its private files are readable by other local accounts, found at the 05.6 discuss session) (owner, 2026-11-01)
-- Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and a private advisory; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
+- Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and two private advisories; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
 
 ## Deferred Items
 
