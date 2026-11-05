@@ -234,7 +234,8 @@ same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMO
 ### Dashboard
 
 Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
-usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
+usage and the Mail backups. Open the app, or run `macos-apps-mcp dashboard`, to open it with its
+page key. The first open of the app also installs the daemon and links the CLI. Details:
 [docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard). Both screenshots use invented data.
 
 <img alt="One calendar edit in the dashboard: the old time struck through, the new time beside it, and the exact tool call the model made" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-diff.png" width="800">

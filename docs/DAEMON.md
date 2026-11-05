@@ -159,7 +159,21 @@ quarantine for you, but it still expects the app to already be in a real `/Appli
 
 ### 3. Install the agent
 
-From the pip-installed package (or the repo venv — `install-agent` is a role of the *pip* CLI,
+**Open the app.** Open `/Applications/macos-apps-mcp.app` from Finder, the Dock or Spotlight.
+With no agent registered, the first open registers it, shows the consent dialogs once (step 3
+below), links the CLI and opens the dashboard on its Health page. Health lists what is still
+missing, with an Open Settings link for each grant that has no dialog. Every later open goes
+straight to the dashboard. The app must run from `/Applications/macos-apps-mcp.app`: the agent
+plist names that path. From anywhere else the app shows an alert and installs nothing. A
+failure shows an alert too, because an opened app has no Terminal to print to.
+
+How it works: the app's main executable is the bundled interpreter, and the daemon's grants
+belong to that file, so it cannot be swapped for a launcher. The bundle's
+`site-packages/sitecustomize.py` (from `packaging/`, never in the wheel) turns a start with no
+arguments into the `launch` role. Every other caller passes arguments: launchd, the shim, the
+CLI wrapper and the build.
+
+**Or from Terminal.** From the pip-installed package (or the repo venv — `install-agent` is a role of the *pip* CLI,
 which drives the *bundle's* executable for the SMAppService-registering steps):
 
 ```sh
@@ -176,8 +190,17 @@ This will:
    tool-call later) keeps a stray timeout from recording as a denial. If a prompt times out anyway, doctor shows
    that row with `reason: "prompt-timeout"` and the reset command to run before
    `doctor(request=True)` with someone at the screen.
-4. Print the FDA deep-link and the shim `command:`/`args:` snippet to paste into your MCP
-   clients.
+4. Link the CLI (below) and print the FDA deep-link and the shim `command:`/`args:` snippet
+   to paste into your MCP clients.
+
+**The CLI on PATH.** The bundle carries a wrapper, `Contents/Resources/bin/macos-apps-mcp`
+(`packaging/cli.sh`), that runs the bundled interpreter with the flags of section 4. Opening the
+app and `install-agent` both link it as `~/.local/bin/macos-apps-mcp`, the folder uv keeps on
+PATH. After that, `macos-apps-mcp dashboard`, `allow-send` and the other roles work without the
+long bundle path. A file at that name that is not this link stays untouched: `uv tool install
+macos-apps-mcp` writes the same name. `install-agent` says when `~/.local/bin` is not on PATH
+(`uv tool update-shell` adds it). The CLI runs in your terminal, so macOS charges a role that
+reads protected data, such as `dedupe-mail`, to the terminal's grants.
 
 **Full Disk Access does not prompt** — step 4 prints the command to open the pane
 (`open 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'` — run it
@@ -290,9 +313,11 @@ non-loopback bind is refused. The MCP endpoint stays on the unix socket and is n
 this port. Every request checks the `Host` header, and every form post checks `Origin` and a
 per-session token.
 
-Every page needs the page key. Run `macos-apps-mcp dashboard` in Terminal (bundle form:
-`/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp dashboard`).
-It prints a link and opens it. The browser keeps the key as a cookie, so you run the command
+Every page needs the page key. Open the app, or run `macos-apps-mcp dashboard` in Terminal (bundle
+form: `/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp
+dashboard`). It prints a link and opens it. `macos-apps-mcp dashboard health` opens a named page;
+the `/key` link follows only a one-segment page path, so it cannot send the browser to another
+site. The browser keeps the key as a cookie, so you run the command
 again only on a new browser or after a key change. The key lives in
 `~/.local/state/macos-apps-mcp/daemon/dashboard_key` (mode 0600, in a 0700 folder) and survives
 restarts. To change the key, remove that file, restart the daemon (the kickstart in section 6)
@@ -559,7 +584,8 @@ The request-size limit rejects a large command before the server executes it.
 macos-apps-mcp uninstall-agent
 ```
 
-Unregisters the `SMAppService` agent and removes the daemon's socket. To also wipe every TCC
+Unregisters the `SMAppService` agent, removes the daemon's socket and removes the
+`~/.local/bin/macos-apps-mcp` link when it points into this app. To also wipe every TCC
 grant held by the daemon identity (so a future reinstall starts from a clean prompt state):
 
 ```sh

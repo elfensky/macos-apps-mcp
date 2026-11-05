@@ -215,6 +215,23 @@ def test_the_link_sets_the_cookie_and_redirects_home():
     _has_headers(r)
 
 
+@pytest.mark.parametrize(
+    ("to", "where"),
+    [
+        ("/health", "/health"),
+        ("%2F%2Fevil.example", "/"),  # protocol-relative: another site
+        ("https://evil.example", "/"),
+        ("/health/../x", "/"),
+        ("/Health", "/"),
+        ("", "/"),
+    ],
+)
+def test_the_link_follows_only_a_one_segment_page(to, where):
+    r = get(f"/key?k={KEY}&to={to}", cookie=False)
+    assert r.status_code == 303 and r.headers["location"] == where
+    assert r.headers.get_list("set-cookie") == [LINK_COOKIE]
+
+
 @pytest.mark.parametrize("path", ["/key", "/key?k=", "/key?k=wrong", f"/key?x={KEY}"])
 def test_the_link_with_a_wrong_key_is_refused_without_a_cookie(path):
     r = get(path, cookie=False)
@@ -307,6 +324,16 @@ def test_dashboard_role_prints_the_link_and_opens_it(
     assert capsys.readouterr().out == LINK + "\n"
     assert opener == [LINK]
     assert (keyfile.read_bytes(), keyfile.stat().st_mtime_ns) == before
+
+
+def test_dashboard_role_names_a_page(keyfile, opener, capsys):
+    keyfile.parent.mkdir()
+    keyfile.write_text(KEY)
+    deploy.dashboard(["health"])
+    assert opener == [LINK + "&to=/health"]
+    assert get(f"/key?k={KEY}&to=/health", cookie=False).headers["location"] == (
+        "/health"
+    )
 
 
 @pytest.mark.parametrize("content", [None, "short"])

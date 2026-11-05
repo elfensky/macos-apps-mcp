@@ -240,12 +240,19 @@ def test_install_agent_missing_app_fails_actionably(tmp_path, capsys):
     assert "build_app.sh" in capsys.readouterr().err
 
 
-def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
-    app = tmp_path / "macos-apps-mcp.app"
+def _app_with_wrapper(root):
+    app = root / "macos-apps-mcp.app"
     (app / "Contents/MacOS").mkdir(parents=True)
     exe = app / "Contents/MacOS/macos-apps-mcp"
     exe.write_text("")
     exe.chmod(0o755)
+    (app / deploy._CLI_WRAPPER).parent.mkdir(parents=True)
+    (app / deploy._CLI_WRAPPER).write_text("")
+    return app
+
+
+def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys, cli_link):
+    app = _app_with_wrapper(tmp_path)
     calls = []
     monkeypatch.setattr(deploy, "_run_bundle_role", lambda a, role: calls.append(role))
     monkeypatch.setattr(
@@ -260,6 +267,123 @@ def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys):
     assert "Privacy_AllFiles" in out  # FDA deep-link printed
     assert '"shim"' in out  # client config snippet
     assert '"-E"' in out  # isolation flags pinned in printed snippet
+    assert os.readlink(deploy._CLI_LINK) == str(app / deploy._CLI_WRAPPER)
+    assert f"CLI: {deploy._CLI_LINK}" in out
+
+
+# --- the CLI link -------------------------------------------------------------------
+
+
+@pytest.fixture
+def cli_link():
+    yield deploy._CLI_LINK
+    deploy._CLI_LINK.unlink(missing_ok=True)
+
+
+def test_link_cli_is_idempotent_and_uninstall_removes_only_its_own(
+    tmp_path, monkeypatch, cli_link
+):
+    app = _app_with_wrapper(tmp_path)
+    assert deploy._link_cli(app).startswith("CLI: ")
+    assert deploy._link_cli(app).startswith("CLI: ")  # an existing own link is fine
+    assert os.readlink(cli_link) == str(app / deploy._CLI_WRAPPER)
+    monkeypatch.setattr(deploy, "_APP", app)
+    monkeypatch.setattr(deploy, "_run_bundle_role", lambda a, role: None)
+    deploy.uninstall_agent()
+    assert not os.path.lexists(cli_link)
+
+
+def test_link_cli_leaves_a_foreign_file_and_a_wrapperless_build_alone(
+    tmp_path, monkeypatch, cli_link
+):
+    app = _app_with_wrapper(tmp_path)
+    cli_link.parent.mkdir(parents=True, exist_ok=True)
+    cli_link.symlink_to("/elsewhere/uv/tools/macos-apps-mcp")  # uv tool install's
+    assert "not this app's" in deploy._link_cli(app)
+    monkeypatch.setattr(deploy, "_APP", app)
+    monkeypatch.setattr(deploy, "_run_bundle_role", lambda a, role: None)
+    deploy.uninstall_agent()
+    assert os.readlink(cli_link) == "/elsewhere/uv/tools/macos-apps-mcp"
+    cli_link.unlink()
+    (app / deploy._CLI_WRAPPER).unlink()  # an app built before the wrapper existed
+    assert "no CLI wrapper" in deploy._link_cli(app)
+    assert not os.path.lexists(cli_link)  # never a dangling link
+
+
+# --- `launch`: what opening the .app does -------------------------------------------
+
+
+@pytest.fixture
+def launched(monkeypatch):
+    """`launch` from the installed bundle path, every side effect recorded."""
+    calls = []
+    monkeypatch.setattr(sys, "executable", str(deploy._APP / "Contents/MacOS/x"))
+    monkeypatch.setattr(deploy, "agent_status", lambda: "enabled")
+    for name in ("register_agent", "_wait_for_socket", "_request_grants_via_daemon"):
+        monkeypatch.setattr(deploy, name, lambda name=name: calls.append(name))
+    monkeypatch.setattr(deploy, "_link_cli", lambda app: calls.append(("link", app)))
+    monkeypatch.setattr(deploy, "dashboard", lambda argv: calls.append(("dash", argv)))
+    monkeypatch.setattr(deploy, "_alert", lambda msg: calls.append(("alert", msg)))
+    return calls
+
+
+def test_launch_first_open_installs_then_opens_health(launched, monkeypatch):
+    monkeypatch.setattr(deploy, "agent_status", lambda: "not-registered")
+    deploy.launch([])
+    assert launched == [
+        "register_agent",
+        "_wait_for_socket",
+        "_request_grants_via_daemon",
+        ("link", deploy._APP),
+        ("dash", ["health"]),
+    ]
+
+
+def test_launch_later_opens_go_to_the_dashboard_home(launched):
+    deploy.launch([])
+    assert launched == [("link", deploy._APP), ("dash", [])]
+
+
+def test_launch_outside_applications_alerts_and_installs_nothing(launched, monkeypatch):
+    monkeypatch.setattr(
+        sys, "executable", "/private/var/folders/T/d/x.app/Contents/MacOS/x"
+    )
+    with pytest.raises(SystemExit) as e:
+        deploy.launch([])
+    assert e.value.code == 1
+    [(kind, msg)] = launched
+    assert kind == "alert" and "/private/var/folders/T/d/x.app" in msg
+    assert "Move it to /Applications" in msg
+
+
+def test_launch_names_login_items_when_macos_stopped_the_agent(launched, monkeypatch):
+    monkeypatch.setattr(deploy, "agent_status", lambda: "requires-approval")
+    with pytest.raises(SystemExit):
+        deploy.launch([])
+    [(kind, msg)] = launched
+    assert kind == "alert" and "Login Items" in msg
+
+
+def test_launch_shows_the_dashboard_refusal_in_an_alert(launched, monkeypatch):
+    def no_key(argv):
+        print("macos-apps-mcp: no usable dashboard key", file=sys.stderr)
+        raise SystemExit(2)
+
+    monkeypatch.setattr(deploy, "dashboard", no_key)
+    with pytest.raises(SystemExit) as e:
+        deploy.launch([])
+    assert e.value.code == 2
+    assert launched[-1] == ("alert", "macos-apps-mcp: no usable dashboard key\n")
+
+
+def test_cli_dispatches_the_launch_role(monkeypatch):
+    from macos_apps_mcp import cli
+
+    called = []
+    monkeypatch.setattr(deploy, "launch", lambda argv: called.append(argv))
+    monkeypatch.setattr("sys.argv", ["macos-apps-mcp", "launch"])
+    cli.main()
+    assert called == [[]]
 
 
 def test_allow_send_round_trip(tmp_path, monkeypatch, capsys):
