@@ -736,11 +736,15 @@ def test_allow_send_is_per_adapter(monkeypatch):
 
 
 def test_send_annotations_are_destructive_and_open_world():
-    assert srv._SEND_ANNOTATIONS == {
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "openWorldHint": True,
-    }
+    # Read the real records: a gated-off send tool still has one (registered=False).
+    sends = [r for r in registry.TOOLS.values() if r.tier == "send"]
+    assert sends, "no send-tier record in registry.TOOLS — the check is vacuous"
+    for rec in sends:
+        assert rec.annotations == {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "openWorldHint": True,
+        }, rec.name
 
 
 # Tools emit Pointer.as_dict() directly — the wire shape lives on the type.
