@@ -1276,7 +1276,8 @@ def update_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict[str, str]:
-    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
+    """Update a reminder by id (full replace). Omit `list_name` to keep the reminder in
+    its list; name one to move it. `due`/`start` ISO (naive = local).
     `recurrence`: RRULE to set ('none' to stop repeating) with FREQ, INTERVAL, COUNT,
     UNTIL, BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
     BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
@@ -1384,7 +1385,8 @@ def update_event(
     span: str | None = None,
     alarms: list[int] | None = None,
 ) -> dict[str, str]:
-    """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
+    """Update an event by id (full replace). Omit `calendar` to keep the event in its
+    calendar; name one to move it. `start`/`end` ISO — naive = local time.
     `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals such as
     2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS;
     BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day` takes a

@@ -236,7 +236,7 @@ def _iso_interval(pair: tuple[int, int]) -> dict[str, str]:
     }
 
 
-def _apply_event(s, e, data: CalendarEventData) -> None:
+def _apply_event(s, e, data: CalendarEventData, *, update: bool = False) -> None:
     e.setTitle_(data.title)
     e.setAllDay_(data.all_day)
     start, end = data.start, data.end
@@ -252,7 +252,8 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     # one occurrence and leave the series recurring. Leave the rule untouched.
     if data.recurrence is not None:
         e.setRecurrenceRules_([to_recurrence_rule(data.recurrence)])
-    e.setCalendar_(_resolve_calendar(s, data.calendar))
+    if data.calendar is not None or not update:  # an update keeps its calendar (#572)
+        e.setCalendar_(_resolve_calendar(s, data.calendar))
     # Relative offsets only: an absolute alarm is rewritten by Google and lands on the
     # wrong day of a floating all-day event. On an all-day event they count from local
     # midnight (#51, D-02). None, never [], clears.
@@ -514,7 +515,7 @@ class CalendarAdapter:
             ek_span = _resolve_span(
                 e, span, adds_recurrence=data.recurrence is not None
             )
-            _apply_event(s, e, data)
+            _apply_event(s, e, data, update=True)
             cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:
