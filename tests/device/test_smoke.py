@@ -6,8 +6,6 @@ skips: its AppleScript would open the app on the owner's screen.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 pytestmark = pytest.mark.device
@@ -36,16 +34,12 @@ READS = [
 ]
 
 
-def _running(app: str) -> bool:
-    """pgrep only: no TCC, no Apple Event."""
-    return subprocess.run(["pgrep", "-x", app], capture_output=True).returncode == 0
-
-
 @pytest.mark.parametrize(
     ("tool", "needs_app", "args"), READS, ids=[r[0] for r in READS]
 )
 def test_adapter_read_answers(guard, tool, needs_app, args):
-    if needs_app and not _running(needs_app):
+    # pgrep on the Mac that owns the daemon: no TCC, no Apple Event.
+    if needs_app and guard.on_device("pgrep", "-x", needs_app).returncode != 0:
         pytest.skip(f"{needs_app} is closed: this read would open the app")
     err, _data, text, secs = guard.run(tool, **args)
     assert not err, f"{tool} error secs={secs} {text[:200]}"

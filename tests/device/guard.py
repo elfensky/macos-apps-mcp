@@ -9,6 +9,7 @@ a tool. A refusal is an ``AssertionError`` raised BEFORE the call.
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -25,6 +26,8 @@ _EVENTKIT_ITEM = {"update_event", "delete_event", "update_reminder", "delete_rem
 _MOVES_TO = {"update_event": "calendar", "update_reminder": "list_name"}
 # Read tier, but they build an index file: no device test may start one.
 _INDEX_BUILDERS = {"mail_index_bodies", "mail_index_ids"}
+# BatchMode: a key logs in, or the call fails. It never waits for a password.
+SSH = ("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 
 
 @dataclass
@@ -115,14 +118,22 @@ def refusal(tool: str, args: dict, tier: str | None, owned: Owned) -> str | None
 class Guard:
     """One device-test session: the owned state plus the only door to the daemon."""
 
-    def __init__(self, socket: Path, marker: str, address: str | None) -> None:
+    def __init__(
+        self, socket: Path, marker: str, address: str | None, host: str | None = None
+    ) -> None:
         self.socket = socket
+        self.host = host  # an ssh destination, when another Mac owns the daemon
         self.owned = Owned(marker=marker, address=address)
         self._client: Client | None = None
 
     @property
     def marker(self) -> str:
         return self.owned.marker
+
+    def on_device(self, *command: str) -> subprocess.CompletedProcess[str]:
+        """Run ``command`` on the Mac that owns the daemon: here, or over SSH."""
+        argv = [*SSH, self.host, *command] if self.host else list(command)
+        return subprocess.run(argv, capture_output=True, text=True)
 
     @asynccontextmanager
     async def connect(self):

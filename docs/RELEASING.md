@@ -132,6 +132,17 @@ forward to `MACOS_APPS_TEST_ADDRESS`, so the daemon must list `send_mail`
 (`MACOS_APPS_ALLOW_SEND=mail`). It takes about 5 minutes: its cleanup waits 2 minutes for a
 Gmail put-back. Without the socket every device test skips.
 
+To test the daemon of another Mac, name that Mac as an ssh destination that logs in with a key:
+
+```sh
+MACOS_APPS_DEVICE_SSH=<user>@<other-mac>.local uv run pytest -m device
+```
+
+The suite then forwards that Mac's socket for the session, and it asks that Mac which apps
+run, so a read never opens a closed app there. `MACOS_APPS_DEVICE_SOCKET` then names the path
+on that Mac. The write tests use the test calendar, the test list and the Mail accounts of
+that Mac. The `ps` locale check skips: it reads this checkout on this Mac.
+
 Before notarization, run `xcrun notarytool history --keychain-profile notary` on the build Mac.
 The existing profile is named `notary`, not an account email. See [profile checks and recovery](DAEMON.md#notarization-profile).
 

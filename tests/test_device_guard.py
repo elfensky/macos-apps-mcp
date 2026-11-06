@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from macos_apps_mcp import registry
-from tests.device.guard import TEST_CONTAINER, Guard, Owned, refusal
+from tests.device.guard import SSH, TEST_CONTAINER, Guard, Owned, refusal
 
 ROOT = Path(__file__).resolve().parents[1]
 MARK = "macos-apps-mcp device 20261106-120000"
@@ -117,6 +117,16 @@ def test_guard_call_raises_before_reaching_a_client():
 
     with pytest.raises(AssertionError, match="delete_note"):
         asyncio.run(go())
+
+
+def test_on_device_uses_ssh_only_when_another_mac_owns_the_daemon(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        "tests.device.guard.subprocess.run", lambda argv, **_kw: seen.append(argv)
+    )
+    Guard(Path("/nonexistent.sock"), MARK, ME).on_device("pgrep", "-x", "Mail")
+    Guard(Path("/nonexistent.sock"), MARK, ME, "me@other").on_device("pgrep", "Mail")
+    assert seen == [["pgrep", "-x", "Mail"], [*SSH, "me@other", "pgrep", "Mail"]]
 
 
 def test_guard_tracks_created_and_changed_ids():
