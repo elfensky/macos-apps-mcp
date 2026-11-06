@@ -7,7 +7,7 @@ status: executing
 stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
 last_updated: "2026-11-06"
 last_activity: 2026-11-06
-last_activity_desc: "Codebase review of 2026-11-06: ten defects filed (#572 to #581) and added to Phase 05.12, before 05.10."
+last_activity_desc: "PR #584 merged: the ten review defects are fixed and device-tested, and a signed develop build is installed. #585 found on the device and added to Phase 05.12."
 state_head: 3e98de6
 progress:
   total_phases: 21
@@ -242,6 +242,7 @@ Recent decisions affecting current work:
 - Phase 05.6 edited: edited fields: title, goal, requirements (+#540 the state folder and its private files are readable by other local accounts, found at the 05.6 discuss session) (owner, 2026-11-01)
 - Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and two private advisories; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
 - Phase 05.12 scope extended: the ten defects of the 2026-11-06 codebase review join the phase (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581); the title names them and the phase folder keeps its slug (owner, 2026-11-06)
+- Phase 05.12 scope extended: #585 (each AppleScript Mail tool fails while Mail.app is closed) joins the phase under the bugs-before-features rule (2026-11-06)
 
 ## Deferred Items
 
