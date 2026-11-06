@@ -21,6 +21,10 @@ from macos_apps_mcp import daemon, registry
 
 TEST_CONTAINER = "macos-apps-mcp-test"  # the test calendar and the test reminder list
 _EVENTKIT_ITEM = {"update_event", "delete_event", "update_reminder", "delete_reminder"}
+# The container argument of an update: a named container moves the item there.
+_MOVES_TO = {"update_event": "calendar", "update_reminder": "list_name"}
+# Read tier, but they build an index file: no device test may start one.
+_INDEX_BUILDERS = {"mail_index_bodies", "mail_index_ids"}
 
 
 @dataclass
@@ -53,6 +57,10 @@ def _own_recipient(args: dict, owned: Owned) -> bool:
 def refusal(tool: str, args: dict, tier: str | None, owned: Owned) -> str | None:
     """The rule ``tool(**args)`` breaks, or ``None`` when the call is allowed."""
     if tier == "read":
+        if tool in _INDEX_BUILDERS:
+            return "an index builder writes a sidecar file"
+        if tool == "doctor" and args.get("request"):
+            return "doctor(request=True) opens permission prompts"
         return None
     if tool == "create_event":
         if args.get("calendar") in owned.containers and _titled(args, owned):
@@ -67,9 +75,12 @@ def refusal(tool: str, args: dict, tier: str | None, owned: Owned) -> str | None
             return None
         return f"only the list named {TEST_CONTAINER}"
     if tool in _EVENTKIT_ITEM:
-        if args.get("id") in owned.items:
+        moves_to = args.get(_MOVES_TO.get(tool, ""))
+        if args.get("id") in owned.items and (
+            moves_to is None or moves_to in owned.containers
+        ):
             return None
-        return "only an id that this session created"
+        return "only an id that this session created, and only into a test container"
     if tool == "send_mail":
         if (
             _own_recipient(args, owned)
