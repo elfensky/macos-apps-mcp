@@ -9,6 +9,7 @@ uv sync
 ```sh
 uv run pytest                 # unit tests — no macOS access needed; this is what CI runs
 uv run pytest -m integration  # real EventKit / TCC — this Mac only, grant access when prompted; NEVER in CI
+uv run pytest -m device       # the installed daemon over its socket — see docs/RELEASING.md; NEVER in CI
 ```
 
 ## Run the server

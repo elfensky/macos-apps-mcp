@@ -64,6 +64,7 @@ AppleScript count there (#291).
 uv sync
 uv run pytest                   # unit tests — mock at the adapter boundary (Protocol fakes)
 uv run pytest -m integration    # real macOS / EventKit / TCC — run manually, NEVER in CI
+uv run pytest -m device         # the INSTALLED daemon over its socket — run manually, NEVER in CI
 uv run ruff check .             # lint
 uv run ruff format .            # format
 uv run macos-apps-mcp            # run the server (stdio)

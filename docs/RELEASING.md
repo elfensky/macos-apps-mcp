@@ -116,6 +116,22 @@ doctor().build     # must report the sha you just built (#143) — version alone
 
 Judge that output. A successful build says nothing about which binary launchd is running.
 
+Then run the device suite against the installed daemon. It reaches the Mac only through the
+daemon's socket (`MACOS_APPS_DEVICE_SOCKET`, default `~/.local/state/macos-apps-mcp/daemon/mcp.sock`),
+and every call passes one guard that refuses a write to anything this run did not make:
+
+```sh
+uv run pytest -m device                                 # reads only
+MACOS_APPS_DEVICE_WRITES=1 MACOS_APPS_TEST_ADDRESS=<your own address> \
+  uv run pytest -m device                               # + Calendar, Reminders, one Mail flow
+```
+
+The write tests need one calendar named `macos-apps-mcp-test` (create it in Calendar.app). The
+reminder list of that name is created when absent. The Mail flow sends one mail and one
+forward to `MACOS_APPS_TEST_ADDRESS`, so the daemon must list `send_mail`
+(`MACOS_APPS_ALLOW_SEND=mail`). It takes about 5 minutes: its cleanup waits 2 minutes for a
+Gmail put-back. Without the socket every device test skips.
+
 Before notarization, run `xcrun notarytool history --keychain-profile notary` on the build Mac.
 The existing profile is named `notary`, not an account email. See [profile checks and recovery](DAEMON.md#notarization-profile).
 
@@ -142,3 +158,4 @@ not close a milestone just because a same-numbered release went out.
 - [ ] Build log shows `signed smoke ok: arm64` and `signed smoke ok: x86_64` — each signed slice loads the server and allocates a ctypes closure under the hardened runtime (#205)
 - [ ] Build log shows `universal2 gate ok` — every binary is arm64 + x86_64 and needs no newer macOS than `LSMinimumSystemVersion` (#205)
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha
+- [ ] `uv run pytest -m device` green on the installed daemon, reads and writes (see Deploying to the daemon)
