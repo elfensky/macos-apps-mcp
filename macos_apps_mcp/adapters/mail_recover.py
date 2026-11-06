@@ -53,6 +53,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import count
 from pathlib import Path
+from typing import NamedTuple
 
 from ..audit import (
     audit_write,
@@ -96,6 +97,25 @@ PERMANENT_OPS = frozenset()
 # would be a confidently wrong answer of exactly the kind this project refuses. Only
 # `locate` may stamp the other three.
 _FULL, _PARTIAL, _ABSENT, _UNKNOWN = "full", "partial", "absent", "unknown"
+
+# Did a target leave its source mailbox (#578)? The third answer is `_UNKNOWN`. This is
+# the fact undo reads, recorded as the done record's `left_source`; `status` stays
+# display text, which an ERROR with some copies moved cannot express.
+LEFT, STAYED = "left", "stayed"
+
+
+class Outcome(NamedTuple):
+    """An act's answer for one id whose status text does not say whether it left its
+    source: an ``ERROR … (1 of 2 copies moved)`` did. A plain status string reads as
+    ``ok`` -> left, ``unknown`` -> unknown, anything else -> stayed."""
+
+    status: str
+    left_source: str
+
+
+def _plain_left_source(status: str) -> str:
+    """The pre-#578 replay rule, as a ``left_source`` value for a plain status."""
+    return {"ok": LEFT, _UNKNOWN: _UNKNOWN}.get(status, STAYED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -531,7 +551,11 @@ def recoverable(
     except NativeTimeout as e:
         timeout_error = e
         statuses = {}
-    done = [replace(t, status=statuses.get(t.id, "unknown")) for t in located]
+    answers = {t.id: statuses.get(t.id, _UNKNOWN) for t in located}
+    for mid, a in answers.items():
+        if not isinstance(a, Outcome):
+            answers[mid] = Outcome(a, _plain_left_source(a))
+    done = [replace(t, status=answers[t.id].status) for t in located]
     audit_write(
         {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -540,6 +564,7 @@ def recoverable(
             "phase": "done",
             "receipt": receipt_id,
             "results": {t.id: t.status for t in done},
+            "left_source": {mid: a.left_source for mid, a in answers.items()},
         }
     )
     if timeout_error is not None:
@@ -617,6 +642,17 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
     return plan, outcomes
 
 
+def _left_sources(receipt_id: str) -> dict[str, str] | None:
+    """The done record's ``left_source`` map (#578), or None for a receipt written
+    before it existed (or with no done record): the caller then keeps the old rule.
+    Reads the same window as ``find_receipt``, which returns ``results`` only."""
+    rid = receipt_id.strip()
+    for rec in audit_read(limit=_RECEIPT_SCAN):
+        if rec.get("receipt") == rid and rec.get("phase") == "done":
+            return rec.get("left_source")
+    return None
+
+
 def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
     """``(record, targets)`` for replaying a receipt in reverse: each target keeps the
     SOURCE folder it came from, and the record's ``destination`` says where the batch
@@ -624,6 +660,7 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
     replayed, and the honest answer points at the preserved bytes instead of pretending
     otherwise."""
     rec, outcomes = find_receipt(receipt_id)
+    left = _left_sources(receipt_id)
     destination = rec.get("destination")
     if not destination:
         where = rec.get("backup_dir") or "(no backup was taken)"
@@ -648,8 +685,13 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
         # back would report a fake success. A missing key (the process died before any
         # done record existed) and an explicit `unknown` (D-06's timeout record, or an
         # id the act did not answer for) share one reading: "we do not know", and the
-        # conservative reading of "we do not know" is that it moved.
-        if outcomes.get(t["id"], "ok") in ("ok", "unknown")
+        # conservative reading of "we do not know" is that it moved. A receipt with
+        # `left_source` (#578) answers from that instead: a partial move left.
+        if (
+            left.get(t["id"], _UNKNOWN) != STAYED
+            if left is not None
+            else outcomes.get(t["id"], "ok") in ("ok", "unknown")
+        )
     ]
     if not targets:
         raise NativeError(

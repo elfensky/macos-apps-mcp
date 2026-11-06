@@ -1690,7 +1690,7 @@ class MailAdapter:
             # Message-ID below.
             statuses = _parse_statuses(raw)
             after = _counts(dst)
-            result: dict[str, str] = {}
+            result: dict[str, str | mail_recover.Outcome] = {}
             for mid in ids:
                 copy_ids = copies.get(mid, [])
                 if not copy_ids:
@@ -1701,9 +1701,10 @@ class MailAdapter:
                     result[mid] = (
                         "ok"
                         if after[mid] > before[mid]
-                        else (
+                        else mail_recover.Outcome(  # every copy left (#578)
                             "ERROR move returned cleanly but the message is not "
-                            "in the destination"
+                            "in the destination",
+                            mail_recover.LEFT,
                         )
                     )
                 elif all(o == "not-in-source" for o in outcomes):
@@ -1714,7 +1715,11 @@ class MailAdapter:
                     moved_n = sum(1 for o in outcomes if o == "moved")
                     if errors:
                         result[mid] = (
-                            f"{errors[0]} ({moved_n} of {len(outcomes)} copies moved)"
+                            mail_recover.Outcome(
+                                f"{errors[0]} ({moved_n} of {len(outcomes)} "
+                                "copies moved)",
+                                mail_recover.LEFT,
+                            )
                             if moved_n > 0
                             else errors[0]
                         )
@@ -1825,7 +1830,7 @@ class MailAdapter:
             # Message-ID below.
             statuses = _parse_statuses(raw)
             after = _counts(dst)
-            result: dict[str, str] = {}
+            result: dict[str, str | mail_recover.Outcome] = {}
             for mid in ids:
                 copy_ids = copies.get(mid, [])
                 if not copy_ids:
@@ -1851,7 +1856,11 @@ class MailAdapter:
                     acted_n = sum(1 for o in outcomes if o in ("deleted", "gone"))
                     if errors:
                         result[mid] = (
-                            f"{errors[0]} ({acted_n} of {len(outcomes)} copies deleted)"
+                            mail_recover.Outcome(
+                                f"{errors[0]} ({acted_n} of {len(outcomes)} "
+                                "copies deleted)",
+                                mail_recover.LEFT,
+                            )
                             if acted_n > 0
                             else errors[0]
                         )
@@ -1981,9 +1990,16 @@ class MailAdapter:
                 )
             )
             # "ok 3" carries how many copies went to Trash; the plane's success test is
-            # the bare "ok", so normalise while keeping the count in the log line.
+            # the bare "ok", so normalise while keeping the count in the log line. Too
+            # many survivors means some losers may already be in Trash (#578).
             return {
-                mid: ("ok" if status.startswith("ok") else status)
+                mid: (
+                    "ok"
+                    if status.startswith("ok")
+                    else mail_recover.Outcome(status, "unknown")
+                    if status.startswith("ERROR expected 1 copy to survive")
+                    else status
+                )
                 for mid, status in statuses.items()
             }
 
