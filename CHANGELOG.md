@@ -37,6 +37,31 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **A send that times out no longer tells the agent to retry** (#573) — `send_mail`, the
+  stored-draft send and `forward_mail` now report that the message may have been sent, and ask
+  for a check of Mail's Outbox and Sent before any retry. A retry after a timeout could send the
+  same mail twice. The two `send_mail` paths now wait 120 seconds, the script's own limit,
+  instead of 30.
+- **`doctor()` reports the code that is running, not the files on disk** (#574) — the version,
+  the build and the bundled library versions are read once at process start. A daemon that was
+  not restarted after an upgrade no longer reports the new build.
+- **`mail_undo` finds receipts after the audit log rotates** (#575) — `audit`, `usage`,
+  `mail_undo` and the dashboard now read `audit.jsonl.1` and `audit.jsonl`. Before, a rotation
+  at 5 MB hid every earlier receipt from `mail_undo`. A recoverable Mail operation now also
+  refuses before it moves anything when its recovery record cannot be written.
+- **`messages_search` finds messages whose text is only in `attributedBody`** (#576) — the
+  search matched the raw blob, which SQLite `LIKE` reads only up to the first NUL byte, so
+  modern iMessages never matched. Search and the list snippets now use the decoded body.
+- **A failure in one cross-account dedupe batch no longer skips the keeper check** (#577) —
+  after a timeout, another native error or a refused argument,
+  `dedupe-mail --cross-account --execute` stops, prints the error with its receipt, still proves
+  that every keeper copy is present, and exits with status 2.
+- **`mail_undo` restores a message that moved only in part** (#578) — when some copies of a
+  duplicated Message-ID moved and others did not, the receipt records that the target left its
+  source, so undo moves it back instead of skipping it. Older receipts keep the old rule.
+- **`doctor` sees running apps in a comma-decimal locale** (#580) — `ps` now runs with
+  `LC_ALL=C`. A `0,0` or `0٫0` value no longer turns a running app into "not running", and
+  timeouts keep their busy-or-wedged hint.
 - **Replies keep Mail's own quote** (#348) — `mail_reply` and `reply_all` let Mail build its
   normal reply and put your text on top through Accessibility, so the quote bar, Mail's
   attribution line, formatting, inline images and the whole original stay, and a sent reply's
