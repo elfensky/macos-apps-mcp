@@ -37,6 +37,14 @@ surface may still shift between minor versions.
 
 ### Fixed
 
+- **An update without `calendar` or `list_name` keeps the item where it is** (#572) —
+  `update_event` and `update_reminder` no longer move an event or a reminder to the default
+  calendar or list when the container is omitted. Every other field is still a full replace: an
+  omitted `notes`, `location`, `priority`, `due` or `start` still clears.
+- **`update_event(recurrence='none')` no longer reports success on a series** (#579) — on a
+  repeating event it is refused and changes nothing, and the error names
+  `delete_event(span='future-events')` as the way to end the series. On a single event `'none'`
+  is a harmless no-op.
 - **A send that times out no longer tells the agent to retry** (#573) — `send_mail`, the
   stored-draft send and `forward_mail` now report that the message may have been sent, and ask
   for a check of Mail's Outbox and Sent before any retry. A retry after a timeout could send the
