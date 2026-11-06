@@ -87,26 +87,6 @@ def _guard(fn):
     return wrapper
 
 
-# MCP tool annotations (#57) — a host (Claude Code's permission system) gates
-# safari_tabs differently from delete_event. Read-only comes straight from the
-# read/write seam. The destructive/additive split is the ONE per-tool judgment
-# (maintainer call): a write that only ADDS a new item (create_*, safari_open opens a
-# fresh tab) is additive; one that modifies/overwrites/deletes existing state — or runs
-# arbitrary automation (run_shortcut) — is destructive. ping/now read; doctor reads.
-_READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
-_ADDITIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": False}
-_DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
-
-# Outbound leaves this machine — a sent mail cannot be recalled by any tool here.
-# MCP's openWorldHint is exactly that signal ("interacts with external entities"), so a
-# host can gate send_mail differently from delete_event, which is destructive but purely
-# local.
-_SEND_ANNOTATIONS = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "openWorldHint": True,
-}
-
 # The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
 # that is genuinely byte-identical across every mail send tool (the folder-VERBATIM /
 # FDA / truncated wordings are hand-tuned per tool and stay in place). Composed into

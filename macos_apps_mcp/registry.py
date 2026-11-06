@@ -26,6 +26,16 @@ from .contracts import Snapshotter
 
 Tier = Literal["read", "additive", "destructive", "send"]
 
+# MCP tool annotations (#57) — a host (Claude Code's permission system) gates
+# safari_tabs differently from delete_event. Read-only comes straight from the
+# read/write seam. The destructive/additive split is the ONE per-tool judgment
+# (maintainer call): a write that only ADDS a new item (create_*, safari_open opens a
+# fresh tab) is additive; one that modifies/overwrites/deletes existing state — or runs
+# arbitrary automation (run_shortcut) — is destructive. ping/now read; doctor reads.
+# Outbound leaves this machine — a sent mail cannot be recalled by any tool here.
+# MCP's openWorldHint is exactly that signal ("interacts with external entities"), so a
+# host can gate send_mail differently from delete_event, which is destructive but purely
+# local.
 _ANNOTATIONS: dict[str, dict[str, bool]] = {
     "read": {"readOnlyHint": True, "destructiveHint": False},
     "additive": {"readOnlyHint": False, "destructiveHint": False},
