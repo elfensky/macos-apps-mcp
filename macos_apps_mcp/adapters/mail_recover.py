@@ -645,9 +645,10 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
 def _left_sources(receipt_id: str) -> dict[str, str] | None:
     """The done record's ``left_source`` map (#578), or None for a receipt written
     before it existed (or with no done record): the caller then keeps the old rule.
-    Reads the same window as ``find_receipt``, which returns ``results`` only."""
+    Reads both retained audit files, like ``find_receipt``, which returns ``results``
+    only."""
     rid = receipt_id.strip()
-    for rec in audit_read(limit=_RECEIPT_SCAN):
+    for rec in reversed(read_all()):  # newest first
         if rec.get("receipt") == rid and rec.get("phase") == "done":
             return rec.get("left_source")
     return None

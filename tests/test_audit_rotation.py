@@ -81,3 +81,26 @@ def test_a_failed_plan_write_stops_before_act(tmp_path, monkeypatch):
             backup=False,
         )
     assert ran == []
+
+
+def test_undo_reads_left_source_from_the_rotated_file():
+    # #575 with #578: the done record, with its left_source map, is in the rotated file
+    plan = {
+        "tool": "mail_recover",
+        "phase": "plan",
+        "receipt": "r2",
+        "op": "move",
+        "destination": f"imap://{ACCT}/Archive",
+        "targets": [{"id": "a", "folder": BOX}, {"id": "b", "folder": BOX}],
+    }
+    done = {
+        "tool": "mail_recover",
+        "phase": "done",
+        "receipt": "r2",
+        "results": {"a": "ERROR x (1 of 2 copies moved)", "b": "not-in-source"},
+        "left_source": {"a": "left", "b": "stayed"},
+    }
+    _write("audit.jsonl.1", [plan, done])
+    _write("audit.jsonl", [{"tool": "other"}])
+    _rec, targets = mail_recover.undo_plan("r2")
+    assert [t.id for t in targets] == ["a"]
