@@ -227,25 +227,35 @@ def _decode_attributed_body(blob: bytes | None) -> str | None:
 
 # Real messages only: item_type=0 (not a group action), not an audio message, and
 # associated_message_type=0 (exclude tapbacks/reactions/stickers, which are message rows
-# too and would otherwise flood a LIMIT). Search matches `text` OR the `attributedBody`
-# blob bytes — modern iMessages keep the body in attributedBody with text NULL, so a
-# a text-only search silently under-reports (full decode is a fast-follow).
+# too and would otherwise flood a LIMIT).
 _MSG_FILTER = (
     "m.item_type = 0 AND m.is_audio_message = 0 AND m.associated_message_type = 0"
 )
 
+# The ONE owner of "the text of a message" in SQL (#576): `text`, else the decoded
+# attributedBody — modern iMessages keep the body there with text NULL. A raw-blob LIKE
+# never matches: LIKE reads a BLOB only up to its first NUL, which precedes the text.
+# COALESCE is lazy, so the Python decoder runs only for rows with no `text`.
+_BODY_EXPR = "COALESCE(NULLIF(m.text, ''), decode_body(m.attributedBody))"
+
+
+def _register_decoder(conn) -> None:
+    """read_via_sqlite ``setup`` hook: expose the typedstream decoder to SQL."""
+    conn.create_function("decode_body", 1, _decode_attributed_body, deterministic=True)
+
+
 _SEARCH_SQL = f"""
-    SELECT m.guid, m.text, m.date, m.is_from_me, h.id
+    SELECT m.guid, {_BODY_EXPR}, m.date, m.is_from_me, h.id
     FROM message m
     LEFT JOIN handle h ON m.handle_id = h.ROWID
     WHERE {_MSG_FILTER}
-      AND (m.text LIKE ? ESCAPE '\\' OR m.attributedBody LIKE ? ESCAPE '\\')
+      AND {_BODY_EXPR} LIKE ? ESCAPE '\\'
     ORDER BY m.date DESC
     LIMIT ?
 """
 
 _WITH_SQL = f"""
-    SELECT m.guid, m.text, m.date, m.is_from_me, h.id
+    SELECT m.guid, {_BODY_EXPR}, m.date, m.is_from_me, h.id
     FROM message m
     JOIN handle h ON m.handle_id = h.ROWID
     WHERE h.id IN ({{placeholders}}) AND {_MSG_FILTER}
@@ -295,21 +305,20 @@ class MessagesAdapter:
     def search_messages(self, query: str, limit: int = MAX_MESSAGES) -> list[Pointer]:
         """Search message content (chat.db, read-only), newest first. Snippet Pointers.
 
-        Matches both ``message.text`` and the ``attributedBody`` blob — modern iMessages
-        store the body in attributedBody with text NULL, so a text-only search would
-        silently miss them. The snippet is still ``text`` (placeholder when NULL) until
-        the get-by-id body decoder (fast-follow) lands. Missing Full Disk Access → a
-        typed FDA error (no content fallback exists)."""
+        Matches ``message.text``, else the decoded ``attributedBody`` — modern iMessages
+        store the body there with text NULL, so a text-only search would silently miss
+        them. The snippet uses the same text. Missing Full Disk Access → a typed FDA
+        error (no content fallback exists)."""
         q = query.strip()
         if not q:
             raise ValueError("messages_search needs a search term (got an empty query)")
         like = f"%{_escape_like(q)}%"
 
         def read(conn):
-            rows = conn.execute(_SEARCH_SQL, (like, like, _clamp(limit))).fetchall()
+            rows = conn.execute(_SEARCH_SQL, (like, _clamp(limit))).fetchall()
             return [_message_pointer(r) for r in rows]
 
-        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read)  # no fallback → FDA raises
+        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read, setup=_register_decoder)
 
     def messages_with(
         self, address: str, country: str | None = None, limit: int = MAX_MESSAGES
@@ -332,7 +341,7 @@ class MessagesAdapter:
             rows = conn.execute(sql, (*variants, _clamp(limit))).fetchall()
             return [_message_pointer(r) for r in rows]
 
-        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read)  # no fallback → FDA raises
+        return read_via_sqlite(CHAT_DB, _FINGERPRINT, read, setup=_register_decoder)
 
     def message_body(self, guid: str) -> str:
         """Full text of ONE message by id (chat.db, read-only), hygiene-budgeted.
