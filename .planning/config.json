@@ -88,5 +88,12 @@
     "source_grounding_authority": "grep"
   },
   "mode": "interactive",
-  "granularity": "standard"
+  "granularity": "standard",
+  "models": {
+    "planning": "opus",
+    "discuss": "opus",
+    "research": "opus",
+    "execution": "opus",
+    "verification": "opus"
+  }
 }
