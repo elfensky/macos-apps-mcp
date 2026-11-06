@@ -52,6 +52,7 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [ ] **FIX-16**: A `mail_reply` or `reply_all` reply keeps Mail's native quote — quote bar, Mail's own attribution line, formatting and inline images, the whole original — with the reply text ahead of it. The plain-text `> ` quote failed the owner's look test on device (2026-10-27) and is removed. A device probe settles the route, and its finding lands in `docs/mail-applescript-facts.md`: (a) first, Mail's untouched native reply with the reply text pasted on top through the Accessibility API, never a write to the reply's `content` (every such write destroys the native quote, facts §4d); (b) only if (a) fails, a self-built styled HTML quote opened as the draft. When the proven route cannot run — its permission is off, the compose window is not the one the tool opened, or the reply text cannot be confirmed in place — the tool refuses, leaves no draft and sends nothing, and the error names the setting to change (owner, 2026-10-27). `doctor()` and the Health page report any new permission the route needs. Verified on device by inspecting the resulting draft and one delivered `reply_all`, with the Mail watchdog running (#348)
 - [ ] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
 - [ ] **FIX-18**: `reply_all(dry_run=True)` previews the reply's own recipients, not the original's header: `to` is the original's sender (its Reply-To when present), `cc` is the original's to + cc, minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15), without duplicates — the set Mail's reply-all addresses; the original's header, if still returned, sits under a separate key; the dry run still builds no outgoing message; a unit test with an original addressed to the account itself pins it (#516)
+- [ ] **FIX-26**: When the paste check of `mail_reply` or `reply_all` fails because the clipboard changed during the call, the refusal says that the clipboard changed and asks the user not to copy while a reply runs. Nothing is sent and no draft stays. Verified on device with the reply route of FIX-16 (#589)
 
 ### Remaining bugs — Phase 05.6
 
@@ -72,7 +73,7 @@ A merged implementation does not complete a requirement that still needs its rec
 
 ### MCP migration — Phase 05.4
 
-- [ ] **MIG-01**: MCP 2 and FastMCP 4 use public transport APIs while preserving capability gates, audit identity, protocol eras, notices and streamed notifications. Interrupted tools receive an uncertain-outcome warning without replay. The local hop has no read deadline. Transport regressions and both bundle slices pass. Installed-daemon, native, physical Intel and signed-release checks complete the migration (#470).
+- [x] **MIG-01**: MCP 2 and FastMCP 4 use public transport APIs while preserving capability gates, audit identity, protocol eras, notices and streamed notifications. Interrupted tools receive an uncertain-outcome warning without replay. The local hop has no read deadline. Transport regressions and both bundle slices pass. Installed-daemon, native, physical Intel and signed, notarized build checks complete the migration (#470). The public release follows the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 ### Calendar
 
@@ -237,6 +238,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-16 | Phase 05.2 | Pending |
 | FIX-17 | Phase 05.2 | Pending |
 | FIX-18 | Phase 05.2 | Pending |
+| FIX-26 | Phase 05.2 | Pending |
 | FIX-19 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-20 | Phase 05.6 | Implementation merged (#554); device acceptance and timing pending |
 | FIX-21 | Phase 05.6 | Implemented (#557); dated snapshot passed on macOS 27; denial/in-flight device cases pending |
@@ -244,7 +246,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-23 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-24 | Phase 05.6 | Implemented (#552); installed arm64 state/socket and fresh Mail backup modes passed |
 | FIX-25 | Phase 05.6 | Reviewed draft #559; both physical inventories complete; localized write acceptance pending before merge |
-| MIG-01 | Phase 05.4 | Implemented (#550, #561); signed arm64 Mail recovery and a >5s call passed; notarization, physical Intel installation and bounded reads passed; remaining native/frontend acceptance and release pending |
+| MIG-01 | Phase 05.4 | Complete (2026-11-06): #550, #561; signed and notarized builds on arm64 and physical Intel; installed device suite and real-frontend restart and outage passed |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
@@ -254,11 +256,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 68 total
-- Mapped to phases: 68
+- v1 requirements: 69 total
+- Mapped to phases: 69
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 5 · Phase 05.6: 7 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 

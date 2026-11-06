@@ -4,14 +4,14 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
+stopped_at: "Phase 05.4 (MCP 2 and FastMCP 4) is complete and verified. Next: the Phase 05.2 reply re-test with the owner, then release 0.16.0."
 last_updated: "2026-11-06"
 last_activity: 2026-11-06
-last_activity_desc: "PR #584 merged: the ten review defects are fixed and device-tested, and a signed develop build is installed. #585 found on the device and added to Phase 05.12."
+last_activity_desc: "Phase 05.4 closed: the device read suite and a real-frontend restart and outage passed on build 3dd93b2. #589 (clipboard refusal text) joins Phase 05.2 as FIX-26."
 state_head: 3e98de6
 progress:
   total_phases: 21
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 94
   completed_plans: 93
 ---
@@ -28,16 +28,16 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 ## Current Position
 
 Phase: 05.6 — probe-independent bug fixes.
-Plans: 05.4-01/02 and 05.6-01/02/03/04 are merged after review and green CI.
+Plans: 05.6-01/02/03/04 are merged after review and green CI. Phase 05.4 is complete (2026-11-06).
 Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
-Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. Remaining native/frontend acceptance and release stay open.
+Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. On build 3dd93b2, the read-only device suite passed (19 passed, 0 failed), and a real frontend survived a daemon restart and an outage ([05.4 UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)).
 Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
-The original November 1 incident remains unproved. Normal installed-shim restart recovery passed; controlled absence, real frontend acceptance, and clipboard observation keep #543 open.
+The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 (FIX-26) in Phase 05.2.
 [Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: 93 of 94 recorded plans have completion summaries. The roadmap records nine historical phase closures.
+Progress: 93 of 94 recorded plans have completion summaries. The roadmap records ten phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -99,6 +99,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.2]: Orchestrator decision 2026-11-01 (unattended, owner may veto): the reply-all preview keeps subtracting the account that HOLDS the original as the proxy for the sending account — the dry run builds no reply, so Mail's own pick cannot be read; known limit: an original addressed to another account's alias can preview that alias in cc (FIX-18 text clarified).
 - [Roadmap]: Grill session 2026-11-01 (owner, nine answers; decision page `.planning/reports/2026-11-01-phase-plan-grill.html`): plans are written one phase at a time, right before each runs; 05.6 runs in its own lane while 05.2-13 waits for the acceptance sitting; the testers get the brief after 05.10 and 05.3 cut 1 (release 0.18.0), so 05.3 sits right after 05.10; the paged reads (#508) are additive and become Phase 05.11 after 05.3; a release is cut at every phase close that changes the daemon; the rename is 0.17.0 and 1.0.0 is the launch release; one `instructions` builder, started by 05.3 cut 2 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (DIST-04); #521 joins 05.6.
 - [Phase 05.6]: Owner decisions 2026-11-01 (discuss, assumptions mode): Mail's Trash, Sent, Junk and Archive are found by translated names in `mailbox_url.py`, not by the private `.mboxCache.plist` role bits; `update_note` backups are kept like Mail backups (until deleted by hand, `0600`/`0700`), which bounds Phase 4 D-13 to the search index; the state folder permissions bug is #540, folded into 05.6. The 05.6 release waits until 05.2 has closed and shipped its own release (05.6-CONTEXT.md D-27).
+- [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -243,6 +244,8 @@ Recent decisions affecting current work:
 - Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and two private advisories; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
 - Phase 05.12 scope extended: the ten defects of the 2026-11-06 codebase review join the phase (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581); the title names them and the phase folder keeps its slug (owner, 2026-11-06)
 - Phase 05.12 scope extended: #585 (each AppleScript Mail tool fails while Mail.app is closed) joins the phase under the bugs-before-features rule (2026-11-06)
+- Phase 05.4 completed: verification passed; the device read suite and a real-frontend restart and outage passed on build 3dd93b2 (2026-11-06)
+- Phase 05.2 scope extended: #589 (the clipboard refusal text, from #543) joins the phase as FIX-26 (owner, 2026-11-06)
 
 ## Deferred Items
 
@@ -254,6 +257,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-04
-Stopped at: Discovery-error follow-up #561 merged as 4397787. Garage publication is complete; its live footer identifies the displayed source. PR #559 retains its localized write acceptance checks; both physical folder inventories are complete. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
-Resume file: .planning/overnight/2026-11-04-notarization-intel-acceptance.md
+Last session: 2026-11-06
+Stopped at: Phase 05.4 is complete and verified. Next: the Phase 05.2 reply re-test with the owner (the 45-second Drafts check, the clipboard check, #589), then release 0.16.0. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
+Resume file: .planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md
