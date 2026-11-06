@@ -815,14 +815,14 @@ def test_automation_permission_real_is_non_prompting():
 def test_build_stamp_reports_dev_without_a_stamp_file(tmp_path, monkeypatch):
     # a dev checkout (and any bundle whose build script predates #143) has no stamp
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", tmp_path / "build_stamp")
-    assert doc.build_stamp() == "dev"
+    assert doc._read_build_stamp() == "dev"
 
 
 def test_build_stamp_reads_the_baked_file(tmp_path, monkeypatch):
     stamp = tmp_path / "build_stamp"
     stamp.write_text("b7fbde6 2026-08-20T10:00:00Z\n")
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", stamp)
-    assert doc.build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
+    assert doc._read_build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
 
 
 def test_report_carries_the_build_stamp(monkeypatch):
