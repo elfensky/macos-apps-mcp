@@ -46,6 +46,8 @@ ALLOWED = [
     ("create_reminder", {"title": MARK + " x", "list_name": "cal-test"}),
     ("create_reminder_list", {"name": TEST_CONTAINER}),
     ("update_event", {"id": "ev-mine"}),
+    ("update_event", {"id": "ev-mine", "calendar": "cal-test"}),
+    ("doctor", {"request": False}),
     ("delete_reminder", {"id": "ev-mine", "dry_run": False}),
     ("send_mail", {"to": ME, "subject": MARK, "body": "b", "from_address": ME}),
     ("forward_mail", {"message_id": "<sent@x>", "mailbox": "m", "to": ME}),
@@ -59,6 +61,13 @@ REFUSED = [
     ("create_event", {"title": "lunch", "calendar": "cal-test"}),
     ("create_reminder_list", {"name": "Groceries"}),
     ("update_event", {"id": "ev-not-mine"}),
+    # an owned item must not move into a real calendar or list
+    ("update_event", {"id": "ev-mine", "calendar": "cal-family"}),
+    ("update_reminder", {"id": "ev-mine", "list_name": "Groceries"}),
+    # read tier, but with a side effect
+    ("doctor", {"request": True}),
+    ("mail_index_bodies", {}),
+    ("mail_index_ids", {}),
     ("delete_event", {"id": "ev-not-mine"}),
     ("update_reminder", {"id": "ev-not-mine"}),
     ("send_mail", {"to": "other@example.invalid", "subject": MARK}),
