@@ -715,8 +715,10 @@ class CalendarEventData:
     all_day: bool = False
     # repeat rule; None leaves an existing series rule untouched (unlike the reminder
     # case, an event can't be safely un-recurred through the occurrence-edit path —
-    # delete the series instead). See calendar._apply_event.
-    recurrence: Recurrence | None = None
+    # delete the series instead). See calendar._apply_event. CLEAR_RECURRENCE
+    # ('none' on update_event) is refused on a repeating event and is None on a
+    # single one — calendar.update_event resolves it before anything reads it (#579).
+    recurrence: Recurrence | _ClearRecurrence | None = None
     # alarms, as minutes BEFORE the start (the Google Calendar API convention). None =
     # leave the event's alarms untouched, () = clear them, (15, 60) = exactly those.
     alarms: tuple[int, ...] | None = None

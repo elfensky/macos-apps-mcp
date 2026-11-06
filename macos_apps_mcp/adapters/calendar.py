@@ -20,6 +20,7 @@ else:
     EK = None
 
 from ..contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     Pointer,
     deletion_result,
@@ -507,8 +508,20 @@ class CalendarAdapter:
         self, ident: str, data: CalendarEventData, span: Span | None = None
     ) -> Pointer:
         def work():
+            nonlocal data
             s = store()
             e = _resolve_event(s, ident)
+            # 'none' (#579): EventKit cannot stop a series through an occurrence
+            # edit, so refuse before any setter; a single event already has no rule.
+            if data.recurrence is CLEAR_RECURRENCE:
+                if e.recurrenceRules():
+                    raise SpanRequired(
+                        "update_event cannot stop a repeating event, so "
+                        "recurrence='none' is refused. To end the series, call "
+                        "delete_event with span='future-events': it deletes this "
+                        "occurrence and all later ones. No change was made."
+                    )
+                data = replace(data, recurrence=None)
             # Resolve span BEFORE saving: a recurring target with no span raises here,
             # so no write happens (#51). Checks the ORIGINAL event's rules, so a
             # single→recurring conversion is series-defining, not ambiguous.
