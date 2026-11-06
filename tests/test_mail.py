@@ -455,7 +455,7 @@ def test_send_dry_run_preview_matches_argv_recipient_set(monkeypatch):
     # (the preview showing ONE recipient while the wire actually carries TWO).
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         # a real send now makes TWO calls: _SEND, then the outbox truth-check
         # (_OUTBOX_COUNT). Dispatch on script identity so the outbox call (whose
         # argv is empty) can't clobber the _SEND argv this test cares about.
@@ -527,7 +527,7 @@ def test_send_dry_run_reports_default_account_when_from_omitted(monkeypatch):
 def test_send_passes_addresses_via_argv_us_joined(monkeypatch):
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         # a real send now dispatches THREE scripts: the ownership read
         # (mail_addressing._MY_ADDRESSES, #208/D-09), _SEND, then _OUTBOX_COUNT
         # (#134's outbox truth-check) — recorded separately so asserting the _SEND
@@ -618,7 +618,7 @@ def test_send_still_reports_sent_when_outbox_count_fails(monkeypatch):
     # end-to-end guard: the NativeError from the outbox read must not escape send().
     from macos_apps_mcp.errors import NativeError
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         if script is mail_outgoing._SEND:
             return "sent"
         raise NativeError("timeout counting outbox")

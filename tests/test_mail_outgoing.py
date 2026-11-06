@@ -158,7 +158,7 @@ def test_draft_send_uses_the_drafts_own_bytes_and_removes_the_source(monkeypatch
         def __exit__(self, *a):
             return False
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_outgoing._DRAFT_ENVELOPE:
             return _draft_payload()
@@ -200,7 +200,7 @@ def test_draft_cleanup_failure_never_turns_a_completed_send_into_an_error(monkey
         def __exit__(self, *a):
             return False
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         if script is mail_outgoing._DRAFT_ENVELOPE:
             return _draft_payload()
         if script is mail_outgoing._OUTBOX_COUNT:
@@ -323,7 +323,7 @@ def test_send_passes_mails_spelling_for_an_owned_from_address(monkeypatch, typed
     which returns ('', '') on that shape)."""
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_addressing._MY_ADDRESSES:
             return _owned("Me@Corp.com", "other@corp.com")
@@ -415,7 +415,7 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
     """A blank from_address means omitted: no ownership read, argv item 4 is empty."""
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_addressing._MY_ADDRESSES:
             raise AssertionError(
