@@ -377,12 +377,7 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
-def version(dist: str = "macos-apps-mcp") -> str:
-    """The version of the code actually SERVING this call. The daemon is a separate
-    long-lived process from the repo you edit — it sat three releases behind for weeks
-    with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
-    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
-    reads it too (#430 IN-02): one lookup, one fallback."""
+def _read_version(dist: str) -> str:
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as dist_version
 
@@ -392,8 +387,34 @@ def version(dist: str = "macos-apps-mcp") -> str:
         return "unknown"
 
 
+# #574: read once at import (process start). A bundle replaced on disk under a daemon
+# that was not restarted must not change what the running code reports.
+_SERVING_VERSIONS = {d: _read_version(d) for d in ("macos-apps-mcp", "mcp", "fastmcp")}
+
+
+def version(dist: str = "macos-apps-mcp") -> str:
+    """The version of the code actually SERVING this call. The daemon is a separate
+    long-lived process from the repo you edit — it sat three releases behind for weeks
+    with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
+    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
+    reads it too (#430 IN-02): one lookup, one fallback."""
+    if dist in _SERVING_VERSIONS:
+        return _SERVING_VERSIONS[dist]
+    return _read_version(dist)
+
+
 # Baked into the installed package by scripts/build_app.sh — absent in a dev checkout.
 _BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
+
+
+def _read_build_stamp() -> str:
+    try:
+        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+_SERVING_BUILD = _read_build_stamp()  # #574: read once at import, like the versions
 
 
 def build_stamp() -> str:
@@ -401,10 +422,7 @@ def build_stamp() -> str:
     same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
     `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
     has no stamp file and honestly reports "dev"."""
-    try:
-        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
-    except OSError:
-        return "dev"
+    return _SERVING_BUILD
 
 
 def _outbound_state() -> dict[str, list[str]]:
