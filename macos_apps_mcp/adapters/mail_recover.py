@@ -54,8 +54,14 @@ from datetime import datetime
 from itertools import count
 from pathlib import Path
 
-from ..audit import audit_read, audit_write, private_directory, state_dir, state_path
-from ..errors import BatchTooLarge, NativeError, NativeTimeout
+from ..audit import (
+    audit_write,
+    private_directory,
+    read_all,
+    state_dir,
+    state_path,
+)
+from ..errors import BatchTooLarge, NativeError, NativeTimeout, WriteRefused
 from . import mail_addressing, mail_index
 
 # Hard cap on one destructive batch, rejected BEFORE any native call. Inbox-zero needs
@@ -502,7 +508,14 @@ def recoverable(
     }
     # Logged BEFORE acting, deliberately: if the process dies mid-act, the log still
     # holds every source mailbox undo needs. The outcome record below completes it.
-    audit_write(plan)
+    if not audit_write(plan):
+        # The receipt is the only automated undo: never act on a batch it does not hold.
+        raise WriteRefused(
+            f"the recovery record for this {op} could not be written to the audit "
+            "log, so nothing was moved: without it mail_undo cannot replay the batch. "
+            "Check that the macos-apps-mcp state folder is writable and the disk is "
+            "not full, then run the same batch again."
+        )
     # D-06: osascript can be killed mid-batch (host-side NativeTimeout). Only that
     # class is caught here — AutomationDenied/AppNotRunning act on nothing, so the
     # plan-only record above is already the honest state, and they propagate
@@ -566,13 +579,6 @@ def recoverable(
     return out
 
 
-# How many audit lines back ``find_receipt`` looks. A receipt is undone within minutes
-# of being minted in every workflow this serves, and the log is append-only with two
-# lines per destructive op — 2000 covers far more history than that while keeping the
-# read bounded.
-_RECEIPT_SCAN = 2000
-
-
 def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
     """``(plan record, per-id outcomes)`` for ``receipt_id``.
 
@@ -586,13 +592,16 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
     writes an explicit done record with every target ``unknown`` before re-raising, so
     that case is never silent — ``outcomes`` comes back populated, not ``{}``.
 
-    Raises when the plan is not in the recent log, naming the reason rather than
+    Both retained audit files are read (#575): a rotation between the plan and the
+    done record, or before the undo, must not lose the receipt.
+
+    Raises when the plan is not in the log, naming the reason rather than
     answering an empty batch: an unresolvable receipt is exactly the thing a caller must
     be told about."""
     rid = receipt_id.strip()
     plan = None
     outcomes: dict[str, str] = {}
-    for rec in audit_read(limit=_RECEIPT_SCAN):
+    for rec in reversed(read_all()):  # newest first
         if rec.get("receipt") != rid:
             continue
         if rec.get("phase") == "plan" and plan is None:
@@ -601,7 +610,7 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
             outcomes = rec.get("results") or {}
     if plan is None:
         raise NativeError(
-            f"no recoverable-mail receipt {rid!r} in the recent audit log — check the "
+            f"no recoverable-mail receipt {rid!r} in the audit log — check the "
             "receipt id from the operation's result, or read `audit` to list them. Do "
             "not retry with a guessed id."
         )

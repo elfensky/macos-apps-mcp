@@ -25,7 +25,7 @@ import json
 import logging
 import os
 import stat
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -119,8 +119,32 @@ def _instant(ts) -> datetime | None:
         return None
 
 
+def _records(live: Path) -> Iterator[dict | OSError]:
+    """Every JSON record of ``<live>.1`` then ``<live>``, oldest to newest: the one
+    reader of a rotated log (#575). A missing file contributes nothing and a corrupt
+    line is skipped. An unreadable file yields its ``OSError`` in place, so each
+    caller says so in its own documented way."""
+    for path in (live.with_name(live.name + ".1"), live):
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            log.debug("reading %s failed: %s", path, e)
+            yield e
+            continue
+        for line in text.split("\n"):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue  # a truncated/corrupt line never fails the read
+            if isinstance(rec, dict):  # ``true`` or a list is no record: corrupt too
+                yield rec
+
+
 def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
-    """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
+    """Recent audit entries from both retained files, newest first, at most ``limit``.
+    ``since`` (ISO datetime)
     drops older entries by INSTANT compare, not string compare: entries are written
     naive-local, but the audit tool tells the model to ground ``since`` via now() —
     which returns an offset-carrying ISO string, and lexically ``…T12:00:00`` <
@@ -129,22 +153,15 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     empty. NEVER raises: an unreadable log yields a single explicit error entry —
     never a raw ``OSError``, and never an empty list masquerading as "no writes"."""
     try:
-        path = _audit_path()
-        if not path.exists():
-            return []
-        text = path.read_text(encoding="utf-8")
+        records = list(_records(_audit_path()))
     except OSError as e:
-        log.debug("audit_read failed: %s", e)
-        return [{"error": f"audit log unreadable: {e}"}]
+        records = [e]
+    for rec in records:
+        if isinstance(rec, OSError):
+            return [{"error": f"audit log unreadable: {rec}"}]
     since_i = _instant(since) if since else None
     out = []
-    for line in text.split("\n"):
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue  # skip a truncated/corrupt line, never fail the read
-        if not isinstance(rec, dict):
-            continue  # a JSON line that is no record (``true``, a list) is corrupt too
+    for rec in records:
         if since:
             ts = rec.get("ts", "")
             rec_i = _instant(ts) if ts else None
@@ -163,30 +180,14 @@ def read_all() -> list[dict]:
     the dashboard's reader (D-12). No cache and no limit: the whole log is two plain
     file reads. A missing file contributes nothing and a corrupt line is skipped; an
     unreadable file adds one ``{"error": …}`` entry so the page can say so (never an
-    empty list masquerading as "no writes"). ``audit_read`` and the ``audit`` tool are
-    deliberately unchanged."""
+    empty list masquerading as "no writes")."""
     try:
-        live = _audit_path()
+        return [
+            {"error": f"audit log unreadable: {r}"} if isinstance(r, OSError) else r
+            for r in _records(_audit_path())
+        ]
     except OSError as e:
         return [{"error": f"audit log unreadable: {e}"}]
-    out: list[dict] = []
-    for path in (live.with_name(live.name + ".1"), live):
-        if not path.exists():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            log.debug("read_all failed: %s", e)
-            out.append({"error": f"audit log unreadable: {e}"})
-            continue
-        for line in text.split("\n"):
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                continue  # a truncated/corrupt line never fails the read
-            if isinstance(rec, dict):
-                out.append(rec)
-    return out
 
 
 # --- per-tool usage tally (#67 addendum) -------------------------------------------
@@ -213,24 +214,21 @@ def usage_log(tool: str) -> None:
 
 
 def usage_read() -> dict[str, dict]:
-    """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
+    """Per-tool tally from both retained usage files: ``{tool: {"count", "first",
+    "last"}}``.
     Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
     log reads as empty (logged) — a lost tally must not fail the ``usage`` tool."""
     out: dict[str, dict] = {}
     try:
-        path = _usage_path()
-        if not path.exists():
-            return out
-        text = path.read_text(encoding="utf-8")
+        records = list(_records(_usage_path()))
     except OSError as e:
         log.debug("usage_read failed: %s", e)
         return out
-    for line in text.split("\n"):
+    for rec in records:
         try:
-            rec = json.loads(line)
             tool, ts = rec["tool"], rec.get("ts", "")
-        except (ValueError, KeyError, TypeError):
-            continue  # skip a truncated/corrupt line, never fail the read
+        except (KeyError, TypeError):
+            continue  # an OSError (logged by the reader) or a record with no tool
         entry = out.get(tool)
         if entry is None:
             out[tool] = {"count": 1, "first": ts, "last": ts}
