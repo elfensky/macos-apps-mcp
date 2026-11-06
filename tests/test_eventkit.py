@@ -4,10 +4,13 @@ TCC calls (those are the D-08 device proof owned by plan 01-08)."""
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import EventKit as EK
 import pytest
 
+from macos_apps_mcp import eventkit
+from macos_apps_mcp.adapters import calendar, reminders
 from macos_apps_mcp.contracts import CLEAR_RECURRENCE, Recurrence
 from macos_apps_mcp.errors import AccessDenied, NativeTimeout
 from macos_apps_mcp.eventkit import (
@@ -45,10 +48,28 @@ def test_store_rejects_off_worker_calls():
         store()
 
 
-def test_store_returns_same_instance_on_worker():
+def test_store_returns_same_instance_on_worker(monkeypatch):
+    # A fake EKEventStore: the default suite never creates a real one (#581).
+    class _FakeStore:
+        @classmethod
+        def alloc(cls):
+            return cls()
+
+        def init(self):
+            return self
+
+    monkeypatch.setattr(eventkit, "EK", SimpleNamespace(EKEventStore=_FakeStore))
+    monkeypatch.setattr(eventkit, "_store", None)
     s1 = run_native(store)
     s2 = run_native(store)
+    assert isinstance(s1, _FakeStore)
     assert s1 is s2  # one store, created once, on the worker
+
+
+def test_unit_lock_refuses_the_real_store_and_its_by_name_copies():
+    for mod in (eventkit, calendar, reminders):
+        with pytest.raises(AssertionError, match="fake it"):
+            mod.store()
 
 
 def test_nsdate_roundtrip():
@@ -295,6 +316,7 @@ def test_bootstrap_is_nonfatal_on_denied_surface(monkeypatch):
         raise ek.AccessDenied("denied")
 
     monkeypatch.setattr(ek, "_request_one", deny)
+    monkeypatch.setattr(ek, "store", object)  # a fake store; deny never touches it
     ek.bootstrap()  # returns without raising despite every surface being denied
 
 

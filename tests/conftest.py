@@ -25,11 +25,12 @@ per session.
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import deploy, doctor, runtime
+from macos_apps_mcp import deploy, doctor, eventkit, runtime
 from macos_apps_mcp.adapters import (
     mail_addressing,
     mail_ids,
@@ -259,6 +260,22 @@ def _no_real_osascript(request, monkeypatch):
             )
 
         monkeypatch.setattr(runtime, seam, _refuse)
+
+    # eventkit.store() creates the process's real EKEventStore (#581). The Calendar
+    # and Reminders adapters hold by-name copies (``from ..eventkit import store``),
+    # so refuse every module attribute that IS the real function, not only the source.
+    def _no_store(*_args, **_kwargs):
+        raise AssertionError(
+            "a unit test reached eventkit.store (a real EKEventStore) — fake it with "
+            "monkeypatch.setattr(<module>, 'store', lambda: <fake store>)"
+        )
+
+    # Package modules only: a test module's own by-name import stays real, the
+    # convention the runtime seams use for their self-tests.
+    real_store = eventkit.store
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("macos_apps_mcp") and getattr(mod, "store", 0) is real_store:
+            monkeypatch.setattr(mod, "store", _no_store)
 
     # The index read of the reply sweep (#348) reads the user's real Envelope Index
     # unless a test supplies its own rows: refuse like an unreadable index, which the
