@@ -43,7 +43,9 @@ def test_messages_search_without_a_match_answers(guard):
     assert not err and n == 0, f"error={err} count={n} secs={secs} {text[:200]}"
 
 
-def test_ps_parse_in_a_comma_decimal_locale():
+def test_ps_parse_in_a_comma_decimal_locale(guard):
+    if guard.host:
+        pytest.skip("this check reads this checkout on this Mac, not the other Mac")
     # A subprocess: the suite conftest refuses tracked_run in this process.
     code = (
         "import json; from macos_apps_mcp import runtime;"
