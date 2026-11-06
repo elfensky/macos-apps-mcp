@@ -116,6 +116,9 @@ doctor().build     # must report the sha you just built (#143) — version alone
 
 Judge that output. A successful build says nothing about which binary launchd is running.
 
+Before notarization, run `xcrun notarytool history --keychain-profile notary` on the build Mac.
+The existing profile is named `notary`, not an account email. See [profile checks and recovery](DAEMON.md#notarization-profile).
+
 ## Milestones vs releases
 
 They are not the same thing and do not have to line up. A milestone is a body of work; a release is

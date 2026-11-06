@@ -48,6 +48,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
+- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -427,10 +428,15 @@ Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; t
 **Requirements**: MIG-01
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 1 implementation plan merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550). Installed-device acceptance, signing and release remain pending.
+**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation, Mail recovery, and bounded reads passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) also passed with both protocol eras and bounded native reads. Remaining native/frontend acceptance and release stay open.
 
 Plans:
 - [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
+- [x] [05.4-02-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-PLAN.md) — public proxy policy preserves discovery errors and explicit recovery; merged 2026-11-04
+
+Failed discovery returns connection errors instead of false missing-tool answers or successful empty lists.
+Synthetic tests cover both protocol eras and exactly one execution after an explicit new call.
+The original November 1 incident remains unproved. Installed/frontend acceptance and the clipboard observation keep #543 open.
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
@@ -506,21 +512,40 @@ Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptan
 **Plans:** 4 implementation plans; device acceptance and remaining bugs stay open.
 
 Plans:
-- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed-device stat acceptance remains open.
+- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket and fresh Mail backup modes passed on arm64.
 - [x] [05.6-02-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-PLAN.md) — localized system-folder reads (#501), merged in #554; non-English device checks and real-index timing remain open.
-- [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed-bundle acceptance remains open.
+- [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed installed notice inspection passed on arm64 (133 distributions, 15 fallback users).
 
-- [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; real macOS 27 acceptance remains open.
+- [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; dated Health/Adapters snapshot checks passed on macOS 27; forced-refusal and in-flight device cases remain open.
+
+[Installed build evidence](overnight/2026-11-04-installed-acceptance.md) records the signed deployment and each acceptance limit.
+[Mail recovery evidence](overnight/2026-11-04-mail-recovery-acceptance.md) records one successful self-addressed send, Trash move, and undo, including fresh backup modes and a 6.087-second call.
+The English Trash route passed. Localized behavior and Gmail Trash persistence remain untested.
 
 Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
-#556 needs a distinct ambiguity outcome before callers can stop trusting name priority. Prep: plan; branch: pending; blocked by: no implementation dependency.
+#556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
+
+### Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories (INSERTED)
+
+**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed.
+
+- When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
+- The private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. Their details stay in the advisories until each fix is released.
+
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found all three; the owner put them in one phase before Phase 05.10 (2026-11-05).
+**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp)
+**Depends on:** Phase 05.6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.12 to break down)
 
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 
 **Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The paged reads (#508) are additive and are Phase 05.11. One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. The breaking release is 0.17.0; 1.0.0 is the launch release after the testers (owner, 2026-11-01). Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.3, 05.11, 05.9, 05.8, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31).
 **Requirements**: TBD (planned from #514, #502)
-**Depends on:** Phase 05.6, after the completed MCP migration
+**Depends on:** Phase 05.12, after the completed MCP migration
 **Plans:** 0 plans
 
 Plans:
@@ -621,7 +646,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 1/1 | Implementation merged; device acceptance and release pending | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Implementation merged; device acceptance and release pending | - |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

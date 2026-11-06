@@ -6,7 +6,9 @@ status: implemented
 source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
 review_status: independent-review-complete
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # Audit and recovery
@@ -65,7 +67,10 @@ These checks do not constitute a global storage gate for all native writes.
 
 Doctor reports observed exposure and repairs remembered by the current process.
 The implementation checks POSIX modes, not macOS ACL permissions.
-Installed-device state-directory acceptance remains pending.
+Installed arm64 state and daemon directories passed 0700 checks; the socket and dashboard key passed 0600 checks.
+Two new backups from an installed Trash/undo test passed 0600 checks and retained the test Message-ID and body.
+Every directory component through the state directory passed owner-only 0700 checks without symlinks.
+See [Mail recovery evidence](../overnight/2026-11-04-mail-recovery-acceptance.md); Gmail Trash persistence and localized behavior remain untested.
 
 ## Sources and planned work
 

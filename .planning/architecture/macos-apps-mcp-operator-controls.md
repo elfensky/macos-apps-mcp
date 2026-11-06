@@ -6,7 +6,9 @@ status: implemented
 source_revision: 4a7c26287b108c9c81f42db0bdf5280ed537e986
 source_evidence_date: 2026-11-04
 review_status: source-checked-update
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # Operator controls

@@ -364,3 +364,65 @@ def test_only_the_intel_slice_carries_the_memory_exception():
     assert "alarm shift; exec @ARGV' 120" in src
     sign = src.index('if [[ -n "$SIGN" ]]')
     assert sign < src.index("entitlements ok") < src.index("signed smoke ok")
+
+
+def _run_sitecustomize(monkeypatch, orig_argv):
+    """Run packaging/sitecustomize.py as Python does at start; record os.execv."""
+    import os
+    import sys
+
+    execs = []
+    monkeypatch.setattr(os, "execv", lambda exe, argv: execs.append(argv))
+    monkeypatch.setattr(sys, "orig_argv", orig_argv)
+    src = (PKG / "sitecustomize.py").read_text()
+    exec(compile(src, "sitecustomize.py", "exec"), {"__name__": "sitecustomize"})
+    return execs
+
+
+def test_sitecustomize_turns_only_a_bare_start_into_launch(monkeypatch):
+    """Opening the .app starts the bundled interpreter with no arguments; every other
+    caller passes some. Only the bare start may become `launch`, or the daemon would."""
+    import sys
+
+    exe = "/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp"
+    for argv in (
+        [exe, "-E", "-s", "-P", "-m", "macos_apps_mcp", "daemon"],
+        [exe, "-E", "-s", "-P", "-m", "macos_apps_mcp", "shim"],
+        [exe, "-I", "-c", "pass"],
+    ):
+        assert _run_sitecustomize(monkeypatch, argv) == []
+    assert _run_sitecustomize(monkeypatch, [exe]) == [
+        [sys.executable, "-E", "-s", "-P", "-m", "macos_apps_mcp", "launch"]
+    ]
+
+
+def test_build_ships_the_open_hook_and_the_cli_wrapper():
+    """The hook goes into the bundle's site-packages only (in the wheel it would take
+    over every environment), before precompile and signing seal the bundle; the
+    wrapper lands where deploy links it from."""
+    from macos_apps_mcp import deploy
+
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    hook = 'cp "$REPO/packaging/sitecustomize.py" "$SITE/sitecustomize.py"'
+    wrapper = f'install -m 755 "$REPO/packaging/cli.sh" "$APP/{deploy._CLI_WRAPPER}"'
+    assert hook in src and wrapper in src
+    assert src.index(hook) < src.index("-m compileall") < src.index('[[ -n "$SIGN" ]]')
+    assert not list((ROOT / "macos_apps_mcp").rglob("sitecustomize.py"))
+
+
+def test_cli_wrapper_runs_the_bundle_interpreter_through_a_link(tmp_path):
+    """The ~/.local/bin link resolves back into the bundle and keeps the isolation
+    flags (docs/DAEMON.md section 4) in front of the caller's arguments."""
+    app = tmp_path / "x.app/Contents"
+    (app / "MacOS").mkdir(parents=True)
+    (app / "MacOS/macos-apps-mcp").write_text('#!/bin/sh\necho "$@"\n')
+    (app / "MacOS/macos-apps-mcp").chmod(0o755)
+    (app / "Resources/bin").mkdir(parents=True)
+    shutil.copy2(PKG / "cli.sh", app / "Resources/bin/macos-apps-mcp")
+    link = tmp_path / "bin/macos-apps-mcp"
+    link.parent.mkdir()
+    link.symlink_to(app / "Resources/bin/macos-apps-mcp")
+    out = subprocess.run(
+        [str(link), "dashboard", "health"], capture_output=True, text=True, check=True
+    ).stdout
+    assert out == "-E -s -P -m macos_apps_mcp dashboard health\n"

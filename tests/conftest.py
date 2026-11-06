@@ -12,7 +12,11 @@ Two separate leaks, isolated two different ways — the difference matters:
   agree on one path — see the comment on the constant). So they are isolated by
   monkeypatching the constants themselves, NOT by moving XDG_STATE_HOME. Without this
   a test run could read/write Andrei's live outbound-send toggle or adapter deny-list
-  (D-17).
+  (D-17). ``deploy._CLI_LINK`` and ``deploy._SETUP_PENDING_FILE`` are home paths
+  too, patched the same way so no test touches the real ``~/.local``.
+* The daemon socket moves through its own override, ``MACOS_APPS_MCP_SOCKET``: a test
+  that reaches ``uninstall_agent()`` unlinks ``socket_path()``, and the live daemon's
+  socket once went with it (clients could no longer connect until a restart).
 
 Session-scoped so both apply before any test (including collection-time fixtures)
 touches either; ``pytest.MonkeyPatch`` (not the function-scoped ``monkeypatch``
@@ -41,9 +45,12 @@ def _isolated_state(tmp_path_factory):
     state_home = tmp_path_factory.mktemp("xdg-state-home")
     mp = pytest.MonkeyPatch()
     mp.setenv("XDG_STATE_HOME", str(state_home))
+    mp.setenv("MACOS_APPS_MCP_SOCKET", str(state_home / "daemon" / "mcp.sock"))
     mp.setattr(deploy, "_ALLOW_SEND_FILE", state_home / "allow_send")
     mp.setattr(deploy, "_ADAPTERS_OFF_FILE", state_home / "adapters_off")
     mp.setattr(deploy, "_DASHBOARD_KEY_FILE", state_home / "daemon" / "dashboard_key")
+    mp.setattr(deploy, "_CLI_LINK", state_home / "bin" / "macos-apps-mcp")
+    mp.setattr(deploy, "_SETUP_PENDING_FILE", state_home / "setup_pending")
     tcc_user = state_home / "absent-tcc-user" / "TCC.db"
     tcc_system = state_home / "absent-tcc-system" / "TCC.db"
     mp.setattr(deploy, "_TCC_DB", tcc_user)

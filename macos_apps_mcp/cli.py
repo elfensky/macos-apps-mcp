@@ -15,6 +15,7 @@ _ROLES = (
     "uninstall-agent",
     "allow-send",
     "dashboard",
+    "launch",
     "dedupe-mail",
     "index-mail-ids",
 )
@@ -76,6 +77,10 @@ def main() -> None:
         from . import deploy
 
         deploy.dashboard(args[1:])
+    elif role == "launch":  # opening the .app: the bundle's sitecustomize starts it
+        from . import deploy
+
+        deploy.launch()
     elif role == "dedupe-mail":
         # CLI-only by design (#140): thousands of ~0.1s deletes against a 30s-capped
         # serialized worker is a job a human starts, not a tool call. The MCP surface

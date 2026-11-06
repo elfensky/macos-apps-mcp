@@ -411,6 +411,8 @@ def build_shim(path: Path) -> FastMCPProxy:
     )
     return FastMCPProxy(
         client_factory=_shim_client_factory(transport),
+        # One upstream: failed discovery must not become an empty catalogue.
+        provider_error_strategy="raise",
         middleware=[_InterruptedToolWarning()],
     )
 

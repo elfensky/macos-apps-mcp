@@ -4,7 +4,9 @@ executable; the pip-side install-agent invokes them (never SMAppService directly
 
 from __future__ import annotations
 
+import contextlib
 import errno
+import io
 import json
 import os
 import re
@@ -23,6 +25,14 @@ from .errors import NativeError
 
 _PLIST = "ren.lav.macos-apps-mcp.plist"
 BUNDLE_ID = _PLIST.removesuffix(".plist")  # our signed .app's CFBundleIdentifier
+# The agent plist names this path (scripts/build_app.sh), so the agent runs only here.
+_APP = Path("/Applications/macos-apps-mcp.app")
+_CLI_WRAPPER = "Contents/Resources/bin/macos-apps-mcp"  # packaging/cli.sh
+# uv keeps this folder on PATH; tests patch the constant (tests/conftest.py).
+_CLI_LINK = Path.home() / ".local/bin/macos-apps-mcp"
+# Present from a first open's registration until its dialog pass ends: a first open
+# that failed half-way runs again. Tests patch the constant (tests/conftest.py).
+_SETUP_PENDING_FILE = Path.home() / ".local/state/macos-apps-mcp/setup_pending"
 _TCC_DB = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
 # FDA (kTCCServiceSystemPolicyAllFiles) rows live in the SYSTEM db, not the user one
 # (#123 — found during #71 acceptance: FDA granted + functional, yet invisible here).
@@ -263,13 +273,106 @@ def _quarantine_guard(app: Path) -> None:
         subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(app)], check=True)
 
 
+def _is_app_link(link: Path) -> bool:
+    """True for a link into any app's CLI wrapper, broken or not. Anything else at that
+    name (`uv tool install macos-apps-mcp` writes the same name) is never ours."""
+    return link.is_symlink() and os.readlink(link).endswith("/" + _CLI_WRAPPER)
+
+
+def _link_cli(app: Path) -> str:
+    """Link the bundle's CLI wrapper into ~/.local/bin and say what happened. An app
+    link to another bundle is moved to this one; any other file stays untouched. Never
+    raises: a missing link must not stop the dashboard."""
+    target = str(app.resolve() / _CLI_WRAPPER)
+    link = _CLI_LINK
+    try:
+        if not Path(target).exists():
+            return "CLI not linked: this build of the app has no CLI wrapper"
+        if os.path.lexists(link) and not _is_app_link(link):
+            return f"CLI not linked: {link} is not an app link; left as is"
+        if not (link.is_symlink() and os.readlink(link) == target):
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.unlink(missing_ok=True)
+            link.symlink_to(target)
+    except OSError as e:
+        return f"CLI not linked: {e}"
+    on_path = str(link.parent) in os.environ.get("PATH", "").split(os.pathsep)
+    hint = "" if on_path else f" ({link.parent} is not on PATH: uv tool update-shell)"
+    return f"CLI: {link} -> {target}{hint}"
+
+
+def _alert(message: str) -> None:
+    """A dialog, for a start that has no Terminal to print to. The text travels as an
+    argument, never spliced into the AppleScript source."""
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            "on run argv",
+            "-e",
+            'display alert "macos-apps-mcp" message (item 1 of argv) as critical',
+            "-e",
+            "end run",
+            message.strip()[:2000],
+        ],
+        capture_output=True,
+    )
+
+
+def launch() -> None:
+    """`launch` — what opening the .app in Finder, the Dock or Spotlight does: the
+    bundle's sitecustomize runs this role on a start with no arguments. The first open
+    registers the agent, shows the permission dialogs once (the Health page itself
+    never prompts, D-14) and opens Health. A first open that failed half-way runs
+    again. Later opens go to the dashboard home. Every open links the CLI. Such a start
+    has no visible stderr, so a failure is an alert."""
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(err):
+            app = Path(sys.executable).parents[2]
+            if app != _APP:  # a Downloads start runs translocated, at a random path
+                raise NativeError(
+                    f"The app runs from {app}. Move it to /Applications with "
+                    "Finder, then open it again."
+                )
+            status = agent_status()
+            if status == "requires-approval":
+                raise NativeError(
+                    "macOS stopped the background service. Turn on macos-apps-mcp in "
+                    "System Settings → General → Login Items, then open it again."
+                )
+            first = status != "enabled" or _SETUP_PENDING_FILE.exists()
+            if first:
+                _SETUP_PENDING_FILE.parent.mkdir(
+                    mode=0o700, parents=True, exist_ok=True
+                )
+                _SETUP_PENDING_FILE.touch()
+                if status != "enabled":  # this process IS the bundle: in-process
+                    register_agent()
+                _wait_for_socket()
+                _request_grants_via_daemon()
+                _SETUP_PENDING_FILE.unlink()
+            _link_cli(app)
+            if not dashboard(["health"] if first else []):
+                raise NativeError(
+                    "No browser opened the dashboard. Run `macos-apps-mcp dashboard` "
+                    "in Terminal to get its link."
+                )
+    except SystemExit:  # dashboard() wrote the reason to stderr
+        _alert(err.getvalue())
+        raise
+    except Exception as e:
+        _alert(f"{err.getvalue()}{e}")
+        raise SystemExit(1) from None
+
+
 def install_agent(argv: list[str]) -> None:
-    app = Path("/Applications/macos-apps-mcp.app")
+    app = _APP
     if argv[:1] == ["--app"]:
         if len(argv) < 2:
             print("usage: install-agent [--app <path-to.app>]", file=sys.stderr)
             raise SystemExit(2)
-        app = Path(argv[1])
+        app = Path(argv[1]).resolve()  # the printed command and the link need it
     if not (app / "Contents/MacOS/macos-apps-mcp").exists():
         print(
             f"no bundle at {app} — build one with scripts/build_app.sh "
@@ -286,6 +389,7 @@ def install_agent(argv: list[str]) -> None:
         "command": str(exe),
         "args": ["-E", "-s", "-P", "-m", "macos_apps_mcp", "shim"],
     }
+    print(_link_cli(app))
     print(
         "Full Disk Access must be granted by hand — opening the pane:\n"
         "  open 'x-apple.systempreferences:com.apple.preference.security"
@@ -437,8 +541,10 @@ def dashboard_key(*, create: bool = False) -> str | None:
     return key
 
 
-def dashboard(argv: list[str]) -> None:
-    """`dashboard` — print the dashboard link with its page key and open it (D-19).
+def dashboard(argv: list[str]) -> bool:
+    """`dashboard [page]` — print the dashboard link with its page key and open it
+    (D-19), on ``page`` (for example ``health``) when one is named. True when a
+    browser opened it.
 
     A CLI role, not an MCP tool, for the `allow-send` reason: the key is the operator's.
     The boundary is the account (the model's shell runs as the same account and could
@@ -462,9 +568,13 @@ def dashboard(argv: list[str]) -> None:
 
     # "/key" is the Guard's KEY_PATH, written out: deploy does not import the dashboard.
     url = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/key?k={key}"
+    if argv:  # the Guard's _PAGE_RE decides whether the link follows it
+        url += f"&to=/{argv[0]}"
     print(url)
-    if not webbrowser.MacOSXOSAScript("default").open(url):
+    opened = webbrowser.MacOSXOSAScript("default").open(url)
+    if not opened:
         print("no browser opened: open the link above in your browser", file=sys.stderr)
+    return opened
 
 
 def allow_send(argv: list[str]) -> None:
@@ -500,10 +610,12 @@ def allow_send(argv: list[str]) -> None:
 def uninstall_agent() -> None:
     from .daemon import socket_path
 
-    app = Path("/Applications/macos-apps-mcp.app")
+    app = _APP
     if (app / "Contents/MacOS/macos-apps-mcp").exists():
         _run_bundle_role(app, "unregister")
     socket_path().unlink(missing_ok=True)
+    if _is_app_link(_CLI_LINK):  # never uv tool install's file of the same name
+        _CLI_LINK.unlink()
     print(
         "agent unregistered. To wipe grants: tccutil reset All ren.lav.macos-apps-mcp"
     )

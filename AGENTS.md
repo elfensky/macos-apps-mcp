@@ -73,11 +73,17 @@ uv run macos-apps-mcp            # run the server (stdio)
 `E, F, I, UP, B, SIM` — same setup as the sibling repos (`lintle`, `descent-engine`). No mypy
 (neither sibling uses one); the Protocol seam keeps the tool layer testable without it.
 
+**Hermetic tests.** A test never touches a real home path. `tests/conftest.py` (`_isolated_state`)
+patches every home-anchored constant and sets `MACOS_APPS_MCP_SOCKET`; add a new one there. A test
+that reached `uninstall_agent()` once unlinked the live daemon's socket.
+
 **Branches & releases.** `develop` is the trunk — every PR **rebase-merged**, so it stays linear.
 `main` is release-only: nothing but `--no-ff` release cuts, each tagged `vX.Y.Z`. Full procedure,
 including the three-file version bump and the mandatory `doctor().version` proof, is in
 [docs/RELEASING.md](docs/RELEASING.md). **The repo is not the daemon** — merging changes nothing
 about what Claude Code sees until the `.app` is rebuilt and reinstalled.
+
+Before requesting notarization credentials, check the existing `notary` profile with `notarytool history`; an account email is not its profile name. See [docs/DAEMON.md](docs/DAEMON.md#notarization-profile).
 
 **Verification.** After completing edits, run these before reporting success — if any fail, report
 the actual output, do not suppress or simplify failures:
@@ -129,8 +135,8 @@ GSD projects: after `/gsd-new-project`, run `/cockpit-gsd-profile` once in this 
 Roadmap: this repo owns its roadmap. `.planning/ROADMAP.md` (GSD) is the one roadmap file here; no second
 roadmap file lives in this repo; `docs/landscape.md` is the prior-art survey, not a plan. The Garage page at
 projects.static.lav.ren is a plain HTML display copy, published from the ordinary checkout with the vault's
-`publish-page` skill and `knowledge/developer/stack/page-kit.md` recipe. Until the vault cutover gives this project
-a repo enrollment, the vault roadmap folder stays a copy and its scheduled refresh owns the page.
+`publish-page` skill and `knowledge/developer/stack/page-kit.md` recipe. The vault repo enrollment retains the
+overview row and skips this project's uploads. Publish the whole project folder so architecture and old phase paths remain present.
 
 **Bugs before features** (owner, 2026-10-11): an open bug or error goes on the GSD roadmap in an
 inserted phase ahead of the next feature phase (precedent: Phase 03.1).

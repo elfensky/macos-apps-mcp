@@ -792,9 +792,10 @@ def test_probe_carries_applescript_side_timeout():
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
     # 2 eventkit (calendar, reminders) + 6 automation (mail, notes, contacts,
-    # safari, messages, music) + shortcuts_cli + full_disk_access + mail_index = 11.
+    # safari, messages, music) + shortcuts_cli + full_disk_access + accessibility
+    # + mail_index = 12. Accessibility guards the Mail reply-window insertion.
     # Photos left the Automation list in Phase 4 (osxphotos reads it at rest).
-    assert len(report["surfaces"]) == 11
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:

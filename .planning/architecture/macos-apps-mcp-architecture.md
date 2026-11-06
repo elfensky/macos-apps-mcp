@@ -5,7 +5,9 @@ status: implemented
 source_revision: 4a7c26287b108c9c81f42db0bdf5280ed537e986
 source_evidence_date: 2026-11-04
 review_status: source-checked-update
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # macos-apps-mcp architecture
@@ -76,7 +78,10 @@ The latest published release remains `v0.15.1`. GSD's `v0.11.0` milestone label 
 
 The migration evidence covers an unsigned universal bundle and both executable slices on an Apple-silicon host.
 It does not establish signing, notarization, installation, physical Intel acceptance, or native application acceptance for this baseline.
-The currently installed build is unverified here.
+Fresh [installed evidence](../overnight/2026-11-04-installed-acceptance.md) verifies signed arm64 build 7bc8607 and bounded native reads.
+[Notarization and physical Intel installation](../overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
+Both protocol eras and bounded native reads passed on Intel; its final signature, staple, and Gatekeeper checks passed.
+Remaining native/frontend acceptance and release stay open.
 
 **eli14:** A workshop can be active while a machine needs repair.
 A finished part, a machine tested in its installed position, and a delivered product have different completion records.
@@ -87,7 +92,7 @@ The source evidence date records source inspection. Earlier architecture content
 Grant-chip additions have source validation; that earlier architecture review does not cover the later wording. User review remains pending.
 `source_revision` identifies the inspected code baseline. The published page commit must be derived separately from Git.
 No `as_of` user-review date is asserted.
-Publication remains pending and has no publication date.
+The Garage roadmap and architecture were first published on 2026-11-04. [Publication evidence](../overnight/garage-publication-2026-11-04.md) records the source and verification.
 
 - [Project scope](../PROJECT.md) and [phase roadmap](../ROADMAP.md).
 - [Tool server](../../macos_apps_mcp/server.py), [transport](../../macos_apps_mcp/daemon.py), and [dependency lock](../../uv.lock).
@@ -98,13 +103,13 @@ Publication remains pending and has no publication date.
 
 - [Implemented grant chips and acceptance limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
 
-## Display contract — planned
+## Display contract
 
 These Markdown files are the local sources. The frontmatter describes content; it does not imply an implemented publisher validator.
-The planned overview path is `/macos-apps-mcp/architecture/`.
+The published overview path is `/macos-apps-mcp/architecture/`.
 Component paths are `/macos-apps-mcp/architecture/<component>/`, using the seven linked filenames without `macos-apps-mcp-` or `.md`.
-These paths are not claimed as published.
+All eight architecture paths were verified after publication.
 
-The parent publication uses the existing plain HTML publisher after merge and vault cutover.
+Publication uses the existing plain HTML publisher after merge and vault cutover.
 The Mermaid block remains source text; the component list provides equivalent navigation without a renderer.
 Display assets must remain local. Working notes are excluded from display content.

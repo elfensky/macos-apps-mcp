@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Migration #550, privacy #552, licences #553, localized folders #554 and roadmap ownership #544 are merged. Architecture #555 and grant chips #557 are merged. Garage cutover and remaining bugs continue. Device acceptance remains incomplete."
-last_updated: "2026-11-04"
-last_activity: 2026-11-04
-last_activity_desc: "MCP migration and four bug implementations merged; architecture is merged and Garage publication continues."
-state_head: 4a7c262
+stopped_at: "Migration #550 and discovery-error follow-up #561 are merged, with four independent bug implementations. Garage roadmap and architecture are published. Trash-safety PR #559 remains a draft. Device acceptance remains incomplete."
+last_updated: "2026-11-05"
+last_activity: 2026-11-05
+last_activity_desc: "PR #566 merged: opening the app opens the dashboard and links the CLI. Phase 05.12 inserted before 05.10: #568 and two private advisories."
+state_head: 3e98de6
 progress:
-  total_phases: 20
+  total_phases: 21
   completed_phases: 9
-  total_plans: 93
-  completed_plans: 92
+  total_plans: 94
+  completed_plans: 93
 ---
 
 # Project State
@@ -28,13 +28,16 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 ## Current Position
 
 Phase: 05.6 — probe-independent bug fixes.
-Plans: 05.4-01 and 05.6-01/02/03/04 are merged after review and green CI.
-Status: Architecture #555 is merged. Canonical roadmap evidence and Garage cutover are in progress. Remaining bugs include #556; Notes and draft changes need device probes.
+Plans: 05.4-01/02 and 05.6-01/02/03/04 are merged after review and green CI.
+Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
-Both unsigned bundle slices passed import and stream checks. Installed-device acceptance, signing and release remain pending.
+Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. Remaining native/frontend acceptance and release stay open.
+Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
+The original November 1 incident remains unproved. Normal installed-shim restart recovery passed; controlled absence, real frontend acceptance, and clipboard observation keep #543 open.
+[Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: 92 of 93 recorded plans have completion summaries. The roadmap records nine historical phase closures.
+Progress: 93 of 94 recorded plans have completion summaries. The roadmap records nine historical phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -129,9 +132,11 @@ Recent decisions affecting current work:
 - [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
 - [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
+- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published, and joins Phase 05.12; #569 takes option 1 (a CLI row on Health); #568 and advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp share bug Phase 05.12 before Phase 05.10.
 
 ### Pending Todos
 
+- Next release: run the five open-app device checks from PR #566 ("Not run on device") on the signed candidate in /Applications (owner, 2026-11-05).
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
 - Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
@@ -233,6 +238,7 @@ Recent decisions affecting current work:
 - Phase 05.9 edited: depends_on (05.11); Phase 05.7 edited: goal, depends_on (05.8) (2026-11-01)
 - Release rule (owner, 2026-11-01): one release at every phase close that changes the daemon; no per-phase release decision from now on
 - Phase 05.6 edited: edited fields: title, goal, requirements (+#540 the state folder and its private files are readable by other local accounts, found at the 05.6 discuss session) (owner, 2026-11-01)
+- Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and two private advisories; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
 
 ## Deferred Items
 
@@ -245,5 +251,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-04
-Stopped at: Grant chips #557 merged as 4a7c262 after architecture #555, roadmap ownership #544 and localized folders #554. Finish canonical roadmap evidence, the separate vault cutover and Garage publication. #556 records unresolved Trash-name ambiguity. Installed-device acceptance remains incomplete.
-Resume file: .planning/overnight/2026-11-03.md
+Stopped at: Discovery-error follow-up #561 merged as 4397787. Garage publication is complete; its live footer identifies the displayed source. PR #559 retains its localized write acceptance checks; both physical folder inventories are complete. Notes and draft changes retain their probe prerequisites. Installed-device acceptance remains incomplete.
+Resume file: .planning/overnight/2026-11-04-notarization-intel-acceptance.md

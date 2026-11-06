@@ -65,9 +65,9 @@ A merged implementation does not complete a requirement that still needs its rec
   Backups remain outside the Mail backup manager in this phase; restoration is manual (D-09).
 - [ ] **FIX-20**: Notes reads exclude Recently Deleted through its schema role, with a translated-name fallback. Mail reads recognize the reviewed localized system-folder names while preserving mailbox URLs. Non-English device checks and real-index timings confirm the change (#501; D-10–D-14).
 - [ ] **FIX-21**: The Adapters page uses the last completed Health report and the existing live/TCC merge for Automation chips. It displays that report's time. Before any report, TCC-only chips and a Health link remain available. Explicit Full Disk Access and EventKit probe refusals override stale TCC rows. Rendering makes no native call and adds no wait state (#497; D-15 and the #557 review correction).
-- [ ] **FIX-22**: Bundled distributions carry nonempty licence material, or verified fallback notices. The build checks both architecture site-packages trees and the final site-packages tree before signing. Missing material, unsupported metadata and fallback drift stop the build. Signed-bundle inspection confirms the notices remain present (#471; D-16–D-17).
+- [x] **FIX-22**: Bundled distributions carry nonempty licence material, or verified fallback notices. The build checks both architecture site-packages trees and the final site-packages tree before signing. Missing material, unsupported metadata and fallback drift stop the build. Signed-bundle inspection confirms the notices remain present (#471; D-16–D-17).
 - [ ] **FIX-23**: After per-account device proof, `delete_draft` uses the index to locate a candidate and reuses `_SWEEP_DELETE` unchanged. The scoped fast path requires exactly one live row, or exactly one Drafts row. Otherwise, the existing unified walk remains. Preview and audit use the same lookup and count without deleting. Exactly-one-match checks and explicit sweep outcomes remain (#521; D-18–D-21).
-- [ ] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
+- [x] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
 - [ ] **FIX-25**: Ambiguous account Trash candidates produce a distinct outcome before an action relies on a guessed destination. Trash, dedupe and recovery callers handle it explicitly. Synthetic tests cover translated root folders and user-created Google-shaped namespaces; device acceptance remains required for affected Mail writes (#556).
 
 ### MCP migration — Phase 05.4
@@ -239,12 +239,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-18 | Phase 05.2 | Pending |
 | FIX-19 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-20 | Phase 05.6 | Implementation merged (#554); device acceptance and timing pending |
-| FIX-21 | Phase 05.6 | Implementation merged (#557); real macOS 27 acceptance pending |
-| FIX-22 | Phase 05.6 | Implementation merged (#553); signed-bundle acceptance pending |
+| FIX-21 | Phase 05.6 | Implemented (#557); dated snapshot passed on macOS 27; denial/in-flight device cases pending |
+| FIX-22 | Phase 05.6 | Implemented (#553); signed installed notice inspection passed on arm64 |
 | FIX-23 | Phase 05.6 | Pending device probe, then implementation |
-| FIX-24 | Phase 05.6 | Implementation merged (#552); installed-device stat acceptance pending |
-| FIX-25 | Phase 05.6 | Planning pending |
-| MIG-01 | Phase 05.4 | Implementation merged (#550); installed-device acceptance and release pending |
+| FIX-24 | Phase 05.6 | Implemented (#552); installed arm64 state/socket and fresh Mail backup modes passed |
+| FIX-25 | Phase 05.6 | Reviewed draft #559; both physical inventories complete; localized write acceptance pending before merge |
+| MIG-01 | Phase 05.4 | Implemented (#550, #561); signed arm64 Mail recovery and a >5s call passed; notarization, physical Intel installation and bounded reads passed; remaining native/frontend acceptance and release pending |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |

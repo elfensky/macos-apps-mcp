@@ -95,19 +95,49 @@ Future jobs must not assume that every attachment works.
 **Notarize** (needed once the `.app` leaves this Mac — e.g. before distributing it, or if
 Gatekeeper is going to see it as freshly downloaded):
 
-```sh
-# one-time: store notary credentials under a keychain profile
-xcrun notarytool store-credentials PROFILE \
-  --apple-id you@example.com --team-id VUMUR696L9 --password APP_SPECIFIC_PW
+#### Notarization profile
 
+The maintainer's existing Keychain profile is **`notary`**. It is a local profile name, not an Apple account email.
+The recorded setup uses an App Store Connect **Team Key**, with the **Developer** role.
+The signing team is `VUMUR696L9`; the signing identity is `Developer ID Application: Andrei M. Lavrenov (VUMUR696L9)`.
+The profile is configured on the build Mac. Its presence on another Mac must be checked separately.
+
+Check the existing setup before requesting or creating credentials:
+
+```sh
+security find-identity -v -p codesigning
+xcrun notarytool history --keychain-profile notary
+```
+
+Both checks passed on 2026-11-04 after the owner accepted Apple's pending Developer agreement.
+The history check proves service access. It does not inspect the stored key or independently confirm its current role.
+The [v0.13.0 record](../.planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a/02.1-08-SUMMARY.md) records the same profile and agreement recovery.
+
+- **Missing or expired agreement:** accept it in the Apple Developer account, then repeat the history check.
+- **Keychain access prompt:** approve access to the existing item through macOS. Do not send the Keychain password to an agent.
+- **Missing profile:** check the exact name `notary` and the build Mac's Keychain first. An email-named profile can be absent while `notary` works.
+- **Authentication refusal after those checks:** investigate the existing key's access or revocation. Restore or replace credentials only when needed.
+
+Signing and notarization use different credentials. An Xcode sign-in does not prove that a named `notarytool` profile exists.
+No new app-specific password is needed while the existing team-key profile works.
+Keep secret material in 1Password; use the supported Keychain profile for `notarytool` access. Never put credentials in documentation or command arguments.
+
+**eli14:** Signing stamps the parcel with its sender. The saved `notary` key opens Apple's inspection desk.
+If that key works, no new key is needed. Each new parcel still needs its own inspection.
+
+Build with the verified profile:
+
+```sh
 scripts/build_app.sh \
   --sign "Developer ID Application: Andrei M. Lavrenov (VUMUR696L9)" \
-  --notarize PROFILE \
+  --notarize notary \
   --out dist
 ```
 
 `--notarize` submits `dist/macos-apps-mcp.zip` with `notarytool submit --wait`, then staples the
-ticket onto the `.app`. Local same-Mac builds you never downloaded don't need this step —
+ticket onto the `.app`. Re-create the distribution zip after stapling; the submission zip does not contain the ticket.
+Verify with `xcrun stapler validate dist/macos-apps-mcp.app` and `spctl -a -vv -t install dist/macos-apps-mcp.app`.
+Local same-Mac builds you never downloaded don't need this step —
 notarization only matters once Gatekeeper sees a quarantine xattr.
 
 ### 2. Move it to `/Applications`
@@ -121,7 +151,8 @@ file's modification time, so a build made before #297 rewrites its `.pyc` inside
 on the first run and breaks the code seal. If an older `/Applications/macos-apps-mcp.app` is
 there, move it away first: `ditto` merges into an existing bundle, and a stale file breaks the seal.
 
-The bundle **must** live in `/Applications` (or `~/Applications`) before registering — a
+The bundle **must** live at `/Applications/macos-apps-mcp.app` before registering: the agent
+plist names that path, so `~/Applications` does not work either. A
 quarantined app run from `~/Downloads` executes under App Translocation (a randomized read-only
 mount), which breaks the agent's on-disk path. `install-agent` verifies the staple and clears
 quarantine for you, but it still expects the app to already be in a real `/Applications` location
@@ -129,12 +160,30 @@ quarantine for you, but it still expects the app to already be in a real `/Appli
 
 ### 3. Install the agent
 
-From the pip-installed package (or the repo venv — `install-agent` is a role of the *pip* CLI,
-which drives the *bundle's* executable for the SMAppService-registering steps):
+**Open the app.** Open `/Applications/macos-apps-mcp.app` from Finder, the Dock or Spotlight.
+The first open registers the agent and shows the consent dialogs once (step 3 below). Then it
+links the CLI and opens the dashboard on its Health page. Health lists the grants that are still
+missing. A grant without a dialog gets an Open Settings link. If the first open stops before the
+dialogs end, the next open runs it again. Every later open goes to the dashboard.
+
+The app must run from `/Applications/macos-apps-mcp.app`, because the agent plist names that
+path. From any other place, the app shows an alert and installs nothing. Each failure also shows
+an alert, because an opened app has no Terminal to print to.
+
+How it works: the main executable of the app is the bundled interpreter. The daemon's grants
+belong to that file, so a launcher cannot replace it. At each start, Python reads the bundle's
+`site-packages/sitecustomize.py` (from `packaging/`, never in the wheel). When the start has no
+arguments, that file runs the `launch` role. Every other caller gives arguments: launchd, the
+shim, the CLI wrapper and the build.
+
+**Or from Terminal.** Run `install-agent` from the pip-installed package or the repo venv.
+`install-agent` is a role of the *pip* CLI, which drives the *bundle's* executable for the
+SMAppService-registering steps:
 
 ```sh
 macos-apps-mcp install-agent
-# or, if the bundle isn't at the default /Applications path:
+# --app registers a bundle at another path, but the agent still runs
+# /Applications/macos-apps-mcp.app (the agent plist names that path):
 macos-apps-mcp install-agent --app /path/to/macos-apps-mcp.app
 ```
 
@@ -146,8 +195,20 @@ This will:
    tool-call later) keeps a stray timeout from recording as a denial. If a prompt times out anyway, doctor shows
    that row with `reason: "prompt-timeout"` and the reset command to run before
    `doctor(request=True)` with someone at the screen.
-4. Print the FDA deep-link and the shim `command:`/`args:` snippet to paste into your MCP
-   clients.
+4. Link the CLI (below) and print the FDA deep-link and the shim `command:`/`args:` snippet
+   to paste into your MCP clients.
+
+**The CLI on PATH.** The bundle carries a wrapper, `Contents/Resources/bin/macos-apps-mcp`
+(`packaging/cli.sh`). It runs the bundled interpreter with the flags of section 4. Opening the
+app and `install-agent` both link it as `~/.local/bin/macos-apps-mcp`. `uv tool update-shell`
+puts that folder on PATH, and `install-agent` says when it is not on PATH. With the link,
+`macos-apps-mcp dashboard`, `allow-send` and the other roles work without the long bundle path.
+
+The link never replaces another file of that name, such as the one from `uv tool install
+macos-apps-mcp`. A link into another copy of the app moves to the copy that runs. `uv tool
+install` does not replace the app link: remove the link first, or add `--force`. The CLI runs in
+your terminal, so macOS charges a role that reads protected data, such as `dedupe-mail`, to the
+terminal's grants.
 
 **Full Disk Access does not prompt** — step 4 prints the command to open the pane
 (`open 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'` — run it
@@ -260,10 +321,12 @@ non-loopback bind is refused. The MCP endpoint stays on the unix socket and is n
 this port. Every request checks the `Host` header, and every form post checks `Origin` and a
 per-session token.
 
-Every page needs the page key. Run `macos-apps-mcp dashboard` in Terminal (bundle form:
-`/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m macos_apps_mcp dashboard`).
-It prints a link and opens it. The browser keeps the key as a cookie, so you run the command
-again only on a new browser or after a key change. The key lives in
+Every page needs the page key. Open the app, or run `macos-apps-mcp dashboard` in Terminal
+(bundle form: `/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp -E -s -P -m
+macos_apps_mcp dashboard`). It prints a link and opens it. `macos-apps-mcp dashboard health`
+opens a named page. The `/key` link follows only a page path of one lowercase segment, so it
+cannot send the browser to another site. The browser keeps the key as a cookie, so you run the
+command again only on a new browser or after a key change. The key lives in
 `~/.local/state/macos-apps-mcp/daemon/dashboard_key` (mode 0600, in a 0700 folder) and survives
 restarts. To change the key, remove that file, restart the daemon (the kickstart in section 6)
 and run the command again. Other accounts on this Mac and sandboxed apps can reach
@@ -481,6 +544,19 @@ build:
   still working, and every destructive Mail call over ~5s died. The cliff moves with the value:
   4.5s returned and 6s did not; set it to 2s and 3s died; set it to `None` and 12s returned.
 
+- **Discovery cannot connect to the daemon.** The shim uses public `provider_error_strategy="raise"`.
+  A failed lookup preserves the connection MCP error, including a first call with no cached catalogue.
+  Failed tool, resource, resource-template, and prompt lists return errors instead of successful empty lists.
+  Healthy empty lists remain valid. A missing tool on a healthy backend still returns `Unknown tool`.
+
+  Connection refusal before dispatch receives no `MAY HAVE COMPLETED` warning.
+  A later explicit call can recover through the same shim after the backend returns.
+  The shim adds no readiness wait or automatic replay. A connection error does not establish why the daemon is unavailable.
+  Synthetic tests cover both protocol eras; the original November 1 incident and installed/frontend acceptance remain unproved (#543).
+
+  **eli14:** The receptionist reports a disconnected phone instead of inventing an empty staff list.
+  This prevents a misleading answer now. Actual client recovery still needs its own acceptance test.
+
 - **A response stream ends without an answer.** MCP 2 reports the abandoned request.
   The shim recognizes `ToolError` caused by `MCPError(CONNECTION_CLOSED)` or an interrupted
   httpx2 read/write. This also covers a modern call that ran before sending response headers.
@@ -516,8 +592,10 @@ The request-size limit rejects a large command before the server executes it.
 macos-apps-mcp uninstall-agent
 ```
 
-Unregisters the `SMAppService` agent and removes the daemon's socket. To also wipe every TCC
-grant held by the daemon identity (so a future reinstall starts from a clean prompt state):
+Unregisters the `SMAppService` agent and removes the daemon's socket. It also removes the
+`~/.local/bin/macos-apps-mcp` link when that link points into a copy of the app. To also wipe
+every TCC grant held by the daemon identity (so a future reinstall starts from a clean prompt
+state):
 
 ```sh
 tccutil reset All ren.lav.macos-apps-mcp

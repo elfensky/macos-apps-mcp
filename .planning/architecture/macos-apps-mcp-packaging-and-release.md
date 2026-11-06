@@ -6,7 +6,9 @@ status: implemented
 source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
 source_evidence_date: 2026-11-04
 review_status: independent-review-complete
-publication_status: pending
+publication_status: published
+first_published_at: "2026-11-04T01:34:18Z"
+first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
 ---
 
 # Packaging and release
@@ -62,7 +64,12 @@ Material presence does not by itself establish complete legal compliance.
 The [migration implementation record](../phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) reports an unsigned universal bundle and successful slice tests.
 The x86_64 execution used Rosetta on an Apple-silicon host.
 That evidence is not signing, notarization, installation, physical Intel acceptance, or native application acceptance.
-The installed daemon's current version and build require separate fresh evidence.
+Fresh [installed evidence](../overnight/2026-11-04-installed-acceptance.md) establishes signed arm64 build 7bc8607, version 0.15.1, native reads, and normal restart recovery.
+Strict signature verification and all 133 distribution notice records passed after installation.
+The [Mail recovery test](../overnight/2026-11-04-mail-recovery-acceptance.md) also passed on this installed build; strict signature verification still passed afterward.
+[Notarization and physical Intel installation](../overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
+Both protocol eras and bounded native reads passed on Intel; its final signature, staple, and Gatekeeper checks passed.
+Remaining native/frontend acceptance and release stay open.
 
 The latest published release remains `v0.15.1`, verified on 2026-11-04.
 The GSD `v0.11.0` label describes a planning milestone, not the current software release.
@@ -78,4 +85,4 @@ The [release procedure](../../docs/RELEASING.md) separates integration into `dev
 
 The universal build and notice inventory are implemented.
 Remaining distribution work includes release bundles, the Homebrew cask, and companion guidance/plugin delivery as specified in Phase 6.
-Current-source installed-device acceptance remains pending.
+Signed arm64 acceptance is partial; remaining checks are listed in the installed evidence record.
