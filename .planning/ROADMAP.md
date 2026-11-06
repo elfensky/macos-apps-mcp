@@ -48,7 +48,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
-- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed
+- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581)** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed; the ten defects of the 2026-11-06 codebase review are fixed
 - [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
 - [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
@@ -526,15 +526,23 @@ Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft
 #556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.
 Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
 
-### Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories (INSERTED)
+### Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581) (INSERTED)
 
-**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed.
+**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. The ten defects that the 2026-11-06 codebase review confirmed are fixed (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581).
 
 - When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
 - The private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. Their details stay in the advisories until each fix is released.
+- `doctor()` reports the version and the build that the daemon captured at its start, so the #568 comparison and the release proof read the running process (#574).
+- An `update_event` or `update_reminder` call that omits `calendar` or `list_name` keeps the item where it is. One rule for an omitted field is an owner decision, and `update_event(recurrence='none')` follows it (#572, #579).
+- A send that times out says that Mail may have sent the message, on every dispatch whose script holds a `send` (#573).
+- `mail_undo` finds a receipt after the audit log rotates, a failed plan write stops the move, and a target that moved in part is replayed (#575, #578).
+- `dedupe-mail --execute` runs its keeper check after a batch timeout (#577).
+- `messages_search` finds a message whose text is only in `attributedBody` (#576).
+- `doctor()` reads the process state in a comma-decimal locale (#580).
+- The script guards cover every script in the package, the real send needs its opt-in, the default suite creates no real `EKEventStore`, and the tool layer has a dispatch test over `registry.TOOLS` (#581).
 
-Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found all three; the owner put them in one phase before Phase 05.10 (2026-11-05).
-**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp)
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06).
+**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #572, #573, #574, #575, #576, #577, #578, #579, #580 and #581)
 **Depends on:** Phase 05.6
 **Plans:** 0 plans
 
