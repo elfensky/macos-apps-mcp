@@ -30,6 +30,7 @@ from ..contracts import (
 from ..errors import (
     SpanRequired,
     VerificationFailed,
+    WriteRefused,
     refused_write,
     resolve_container,
     verify_persisted,
@@ -515,7 +516,9 @@ class CalendarAdapter:
             # edit, so refuse before any setter; a single event already has no rule.
             if data.recurrence is CLEAR_RECURRENCE:
                 if e.recurrenceRules():
-                    raise SpanRequired(
+                    # a refused write, not a missing span: a span on THIS call
+                    # would not help, so the kind must not say span_required
+                    raise WriteRefused(
                         "update_event cannot stop a repeating event, so "
                         "recurrence='none' is refused. To end the series, call "
                         "delete_event with span='future-events': it deletes this "

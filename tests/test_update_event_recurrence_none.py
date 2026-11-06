@@ -11,7 +11,7 @@ import pytest
 
 import macos_apps_mcp.server as srv
 from macos_apps_mcp.contracts import CLEAR_RECURRENCE, CalendarEventData, Pointer
-from macos_apps_mcp.errors import SpanRequired
+from macos_apps_mcp.errors import WriteRefused
 from tests._fakes import fake_rule
 from tests.test_eventkit_update_container import _cal_store, _event_world, _Item
 
@@ -34,7 +34,7 @@ def test_none_on_a_repeating_event_is_refused_before_any_write(monkeypatch):
     item.state["recurrenceRules"] = [fake_rule(freq=1)]
     adapter = _event_world(monkeypatch, item, s)
     saved = _saves(s)
-    with pytest.raises(SpanRequired) as exc:
+    with pytest.raises(WriteRefused) as exc:
         adapter.update_event(
             "I-1|1", _data(recurrence=CLEAR_RECURRENCE), span="future-events"
         )
