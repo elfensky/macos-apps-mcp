@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -59,6 +60,7 @@ from ..errors import (
     AccessibilityDenied,
     ComposeRefused,
     NativeError,
+    NativeTimeout,
 )
 from ..text import (
     READ_BODY,
@@ -1470,6 +1472,26 @@ def _send_reply(outgoing_id: int) -> None:
         raise NativeError(f"send: {type(exc).__name__}{_SEND_UNSURE}") from exc
 
 
+# #573: said when a host timeout stops a script that holds `send`. Stopping
+# osascript does not recall an Apple Event Mail accepted: the generic retry text
+# could send the mail twice.
+_SEND_TIMED_OUT = (
+    "Mail did not confirm the send in time. WARNING: the message MAY have been sent, "
+    "or it may wait in Mail's Outbox. Check Mail's Outbox and Sent before any retry, "
+    "so a retry cannot send the message twice."
+)
+
+
+@contextmanager
+def _send_may_have_happened():
+    """Around a `send` dispatch: a NativeTimeout gets the uncertain-outcome text. Every
+    other error passes unchanged (Mail accepted nothing, or the script rolled back)."""
+    try:
+        yield
+    except NativeTimeout as exc:
+        raise NativeTimeout(_SEND_TIMED_OUT) from exc
+
+
 # --- the four builders ---------------------------------------------------------------
 
 
@@ -1499,7 +1521,7 @@ def new_message(
         # This only runs here — deliver() calls dispatch() only when dry_run=False —
         # so a dry run never reaches the ownership read and never constructs anything.
         spelling = owned_sender(sender) if sender else ""
-        with runtime.body_file(text) as path:
+        with runtime.body_file(text) as path, _send_may_have_happened():
             runtime.run_osascript(
                 _SEND,
                 subj,
@@ -1509,6 +1531,7 @@ def new_message(
                 US.join(to_list),
                 US.join(cc_list),
                 US.join(bcc_list),
+                timeout=ORIGINAL_TIMEOUT,
             )
 
     return Outgoing(
@@ -1671,9 +1694,10 @@ def forward_of(message_id: str, mailbox: str, to) -> Outgoing:
     mb = mail_addressing.mailbox_args(mailbox)
 
     def dispatch() -> None:
-        runtime.run_osascript(
-            _FORWARD, mid, US.join(to_list), *mb, timeout=ORIGINAL_TIMEOUT
-        )
+        with _send_may_have_happened():
+            runtime.run_osascript(
+                _FORWARD, mid, US.join(to_list), *mb, timeout=ORIGINAL_TIMEOUT
+            )
 
     return Outgoing(
         action="forward",
@@ -1750,7 +1774,7 @@ def stored_draft(draft_id: str) -> Outgoing:
         )
 
     def dispatch() -> None:
-        with runtime.body_file(d["body"]) as path:
+        with runtime.body_file(d["body"]) as path, _send_may_have_happened():
             runtime.run_osascript(
                 _SEND,
                 d["subject"],
@@ -1760,6 +1784,7 @@ def stored_draft(draft_id: str) -> Outgoing:
                 US.join(d["to"]),
                 US.join(d["cc"]),
                 US.join(d["bcc"]),
+                timeout=ORIGINAL_TIMEOUT,
             )
 
     return Outgoing(
