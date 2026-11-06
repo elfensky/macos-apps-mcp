@@ -321,7 +321,7 @@ def _preflight_trash(urls: list[str]) -> None:
             raise SystemExit(2)
 
 
-def _report_batch_refusal(exc: NativeError) -> None:
+def _report_batch_refusal(exc: Exception) -> None:
     print(
         "Pass stopped at this batch. Earlier batches may already have changed "
         f"messages; inspect their receipt lines above.\n{exc}",
@@ -503,9 +503,9 @@ def _run_cross_account(opts: dict) -> None:
         for batch in _chunks(mids):
             try:
                 result = adapter.trash_mail(batch, url, dry_run=False)
-            # Any native failure, a timeout too (#577): earlier batches moved copies,
-            # so the keeper check below must still run.
-            except NativeError as exc:
+            # Any failure of a batch, a timeout or a refused argument too (#577):
+            # earlier batches moved copies, so the keeper check below must still run.
+            except (NativeError, ValueError) as exc:
                 _report_batch_refusal(exc)
                 refused = True
                 break
