@@ -134,6 +134,7 @@ Recent decisions affecting current work:
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
 - [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published, and joins Phase 05.12; #569 takes option 1 (a CLI row on Health); #568 and advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp share bug Phase 05.12 before Phase 05.10.
 - [Roadmap]: Owner decision 2026-11-06 (codebase review): the ten confirmed defects (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581) join bug Phase 05.12 before Phase 05.10.
+- [Roadmap]: Owner decisions 2026-11-06 (fix dispatch): #572 fixes only the calendar or list move in Phase 05.12, and the keep rule for the other omitted fields is designed in Phase 05.10 with the 0.17.0 wire changes; `update_event(recurrence='none')` is refused on a repeating event and names `delete_event(span='future-events')` (#579).
 
 ### Pending Todos
 
