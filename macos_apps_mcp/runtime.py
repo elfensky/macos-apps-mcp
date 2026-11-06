@@ -133,8 +133,10 @@ def app_process_info(app: str) -> dict | None:
     the timeout classification (#183) and doctor's automation report."""
     try:
         pid = int(tracked_run(["pgrep", "-x", app], timeout=5.0).stdout.split()[0])
+        # #580: the C locale, so %cpu reads "0.9" and never "0,9" or "0٫9" (U+066B)
         state, cpu, etime = tracked_run(
-            ["ps", "-o", "state=,%cpu=,etime=", "-p", str(pid)], timeout=5.0
+            ["env", "LC_ALL=C", "ps", "-o", "state=,%cpu=,etime=", "-p", str(pid)],
+            timeout=5.0,
         ).stdout.split()
         return {"pid": pid, "state": state, "cpu": float(cpu), "etime": etime}
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
