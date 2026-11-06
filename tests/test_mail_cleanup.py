@@ -25,6 +25,7 @@ from macos_apps_mcp.adapters import mail_index, mail_recover
 from macos_apps_mcp.adapters.mail import MailAdapter
 from macos_apps_mcp.errors import NativeError
 from macos_apps_mcp.text import RS, US
+from tests import scripts
 from tests._fakes import FakeMail
 
 ACCT = "AAAAAAAA-1111-2222-3333-444444444444"
@@ -588,14 +589,27 @@ def test_dedupe_is_cli_only_and_never_an_mcp_tool():
 # --- the check a green suite has twice failed to be ----------------------------------
 
 
-def test_every_applescript_constant_actually_compiles():
-    """osacompile every script the mail adapter builds — in EVERY module of it.
+_SCRIPTS = scripts.templates()
 
-    Scans each mail module for uppercase string constants that look like a script, so
-    a new script is covered the moment it is named (keep the `on run argv` convention).
-    ``mail_outgoing`` joined the list with #160, which moved the four send scripts out
-    of ``mail.py``; a derived test that only knew one module would have silently
-    stopped compiling them.
+
+def test_the_compile_check_finds_the_scripts():
+    # guard the scan itself — an empty sweep would make the compile check vacuous.
+    assert len(_SCRIPTS) >= scripts.MIN_TEMPLATES, sorted(_SCRIPTS)
+    # the send plane moved to mail_outgoing (#160) — prove the net still reaches it
+    assert any(k.startswith("mail_outgoing.") for k in _SCRIPTS)
+    # #581: the scan covers the whole package, not four mail modules
+    assert "runtime._ACTIVATE_WINDOW" in _SCRIPTS
+
+
+@pytest.mark.parametrize("name", sorted(_SCRIPTS))
+def test_every_applescript_constant_actually_compiles(name):
+    """osacompile every script the package builds — in EVERY module of it.
+
+    ``tests.scripts.templates()`` scans every module of ``macos_apps_mcp`` for
+    uppercase string constants that drive an app, so a new script is covered the
+    moment it is named. ``mail_outgoing`` once had to join a hand list with #160,
+    which moved the four send scripts out of ``mail.py``; #581 found that list still
+    skipped eight modules, ``runtime`` among them.
 
     0.9.2 shipped a `move_mail` that could not compile — a scratch variable named `st`,
     which is an AppleScript reserved word (the "1st" ordinal) — past three code reviews
@@ -603,39 +617,27 @@ def test_every_applescript_constant_actually_compiles():
     Mocking `run_osascript` proves the Python around a script; it cannot prove the
     script. This costs milliseconds and catches that whole class.
 
-    Compilation only — `osacompile` parses, it does not talk to Mail, so this needs no
-    Automation grant and is safe in the normal suite. Skipped where the tool is absent.
+    Compilation only — `osacompile` parses, it does not talk to the app, so this needs
+    no Automation grant and is safe in the normal suite. Skipped where the tool is
+    absent, and per script where the app it names is absent: `osacompile` needs that
+    app's scripting dictionary, so a failure there would prove nothing about the script.
     """
     import shutil
     import subprocess
 
     if not shutil.which("osacompile"):
         pytest.skip("osacompile is macOS-only")
-    from macos_apps_mcp.adapters import mail_addressing, mail_drafts, mail_outgoing
-
-    modules = (mail_mod, mail_outgoing, mail_addressing, mail_drafts)
-    scripts = {
-        f"{mod.__name__.rsplit('.', 1)[-1]}.{name}": getattr(mod, name)
-        for mod in modules
-        for name in dir(mod)
-        if name.isupper()
-        and isinstance(getattr(mod, name), str)
-        # every script in these modules opens with a handler or `on run`
-        and ("on run argv" in getattr(mod, name))
-    }
-    assert scripts, "no AppleScript constants found — did the naming change?"
-    # the send plane moved to mail_outgoing (#160) — prove the net still reaches it
-    assert any(k.startswith("mail_outgoing.") for k in scripts)
-    failures = {}
-    for name, source in scripts.items():
-        proc = subprocess.run(
-            ["osacompile", "-o", "/dev/null", "-"],
-            input=source,
-            capture_output=True,
-            text=True,
+    source = _SCRIPTS[name]
+    if missing := scripts.missing_apps(source):
+        pytest.skip(
+            f"{name}: no {', '.join(missing)} on this machine to compile against"
         )
-        if proc.returncode != 0:
-            failures[name] = proc.stderr.strip()
-    assert not failures, "AppleScript that does not compile: " + "; ".join(
-        f"{k}: {v}" for k, v in failures.items()
+    proc = subprocess.run(
+        ["osacompile", "-o", "/dev/null", "-"],
+        input=source,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, (
+        f"AppleScript that does not compile: {name}: {proc.stderr.strip()}"
     )
