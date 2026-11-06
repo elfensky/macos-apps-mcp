@@ -1,10 +1,11 @@
 """On-device Mail outbound tests (#82/#83) — NEVER run in CI.
 
-Every send here targets SELF_ADDRESS, the operator's own address. No test in this
-file may ever address a third party: a failed assertion is recoverable, a
-mis-sent mail is not.
+Every send here targets SELF_ADDRESS, read from MACOS_APPS_TEST_ADDRESS: set it to
+your own address. No test in this file may ever address a third party: a failed
+assertion is recoverable, a mis-sent mail is not.
 
-Run with:  MACOS_APPS_ALLOW_SEND=mail uv run pytest -m integration -k outbound
+Run with:  MACOS_APPS_ALLOW_SEND=mail MACOS_APPS_TEST_ADDRESS=<your own address> \
+           uv run pytest -m integration -k outbound
 """
 
 from __future__ import annotations
@@ -19,8 +20,19 @@ from macos_apps_mcp.adapters.mail import MailAdapter
 
 pytestmark = pytest.mark.integration
 
-SELF_ADDRESS = "andrei@lav.ren"
+SELF_ADDRESS = os.environ.get("MACOS_APPS_TEST_ADDRESS")
 MARKER = "macos-apps-mcp integration"
+
+# Every test that really sends wears both marks: the send opt-in, and a recipient the
+# contributor owns (never a hardcoded address that mails the maintainer).
+_send_opt_in = pytest.mark.skipif(
+    os.environ.get("MACOS_APPS_ALLOW_SEND") is None,
+    reason="set MACOS_APPS_ALLOW_SEND=mail to run the real-send test",
+)
+_test_address = pytest.mark.skipif(
+    SELF_ADDRESS is None,
+    reason="set MACOS_APPS_TEST_ADDRESS to your own address to run a real send",
+)
 
 
 def test_list_drafts_returns_pointers():
@@ -35,15 +47,15 @@ def test_dry_run_send_leaves_no_draft_behind():
     # The regression this guards: constructing an outgoing message can strand an
     # autosaved copy in Drafts. A dry run must construct nothing.
     before = {p["id"] for p in MailAdapter().list_drafts()["results"]}
-    out = MailAdapter().send(SELF_ADDRESS, f"{MARKER} dry", "body")
+    # A dry run sends nothing, so it needs no real recipient.
+    to = SELF_ADDRESS or "nobody@example.invalid"
+    out = MailAdapter().send(to, f"{MARKER} dry", "body")
     assert out["dry_run"] is True
     assert {p["id"] for p in MailAdapter().list_drafts()["results"]} == before
 
 
-@pytest.mark.skipif(
-    os.environ.get("MACOS_APPS_ALLOW_SEND") is None,
-    reason="set MACOS_APPS_ALLOW_SEND=mail to run the real-send test",
-)
+@_send_opt_in
+@_test_address
 def test_send_to_self_and_delete_draft_round_trip():
     adapter = MailAdapter()
     subject = f"{MARKER} send"
@@ -130,6 +142,8 @@ end run"""
     assert verdict == "true"  # the delete was verified, not assumed
 
 
+@_send_opt_in
+@_test_address
 def test_outbox_pending_tracks_the_real_queue_not_session_objects():
     """A real send to self must move outbox_pending 0 -> non-zero -> 0. The counter this
     shipped with (`count of outgoing messages`) counts script-session objects including
