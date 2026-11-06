@@ -12,8 +12,16 @@ from tests.envelope import ACCT_A, ACCT_B
 from tests.test_dedupe_preflight import KEEP, _adapter, _args, _seed
 
 
-def test_timeout_in_second_batch_still_verifies_keepers(
-    blank_envelope, monkeypatch, capsys
+@pytest.mark.parametrize(
+    "failure",
+    [
+        NativeTimeout("timed out; receipt R-2 written, outcome unknown"),
+        # a refused argument is no NativeError: it must not skip the check either
+        ValueError("refused; receipt R-2 written before the refusal"),
+    ],
+)
+def test_failure_in_second_batch_still_verifies_keepers(
+    blank_envelope, monkeypatch, capsys, failure
 ):
     _seed(blank_envelope, "cross", monkeypatch)
     for acct in (ACCT_A, ACCT_B):
@@ -24,7 +32,7 @@ def test_timeout_in_second_batch_still_verifies_keepers(
     def act(ids, url, *, dry_run):
         calls.append(url)
         if len(calls) == 2:
-            raise NativeTimeout("timed out; receipt R-2 written, outcome unknown")
+            raise failure
         return {"succeeded": len(ids), "receipt": f"R-{len(calls)}"}
 
     adapter.trash_mail.side_effect = act
