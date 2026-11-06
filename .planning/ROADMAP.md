@@ -20,9 +20,10 @@ people run it safely: per-adapter toggles and a loopback dashboard, then distrib
 `.mcpb`, a Homebrew cask and a companion plugin.
 
 **Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
-The migration and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
+The migration is complete (Phase 05.4, 2026-11-06), and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
 Remaining bugs use the migrated server. Installed-device acceptance and release remain separate from implementation.
 Phase 05.2 device acceptance remains incomplete; migration does not establish Mail acceptance.
+Release 0.16.0 ships the migration after the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
 by default, its own audit verb, and verification by running it on device and inspecting the result.
@@ -45,7 +46,7 @@ Execution follows the dependency order below, rather than numeric phase identifi
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
-- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
+- [x] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers (completed 2026-11-06)
 - [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6
 - [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
 - [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581)** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed; the ten defects of the 2026-11-06 codebase review are fixed
@@ -428,7 +429,8 @@ Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; t
 **Requirements**: MIG-01
 **Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
 **Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
-**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation, Mail recovery, and bounded reads passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) also passed with both protocol eras and bounded native reads. Remaining native/frontend acceptance and release stay open.
+**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation, Mail recovery, and bounded reads passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) also passed with both protocol eras and bounded native reads. On build `3dd93b2`, the read-only device suite passed, and a real frontend survived a daemon restart and an outage ([UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)). [Verification](phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md): passed, 2026-11-06.
+The public release is not a criterion of this phase. Release 0.16.0 follows the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 Plans:
 - [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
@@ -436,12 +438,12 @@ Plans:
 
 Failed discovery returns connection errors instead of false missing-tool answers or successful empty lists.
 Synthetic tests cover both protocol eras and exactly one execution after an explicit new call.
-The original November 1 incident remains unproved. Installed/frontend acceptance and the clipboard observation keep #543 open.
+A real frontend gets a connection error during a daemon outage, and the next call after the restart answers normally. The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 in Phase 05.2.
 
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
 **Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464); `reply_all`'s dry-run preview lists the original's header, not the reply's recipients (#516, found at the 05.2-07 device sitting). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17, FIX-18
+**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17, FIX-18, FIX-26
 **Depends on:** Phase 05.1
 **Success Criteria** (what must be TRUE):
 
@@ -450,6 +452,9 @@ The original November 1 incident remains unproved. Installed/frontend acceptance
   3. A `mail_reply` or `reply_all` reply keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, on a route settled by a device probe recorded in `docs/mail-applescript-facts.md` — (a) the reply text pasted on top of Mail's untouched native reply through the Accessibility API, tested first; (b) a self-built styled HTML quote only if (a) fails. The plain-text `> ` quote is removed (owner verdict, 2026-10-27). When the route cannot run, the tool refuses, leaves no draft and sends nothing, and names the setting; `doctor()` and the Health page report the route's permission. The resulting draft and one delivered `reply_all` are inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
   5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15) — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
+  6. When the paste check of `mail_reply` or `reply_all` fails because the clipboard changed during the call, the refusal says so and asks the user not to copy while a reply runs; nothing is sent and no draft stays (#589, moved from #543 by the owner, 2026-11-06).
+
+Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
 **Plans:** 15/16 plans executed; device acceptance remains incomplete
 
@@ -655,7 +660,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Implementation merged; device acceptance and release pending | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
