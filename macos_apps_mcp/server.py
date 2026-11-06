@@ -1400,6 +1400,10 @@ def update_event(
     removes them all.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
+    `recurrence='none'` on a repeating event is refused and changes nothing:
+    update_event cannot stop a series. To end it, use
+    `delete_event(span='future-events')`, which deletes this occurrence and all later
+    ones. On a single event 'none' changes nothing about recurrence.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
     events."""
     data = CalendarEventData(
@@ -1410,7 +1414,7 @@ def update_event(
         location=location,
         notes=notes,
         all_day=all_day,
-        recurrence=parse_recurrence(recurrence),
+        recurrence=parse_recurrence_update(recurrence),
         alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.update_event(id, data, span=span).as_dict()
