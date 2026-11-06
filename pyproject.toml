@@ -106,8 +106,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: real macOS / EventKit / TCC — run manually, never in CI"]
-addopts = "-m 'not integration'"
+markers = ["integration: real macOS / EventKit / TCC — run manually, never in CI", "device: through the INSTALLED daemon over its unix socket — run manually, never in CI"]
+addopts = "-m 'not integration and not device'"
 
 # TestPyPI as a named publish target. `explicit = true` keeps it out of normal
 # dependency resolution — it is only ever used via `uv publish --index testpypi`.
