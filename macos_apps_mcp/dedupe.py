@@ -54,7 +54,7 @@ import sys
 from .adapters import mail_addressing, mail_index, mailbox_url
 from .adapters.mail import MailAdapter
 from .adapters.mail_recover import MAX_TARGETS
-from .errors import AmbiguousTarget
+from .errors import AmbiguousTarget, NativeError
 from .text import clean_summary
 
 _USAGE = """usage: macos-apps-mcp dedupe-mail [options]
@@ -321,7 +321,7 @@ def _preflight_trash(urls: list[str]) -> None:
             raise SystemExit(2)
 
 
-def _report_batch_refusal(exc: AmbiguousTarget) -> None:
+def _report_batch_refusal(exc: NativeError) -> None:
     print(
         "Pass stopped at this batch. Earlier batches may already have changed "
         f"messages; inspect their receipt lines above.\n{exc}",
@@ -503,7 +503,9 @@ def _run_cross_account(opts: dict) -> None:
         for batch in _chunks(mids):
             try:
                 result = adapter.trash_mail(batch, url, dry_run=False)
-            except AmbiguousTarget as exc:
+            # Any native failure, a timeout too (#577): earlier batches moved copies,
+            # so the keeper check below must still run.
+            except NativeError as exc:
                 _report_batch_refusal(exc)
                 refused = True
                 break
