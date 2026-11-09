@@ -1,0 +1,39 @@
+{
+  "parts": [
+    {"id": "client", "name": "MCP client", "role": "An app that calls tools", "kind": "outside", "lane": "callers", "row": 1, "col": 2,
+      "does": "An app that connects through standard input and output, or through the shim, and calls tools." },
+    {"id": "operator", "name": "Local operator", "role": "Runs and checks the server", "kind": "person", "lane": "callers", "row": 1, "col": 3,
+      "does": "The person who installs, checks and restarts the server." },
+    {"id": "packaging-and-release", "name": "Packaging and release", "role": "Builds and signs the app", "kind": "component", "lane": "system", "row": 1, "col": 1,
+      "does": "Builds the universal app from the locked dependencies, bundles the licence notices, then signs and notarizes it." },
+    {"id": "transport", "name": "Transport", "role": "Holds client connections", "kind": "component", "lane": "system", "row": 1, "col": 2,
+      "does": "Serves the tools over stdio or a shim and daemon socket, keeps both protocol eras, and warns about an interrupted call without a replay." },
+    {"id": "operator-controls", "name": "Operator controls", "role": "Dashboard, health, switches", "kind": "component", "lane": "system", "row": 1, "col": 3,
+      "does": "The local dashboard and command line: diagnostics, app switches and restart." },
+    {"id": "tools-and-policy", "name": "Tools and policy", "role": "Gates tools, routes each call", "kind": "component", "lane": "system", "row": 2, "col": 2,
+      "does": "Applies the capability gates when tools register. Sends each app tool call to its adapter and marks the result as untrusted data." },
+    {"id": "adapters", "name": "App adapters", "role": "Per app: reads and actions", "kind": "component", "lane": "system", "row": 3, "col": 2,
+      "does": "One adapter per app family. Each reads data and does the requested actions, within its limits." },
+    {"id": "audit-and-recovery", "name": "Audit and recovery", "role": "Records, backups, Mail undo", "kind": "component", "lane": "system", "row": 3, "col": 3,
+      "does": "Keeps audit records, Mail backups and undo receipts. A Mail batch acts only after its plan record is written." },
+    {"id": "native-access", "name": "Native access", "role": "One queue into macOS", "kind": "component", "lane": "system", "row": 4, "col": 2,
+      "does": "Runs EventKit, AppleScript, database, Photos and Accessibility work on one worker, one call at a time, and cleans up child processes." },
+    {"id": "apps", "name": "macOS apps", "role": "Mail, Calendar, Notes, more", "kind": "outside", "lane": "outside", "row": 1, "col": 2,
+      "does": "Ten native app families, such as Mail, Calendar, Reminders, Notes and Photos, and their local stores." }
+  ],
+  "links": [
+    {"from": "client", "to": "transport", "kind": "call", "label": "calls tools"},
+    {"from": "operator", "to": "operator-controls", "kind": "call", "label": "opens"},
+    {"from": "packaging-and-release", "to": "transport", "kind": "call", "label": "supplies"},
+    {"from": "operator-controls", "to": "transport", "kind": "call", "label": "restarts"},
+    {"from": "operator-controls", "to": "tools-and-policy", "kind": "data", "label": "sets the gates"},
+    {"from": "transport", "to": "tools-and-policy", "kind": "call"},
+    {"from": "tools-and-policy", "to": "adapters", "kind": "call"},
+    {"from": "adapters", "to": "native-access", "kind": "call"},
+    {"from": "native-access", "to": "apps", "kind": "call", "label": "reads and acts"},
+    {"from": "tools-and-policy", "to": "audit-and-recovery", "kind": "data", "label": "records, reads"},
+    {"from": "adapters", "to": "audit-and-recovery", "kind": "data", "label": "records"},
+    {"from": "operator-controls", "to": "audit-and-recovery", "kind": "data", "label": "reads, records"},
+    {"from": "operator-controls", "to": "native-access", "kind": "call", "label": "probes grants"}
+  ]
+}
