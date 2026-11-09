@@ -30,8 +30,8 @@
     {"from": "tools-and-policy", "to": "adapters", "kind": "call"},
     {"from": "adapters", "to": "native-access", "kind": "call"},
     {"from": "native-access", "to": "apps", "kind": "call", "label": "reads and acts"},
-    {"from": "tools-and-policy", "to": "audit-and-recovery", "kind": "data", "label": "records"},
-    {"from": "adapters", "to": "audit-and-recovery", "kind": "data", "label": "records"},
+    {"from": "tools-and-policy", "to": "audit-and-recovery", "kind": "data"},
+    {"from": "adapters", "to": "audit-and-recovery", "kind": "data"},
     {"from": "operator-controls", "to": "audit-and-recovery", "kind": "data"},
     {"from": "operator-controls", "to": "native-access", "kind": "call", "label": "probes grants"}
   ]
