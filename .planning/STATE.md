@@ -29,7 +29,7 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 
 Phase: 05.6 — probe-independent bug fixes.
 Plans: 05.6-01/02/03/04 are merged after review and green CI. Phase 05.4 is complete (2026-11-06).
-Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is reviewed and corrected, with green CI. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
+Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is merged (2026-11-06). The 2026-11-06 review fixes (#572 to #581) are merged in PR #584 (Phase 05.12). Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
 Phase 05.2: 15 of 16 plans merged; 05.2-16 device acceptance remains incomplete.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
 Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. On build 3dd93b2, the read-only device suite passed (19 passed, 0 failed), and a real frontend survived a daemon restart and an outage ([05.4 UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)).
