@@ -23,7 +23,7 @@ A job can finish even when its receipt is lost; the missing receipt does not mak
 
 ## Components
 
-The diagram describes implemented responsibilities. Arrows show communication or dependency, rather than permission grants.
+The diagram describes implemented responsibilities. Arrows show communication or dependency, rather than permission grants. Dashed arrows show records written or read.
 
 ```mermaid
 flowchart TD
@@ -56,7 +56,7 @@ The grid file [macos-apps-mcp-architecture.json](macos-apps-mcp-architecture.jso
 - A tool becomes visible to a client only after its capability gate passes. Tool registration applies the gates.
 - EventKit, AppleScript and native database work runs one call at a time on one worker. Native databases open read-only.
 - The transport warns about an interrupted call and never replays it.
-- The audit log is best-effort: a native action can finish without a stored audit record. A Mail batch acts only after its plan record is written.
+- The audit log is best-effort: a native action can finish without a stored audit record. A Mail move, Trash or dedupe batch acts only after its plan record is written.
 - A caller name or a shim identifier is an advisory label, not an authenticated identity.
 - Mail recovery is not a general undo. Notes has no full-body backups.
 - Private storage checks protect particular file writes. They do not stop every native action when storage fails.

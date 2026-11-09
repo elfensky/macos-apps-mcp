@@ -71,7 +71,6 @@ Caller identity remains advisory, as described in [transport](macos-apps-mcp-tra
 
 - [Phase 1 verification](../phases/01-gate-land-the-spiked-architecture-cuts/01-VERIFICATION.md).
 
-AGENTS.md still says that an outbound dry run makes no native call. The stored-draft and reply-all previews read stored mail.
 Phase 05.12 is in progress. Its PR #584 added the dispatch test over `registry.TOOLS` (#581).
 Phase 05.10 plans tool names, parameter descriptions, error codes (#502) and the omitted-field rule (#572).
 Phase 05.11 plans query-bound paging. Phase 05.7 plans agent guidance.

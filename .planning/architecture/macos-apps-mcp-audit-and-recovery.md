@@ -25,7 +25,7 @@ Audit storage rotates JSONL files. Every reader covers both retained files, `aud
 
 **eli14:** The workshop keeps receipts beside its completed jobs.
 The receipt printer can fail after a job finishes.
-Mail jobs write a work order first and can keep a spare copy. A Mail job with no work order does not start. A missing final receipt still leaves uncertainty.
+Mail moves, Trash and dedupe jobs write a work order first and can keep a spare copy. Such a job with no work order does not start. A missing final receipt still leaves uncertainty.
 Future recovery depends on the copies and records that actually survived.
 
 ### Mail recovery
