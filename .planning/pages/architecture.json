@@ -1,0 +1,214 @@
+{
+  "format": 1,
+  "purpose": "macos-apps-mcp gives MCP clients bounded access to ten native macOS app families.",
+  "state": "implemented",
+  "checked": "2026-11-09",
+  "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+  "eli14": "The server is a workshop with a reception desk, specialist benches, and one shared machine station. The desk accepts permitted jobs, and each bench knows its app. The station handles native app access in order. A job can finish even when its receipt is lost; the missing receipt does not make repetition safe.",
+  "prose": "## Rules\n\n- A tool becomes visible to a client only after its capability gate passes. Tool registration applies the gates.\n- EventKit, AppleScript and native database work runs one call at a time on one worker. Native databases open read-only.\n- The transport warns about an interrupted call and never replays it.\n- The audit log is best-effort: a native action can finish without a stored audit record. A Mail move, Trash or dedupe batch acts only after its plan record is written.\n- A caller name or a shim identifier is an advisory label, not an authenticated identity.\n- Mail recovery is not a general undo. Notes has no full-body backups.\n- Private storage checks protect particular file writes. They do not stop every native action when storage fails.\n\n## Sources\n\n`source_revision` identifies the checked code baseline, and `source_evidence_date` the date of that check.\nThe page commit comes from Git, not from this note. User review remains pending.\n[Publication evidence](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/overnight/garage-publication-2026-11-04.md) records the first publication on 2026-11-04, by the earlier plain HTML publisher.\n\n- [Project scope](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/PROJECT.md) and [phase roadmap](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/ROADMAP.md).\n- [Tool server](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/server.py), [transport](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/daemon.py), and [dependency lock](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/uv.lock).\n- [Migration implementation and acceptance limits](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) and [Phase 05.4 UAT](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md).\n- [Private storage implementation](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-SUMMARY.md).\n- [Distribution notice inventory](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/packaging/licenses/README.md).\n- [Planned Notes safety](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md).\n- [Implemented grant chips and acceptance limits](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).\n\nThe architecture notes at 834691b4: [macos-apps-mcp-architecture.md](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/architecture/macos-apps-mcp-architecture.md).\n",
+  "parts": [
+    {
+      "id": "client",
+      "name": "MCP client",
+      "role": "An app that calls tools",
+      "kind": "outside",
+      "lane": "callers",
+      "row": 1,
+      "col": 2,
+      "does": "An app that connects through standard input and output, or through the shim, and calls tools."
+    },
+    {
+      "id": "operator",
+      "name": "Local operator",
+      "role": "Runs and checks the server",
+      "kind": "person",
+      "lane": "callers",
+      "row": 1,
+      "col": 3,
+      "does": "The person who installs, checks and restarts the server."
+    },
+    {
+      "id": "packaging-and-release",
+      "name": "Packaging and release",
+      "role": "Builds and signs the app",
+      "kind": "component",
+      "lane": "system",
+      "row": 1,
+      "col": 1,
+      "does": "Builds the universal app from the locked dependencies, bundles the licence notices, then signs and notarizes it.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "Packaging puts the workshop's tools into one labelled crate. Checking both compartments proves that both sets of tools are present and can start in the tested environment. It does not prove that the crate was delivered, installed, or tested on a physical Intel Mac. A new crate label also cannot change the crate already in use.",
+      "page": true
+    },
+    {
+      "id": "transport",
+      "name": "Transport",
+      "role": "Holds client connections",
+      "kind": "component",
+      "lane": "system",
+      "row": 1,
+      "col": 2,
+      "does": "Serves the tools over stdio or a shim and daemon socket, keeps both protocol eras, and warns about an interrupted call without a replay.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "The shim is a cable from the client's desk to the workshop. The cable carries commands and answers, while the workshop operates the machines. A broken cable can lose an answer after the work finishes.",
+      "page": true
+    },
+    {
+      "id": "operator-controls",
+      "name": "Operator controls",
+      "role": "Dashboard, health, switches",
+      "kind": "component",
+      "lane": "system",
+      "row": 1,
+      "col": 3,
+      "does": "The local dashboard and command line: diagnostics, app switches and restart.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "The dashboard is the workshop's control panel behind a local access door. The door needs a key because other accounts and apps on this Mac can reach the same building. Changing a switch can require a restart, which can interrupt unfinished jobs. A panel label does not prove that the app has granted permission.",
+      "page": true
+    },
+    {
+      "id": "tools-and-policy",
+      "name": "Tools and policy",
+      "role": "Gates tools, routes each call",
+      "kind": "component",
+      "lane": "system",
+      "row": 2,
+      "col": 2,
+      "does": "Applies the capability gates when tools register. Sends each app tool call to its adapter and marks the result as untrusted data.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "The workshop desk offers a menu of permitted jobs and returns short collection tickets. A ticket identifies the item without carrying its entire contents. Removing a job from the menu prevents a client from requesting that tool through MCP. The desk writes down the name that each customer gives. The desk does not check that name.",
+      "page": true
+    },
+    {
+      "id": "adapters",
+      "name": "App adapters",
+      "role": "Per app: reads and actions",
+      "kind": "component",
+      "lane": "system",
+      "row": 3,
+      "col": 2,
+      "does": "One adapter per app family. Each reads data and does the requested actions, within its limits.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "Each workshop bench handles one kind of item. Some benches read a catalogue; others ask the app to change an item. A catalogue can be incomplete, and permission to use one bench does not grant permission to use every bench. Each bench therefore reports its own limits.",
+      "page": true
+    },
+    {
+      "id": "audit-and-recovery",
+      "name": "Audit and recovery",
+      "role": "Records, backups, Mail undo",
+      "kind": "component",
+      "lane": "system",
+      "row": 3,
+      "col": 3,
+      "does": "Keeps audit records, Mail backups and undo receipts. A Mail move, Trash or dedupe batch acts only after its plan record is written.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "The workshop keeps receipts beside its completed jobs. The receipt printer can fail after a job finishes. Mail moves, Trash and dedupe jobs write a work order first and can keep a spare copy. Such a job with no work order does not start. A missing final receipt still leaves uncertainty. Future recovery depends on the copies and records that actually survived.",
+      "page": true
+    },
+    {
+      "id": "native-access",
+      "name": "Native access",
+      "role": "One queue into macOS",
+      "kind": "component",
+      "lane": "system",
+      "row": 4,
+      "col": 2,
+      "does": "Runs EventKit, AppleScript, database, Photos and Accessibility work on one worker, one call at a time, and cleans up child processes.",
+      "state": "implemented",
+      "checked": "2026-11-09",
+      "commit": "67a668c39484ebc2017c092d008f1dd705ccff73",
+      "eli14": "The workshop has one machine station because its tools must stay with the same operator. Jobs wait their turn at that station. A jam can delay later jobs, so individual operations have stop conditions. Adding operators without separating the tools would break this arrangement.",
+      "page": true
+    },
+    {
+      "id": "apps",
+      "name": "macOS apps",
+      "role": "Mail, Calendar, Notes, more",
+      "kind": "outside",
+      "lane": "outside",
+      "row": 1,
+      "col": 2,
+      "does": "Ten native app families, such as Mail, Calendar, Reminders, Notes and Photos, and their local stores."
+    }
+  ],
+  "links": [
+    {
+      "from": "client",
+      "to": "transport",
+      "kind": "call",
+      "label": "calls tools"
+    },
+    {
+      "from": "operator",
+      "to": "operator-controls",
+      "kind": "call",
+      "label": "opens"
+    },
+    {
+      "from": "packaging-and-release",
+      "to": "transport",
+      "kind": "call",
+      "label": "supplies"
+    },
+    {
+      "from": "operator-controls",
+      "to": "transport",
+      "kind": "call",
+      "label": "restarts"
+    },
+    {
+      "from": "transport",
+      "to": "tools-and-policy",
+      "kind": "call"
+    },
+    {
+      "from": "tools-and-policy",
+      "to": "adapters",
+      "kind": "call"
+    },
+    {
+      "from": "adapters",
+      "to": "native-access",
+      "kind": "call"
+    },
+    {
+      "from": "native-access",
+      "to": "apps",
+      "kind": "call",
+      "label": "reads and acts"
+    },
+    {
+      "from": "tools-and-policy",
+      "to": "audit-and-recovery",
+      "kind": "data"
+    },
+    {
+      "from": "adapters",
+      "to": "audit-and-recovery",
+      "kind": "data"
+    },
+    {
+      "from": "operator-controls",
+      "to": "audit-and-recovery",
+      "kind": "data"
+    },
+    {
+      "from": "operator-controls",
+      "to": "native-access",
+      "kind": "call",
+      "label": "probes grants"
+    }
+  ]
+}
