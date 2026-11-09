@@ -30,13 +30,12 @@ flowchart TD
     client["MCP client"] -- calls tools --> transport["Transport: stdio or shim and daemon"]
     transport --> tools-and-policy["Tools and policy"]
     tools-and-policy --> adapters["App adapters"]
-    tools-and-policy -. records, reads .-> audit-and-recovery["Audit and recovery"]
+    tools-and-policy -. records .-> audit-and-recovery["Audit and recovery"]
     adapters -. records .-> audit-and-recovery
     adapters --> native-access["Native access"]
     native-access -- reads and acts --> apps["macOS apps and local stores"]
     operator(["Local operator"]) -- opens --> operator-controls["Dashboard and CLI"]
-    operator-controls -. reads, records .-> audit-and-recovery
-    operator-controls -. sets the gates .-> tools-and-policy
+    operator-controls -.-> audit-and-recovery
     operator-controls -- probes grants --> native-access
     operator-controls -- restarts --> transport
     packaging-and-release["Packaging and release"] -- supplies --> transport
