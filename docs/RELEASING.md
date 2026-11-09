@@ -16,7 +16,7 @@ Merge commits before that point are historical, not the convention.
 ## Feature work
 
 Every change — the release bump included — is made in its own worktree,
-`~/Developer/.worktrees/macos-apps-mcp/<branch-with-dashes>`, and reaches `develop` by a PR; the
+`~/Developer/.worktrees/macos-apps-mcp/<branch-with-hyphens>`, and reaches `develop` by a PR; the
 procedure is the developer handbook's (`git-and-prs.md` § Worktrees). The main checkout never
 branches or commits.
 
@@ -33,15 +33,15 @@ reporting the wrong version). A missed `server.json` lists a stale version in th
 - `packaging/Info.plist` → `CFBundleShortVersionString`
 - `server.json` → `version` and `packages[0].version`
 
-Make the bump in a worktree (`~/Developer/.worktrees/macos-apps-mcp/chore-release-X.Y.Z`, branch `chore/release-X.Y.Z`) and land it
-on `develop` by PR like any other change:
+Make the bump in a worktree (`~/Developer/.worktrees/macos-apps-mcp/chore-release-X.Y.Z`,
+branch `chore/release-X.Y.Z`) and land it on `develop` by PR like any other change:
 
 ```sh
 uv run pytest tests/test_packaging.py
 git commit -am "chore(release): X.Y.Z — <milestone name>"
 git push -u origin HEAD && gh pr create --base develop --fill
 gh pr checks --watch --required && gh pr merge --rebase
-git push origin --delete chore/release-X.Y.Z   # never --delete-branch from the lane: it removes the lane
+git push origin --delete chore/release-X.Y.Z   # not --delete-branch from the lane: git-and-prs.md § Merging
 ```
 
 **2. Verify develop is green** — the tree you are about to release, not one from earlier:
