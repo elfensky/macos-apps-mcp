@@ -13,7 +13,7 @@ build/
 .desloppify
 # graphify graph (generated locally)
 graphify-out/
-# per-session git worktrees (see AGENTS.md)
+# in-repo git worktrees of older sessions (sessions now use ~/Developer/.worktrees/)
 .worktrees/
 # GSD research fetch cache (machine artifacts, not planning docs)
 .planning/research/.cache/
@@ -21,3 +21,6 @@ graphify-out/
 .gsd/
 .planning/state.json
 .planning/milestone.lock
+.planning/estimation-calibration.json
+.planning/intel/
+.planning/ui-reviews/

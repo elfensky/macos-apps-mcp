@@ -35,9 +35,8 @@ Commits follow conventional-commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, 
 ## Branching & releases
 
 - **`develop`** is the trunk — all history lives here. Branch features off it
-  (`feature/<desc>`, `refactor/<desc>`) in a worktree under `.worktrees/` — never in
-  the main checkout, see [AGENTS.md](AGENTS.md) ("Worktrees — one lane, always") —
-  and PR back with **rebase-and-merge** so `develop` stays linear.
+  (`feature/<desc>`, `refactor/<desc>`) in a worktree of its own — never in
+  the main checkout — and PR back with **rebase-and-merge** so `develop` stays linear.
 - **`main`** is release-only: one merge commit per release, its tree equal to
   `develop`'s release-point tree and its second parent the `develop` commit it was
   cut from. Never commit directly to `main`. `git log --first-parent main` shows the
