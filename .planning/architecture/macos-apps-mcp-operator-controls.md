@@ -32,7 +32,7 @@ A panel label does not prove that the app has granted permission.
 
 ### Adapter permission chips
 
-Adapters reads the last completed Health report through `health.last_permissions()`.
+The Adapters page reads the last completed Health report through `health.last_permissions()`.
 Automation uses Health's existing live/TCC merge; other permissions use the same report's TCC data.
 Explicit Full Disk Access and EventKit probe refusals override those rows.
 Before the first completed report, `deploy.grant_report()` supplies the existing TCC-only fallback.
