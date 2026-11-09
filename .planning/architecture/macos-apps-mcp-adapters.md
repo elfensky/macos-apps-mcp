@@ -3,32 +3,28 @@ kind: component
 title: App adapters
 component: adapters
 status: implemented
-source_revision: 18dcbf6594bbd62330f71c89376a54155dda1d63
-source_evidence_date: 2026-11-04
-review_status: independent-review-complete
-publication_status: published
-first_published_at: "2026-11-04T01:34:18Z"
-first_published_revision: 93c7f0928d2534ddae2392e78ec722f55491a2ae
+source_revision: 67a668c39484ebc2017c092d008f1dd705ccff73
+source_evidence_date: 2026-11-09
 ---
 
 # App adapters
 
 [Architecture overview](macos-apps-mcp-architecture.md)
 
-## Responsibility and app families
+## What it does
 
 Adapters translate [typed tool requests](macos-apps-mcp-tools-and-policy.md) into app-specific reads and actions.
 Shared [native access](macos-apps-mcp-native-access.md) supplies framework, process, and database primitives.
-Mail has several internal helper modules; these remain within the Mail family.
+Mail and Reminders have internal helper modules. These stay inside their own family.
 
 | Family and source | Implemented access and limits |
 |---|---|
-| [Calendar](../../macos_apps_mcp/adapters/calendar.py) | EventKit reads, free/busy, create/update/delete, alarms, and supported recurrence rules. Unsupported recurrence shapes are refused. |
-| [Reminders](../../macos_apps_mcp/adapters/reminders.py) | EventKit item/list actions; the read-only Reminders store adds tags and parent links. No public tag or subtask writes. |
+| [Calendar](../../macos_apps_mcp/adapters/calendar.py) | EventKit reads, free/busy, create/update/delete, alarms, and supported recurrence rules. Unsupported recurrence shapes are refused. An update refuses `recurrence='none'` on a repeating event. An update without a calendar keeps the event's calendar. Omitted location and notes are cleared (#572). |
+| [Reminders](../../macos_apps_mcp/adapters/reminders.py) | EventKit item/list actions; the read-only Reminders store adds tags and parent links. No public tag or subtask writes. An update without a list keeps the reminder's list. Omitted notes, priority, due and start are cleared (#572). |
 | [Mail](../../macos_apps_mcp/adapters/mail.py) | Envelope Index, local message files, and optional indexes serve reads. AppleScript performs app actions; reply composition also uses Accessibility. |
 | [Notes](../../macos_apps_mcp/adapters/notes.py) | NoteStore reads, body decoding, and in-memory FTS5 search. AppleScript supplies fallbacks and writes. |
 | [Contacts](../../macos_apps_mcp/adapters/contacts.py) | AppleScript search and creation with typed `ContactData`; no direct Contacts framework access. |
-| [Messages](../../macos_apps_mcp/adapters/messages.py) | Read-only `chat.db` content; AppleScript chat listing. No send implementation. |
+| [Messages](../../macos_apps_mcp/adapters/messages.py) | Read-only `chat.db` content; AppleScript chat listing. Search and snippets use the decoded `attributedBody` when `text` is empty. No send implementation. |
 | [Photos](../../macos_apps_mcp/adapters/photos.py) | osxphotos library reads, albums, metadata, and local still-image export. Requires Full Disk Access, rather than Automation. |
 | [Safari](../../macos_apps_mcp/adapters/safari.py) | AppleScript tab reads and URL opening. |
 | [Music](../../macos_apps_mcp/adapters/music.py) | AppleScript library search, current playback, playlists, and playback controls. |
@@ -39,7 +35,9 @@ Some benches read a catalogue; others ask the app to change an item.
 A catalogue can be incomplete, and permission to use one bench does not grant permission to use every bench.
 Each bench therefore reports its own limits.
 
-## Read and action boundaries
+## Rules it keeps
+
+### Read and action boundaries
 
 The [Mail index](../../macos_apps_mcp/adapters/mail_index.py) separates indexed reads from AppleScript actions.
 The [Message-ID sidecar](../../macos_apps_mcp/adapters/mail_ids.py) supports stores without the needed header column and reports stale coverage.
@@ -54,20 +52,24 @@ Mail sending remains behind the outbound gate.
 An accepted send does not prove delivery; Outbox status and post-action warnings remain material.
 Mail writes require resulting-message inspection during acceptance, as recorded in the [device facts](../../docs/mail-applescript-facts.md).
 
-## Planned work and acceptance
+### Notes and localization limits
 
 Notes currently supports create, full replacement, and deletion, with previews on content-removing tools.
 Its snapshots are title pointers, not full-content backups.
-Locked/shared-note guards, non-text preservation checks, and full HTML before-state backups remain planned under #500.
-Notes backup browsing and an undo tool are also not implemented.
+Notes has no backup browsing and no undo tool.
 
-Localization #554 is merged. Notes excludes folder type 1 and passes 48 translated names to its AppleScript fallback.
+Notes excludes folder type 1 and passes 48 translated names to its AppleScript fallback.
 Mail supports explicit translated system-folder names and preserves the original mailbox address.
-Names remain heuristics; SQLite ASCII case matching differs from Python Unicode casefolding. Ambiguous Trash selection remains tracked in #556.
-Non-English device acceptance and real-index timing remain open.
-Implemented adapters do not imply installed-device acceptance for the current migration.
+Names remain heuristics; SQLite ASCII case matching differs from Python Unicode casefolding.
+Mail refuses a Trash write when more than one distinct Trash path matches (#556). Undo of a trash receipt needs one current Trash at the recorded path.
+
+## Sources
 
 - [Phase 3 verification](../phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-VERIFICATION.md): EventKit depth.
 - [Phase 4 verification](../phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane/04-VERIFICATION.md): Notes search and Photos.
 - [Localized-folder implementation and limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-SUMMARY.md).
 - [Phase 05.6 context](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-CONTEXT.md): planned Notes safety and localization.
+- [Ambiguous Trash selection](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-05-SUMMARY.md): implemented; device acceptance pending.
+
+Locked and shared-note guards, non-text preservation checks and full HTML before-state backups are planned under #500.
+The read-only device suite passed on build `3dd93b2`. Localized Mail write acceptance (#556), real-index timing, Notes probes and draft probes remain open.
