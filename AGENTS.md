@@ -32,8 +32,8 @@ This file holds only what is true of this repo. Personal project: commits as `an
 
 `develop` integrates. `main` releases: only `--no-ff` release cuts from `develop`, each tagged `vX.Y.Z`; the merge to
 `main` publishes to TestPyPI, and PyPI is a manual dispatch (`docs/RELEASING.md`). A PR to `develop` merges with
-`gh pr merge --rebase`, then `git push origin --delete <branch>`. Rulesets: `develop` takes PRs with rebase only and requires `check`; `main`
-takes PRs with a merge commit only and requires `check` and `bumped`.
+`gh pr merge --rebase`, then `git push origin --delete <branch>`. Rulesets: `develop` takes PRs with rebase only and
+requires `check`; `main` takes PRs with a merge commit only and requires `check` and `bumped`.
 
 ## This repo's own rules
 
