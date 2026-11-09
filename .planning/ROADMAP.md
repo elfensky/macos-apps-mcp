@@ -456,7 +456,7 @@ A real frontend gets a connection error during a daemon outage, and the next cal
 
 Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
-**Plans:** 15/16 plans executed; device acceptance remains incomplete
+**Plans:** 16/16 plans executed; device acceptance remains incomplete
 
 Plans:
 **Wave 1**
@@ -497,7 +497,7 @@ Plans:
 - [x] 05.2-15-PLAN.md — the reply-all preview reads the account's own addresses into a variable first, and the Drafts sweep accepts the reply's own signature between the text and the quote (FIX-18, FIX-16; #516, #348)
 
 **Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
-- [ ] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
+- [x] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
 
@@ -661,7 +661,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 15/16 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 16/16 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/TBD; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
