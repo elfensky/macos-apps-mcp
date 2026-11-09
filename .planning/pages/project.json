@@ -1,0 +1,173 @@
+{
+  "format": 1,
+  "kind": "repo",
+  "id": "personal-macos-apps-mcp",
+  "slug": "macos-apps-mcp",
+  "domain": "personal",
+  "title": "macos-apps-mcp",
+  "repo": "elfensky/macos-apps-mcp",
+  "description": "A local MCP server that provides controlled access to macOS applications.",
+  "status": "active",
+  "icon": "🍎",
+  "next_action": "Phase 5.6: bugs against the merged MCP 2 and FastMCP 4 implementation.",
+  "commit": "e2de28f75245ebc5f9dfdcf9531ca36199667e54",
+  "plan_date": "2026-11-09",
+  "source": "https://github.com/elfensky/macos-apps-mcp/blob/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/ROADMAP.md",
+  "prose": "## Blockers\n\n- [Phase 04.1] Deferred: `export_mail` refuses mid-batch after earlier files were written, and the typed refusal hides that (review WR-02, tracked in #399).\n\n- Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).\n- [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.\n- The installed daemon is a develop build: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.\n- [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.\n- [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.\n- [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.\n- The repo is not the daemon: merging changes nothing about what a Claude Code session sees until the `.app` is rebuilt and reinstalled.\n- Every Mail write is verified by running it on device with the watchdog running — a green suite has passed a broken forward before.\n\n## Decisions\n\n- [Roadmap]: Owner decision 2026-11-03: migrate to the new MCP server first. Reassess bugs and architecture after migration, because the new SDK may provide different fixes and supported interfaces.\n- [Phase 05.2]: Owner decision 2026-11-01 (05.2-13 sitting): the device acceptance verdict is failed (C2 dry run FIX-18, C3 live Accessibility read); #348 and #516 stay open; gaps G1-G4 (05.2-13-SUMMARY.md) go to /gsd-plan-phase 05.2 --gaps; build 873b553 stays installed, 0.15.1 kept in ~/p052-gaps-rollback/.\n- [Phase 05.2]: Owner decision 2026-11-01: the reply sweep's residual is accepted as documented (facts §4e `Refusal cleanup` (3)): the owner's own hand draft with the same text and the full quote, in the sending account, saved inside the claim window (at most 120 s), can be taken for the call's copy.\n- [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.\n- [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.\n- [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.\n- [Phase 05.2]: Owner decisions 2026-11-01 (gap round 2 planning): plan without CONTEXT.md; targeted research on G2/G3 first (05.2-RESEARCH.md D5); scope G1-G4 plus doctor's restart note; the two other 05.2-13 observations go to #543.\n- [Phase 05.2]: Owner decision 2026-11-01 (G4): the Drafts sweep may take the reply's own signature between the call's text and the quote as its own copy — it deletes a draft only when the draft holds nothing the owner wrote (the call's own text, this reply's signature, Mail's attribution, the quote); an empty call text matches nothing (05.2-15, facts §4e).\n- [Phase 05.2]: Orchestrator decision 2026-11-01 (unattended, owner may veto): the reply-all preview keeps subtracting the account that HOLDS the original as the proxy for the sending account — the dry run builds no reply, so Mail's own pick cannot be read; known limit: an original addressed to another account's alias can preview that alias in cc (FIX-18 text clarified).\n- [Roadmap]: Grill session 2026-11-01 (owner, nine answers; decision page `.planning/reports/2026-11-01-phase-plan-grill.html`): plans are written one phase at a time, right before each runs; 05.6 runs in its own lane while 05.2-13 waits for the acceptance sitting; the testers get the brief after 05.10 and 05.3 cut 1 (release 0.18.0), so 05.3 sits right after 05.10; the paged reads (#508) are additive and become Phase 05.11 after 05.3; a release is cut at every phase close that changes the daemon; the rename is 0.17.0 and 1.0.0 is the launch release; one `instructions` builder, started by 05.3 cut 2 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (DIST-04); #521 joins 05.6.\n- [Phase 05.6]: Owner decisions 2026-11-01 (discuss, assumptions mode): Mail's Trash, Sent, Junk and Archive are found by translated names in `mailbox_url.py`, not by the private `.mboxCache.plist` role bits; `update_note` backups are kept like Mail backups (until deleted by hand, `0600`/`0700`), which bounds Phase 4 D-13 to the search index; the state folder permissions bug is #540, folded into 05.6. The 05.6 release waits until 05.2 has closed and shipped its own release (05.6-CONTEXT.md D-27).\n- [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.\nDecisions are logged in PROJECT.md Key Decisions table.\nRecent decisions affecting current work:\n\n- Gate first: land the 2026-08-28 spiked review before any adapter work — cards 1/7/5 reshape `server.py`/`runtime.py`/`doctor.py`, the files every adapter PR touches.\n- Gate build order is load-bearing: 1 → 7 → 5 → 2 sequentially, Mail-scoped 3/4/9 in parallel; after cards 5 and 2 rebuild the daemon and prove `doctor().version`.\n- Spike branches (`spike/arch-review-*`) are primary sources, never landing branches — each cut re-lands by rebasing onto the previous PR.\n- `dry_run=True` on every destructive tool, enforced from the registration record — done in Phase 1 (GATE-05), live-verified 2026-09-26.\n- Contacts and Messages depth are v2, not v1 (owner, 2026-08-28 roadmap review) — the requirements stay tracked under `## v2 Requirements`, out of this milestone's phases.\n- Email work comes before any new or additional feature (owner, 2026-09-24). Mail fixes are Phase 02.1, right after the gate; the gate stays first because card 4 rewrites `recoverable()`, the function #206 fixes.\n- #205 (Intel build) is DIST-06 in Phase 6 but depends on nothing before it — it may land early as a `/gsd-quick` task.\n- The Sequoia plane (#199/#201) landed outside the phases as bug-driven work; it is recorded as Validated in PROJECT.md, not back-filled as a phase.\n- A probe that overturns an issue's premise is a valid deliverable — ten consecutive 0.9.x cuts were revised on device before code was written.\n- [Phase 01]: Release cut: PR develop→main merged with --merge (never rebase, never --delete-branch since head=develop); tag the merge commit; build only in a detached tag worktree; re-zip after stapling.\n- [Phase 01]: One-off daemon proofs live at .worktrees/.daemon_probe.py (git-ignored), reused across plans 01-10 and 01-14 instead of rewritten per plan.\n- [Phase 02]: An intermittent device test is held by a non-strict xfail with evidence (#230): a strict mark flips the sweep gate on a pass; the mechanism question (content read of an undownloaded body) goes to 02.1.\n- [Phase 02]: A new session re-asks the owner before any device run; one diagnostic re-run per failed nodeid; the watchdog precondition before every Mail run; Mail is never force-quit on a timeout hint alone — a bare Apple Event decides whether it is wedged.\n- [Phase 02]: Planning records land by PR from a locked worktree like code (the main checkout had drifted 11 ahead / 8 behind by direct commits); `.planning/` is excluded from `ruff format` because ruff 0.16 formats Python fences in markdown.\n- [Phase 02.1]: Mail does not reject an unowned `from_address` — it sends from the default account. `send_mail`/`create_draft` refuse it before any native write; `owned_addresses()` fails closed (the opposite of `account_map()`'s fail-open label lookup).\n- [Phase 02.1]: Batch moves and trashes act by internal id from one bulk read (`«class mssg» id n of src`), behind a per-copy `considering case` identity guard; `ok` needs the source reference dead (-1728) plus a destination count rise.\n- [Phase 02.1]: A timeout receipt marks its targets `unknown`, and `undo_plan` replays `unknown` as well as `ok`.\n- [Phase 02.1]: No device probe targets a family account (Personal, Grandma, Mama) — this rule skipped the five #230 runs; both #229 and #230 stay open behind non-strict xfails with device evidence.\n- [Phase 02.1]: Phase close runs validate-phase and secure-phase from the verify:post hooks; their files land in the same records PR as the UAT.\n- [Phase 03]: Pre-code probes (03-01) overturned no premise: reminder lists save on the default source; Google refuses a list save with EKErrorDomain 24; reminder BY* parts and UNTIL (day granularity) round-trip; Google alarms unchanged from spike 008. — Measured on device 2026-10-06 before any Phase 3 code (D-23).\n- [Phase 03]: Owner rulings after the 03-01 probes: A3 and A4 confirmed (alarms refuse a negative value on a timed event and a duplicate offset); A5 changed — reminders compare UNTIL at day granularity too (03-03); A9 changed — complete_reminder refuses with WriteRefused, no save, when the Reminders store cannot be read (03-08). — Probe 2 showed reminders keep UNTIL exactly; the owner prefers a refusal to a blind completion of a possible parent.\n\n- [Phase 03.1]: #335 premise overturned on the iMac (2026-10-13): the SQLite plane, Notes.app and `notes_all` all count 1 live note; the 2 titled rows of the device report sit in Recently Deleted. No filter change; #335 closed with the record.\n- [Phase 03.1]: Contacts route a (PR #355): on the Intel iMac every `whose` reference re-runs the scan, so each property is read with one Apple event over the whole match list (5 scans, 9 s measured) instead of one per person; a length mismatch across the five lists raises instead of mixing two people's fields. No host cap (route b) yet — 03.1-07 proves it through the daemon.\n- [Phase 03.1]: `mail_overview` labels an id absent from a NON-empty account map `(account not in Mail)` (PR #356; cause: a removed account whose rows stay in the Envelope Index). An empty map keeps the uuid, so a cold cache never makes every account look removed.\n- [Phase 04.1]: Bugs before any feature: #373 (hash-locked `build` group, the bundled wheel installed `--no-deps`), #383 (an existing target and a failed `mkdir` raise `WriteRefused`; `_guard` untouched), #384 (ruff on py312 with a drift-guard test), #387 (pid-tagged staging, a dead-pid sweep with five guards, a cleanup error never replaces a written result) — PRs #390/#392/#394/#396, close PR #398.\n- [Phase 05.1]: Owner decisions 2026-10-24: O3/O4/O5 confirmed, O1 overturned → #450 (file-backed account-name cache; a Mail call at daemon start would launch Mail, so refresh only when Mail already runs). PM-04/PM-16 fixed by #451 on the owner's word.\n- [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.\n- [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the \"port held\" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).\n- [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.\n- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published, and joins Phase 05.12; #569 takes option 1 (a CLI row on Health); #568 and advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp share bug Phase 05.12 before Phase 05.10.\n- [Roadmap]: Owner decision 2026-11-06 (codebase review): the ten confirmed defects (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581) join bug Phase 05.12 before Phase 05.10.\n- [Roadmap]: Owner decisions 2026-11-06 (fix dispatch): #572 fixes only the calendar or list move in Phase 05.12, and the keep rule for the other omitted fields is designed in Phase 05.10 with the 0.17.0 wire changes; `update_event(recurrence='none')` is refused on a repeating event and names `delete_event(span='future-events')` (#579).\n\n## Sources\n\nSTATE.md and ROADMAP.md at e2de28f7 (2026-11-09): [STATE.md](https://github.com/elfensky/macos-apps-mcp/blob/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/STATE.md), [ROADMAP.md](https://github.com/elfensky/macos-apps-mcp/blob/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/ROADMAP.md).\n",
+  "milestones": [
+    {
+      "id": "v0-11-0",
+      "no": "v0.11.0",
+      "title": "v0.11.0",
+      "summary": "The server already ships nine adapters, three capability tiers, a signed daemon and a Mail plane that is a complete mail-client API.",
+      "state": "inprogress",
+      "page": true,
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/ROADMAP.md",
+      "items": [
+        {
+          "name": "Gate — Land the Spiked Architecture Cuts",
+          "state": "done",
+          "done": 14,
+          "total": 14,
+          "date": "2026-09-26",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/01-gate-land-the-spiked-architecture-cuts"
+        },
+        {
+          "name": "Gate Close — Fail-Closed Suite and Device Sweep",
+          "state": "done",
+          "done": 6,
+          "total": 6,
+          "date": "2026-10-01",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/02-gate-close-fail-closed-suite-and-device-sweep"
+        },
+        {
+          "name": "Mail Fixes — Batch Moves Fit Their Timeout, Drafts Pick Their Account",
+          "state": "done",
+          "done": 8,
+          "total": 8,
+          "date": "2026-10-05",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/02.1-mail-fixes-batch-moves-fit-their-timeout-drafts-pick-their-a"
+        },
+        {
+          "name": "EventKit Depth — Calendar Alarms & Recurrence, Reminders CRUD & Subtasks",
+          "state": "done",
+          "done": 10,
+          "total": 10,
+          "date": "2026-10-11",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub"
+        },
+        {
+          "name": "Bug Fixes — Device-Report Findings Before Any Feature",
+          "state": "done",
+          "done": 7,
+          "total": 7,
+          "date": "2026-10-16",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/03.1-bug-fixes-device-report-findings-before-any-feature"
+        },
+        {
+          "name": "Notes & Photos — Settle the Mechanism, Then Ship the Read Plane",
+          "state": "done",
+          "done": 6,
+          "total": 6,
+          "date": "2026-10-20",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/04-notes-photos-settle-the-mechanism-then-ship-the-read-plane"
+        },
+        {
+          "name": "Bug Fixes — Phase 4 Follow-ups Before Any Feature",
+          "state": "done",
+          "done": 5,
+          "total": 5,
+          "date": "2026-10-21",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/04.1-bug-fixes-phase-4-follow-ups-before-any-feature"
+        },
+        {
+          "name": "Operator Control Plane — Adapter Toggles and the Localhost Dashboard",
+          "state": "done",
+          "done": 9,
+          "total": 9,
+          "date": "2026-10-22",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das"
+        },
+        {
+          "name": "Bug fixes — dashboard follow-ups (#427, #428, #430)",
+          "state": "done",
+          "done": 7,
+          "total": 7,
+          "date": "2026-10-25",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.1-bug-fixes-dashboard-follow-ups-427-428-430"
+        },
+        {
+          "name": "Migration — mcp 2 and fastmcp 4 (#470)",
+          "state": "done",
+          "date": "2026-11-06",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.4-mcp-2-fastmcp-4-migration"
+        },
+        {
+          "name": "Bug fixes — every open bug before Phase 6 (#455, #399, #348)",
+          "state": "todo",
+          "done": 16,
+          "total": 16,
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455"
+        },
+        {
+          "name": "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)",
+          "state": "inprogress",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu"
+        },
+        {
+          "name": "Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.12-bug-fixes-the-app-after-an-upgrade-568-and-two-private-advis"
+        },
+        {
+          "name": "Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.10-tool-surface-parameter-descriptions-verb-noun-names-merged-d"
+        },
+        {
+          "name": "Feedback — problem reports and improvement suggestions (#465)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.3-feedback-problem-reports-and-improvement-suggestions-465"
+        },
+        {
+          "name": "Paged reads — a cursor bound to the query (#508)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.11-paged-reads-a-cursor-bound-to-the-query-508"
+        },
+        {
+          "name": "CLI — tools from the shell (#507)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.9-cli-tools-from-the-shell-507"
+        },
+        {
+          "name": "Notes depth — Markdown input and note attachments (#505, #506)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.8-notes-depth-markdown-input-and-note-attachments-505-506"
+        },
+        {
+          "name": "Agent guidance — server instructions and per-app skills (#503, #504)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.7-agent-guidance-server-instructions-and-per-app-skills-503-50"
+        },
+        {
+          "name": "Dashboard at a domain — the loader page (#483)",
+          "state": "todo",
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/e2de28f75245ebc5f9dfdcf9531ca36199667e54/.planning/phases/05.5-dashboard-at-a-domain-the-loader-page-483"
+        },
+        {
+          "name": "Distribution — uvx, Bundles, Cask, and the Companion Plugin",
+          "state": "todo"
+        }
+      ]
+    }
+  ],
+  "forwards": [
+    "phase-05-1-dashboard-fixes",
+    "phase-05-2-bug-fixes",
+    "phase-05-4-mcp-migration",
+    "phase-05-6-notes-write-safety",
+    "phase-5-operator-controls",
+    "phase-6-distribution"
+  ],
+  "architecture": true
+}
