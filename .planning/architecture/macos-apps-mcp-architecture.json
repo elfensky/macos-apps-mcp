@@ -15,7 +15,7 @@
     {"id": "adapters", "name": "App adapters", "role": "Per app: reads and actions", "kind": "component", "lane": "system", "row": 3, "col": 2,
       "does": "One adapter per app family. Each reads data and does the requested actions, within its limits." },
     {"id": "audit-and-recovery", "name": "Audit and recovery", "role": "Records, backups, Mail undo", "kind": "component", "lane": "system", "row": 3, "col": 3,
-      "does": "Keeps audit records, Mail backups and undo receipts. A Mail batch acts only after its plan record is written." },
+      "does": "Keeps audit records, Mail backups and undo receipts. A Mail move, Trash or dedupe batch acts only after its plan record is written." },
     {"id": "native-access", "name": "Native access", "role": "One queue into macOS", "kind": "component", "lane": "system", "row": 4, "col": 2,
       "does": "Runs EventKit, AppleScript, database, Photos and Accessibility work on one worker, one call at a time, and cleans up child processes." },
     {"id": "apps", "name": "macOS apps", "role": "Mail, Calendar, Notes, more", "kind": "outside", "lane": "outside", "row": 1, "col": 2,
