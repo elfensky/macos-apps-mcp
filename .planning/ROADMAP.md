@@ -456,7 +456,7 @@ A real frontend gets a connection error during a daemon outage, and the next cal
 
 Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
-**Plans:** 16/16 plans executed; device acceptance remains incomplete
+**Plans:** 16/18 plans executed; gap round 3 (05.2-17, 05.2-18) is planned; device acceptance remains incomplete
 
 Plans:
 **Wave 1**
@@ -498,6 +498,14 @@ Plans:
 
 **Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
 - [x] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
+
+**Gap closure, round 3** (from the failed 05.2-16 device acceptance, 2026-11-03: gaps G-05.2-2 to G-05.2-6, diagnosed 2026-11-14; and FIX-26, #589)
+
+**Round 3 · Gap Wave 1**
+- [ ] 05.2-17-PLAN.md — the after-send sweep sets aside the delivered copy of the sent reply and names every `unproven` branch with a reason code; the clipboard-changed refusal text (FIX-26); the device probe compares the signature by its text and the clipboard by its `changeCount` change; the facts `Layout` row is corrected (FIX-16, FIX-26; #348, #589)
+
+**Round 3 · Gap Wave 2** *(blocked on Round 3 · Gap Wave 1 completion)*
+- [ ] 05.2-18-PLAN.md — owner sitting on the rebuilt `.app`: one delivered `reply_all` with the corrected timing, the signature check by text, the clipboard checks, the two-display state, a FIX-26 refusal, and refusal-after-autosave when it occurs; the gaps close on device evidence or the owner's explicit answer (FIX-16, FIX-18, FIX-26; #348, #516, #589)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
 

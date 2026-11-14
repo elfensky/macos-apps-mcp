@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.4 (MCP 2 and FastMCP 4) is complete and verified. Next: the Phase 05.2 reply re-test with the owner, then release 0.16.0."
-last_updated: "2026-11-06"
-last_activity: 2026-11-06
-last_activity_desc: "Phase 05.4 closed: the device read suite and a real-frontend restart and outage passed on build 3dd93b2. #589 (clipboard refusal text) joins Phase 05.2 as FIX-26."
-state_head: 3e98de6
+stopped_at: "Phase 05.2 gap round 3 is planned and checked (05.2-17 code, 05.2-18 owner sitting; G-05.2-2 to G-05.2-6 and FIX-26). Next: land the records PR, then /gsd-execute-phase 05.2 --gaps-only."
+last_updated: "2026-11-14T03:42:39.047Z"
+state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 10
   total_plans: 94
   completed_plans: 93
+last_activity: 2026-11-14
+last_activity_desc: "Phase 05.2 UAT diagnosed (G-05.2-2 product; G-05.2-3 and G-05.2-4 test method; G-05.2-5 and G-05.2-6 evidence gaps) and gap round 3 planned: 05.2-17, 05.2-18."
 ---
 
 # Project State
@@ -257,6 +257,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-06
-Stopped at: Phase 05.4 is complete and verified. Next: the Phase 05.2 reply re-test with the owner (the 45-second Drafts check, the clipboard check, #589), then release 0.16.0. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
-Resume file: .planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md
+Last session: 2026-11-14
+Stopped at: Phase 05.2 gap round 3 is planned and checked (05.2-17 code, 05.2-18 owner sitting; G-05.2-2 to G-05.2-6 and FIX-26). Next: land the records PR, then /gsd-execute-phase 05.2 --gaps-only. Then release 0.16.0. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
+Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
