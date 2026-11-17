@@ -33,9 +33,11 @@ reporting the wrong version). A missed `server.json` lists a stale version in th
 - `packaging/Info.plist` → `CFBundleShortVersionString`
 - `server.json` → `version` and `packages[0].version`
 
-The cut that closes the last phase of a minor release also marks its line in `.planning/ROADMAP.md` § Releases `✅`
-with `(shipped YYYY-MM-DD)`, the date of its `X.Y.0` heading in CHANGELOG.md. In the same PR it moves `🚧`, `Next:`
-and `Waits for:` to the next release. Until then the line stays `🚧`. The roadmap page reads that section (2026-11-17).
+`.planning/ROADMAP.md` § Releases has one line per minor release, and the roadmap page reads it (2026-11-17). An
+`X.Y.0` cut while phases of its release are still open changes no status: the line stays `🚧`, and the bump PR updates
+its `Next:` and `Waits for:` lines. When GSD has marked the last phase of the release done, the next bump PR turns the
+line `✅` with `(shipped YYYY-MM-DD)`, the date of the `X.Y.0` heading in CHANGELOG.md. It moves `🚧`, `Next:` and
+`Waits for:` to the next release.
 
 Make the bump in a worktree (`~/Developer/.worktrees/macos-apps-mcp/chore-release-X.Y.Z`,
 branch `chore/release-X.Y.Z`) and land it on `develop` by PR like any other change:
@@ -165,8 +167,8 @@ release, and each open phase stands in exactly one of them (owner, 2026-11-17).
 ## Checklist
 
 - [ ] Version bumped in `pyproject.toml`, `packaging/Info.plist` **and** `server.json` (both fields)
-- [ ] The cut closes the last phase of a minor release: its line in `.planning/ROADMAP.md` § Releases is `✅` with the
-      shipped date, and `🚧`, `Next:` and `Waits for:` stand on the next release
+- [ ] `.planning/ROADMAP.md` § Releases: the line of the release in work has current `Next:` and `Waits for:` lines.
+      When all its phases are done, it is `✅` with the shipped date, and `🚧` stands on the next release
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
 - [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed

@@ -12,7 +12,7 @@ The [current architecture](architecture/macos-apps-mcp-architecture.md) records 
 
 ## eli14
 
-Think of the project as a restaurant kitchen. The AI assistant is the chef, and the apps on the Mac are the pantry. The house rule is safe cooking: anything that throws food away, moves it or sends it out is shown first, and a dish that was moved can come back. Each release adds one dish to the menu. 1.0 is the grand opening.
+Think of the project as a restaurant kitchen. The AI assistant is the chef, and the apps on the Mac are the pantry. The house rule is safe cooking: anything that throws food away, moves it or sends it out is shown first by default, and a dish that was moved can come back. Each release adds one dish to the menu. 1.0 is the grand opening.
 
 ## Core Value
 
