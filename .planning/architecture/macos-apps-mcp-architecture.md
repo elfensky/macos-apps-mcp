@@ -4,7 +4,7 @@ title: macos-apps-mcp architecture
 status: implemented
 source_revision: 67a668c39484ebc2017c092d008f1dd705ccff73
 source_evidence_date: 2026-11-09
-forwards: phase-05-1-dashboard-fixes, phase-05-2-bug-fixes, phase-05-4-mcp-migration, phase-05-6-notes-write-safety, phase-5-operator-controls, phase-6-distribution
+forwards: phase-05-1-dashboard-fixes, phase-05-2-bug-fixes, phase-05-4-mcp-migration, phase-05-6-notes-write-safety, phase-5-operator-controls, phase-6-distribution, v0-11-0
 ---
 
 # macos-apps-mcp architecture
