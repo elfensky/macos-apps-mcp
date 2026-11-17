@@ -33,9 +33,9 @@ reporting the wrong version). A missed `server.json` lists a stale version in th
 - `packaging/Info.plist` → `CFBundleShortVersionString`
 - `server.json` → `version` and `packages[0].version`
 
-An `X.Y.0` release also marks its line in `.planning/ROADMAP.md` § Releases `✅` with `(shipped YYYY-MM-DD)`, in the
-same PR, and moves `🚧` to the next release. A patch release changes no line. The roadmap page reads that section,
-and its writer refuses a `vX.Y.0` tag without a shipped line (2026-11-17).
+The cut that closes the last phase of a minor release also marks its line in `.planning/ROADMAP.md` § Releases `✅`
+with `(shipped YYYY-MM-DD)`, the date of its `X.Y.0` heading in CHANGELOG.md. In the same PR it moves `🚧`, `Next:`
+and `Waits for:` to the next release. Until then the line stays `🚧`. The roadmap page reads that section (2026-11-17).
 
 Make the bump in a worktree (`~/Developer/.worktrees/macos-apps-mcp/chore-release-X.Y.Z`,
 branch `chore/release-X.Y.Z`) and land it on `develop` by PR like any other change:
@@ -165,7 +165,8 @@ release, and each open phase stands in exactly one of them (owner, 2026-11-17).
 ## Checklist
 
 - [ ] Version bumped in `pyproject.toml`, `packaging/Info.plist` **and** `server.json` (both fields)
-- [ ] An `X.Y.0` release: its line in `.planning/ROADMAP.md` § Releases is `✅` with the shipped date
+- [ ] The cut closes the last phase of a minor release: its line in `.planning/ROADMAP.md` § Releases is `✅` with the
+      shipped date, and `🚧`, `Next:` and `Waits for:` stand on the next release
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
 - [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed
