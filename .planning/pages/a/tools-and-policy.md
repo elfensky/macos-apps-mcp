@@ -42,20 +42,20 @@ Local destructive previews can also read native state to validate their targets.
 
 `UntrustedDataNotice` prepends a warning to every successful result except `ping`, `now`, `doctor` and `usage`. It does not change the structured content.
 The warning marks app data as untrusted; it is not a prompt-injection containment boundary.
-Caller identity remains advisory, as described in [transport](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/architecture/macos-apps-mcp-transport.md).
+Caller identity remains advisory, as described in [transport](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/architecture/macos-apps-mcp-transport.md).
 
 ## Code paths
 
-- [server.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/server.py), [contracts.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/contracts.py), [registry.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/registry.py), and [tiers.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/tiers.py).
-- [notices.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/notices.py), [mail_outgoing.py](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/macos_apps_mcp/adapters/mail_outgoing.py), and [preview tests](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_mail_outgoing.py).
-- [Annotation and send-gate tests](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_tool_annotations.py), [registry and gate tests](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_registry.py), [send dispatch tests](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_gate_on_dispatch.py), and [import boundaries](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_import_layers.py).
-- [Dispatch test for every tool](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_tool_dispatch.py) and [send timeout tests](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/tests/test_mail_send_timeout.py).
+- [server.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/server.py), [contracts.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/contracts.py), [registry.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/registry.py), and [tiers.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/tiers.py).
+- [notices.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/notices.py), [mail_outgoing.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/adapters/mail_outgoing.py), and [preview tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_mail_outgoing.py).
+- [Annotation and send-gate tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_tool_annotations.py), [registry and gate tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_registry.py), [send dispatch tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_gate_on_dispatch.py), and [import boundaries](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_import_layers.py).
+- [Dispatch test for every tool](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_tool_dispatch.py) and [send timeout tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_mail_send_timeout.py).
 
 ## Sources
 
-- [Phase 1 verification](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/phases/01-gate-land-the-spiked-architecture-cuts/01-VERIFICATION.md).
+- [Phase 1 verification](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/01-gate-land-the-spiked-architecture-cuts/01-VERIFICATION.md).
 
 Phase 05.12 is in progress. Its PR #584 added the dispatch test over `registry.TOOLS` (#581).
 Phase 05.10 plans tool names, parameter descriptions, error codes (#502) and the omitted-field rule (#572).
 Phase 05.11 plans query-bound paging. Phase 05.7 plans agent guidance.
-Their scope belongs to the [roadmap](https://github.com/elfensky/macos-apps-mcp/blob/834691b4ab771698a09d63e7546a0781caf4b548/.planning/ROADMAP.md).
+Their scope belongs to the [roadmap](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/ROADMAP.md).
