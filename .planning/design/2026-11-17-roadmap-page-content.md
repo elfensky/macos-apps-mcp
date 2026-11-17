@@ -3,13 +3,13 @@
 Design of the content of https://projects.lav.ren/macos-apps-mcp/roadmap/, 2026-11-17. Decided by the owner
 (question tool, 2026-11-17): one row per minor release, four eras as context, and every open phase in one release.
 Bug-fix phases ship in the release in work or as its patch releases. Two council seats (GPT Astra, Claude Fable 5.2)
-reviewed the design and the build, and their findings are folded in.
+reviewed the design and the build, and their confirmed findings are folded in.
 
 **eli14:** the page is a shop window. Before, it showed one big box labelled "v0.11.0" and a pile of the workshop's
 notes. Now each release is one box on the shelf, in order: the sold boxes go into one drawer, the box in work sits in
 front, and the next boxes stand behind it. A card beside the shelf tells the shop's story in four lines. *Today:* the
-page reads one more section of the plan. *Later:* the section needs one line of care when a release changes state, or the window
-shows an old shelf.
+page reads one more section of the plan. *Later:* each bump PR keeps the section current, or the window shows an old
+shelf.
 
 ## The page, top to bottom
 
