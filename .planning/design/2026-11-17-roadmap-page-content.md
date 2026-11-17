@@ -15,7 +15,6 @@ shows an old shelf.
 | Place | Content | Source |
 |---|---|---|
 | Lede | The project's description | The vault hub's `description` |
-| Facts line | `Latest release 0.15.1`, with its date | The writer: the newest `v*` tag |
 | eli14 aside | The kitchen analogy | `## eli14` in `.planning/PROJECT.md` |
 | Position | "15 of 23 milestones are done. 1 is in work." and the next move | The renderer; `Next:` on the release in work |
 | Rows | 0.1–0.15 shipped (title and date), 0.16 in work, 0.17–0.22 and 1.0 to do | `## Releases` in `.planning/ROADMAP.md` |
@@ -24,9 +23,10 @@ shows an old shelf.
 | Decisions | The dated owner rules that explain the order | `### Why this order` in that section |
 | Sources | ROADMAP.md and STATE.md at the plan commit; STATE.md holds the full decision log | The writer |
 
-The writer (`project-pages.py write --repo`, vault page-kit § Releases) reads the section. It refuses an open phase
-in no release or in two, an unknown phase, and a `vX.Y.0` tag without its shipped line. A release cut marks its line
-shipped (`docs/RELEASING.md` § Cutting a release).
+The writer (`project-pages.py write --repo`, vault page-kit § Releases) reads the section and nothing else, so the
+same plan gives the same files. It refuses an open phase in no release, in two or under a shipped line, an unknown
+phase, and a shipped line without its date. The pages pass reports a `vX.Y.0` tag without its shipped line. The cut
+that closes a release's last phase marks its line shipped (`docs/RELEASING.md` § Cutting a release).
 
 ## Why each choice
 
@@ -57,6 +57,6 @@ shipped (`docs/RELEASING.md` § Cutting a release).
 
 - The phase names on the milestone pages still carry tracker numbers and kind-of-work words ("Bug fixes — … (#455)").
   A rename to results goes through `/gsd-phase`.
-- The calendar labels of the 15 releases of June–July overlap (keijiban).
+- The calendar labels of the releases of June and July overlap (keijiban).
 - The hub description is the vault's: "Lets an AI assistant use Mail, Calendar, Reminders, Notes, Photos and five more
-  Mac apps; a delete, move or send shows a preview first."
+  Mac apps. A delete, move or send previews by default."

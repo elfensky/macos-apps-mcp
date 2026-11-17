@@ -30,9 +30,9 @@ by default, its own audit verb, and verification by running it on device and ins
 
 ## Releases
 
-One line per minor release; the roadmap page reads this section. A release cut marks its line ✅ with the date.
+One line per minor release. The roadmap page reads this section. Bug-fix phases ship as patch releases of the release in work, and a release stays 🚧 until its last phase is done. A shipped date is the date of its X.Y.0 heading in CHANGELOG.md.
 
-- ✅ **0.1 Nine Mac apps; Calendar and Reminders can write** — The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules. (shipped 2026-06-27)
+- ✅ **0.1 Reads nine Mac apps and writes Calendar and Reminders** — The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules. (shipped 2026-06-27)
 - ✅ **0.2 New name: mac-mcp** — The project and its package take the name mac-mcp, with an MIT licence. (shipped 2026-06-29)
 - ✅ **0.3 Errors that explain themselves** — A native failure is a typed error, doctor checks the permissions, and each create or update is read back. (shipped 2026-07-09)
 - ✅ **0.4 Previews and limits before a delete** — Event and note deletes preview first, batches have caps, and text from the apps is marked as untrusted. (shipped 2026-07-10)
@@ -44,18 +44,18 @@ One line per minor release; the roadmap page reads this section. A release cut m
 - ✅ **0.10 Mail complete, with undo** — Mail gets search, threads, folders, trash and attachments, and a backup before each move or delete makes undo possible. (shipped 2026-08-20)
 - ✅ **0.11 Mail search and undo on macOS 15** — Mail reads its own database on macOS 15 too, so search and undo work there. (shipped 2026-09-25)
 - ✅ **0.12 A rebuilt base, proven by tests** — One safe path to the apps, settled modules, and a test suite that cannot reach a real app. (shipped 2026-09-30)
-- ✅ **0.13 Large Mail moves finish; drafts use the right account** — A move of 25 messages finishes in time and leaves a receipt, and a draft starts from the account the caller names. (shipped 2026-10-03)
+- ✅ **0.13 Large Mail moves finish, and drafts use the right account** — A move of 25 messages finishes in time and leaves a receipt, and a draft starts from the account the caller names. (shipped 2026-10-03)
 - ✅ **0.14 Calendar alarms, Reminders depth, Intel Macs** — Events get alarms and more repeat rules, Reminders can be deleted and show their tags, and the app runs on Intel Macs. (shipped 2026-10-07)
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
-- 🚧 **0.16 Runs on MCP 2; replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed; it ships after reply drafts pass on a real Mac.
+- 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
   - Next: one code fix (plan 05.2-17), then the owner's test of reply drafts on a real Mac.
   - Waits for: the owner's test of reply drafts on a real Mac (plan 05.2-18), after the code fix of plan 05.2-17.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
-- 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click; then the testers start.
+- 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
   - Phases: 05.3
-- 📋 **0.19 Long reads continue page by page** — A capped read continues with a cursor that belongs to its query; a cursor from another query is refused.
+- 📋 **0.19 Long reads continue page by page** — A capped read continues with a cursor that belongs to its query, and a cursor from another query is refused.
   - Phases: 05.11
 - 📋 **0.20 Tools from the command line** — Any tool runs from the shell through the signed background app.
   - Phases: 05.9
@@ -79,7 +79,7 @@ One line per minor release; the roadmap page reads this section. A release cut m
 - Contacts and Messages depth waits for v2 (owner, 2026-08-28).
 - Email work comes before every new feature (owner, 2026-09-24).
 - Bugs come before features (owner, 2026-10-11).
-- One release at each phase close that changes the app; 0.17 is the breaking release; 1.0 follows the testers (owner, 2026-11-01).
+- One release at every phase close that changes the app. 0.17 is the breaking release, and 1.0 follows the testers (owner, 2026-11-01).
 - The MCP 2 migration comes first (owner, 2026-11-03).
 
 ## Phases
