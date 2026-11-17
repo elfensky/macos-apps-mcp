@@ -30,7 +30,7 @@ by default, its own audit verb, and verification by running it on device and ins
 
 ## Releases
 
-One line per minor release. The roadmap page reads this section. Bug-fix phases ship as patch releases of the release in work, and a release stays 🚧 until its last phase is done. A shipped date is the date of its X.Y.0 heading in CHANGELOG.md.
+One line per minor release. The roadmap page reads this section. Bug-fix phases ship in the release in work or as its patch releases. A release stays 🚧 until its last phase is done, and a bug-fix phase that comes after that stands in the next release. A shipped date is the date of the X.Y.0 heading in CHANGELOG.md. For 0.10, which has no heading there, it is the date of tag v0.10.0.
 
 - ✅ **0.1 Reads nine Mac apps and writes Calendar and Reminders** — The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules. (shipped 2026-06-27)
 - ✅ **0.2 New name: mac-mcp** — The project and its package take the name mac-mcp, with an MIT licence. (shipped 2026-06-29)

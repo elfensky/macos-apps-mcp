@@ -1,13 +1,14 @@
 # The roadmap page: one row per release
 
 Design of the content of https://projects.lav.ren/macos-apps-mcp/roadmap/, 2026-11-17. Decided by the owner
-(question tool, 2026-11-17): one row per minor release; four eras as context; every open phase in one release, one
-release per phase close. Reviewed by two council seats (GPT Astra, Claude Fable 5.2); their critique is folded in.
+(question tool, 2026-11-17): one row per minor release, four eras as context, and every open phase in one release.
+Bug-fix phases ship in the release in work or as its patch releases. Two council seats (GPT Astra, Claude Fable 5.2)
+reviewed the design and the build, and their findings are folded in.
 
 **eli14:** the page is a shop window. Before, it showed one big box labelled "v0.11.0" and a pile of the workshop's
 notes. Now each release is one box on the shelf, in order: the sold boxes go into one drawer, the box in work sits in
 front, and the next boxes stand behind it. A card beside the shelf tells the shop's story in four lines. *Today:* the
-page reads one more section of the plan. *Later:* the section needs one line of care at each release, or the window
+page reads one more section of the plan. *Later:* the section needs one line of care when a release changes state, or the window
 shows an old shelf.
 
 ## The page, top to bottom
@@ -23,10 +24,11 @@ shows an old shelf.
 | Decisions | The dated owner rules that explain the order | `### Why this order` in that section |
 | Sources | ROADMAP.md and STATE.md at the plan commit; STATE.md holds the full decision log | The writer |
 
-The writer (`project-pages.py write --repo`, vault page-kit § Releases) reads the section and nothing else, so the
+The writer (`project-pages.py write --repo`, vault page-kit § Releases) reads the plan files only, no tags, so the
 same plan gives the same files. It refuses an open phase in no release, in two or under a shipped line, an unknown
-phase, and a shipped line without its date. The pages pass reports a `vX.Y.0` tag without its shipped line. The cut
-that closes a release's last phase marks its line shipped (`docs/RELEASING.md` § Cutting a release).
+phase, and a shipped line without its date. The pages pass reports a `vX.Y.0` tag whose release has every phase done
+and no shipped line. When GSD marks the last phase of a release done, the next bump PR marks its line shipped
+(`docs/RELEASING.md` § Cutting a release).
 
 ## Why each choice
 
