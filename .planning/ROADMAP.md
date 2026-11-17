@@ -28,6 +28,60 @@ Release 0.16.0 ships the migration after the Phase 05.2 reply acceptance (owner,
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
 by default, its own audit verb, and verification by running it on device and inspecting the result.
 
+## Releases
+
+One line per minor release; the roadmap page reads this section. A release cut marks its line ✅ with the date.
+
+- ✅ **0.1 Nine Mac apps; Calendar and Reminders can write** — The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules. (shipped 2026-06-27)
+- ✅ **0.2 New name: mac-mcp** — The project and its package take the name mac-mcp, with an MIT licence. (shipped 2026-06-29)
+- ✅ **0.3 Errors that explain themselves** — A native failure is a typed error, doctor checks the permissions, and each create or update is read back. (shipped 2026-07-09)
+- ✅ **0.4 Previews and limits before a delete** — Event and note deletes preview first, batches have caps, and text from the apps is marked as untrusted. (shipped 2026-07-10)
+- ✅ **0.5 Reads from the apps' own databases** — Messages and Notes are read from their own databases, which is faster and more complete than AppleScript. (shipped 2026-07-12)
+- ✅ **0.6 New name: macos-apps-mcp** — The package, the repository and the module take the name macos-apps-mcp. (shipped 2026-07-15)
+- ✅ **0.7 Free time, Notes writes and a write log** — Free and busy times, Notes create and update, a log of every write, and a list of mail that needs a reply. (shipped 2026-07-22)
+- ✅ **0.8 One signed app holds the permissions** — A signed background app asks for each Mac permission once, and every client connects through it. (shipped 2026-07-25)
+- ✅ **0.9 Sending mail, behind a switch** — Mail can send, reply and forward, but only after the owner turns sending on outside the assistant's reach. (shipped 2026-07-27)
+- ✅ **0.10 Mail complete, with undo** — Mail gets search, threads, folders, trash and attachments, and a backup before each move or delete makes undo possible. (shipped 2026-08-20)
+- ✅ **0.11 Mail search and undo on macOS 15** — Mail reads its own database on macOS 15 too, so search and undo work there. (shipped 2026-09-25)
+- ✅ **0.12 A rebuilt base, proven by tests** — One safe path to the apps, settled modules, and a test suite that cannot reach a real app. (shipped 2026-09-30)
+- ✅ **0.13 Large Mail moves finish; drafts use the right account** — A move of 25 messages finishes in time and leaves a receipt, and a draft starts from the account the caller names. (shipped 2026-10-03)
+- ✅ **0.14 Calendar alarms, Reminders depth, Intel Macs** — Events get alarms and more repeat rules, Reminders can be deleted and show their tags, and the app runs on Intel Macs. (shipped 2026-10-07)
+- ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
+- 🚧 **0.16 Runs on MCP 2; replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed; it ships after reply drafts pass on a real Mac.
+  - Phases: 05.4, 05.2, 05.6, 05.12
+  - Next: one code fix (plan 05.2-17), then the owner's test of reply drafts on a real Mac.
+  - Waits for: the owner's test of reply drafts on a real Mac (plan 05.2-18), after the code fix of plan 05.2-17.
+- 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
+  - Phases: 05.10
+- 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click; then the testers start.
+  - Phases: 05.3
+- 📋 **0.19 Long reads continue page by page** — A capped read continues with a cursor that belongs to its query; a cursor from another query is refused.
+  - Phases: 05.11
+- 📋 **0.20 Tools from the command line** — Any tool runs from the shell through the signed background app.
+  - Phases: 05.9
+- 📋 **0.21 Notes in Markdown, with attachments** — Notes take Markdown and show their attachments.
+  - Phases: 05.8
+- 📋 **0.22 Guidance for assistants** — The server tells an assistant how to use it, with one short guide per app.
+  - Phases: 05.7
+- 📋 **1.0 Public launch, one-step install** — After the testers, it is listed for everyone and installs in one step.
+  - Phases: 6, 05.5
+
+### Eras
+
+- **0.1–0.7 (June–July 2026): a server each client starts.** Calendar and Reminders first, then trust, safety rails and fast reads. Each client started its own copy and asked for its own permissions.
+- **0.8–0.10 (July–August): one signed app.** A signed background app holds the permissions once. Mail grows to full depth, with undo, and sending waits behind a switch.
+- **0.11–0.15 (September–October): the planned rebuild.** After the review of 2026-08-28, a written plan rebuilds the base, fixes Mail, deepens Calendar, Reminders, Notes and Photos, and adds the owner's dashboard.
+- **0.16–1.0 (from November): road to launch.** A new MCP core, the open bugs, the final tool names, problem reports, then the testers and the public launch.
+- **After 1.0:** deeper Contacts and Messages, Safari, Maps and a menu-bar app.
+
+### Why this order
+
+- Contacts and Messages depth waits for v2 (owner, 2026-08-28).
+- Email work comes before every new feature (owner, 2026-09-24).
+- Bugs come before features (owner, 2026-10-11).
+- One release at each phase close that changes the app; 0.17 is the breaking release; 1.0 follows the testers (owner, 2026-11-01).
+- The MCP 2 migration comes first (owner, 2026-11-03).
+
 ## Phases
 
 **Phase Numbering:**

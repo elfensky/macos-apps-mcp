@@ -10,6 +10,10 @@ Discovery reads return bounded pointers; explicit detail and body tools return r
 Capability gates control write access. Audit persistence is best effort, and recovery applies to selected Mail operations.
 The [current architecture](architecture/macos-apps-mcp-architecture.md) records the implementation and its limits.
 
+## eli14
+
+Think of the project as a restaurant kitchen. The AI assistant is the chef, and the apps on the Mac are the pantry. The house rule is safe cooking: anything that throws food away, moves it or sends it out is shown first, and moved mail can come back. Each release adds one dish to the menu; 1.0 is the grand opening.
+
 ## Core Value
 
 **Safe writes are the design goal.** Writes should be gated by tier, addressed by id, previewable, audited, and recoverable.
