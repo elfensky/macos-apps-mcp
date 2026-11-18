@@ -126,6 +126,11 @@ surface may still shift between minor versions.
   list. `doctor`'s note says that Automation and Accessibility need no restart, and that
   Full Disk Access, Calendars and Reminders may need one, not tested on a device.
 
+- **A reply refused because the clipboard changed says so** (#589) — when something is copied
+  while `mail_reply` or `reply_all` pastes its text, the refusal says that the clipboard changed
+  and asks the user not to copy while a reply runs. The reply is discarded as for every refusal;
+  nothing is sent.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added
