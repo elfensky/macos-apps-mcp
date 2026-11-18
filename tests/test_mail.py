@@ -2656,18 +2656,22 @@ _QUOTE_HTML = (
 
 
 def _real_selector(monkeypatch, *stored):
-    """The REAL selector over a faked index: ``stored`` is ``(url, body, kind[, mid])``
-    per new row (rowids 8, 9, ...), each a reply to the original. ``mid`` is the row's
-    Message-ID (default ``<own{rowid}@x>``)."""
+    """The REAL selector over a faked index: ``stored`` is
+    ``(url, body, kind[, mid[, received]])`` per new row (rowids 8, 9, ...), each a
+    reply to the original. ``mid`` is the row's Message-ID (default
+    ``<own{rowid}@x>``); ``received`` is whether its headers carry a mail server's
+    postmark (default no)."""
     monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
     rows = [(8 + n, row[0]) for n, row in enumerate(stored)]
     monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: rows)
 
     def read(url, rowid):
-        _, body, kind, *mid = stored[rowid - 8]
+        _, body, kind, *extra = stored[rowid - 8]
         msg = email.message.EmailMessage(policy=email.policy.default)
         msg.set_content(body, subtype=kind)
-        return ("<abc@x>", mid[0] if mid else f"<own{rowid}@x>", lambda: msg)
+        mid = extra[0] if extra else f"<own{rowid}@x>"
+        received = bool(extra[1]) if len(extra) > 1 else False
+        return ("<abc@x>", mid, lambda: msg, received)
 
     monkeypatch.setattr(mail_reply_cleanup, "_read_draft", read)
 
@@ -3631,12 +3635,25 @@ def test_send_then_sweep_sets_aside_the_delivered_copy_in_this_macs_inbox(monkey
         monkeypatch,
         (f"imap://{_GMAIL_UUID}/Drafts", _OWN_BODY, "html", "<draft@x>"),
         (_SENT_URL, _OWN_BODY, "html", "<sent@x>"),
-        (_INBOX_URL, "<div>delivered</div>", "html", "<sent@x>"),
+        (_INBOX_URL, "<div>delivered</div>", "html", "<sent@x>", True),  # postmarked
     )
     calls = rig.calls_of("_SWEEP_DELETE")
     assert [c[1] for c in calls] == [("draft@x", _GMAIL_UUID, "Drafts")]
     assert out["sent"] is True and out["drafts_copy"] == "removed"
     assert "drafts_copy_reason" not in out
+
+
+def test_send_then_sweep_keeps_an_inbox_row_without_a_postmark_unproven(monkeypatch):
+    # the same three rows, but no mail server stamped the INBOX row: it may be a
+    # leftover draft with the sent Message-ID, so it is reported, nothing is deleted
+    rig, out = _sent_reply(
+        monkeypatch,
+        (f"imap://{_GMAIL_UUID}/Drafts", _OWN_BODY, "html", "<draft@x>"),
+        (_SENT_URL, _OWN_BODY, "html", "<sent@x>"),
+        (_INBOX_URL, "<div>delivered</div>", "html", "<sent@x>"),
+    )
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["drafts_copy"] == "unproven" and out["drafts_copy_reason"] == "inbox_row"
 
 
 def test_send_then_sweep_with_an_inbox_row_of_another_message_names_it(monkeypatch):

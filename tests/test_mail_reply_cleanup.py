@@ -30,9 +30,25 @@ _KW = {"tail": _TAIL, "landed_by": 10**6}
 _URL = f"imap://{_ACCT}/Drafts"
 
 
-def _emlx(in_reply_to: str, mid: str, body: str, kind: str = "html") -> bytes:
+def _emlx(
+    in_reply_to: str,
+    mid: str,
+    body: str,
+    kind: str = "html",
+    received: bool = False,
+) -> bytes:
+    """``received``: the two ``Received`` lines a mail server adds to a delivered
+    message (a draft and a Sent copy carry none)."""
+    postmark = (
+        "Received: from mx2.example.net by mx1.example.net; "
+        "Wed, 18 Nov 2026 10:00:00 +0000\r\n"
+        "Received: from mx3.example.net by mx2.example.net; "
+        "Wed, 18 Nov 2026 09:59:59 +0000\r\n"
+        if received
+        else ""
+    )
     raw = (
-        f"Message-ID: <{mid}>\r\nIn-Reply-To: <{in_reply_to}>\r\n"
+        f"{postmark}Message-ID: <{mid}>\r\nIn-Reply-To: <{in_reply_to}>\r\n"
         f"Subject: Re: x\r\nContent-Type: text/{kind}; charset=utf-8\r\n\r\n"
         f"{body}"
     ).encode()
@@ -50,7 +66,17 @@ def mailroot(tmp_path, monkeypatch):
         lambda: tmp_path / "V10" / "MailData" / "Envelope Index",
     )
 
-    def put(rowid, in_reply_to, mid, body, *, url=_URL, kind="html", partial=False):
+    def put(
+        rowid,
+        in_reply_to,
+        mid,
+        body,
+        *,
+        url=_URL,
+        kind="html",
+        partial=False,
+        received=False,
+    ):
         account, _, path = url.partition("://")[2].partition("/")
         folder = tmp_path / "V10" / account
         for segment in unquote(path).split("/"):
@@ -59,7 +85,7 @@ def mailroot(tmp_path, monkeypatch):
         box = folder / "GUID" / "Data" / shard / "Messages"
         box.mkdir(parents=True, exist_ok=True)
         name = f"{rowid}.partial.emlx" if partial else f"{rowid}.emlx"
-        (box / name).write_bytes(_emlx(in_reply_to, mid, body, kind))
+        (box / name).write_bytes(_emlx(in_reply_to, mid, body, kind, received))
         return box / name
 
     return put
@@ -780,12 +806,20 @@ _INBOX = f"imap://{_ACCT}/INBOX"
 
 
 def _stored(mailroot, monkeypatch, rows, **kw):
-    """Store ``(rowid, url, mid, body)`` rows (a ``None`` body leaves the file out) and
+    """Store ``(rowid, url, mid, body[, received])`` rows (a ``None`` body leaves the
+    file out; ``received`` writes the postmark of a delivered message, default none) and
     run the selector over them."""
-    for rowid, url, mid, body in rows:
+    for rowid, url, mid, body, *received in rows:
         if body is not None:
-            mailroot(rowid, _ORIGINAL, mid, body, url=url)
-    return _find(monkeypatch, [(rowid, url) for rowid, url, _, _ in rows], **kw)
+            mailroot(
+                rowid,
+                _ORIGINAL,
+                mid,
+                body,
+                url=url,
+                received=bool(received and received[0]),
+            )
+    return _find(monkeypatch, [(row[0], row[1]) for row in rows], **kw)
 
 
 _DRAFT_ROW = (20, _URL, "d@x", _OWN)
@@ -796,7 +830,7 @@ _OTHER_BODY = "<div>not the reply</div>"
     "inbox_first, twin_url",
     [(True, _SENT), (False, _SENT), (True, _ALL_MAIL), (False, _ALL_MAIL)],
 )
-def test_find_own_draft_after_a_send_sets_aside_the_delivered_inbox_copy(
+def test_find_own_draft_after_a_send_sets_aside_the_postmarked_delivered_inbox_copy(
     mailroot, monkeypatch, inbox_first, twin_url
 ):
     # the sent message reached an address whose account is in Mail on this Mac: its
@@ -804,13 +838,46 @@ def test_find_own_draft_after_a_send_sets_aside_the_delivered_inbox_copy(
     # the order of the two rows in the index is not ours to know
     first, second = (21, 22) if inbox_first else (22, 21)
     twin = (second, twin_url, "s@x", _OWN)
-    inbox = (first, _INBOX, "S@X", _OTHER_BODY)  # its body is never judged
+    # its body is never judged; a mail server's `Received` header is the postmark
+    inbox = (first, _INBOX, "S@X", _OTHER_BODY, True)
     rows = [_DRAFT_ROW, inbox, twin] if inbox_first else [_DRAFT_ROW, twin, inbox]
     got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
     assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
     # without the own Drafts copy nothing is left to report
     got = _stored(mailroot, monkeypatch, rows[1:], sent_twins=True)
     assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize(
+    "inbox_first, twin_url",
+    [(True, _SENT), (False, _SENT), (True, _ALL_MAIL), (False, _ALL_MAIL)],
+)
+@pytest.mark.parametrize("with_drafts", [True, False])
+def test_find_own_draft_keeps_an_inbox_row_without_a_postmark_unproven(
+    mailroot, monkeypatch, inbox_first, twin_url, with_drafts
+):
+    # the Message-ID matches a set-aside copy, but no mail server stamped the row: an
+    # account whose Drafts mailbox is its INBOX could hold a leftover draft like this
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, twin_url, "s@x", _OWN)
+    inbox = (first, _INBOX, "s@x", _OTHER_BODY)  # no `Received` header
+    rows = [inbox, twin] if inbox_first else [twin, inbox]
+    got = _stored(
+        mailroot,
+        monkeypatch,
+        [_DRAFT_ROW, *rows] if with_drafts else rows,
+        sent_twins=True,
+    )
+    assert got.kind == "unproven" and got.reason == "inbox_row"
+
+
+def test_read_draft_reads_the_postmark_from_the_headers(mailroot):
+    mailroot(20, _ORIGINAL, "d@x", _OWN, received=True)
+    mailroot(21, _ORIGINAL, "s@x", _OWN)
+    stamped = mail_reply_cleanup._read_draft(_URL, 20)
+    plain = mail_reply_cleanup._read_draft(_URL, 21)
+    assert stamped[3] is True and plain[3] is False
+    assert callable(stamped[2]) and callable(plain[2])  # the body is not parsed here
 
 
 @pytest.mark.parametrize(
