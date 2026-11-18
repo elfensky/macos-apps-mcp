@@ -232,10 +232,34 @@ def _emlx_path(url: str, rowid: int) -> Path | None:
     return None
 
 
+# Mail's quote writes each inline image of the original this way: the first form in Sent
+# and delivered copies, the second (compose-time marker) in drafts (facts 4e `Layout`).
+_PLACEHOLDER = re.compile(
+    r'<span (?:class="AppleTemporaryEditingElement" )?id="cid:[^"<>]*">([^<]*)</span>'
+)
+_TOKEN = re.compile(r"<[^<>]*[^<>\s][^<>]*>")
+
+
+def _drop_placeholders(quote: str) -> str:
+    """``quote`` (HTML) without Mail's own inline-image placeholders (owner decision
+    2026-11-18): an element in exactly one of the two forms of ``_PLACEHOLDER``, with no
+    tag inside, whose text (unescaped, white space at both ends removed) is one
+    ``<...>`` token. A typed ``<x.png>`` and every other form stay text, so the copy
+    keeps reading ``unproven``."""
+
+    def drop(found: re.Match[str]) -> str:
+        text = html.unescape(found.group(1)).strip()
+        return "" if _TOKEN.fullmatch(text) else found.group(0)
+
+    return _PLACEHOLDER.sub(drop, quote)
+
+
 def _split_quote(msg) -> tuple[str, str]:
     """The squashed text of a draft before its first quote, and the squashed text from
     the quote on: the HTML text before / from the first blockquote, else the plain lines
-    before / from the first ``>`` line."""
+    before / from the first ``>`` line. In the quote part of HTML, Mail's inline-image
+    placeholders are not text (``_drop_placeholders``); the part before the quote keeps
+    every element."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
@@ -250,7 +274,7 @@ def _split_quote(msg) -> tuple[str, str]:
         cut = re.search(r"(?i)<blockquote\b", markup)
         at = cut.start() if cut else len(markup)
         parts = []
-        for chunk in (markup[:at], markup[at:]):
+        for chunk in (markup[:at], _drop_placeholders(markup[at:])):
             chunk = re.sub(r"(?is)<(script|style).*?</\1>", "", chunk)
             parts.append(html.unescape(re.sub(r"<[^>]+>", " ", chunk)))
         head, tail = parts
