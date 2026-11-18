@@ -12,7 +12,11 @@ Every line printed is a verdict, a count, an id or a hash: never clipboard conte
 text (the probe marker aside). Nothing here ever calls the prompting AX trust variant.
 
 Subcommands (see --help of each):
-  selftest | trusted | dump-scripts DIR | clip-hash OUT.json [--against FILE]
+  selftest | trusted | dump-scripts DIR
+  clip-hash OUT.json [--against FILE [--expect-delta N]]   (verdict from changeCount)
+  sig-check EML          (the outgoing signature, found by its text in the delivered HTML)
+  window-state [--raise BUNDLE]   (Mail active? top layer-0 window Mail's? displays)
+  clip-churn SECONDS     (1-30: change the clipboard on purpose, then restore it)
   open-reply MID ACCOUNT PATH ALL | insert M1|M2|M3 WINDOW-ID MARKER-FILE --outgoing-id OID
       [--replace-all] [--activate] [--body-roles A,B] [--expect-tail TEXT]
       [--original MID ACCOUNT PATH]
@@ -26,7 +30,10 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import email
+import email.policy
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -77,6 +84,7 @@ def _bind() -> dict:
             ("AXUIElementCopyAttributeValue", b"i^{__AXUIElement=}^{__CFString=}o^@"),
             ("AXUIElementSetAttributeValue", b"i^{__AXUIElement=}^{__CFString=}@"),
             ("AXUIElementIsAttributeSettable", b"i^{__AXUIElement=}^{__CFString=}o^Z"),
+            ("AXUIElementPerformAction", b"i^{__AXUIElement=}^{__CFString=}"),
             ("_AXUIElementGetWindow", b"i^{__AXUIElement=}o^I"),  # SPI, optional
         ],
     )
@@ -228,13 +236,19 @@ def _top_layer0() -> dict | None:
     return next((w for w in _cg_windows() if w["layer"] == 0), None)
 
 
-def _mail_pid() -> int:
+def _pid_of(bundle: str) -> int:
     import AppKit
 
-    apps = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(MAIL)
+    apps = AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(bundle)
     if not apps:
-        raise Refuse("Mail is not running")
+        raise Refuse(
+            "Mail is not running" if bundle == MAIL else f"{bundle} is not running"
+        )
     return int(apps[0].processIdentifier())
+
+
+def _mail_pid() -> int:
+    return _pid_of(MAIL)
 
 
 def _frontmost_bundle() -> str | None:
@@ -587,7 +601,37 @@ end run
 """
 )
 
+# sig-check, read only: each outgoing message's signature content. One record per message,
+# records end with RS (ASCII 30); a record is `missing`, or `found` + US (ASCII 31) + the
+# content. Nothing is written, closed or sent here (selftest checks the verbs).
+_SIG_READ = """on run argv
+  set rs to character id 30
+  set us to character id 31
+  set out to ""
+  with timeout of 120 seconds
+    tell application "Mail"
+      repeat with m in (every outgoing message)
+        set sig to missing value
+        try
+          set sig to message signature of m
+        end try
+        set rec to "missing"
+        if sig is not missing value then
+          set rec to "found" & us
+          try
+            set rec to rec & (content of sig)
+          end try
+        end if
+        set out to out & rec & rs
+      end repeat
+    end tell
+  end timeout
+  return out
+end run
+"""
+
 SCRIPTS = {
+    "sig_read": _SIG_READ,
     "open_reply": _OPEN_REPLY,
     "window_index": _WINDOW_INDEX,
     "activate": _ACTIVATE,
@@ -665,6 +709,19 @@ def _clip_equal(a: dict, b: dict) -> bool:
     )
 
 
+def _clip_verdict(after: dict, before: dict, expect: int = 2) -> tuple[bool, str, str]:
+    """(equal, delta, verdict) of a clip-hash compare (G-05.2-4). A call that wrote adds
+    exactly 2 to changeCount (one write, one restore); a refusal before the write adds 0.
+    Any other delta means a write from outside, whatever the items say."""
+    equal = _clip_equal(after, before)
+    if "changeCount" not in before or "changeCount" not in after:
+        return equal, "?", "unknown"
+    delta = int(after["changeCount"]) - int(before["changeCount"])
+    if delta != expect:
+        return equal, str(delta), "outside_write"
+    return equal, str(delta), "pass" if equal else "differs"
+
+
 def _restore(pb, snap: list[dict[str, bytes]]) -> None:
     import AppKit
     import Foundation
@@ -694,6 +751,79 @@ def _write_marker(pb, text: str) -> None:
 
 
 # --- pure checks -------------------------------------------------------------------
+
+_RS, _US = "\x1e", "\x1f"  # the record and field separators of _SIG_READ
+
+
+def _alnum(text: str) -> str:
+    """Copy of runtime._alnum: only the letters and digits."""
+    return "".join(c for c in _squash(text) if c.isalnum())
+
+
+def _bare(text: str) -> str:
+    """Copy of mail_reply_cleanup._bare: NFC, no white space, no U+FFFC."""
+    return "".join(
+        c
+        for c in unicodedata.normalize("NFC", str(text or ""))
+        if not c.isspace() and c != "\ufffc"
+    )
+
+
+def _sig_head(markup: str) -> str:
+    """The text before the first blockquote: a copy of the HTML branch of
+    mail_reply_cleanup._split_quote (script and style dropped, tags to spaces)."""
+    cut = re.search(r"(?i)<blockquote\b", markup)
+    head = markup[: cut.start()] if cut else markup
+    head = re.sub(r"(?is)<(script|style).*?</\1>", "", head)
+    return html.unescape(re.sub(r"<[^>]+>", " ", head)).replace("\ufffc", "")
+
+
+def _sig_verdict(signature: str, markup: str) -> str:
+    """G-05.2-3: find the signature by its TEXT before the first quote, never by an
+    element id. present = its letters and digits occur there; equal = it occurs there
+    equal except for white space (the sweep's compare)."""
+    head = _sig_head(markup)
+    sa, sb = _alnum(signature), _bare(signature)
+    present = bool(sa) and sa in _alnum(head)
+    equal = bool(sb) and sb in _bare(head)
+    return f"present={'yes' if present else 'no'} equal={'yes' if equal else 'no'}"
+
+
+def _parse_sig_read(out: str) -> list[str | None]:
+    """_SIG_READ's answer as one entry per outgoing message: None = no signature."""
+    sigs: list[str | None] = []
+    for rec in out.split(_RS):
+        if rec.startswith("found"):
+            sigs.append(rec[5:].removeprefix(_US))
+        elif rec.startswith("missing"):
+            sigs.append(None)
+    return sigs
+
+
+def _churn(
+    pb, seconds: float, pause: float = 0.1, after_write=None
+) -> tuple[int, bool]:
+    """Write a transient marker every ``pause`` s for ``seconds`` s, then put the
+    snapshot back only when changeCount still equals the last churn write's (a newer
+    copy by someone else stays). Returns (writes, restored). An incomplete snapshot
+    refuses before any write."""
+    snap, bad = _snapshot(pb)
+    _require_snapshot(snap, bad, int(pb.changeCount()), len(pb.types() or []))
+    writes, last = 0, None
+    end = time.monotonic() + seconds
+    try:
+        while time.monotonic() < end:
+            _write_marker(pb, "P052-CHURN")
+            last = int(pb.changeCount())
+            writes += 1
+            if after_write:
+                after_write(writes)
+            time.sleep(pause)
+    finally:
+        restored = last is not None and int(pb.changeCount()) == last
+        if restored:
+            _restore(pb, snap)
+    return writes, restored
 
 
 def _new_ids(before: list[int], after: list[int]) -> list[int]:
@@ -804,6 +934,51 @@ def _selftest_pure() -> None:
     assert not _clip_equal({**h, "unreadable": 1}, h)
     assert not _clip_equal(h, {"items": [{"a": "1"}]})  # type lists differ
     assert not _clip_equal(h, {"items": [{"a": "1", "b": "2"}, {"c": "3"}]})
+    # G-05.2-4: a clipboard compare is judged by its changeCount delta
+    b0 = {"changeCount": 10, "items": [{"a": "1"}], "unreadable": 0}
+    a_ok = {"changeCount": 12, "items": [{"a": "1"}], "unreadable": 0}
+
+    def verdict(after, before, *expect):
+        return _clip_verdict(after, before, *expect)[2]
+
+    assert verdict(a_ok, b0) == "pass"
+    assert _clip_verdict(a_ok, b0) == (True, "2", "pass")
+    assert verdict({**a_ok, "changeCount": 13}, b0) == "outside_write"
+    assert verdict({**a_ok, "changeCount": 10}, b0, 2) == "outside_write"
+    assert verdict({**a_ok, "changeCount": 12}, b0, 0) == "outside_write"
+    assert verdict({**a_ok, "changeCount": 10}, b0, 0) == "pass"  # a refusal: no write
+    assert verdict({**a_ok, "items": [{"a": "9"}]}, b0) == "differs"
+    assert verdict(a_ok, {"items": [{"a": "1"}]}) == "unknown"
+    # G-05.2-3: the signature by its text before the first quote (fixtures are invented)
+    sig = "Jane Doe\nAcme Ltd"
+    quote = '<blockquote type="cite">Original text</blockquote>'
+    for markup, want in [
+        (f"<div>Hi</div><div>Jane Doe<br>Acme Ltd</div>{quote}", "yes yes"),
+        (
+            f'<div>Hi</div><div id="AppleMailSignature">Jane Doe<br>Acme Ltd</div>{quote}',
+            "yes yes",
+        ),
+        (f"<div>Jane&nbsp;Doe<br>&nbsp;Acme  Ltd</div>{quote}", "yes yes"),
+        (f"<div>Jane Doe<br>--<br>Acme Ltd</div>{quote}", "yes no"),
+        (
+            f'<div>Hi</div><blockquote type="CITE">Jane Doe Acme Ltd</blockquote>',
+            "no no",
+        ),
+        (f"<style>.x{{}}</style><div>Hi</div>{quote}", "no no"),
+    ]:
+        got = _sig_verdict(sig, markup)
+        want = "present={} equal={}".format(*want.split())
+        assert got == want, (markup, got, want)
+    assert _sig_verdict("", f"<div>Hi</div>{quote}") == "present=no equal=no"
+    assert _parse_sig_read(f"found{_US}A B{_RS}missing{_RS}found{_US}{_RS}") == [
+        "A B",
+        None,
+        "",
+    ]
+    assert _parse_sig_read(f"missing{_RS}found") == [None, ""]
+    assert not re.search(
+        r"(?i)\b(make|delete|save|send|close|move|duplicate)\b", _SIG_READ
+    ), "_SIG_READ must only read"
     # F5: one predicate for settle and confirm
     second = "Second line \u2013 caf\u00e9 \u2713"
     m1, m2 = "PROBE-1", f"PROBE-2\n\n{second}"
@@ -835,6 +1010,7 @@ def cmd_selftest(_a) -> int:
 
     b = _bind()
     _cg()
+    assert "AXUIElementPerformAction" in b
     assert hasattr(_cg(), "CGEventPostToPid")
     assert _cg_windows() is not None
     assert _fold("e\u0301\r\nx\u2028y") == "\u00e9\nx\ny"
@@ -864,6 +1040,20 @@ def cmd_selftest(_a) -> int:
         after = _hash_items(_snapshot(pb)[0])
         assert len(before) == 2 and all(len(i) == 2 for i in before), before
         assert before == after, "named-pasteboard round trip differs"
+        # clip-churn on the unique pasteboard: restored when nobody copied meanwhile ...
+        writes, restored = _churn(pb, 0.2, 0.05)
+        assert writes >= 2 and restored
+        assert _hash_items(_snapshot(pb)[0]) == before
+        # ... and a copy made after the last churn write stays (one iteration only)
+        copied = []
+
+        def newer(_n):
+            _write_marker(pb, "someone-else")
+            copied.append(1)
+
+        writes, restored = _churn(pb, 0.01, 0.05, newer)
+        assert writes == 1 and copied and not restored
+        assert _hash_items(_snapshot(pb)[0]) != before
     finally:
         pb.releaseGlobally()
     say(f"info: ax_getwindow_spi={'_AXUIElementGetWindow' in b}")
@@ -900,7 +1090,64 @@ def cmd_clip_hash(a) -> int:
     say(f"clip-hash: unreadable_types={bad}")
     if a.against:
         other = json.loads(Path(a.against).read_text("utf-8"))
-        say(f"clip-hash: equal={_clip_equal(data, other)}")
+        equal, delta, verdict = _clip_verdict(data, other, a.expect_delta)
+        say(f"clip-hash: equal={equal} delta={delta} verdict={verdict}")
+    return 0
+
+
+def cmd_sig_check(a) -> int:
+    msg = email.message_from_bytes(
+        Path(a.eml).read_bytes(), policy=email.policy.default
+    )
+    markup = ""
+    for part in msg.walk():
+        if part.get_content_type() == "text/html":
+            try:
+                markup += part.get_content()
+            except (LookupError, ValueError):
+                continue
+    sigs = _parse_sig_read(_osa(_SIG_READ))
+    say(f"sig-check: outgoing={len(sigs)}")
+    if not markup:
+        say("sig-check: eml-html=none")
+        return 0
+    for i, sig in enumerate(sigs, 1):
+        say(
+            f"sig-check {i}: "
+            + ("missing" if sig is None else _sig_verdict(sig, markup))
+        )
+    return 0
+
+
+def cmd_window_state(a) -> int:
+    import AppKit
+
+    pid = _mail_pid()
+    raised = "-"
+    if a.raise_bundle:
+        app = _bind()["AXUIElementCreateApplication"](_pid_of(a.raise_bundle))
+        wins = _ax(app, "AXWindows") or []
+        err = _bind()["AXUIElementPerformAction"](wins[0], "AXRaise") if wins else 1
+        raised = "yes" if err == 0 else "no"
+        time.sleep(0.3)
+    front = _ax(_bind()["AXUIElementCreateApplication"](pid), "AXFrontmost")
+    active = "unreadable" if front is None else ("yes" if front else "no")
+    top = _top_layer0()
+    top_mail = "yes" if top and top["pid"] == pid else "no"
+    say(
+        f"window-state: mail_active={active} top_layer0_is_mail={top_mail} "
+        f"displays={len(AppKit.NSScreen.screens())} raised={raised}"
+    )
+    return 0
+
+
+def cmd_clip_churn(a) -> int:
+    import AppKit
+
+    if not 1 <= a.seconds <= 30:
+        raise Refuse("seconds must be 1 to 30")
+    writes, restored = _churn(AppKit.NSPasteboard.generalPasteboard(), a.seconds)
+    say(f"clip-churn: writes={writes} restored={'yes' if restored else 'no'}")
     return 0
 
 
@@ -1191,7 +1438,12 @@ def main(argv: list[str] | None = None) -> int:
     add("selftest", cmd_selftest)
     add("trusted", cmd_trusted)
     add("dump-scripts", cmd_dump_scripts, "dir")
-    add("clip-hash", cmd_clip_hash, "out").add_argument("--against")
+    ch = add("clip-hash", cmd_clip_hash, "out")
+    ch.add_argument("--against")
+    ch.add_argument("--expect-delta", type=int, default=2)
+    add("sig-check", cmd_sig_check, "eml")
+    add("window-state", cmd_window_state).add_argument("--raise", dest="raise_bundle")
+    add("clip-churn", cmd_clip_churn).add_argument("seconds", type=float)
     add("open-reply", cmd_open_reply, "mid", "account", "path", "all")
     ins = add("insert", cmd_insert)
     ins.add_argument("mech", choices=["M1", "M2", "M3"])
