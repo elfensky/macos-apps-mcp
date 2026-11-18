@@ -5,6 +5,7 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 from __future__ import annotations
 
 import email
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -335,7 +336,9 @@ def test_find_own_draft_with_more_new_rows_than_it_reads_proves_nothing(
     rows = [(20 + n, _URL) for n in range(3)]
     for rowid, _ in rows:  # all readable, none a reply to the original
         mailroot(rowid, "other@example.com", f"m{rowid}@x", "<div>hello</div>")
-    assert _find(monkeypatch, rows) == mail_reply_cleanup.Draft("unproven")
+    assert _find(monkeypatch, rows) == mail_reply_cleanup.Draft(
+        "unproven", reason="too_many_rows"
+    )
     assert _find(monkeypatch, rows[:2]) == mail_reply_cleanup.Draft("none")
 
 
@@ -769,3 +772,176 @@ def test_find_own_draft_after_a_send_sets_aside_a_sent_copy_with_the_signature(
     assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
     # without the signature read the same rows stay unproven (today's rule)
     assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"
+
+
+# --- the delivered copy and the reason of every unproven verdict (#348, 05.2-17) ------
+
+_INBOX = f"imap://{_ACCT}/INBOX"
+
+
+def _stored(mailroot, monkeypatch, rows, **kw):
+    """Store ``(rowid, url, mid, body)`` rows (a ``None`` body leaves the file out) and
+    run the selector over them."""
+    for rowid, url, mid, body in rows:
+        if body is not None:
+            mailroot(rowid, _ORIGINAL, mid, body, url=url)
+    return _find(monkeypatch, [(rowid, url) for rowid, url, _, _ in rows], **kw)
+
+
+_DRAFT_ROW = (20, _URL, "d@x", _OWN)
+_OTHER_BODY = "<div>not the reply</div>"
+
+
+@pytest.mark.parametrize(
+    "inbox_first, twin_url",
+    [(True, _SENT), (False, _SENT), (True, _ALL_MAIL), (False, _ALL_MAIL)],
+)
+def test_find_own_draft_after_a_send_sets_aside_the_delivered_inbox_copy(
+    mailroot, monkeypatch, inbox_first, twin_url
+):
+    # the sent message reached an address whose account is in Mail on this Mac: its
+    # delivered copy is an INBOX row with the Sent copy's Message-ID (any case), and
+    # the order of the two rows in the index is not ours to know
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, twin_url, "s@x", _OWN)
+    inbox = (first, _INBOX, "S@X", _OTHER_BODY)  # its body is never judged
+    rows = [_DRAFT_ROW, inbox, twin] if inbox_first else [_DRAFT_ROW, twin, inbox]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # without the own Drafts copy nothing is left to report
+    got = _stored(mailroot, monkeypatch, rows[1:], sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize(
+    "rows, kw, reason",
+    [
+        # no Message-ID: nothing ties it to the sent message
+        ([(21, _SENT, "s@x", _OWN), (22, _INBOX, "", _OTHER_BODY)], {}, "inbox_row"),
+        # a Message-ID no set-aside copy carries
+        (
+            [(21, _SENT, "s@x", _OWN), (22, _INBOX, "other@x", _OTHER_BODY)],
+            {},
+            "inbox_row",
+        ),
+        # after a refusal nothing was sent: no copy is set aside, whatever it carries
+        ([(22, _INBOX, "s@x", _OWN)], {"sent_twins": False}, "inbox_row"),
+        # the Sent row failed the text check, so it set nothing aside: the INBOX row
+        # with its Message-ID is not set aside either, and nothing is claimed
+        (
+            [(21, _SENT, "s@x", _OTHER_BODY), (22, _INBOX, "s@x", _OTHER_BODY)],
+            {},
+            "sent_not_own",
+        ),
+        (
+            [(22, _INBOX, "s@x", _OTHER_BODY), (23, _SENT, "s@x", _OTHER_BODY)],
+            {},
+            "sent_not_own",
+        ),
+    ],
+)
+def test_find_own_draft_keeps_every_other_inbox_row_unproven(
+    mailroot, monkeypatch, rows, kw, reason
+):
+    got = _stored(mailroot, monkeypatch, rows, **{"sent_twins": True, **kw})
+    assert got.kind == "unproven" and got.reason == reason
+
+
+@pytest.mark.parametrize(
+    "url, reason",
+    [
+        (f"imap://{_ACCT}/Concepten", "other_mailbox"),  # a localized Drafts
+        (f"imap://{_ACCT}/Projects/INBOX", "other_mailbox"),  # not directly under it
+        (f"imap://{_ACCT}/Projects/Drafts", "other_mailbox"),
+        (f"imap://{_ACCT}/inbox", "other_mailbox"),  # another spelling
+        (_URL, "several_rows"),  # a second Drafts row: both look like the call's own
+    ],
+)
+def test_find_own_draft_never_sets_aside_a_row_outside_the_inbox_by_message_id(
+    mailroot, monkeypatch, url, reason
+):
+    # the Drafts autosave may share the sent message's Message-ID: only the top-level
+    # INBOX, which never holds a draft, may pass for the delivered copy
+    rows = [(21, _SENT, "s@x", _OWN), (22, url, "s@x", _OWN)]
+    if url == _URL:
+        rows.insert(0, _DRAFT_ROW)
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+# (stored rows, find kwargs, reason): one per code. A body of None leaves the file out.
+_BRANCH_CASES = [
+    ("too_many_rows", [(20 + n, _URL, f"m{n}@x", _OTHER_BODY) for n in range(3)], {}),
+    ("unreadable_row", [(20, _URL, "d@x", None)], {}),
+    ("drafts_late", [_DRAFT_ROW], {"landed_by": 19}),
+    ("drafts_late", [_DRAFT_ROW], {"landed_by": None}),
+    (
+        "drafts_not_own",
+        [(20, _URL, "d@x", "<div>Hi there, Jane</div>" + _QUOTE_HTML)],
+        {},
+    ),
+    ("drafts_not_own", [(20, _URL, "", _OWN)], {}),
+    (
+        "sent_not_own",
+        [(21, _SENT, "s@x", "<div>Hi there, Jane</div>" + _QUOTE_HTML)],
+        {"sent_twins": True},
+    ),
+    ("sent_not_own", [(21, _SENT, "", _OWN)], {"sent_twins": True}),
+    ("inbox_row", [(22, _INBOX, "s@x", _OWN)], {}),
+    ("other_mailbox", [(22, f"imap://{_ACCT}/Archive", "s@x", _OWN)], {}),
+    ("other_mailbox", [(21, _SENT, "s@x", _OWN)], {}),  # a refusal sent nothing
+    ("several_rows", [_DRAFT_ROW, (21, _URL, "e@x", _OWN)], {}),
+    # the first row that cannot be claimed names the branch
+    (
+        "other_mailbox",
+        [_DRAFT_ROW, (21, f"imap://{_ACCT}/Archive", "s@x", _OWN)],
+        {},
+    ),
+    (
+        "other_mailbox",
+        [(19, f"imap://{_ACCT}/Archive", "s@x", _OWN), (20, _URL, "d@x", _OWN)],
+        {},
+    ),
+]
+
+
+@pytest.mark.parametrize("reason, rows, kw", _BRANCH_CASES)
+def test_find_own_draft_names_each_unproven_branch(
+    mailroot, monkeypatch, reason, rows, kw
+):
+    if reason == "too_many_rows":
+        monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2)
+    got = _stored(mailroot, monkeypatch, rows, **kw)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
+    eight = {
+        "too_many_rows",
+        "unreadable_row",
+        "drafts_late",
+        "drafts_not_own",
+        "sent_not_own",
+        "inbox_row",
+        "other_mailbox",
+        "several_rows",
+    }
+    produced = set()
+    for n, (_, rows, kw) in enumerate(_BRANCH_CASES):
+        monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2 if n == 0 else 300)
+        # a fresh row id range per case, so a stored file never answers for the next
+        shifted = [(rowid + 100 * n, *rest) for rowid, *rest in rows]
+        got = _stored(
+            mailroot,
+            monkeypatch,
+            shifted,
+            **{"landed_by": 10**6, **kw},
+        )
+        produced.add(got.reason)
+    assert produced == eight
+    assert all(re.fullmatch(r"[a-z_]+", code) for code in produced)
+
+
+def test_a_claimed_or_empty_verdict_carries_no_reason(mailroot, monkeypatch):
+    assert _stored(mailroot, monkeypatch, [_DRAFT_ROW]).reason == ""
+    assert _find(monkeypatch, rows=[]).reason == ""
