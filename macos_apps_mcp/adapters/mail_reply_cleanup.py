@@ -51,7 +51,8 @@ Sent copy and, on Gmail, an All Mail twin. ``find_own_draft(..., sent_twins=True
 those aside (in a ``Sent`` mailbox or Gmail's ``All Mail``, with a Message-ID, the
 call's exact text and the original's quote), and so is the delivered copy of the same
 message when it landed in an INBOX on this Mac (the top-level INBOX of an account, with
-the Message-ID of a copy set aside); the Drafts copy is then judged by the rules above,
+the Message-ID of a copy set aside and a mail server's ``Received`` header, owner
+decision 2026-11-18); the Drafts copy is then judged by the rules above,
 and any other threaded row keeps the result ``unproven``. The sweep never deletes
 anything outside the one Drafts row it proved, by that row's own message id.
 
@@ -180,8 +181,10 @@ def _is_sent_url(url: str) -> bool:
     """A mailbox that holds the SENT message's own copy: a ``Sent`` folder under its
     account or under Google's root (``Sent Messages``, ``[Gmail]/Sent Mail``,
     ``Sent Items``), or Gmail's ``All Mail``. Matched by name like ``_is_drafts_url``,
-    for the same reason (the index has no mailbox role): a localized name or a user
-    folder is not matched, so a copy there is ``unproven``, never explained away."""
+    for the same reason (the index has no mailbox role): a name outside
+    ``mailbox_url.SENT_LEAVES`` (its English names and the canonical translations) or
+    a user folder is not matched, so a copy there is ``unproven``, never explained
+    away."""
     parts = mailbox_url.path(url).split("/")
     nested = len(parts) == 2 and parts[0] in _GOOGLE_ROOTS
     if parts[-1] == "All Mail":
@@ -193,8 +196,11 @@ def _is_inbox_url(url: str) -> bool:
     """The INBOX directly under an account. Only this mailbox may hold the delivered
     copy of a sent message: a delivered message lands there, and the Drafts autosave
     may share the sent message's Message-ID, so a Message-ID match in any other mailbox
-    (a localized Drafts, ``Projects/INBOX``, a user folder) proves nothing. That an
-    INBOX never holds a draft is assumed, not run on device."""
+    (a localized Drafts, ``Projects/INBOX``, a user folder) proves nothing. The row must
+    also carry a mail server's ``Received`` header (``find_own_draft``): an account
+    whose Drafts mailbox is its INBOX could hold a leftover draft with the sent
+    Message-ID, and a draft has no ``Received`` field, so that row stays
+    ``unproven``."""
     return mailbox_url.path(url) == "INBOX"
 
 
@@ -288,9 +294,11 @@ def _split_quote(msg) -> tuple[str, str]:
 
 
 def _read_draft(url: str, rowid: int):
-    """``(In-Reply-To, Message-ID, body)`` of one stored message, or None when its file
-    is absent or unreadable. Only the headers are parsed here; ``body()`` parses the
-    whole message and is called for a threaded row only."""
+    """``(In-Reply-To, Message-ID, body, received)`` of one stored message, or None
+    when its file is absent or unreadable. Only the headers are parsed here; ``body()``
+    parses the whole message and is called for a threaded row only. ``received``: the
+    headers carry a ``Received`` field. A mail server adds one to a delivered message;
+    a draft and a Sent copy carry none."""
     path = _emlx_path(url, rowid)
     if path is None:
         return None
@@ -307,6 +315,7 @@ def _read_draft(url: str, rowid: int):
         str(head.get("In-Reply-To", "") or ""),
         str(head.get("Message-ID", "") or ""),
         lambda: email.message_from_bytes(payload, policy=email.policy.default),
+        bool(head.get_all("Received")),
     )
 
 
@@ -382,28 +391,30 @@ def find_own_draft(
     Message-ID, the call's exact text and the original's quote is such a copy and is set
     aside, never claimed and never a reason for ``unproven``; so is a threaded row in
     the INBOX directly under an account whose Message-ID equals that of a copy set aside
-    (the delivered copy, when the recipient's account is in Mail on this Mac), whatever
-    the order of the two rows. Any other threaded row still is ``unproven`` (a localized
-    Sent or Drafts, a user folder, an INBOX row of another message). ``signature``: the
-    signature Mail put into this reply ("" when it did not read), accepted between the
-    text and the attribution (``_is_own``), for the Drafts copy and the sent twins
-    alike. After a refusal nothing was sent, so nothing is set aside. An ``unproven``
-    verdict carries the code of its branch in ``reason`` (the first row that could not
-    be set aside names it; INBOX rows after a send are judged last). Raises
-    ``NativeError`` when the index cannot be read now (the caller treats that as
-    unavailable)."""
+    and whose headers carry a mail server's ``Received`` field (the delivered copy, when
+    the recipient's account is in Mail on this Mac), whatever the order of the two rows;
+    without a ``Received`` field the row stays ``unproven`` (``inbox_row``). Any other
+    threaded row still is ``unproven`` (a localized Sent or Drafts, a user folder, an
+    INBOX row of another message). ``signature``: the signature Mail put into this
+    reply ("" when it did not read), accepted between the text and the attribution
+    (``_is_own``), for the Drafts copy and the sent twins alike. After a refusal nothing
+    was sent, so nothing is set aside. An ``unproven`` verdict carries the code of its
+    branch in ``reason`` (the first row that could not be set aside names it; INBOX
+    rows after a send are judged last). Raises ``NativeError`` when the index cannot be
+    read now (the caller treats that as unavailable)."""
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven", reason="too_many_rows")  # too many rows to read all
     found: list[Draft] = []
     twin_mids: set[str] = set()  # Message-IDs of the Sent / All Mail copies set aside
-    delivered: list[tuple[str, str]] = []  # INBOX rows, judged after the loop
+    # INBOX rows (url, Message-ID, has Received), judged after the loop
+    delivered: list[tuple[str, str, bool]] = []
     for rowid, url in rows:
         draft = _read_draft(url, rowid)
         if draft is None:
             # a new row we cannot read might be the one
             return Draft("unproven", reason="unreadable_row")
-        in_reply_to, mid, body = draft
+        in_reply_to, mid, body, received = draft
         if _norm_mid(in_reply_to) != _norm_mid(original_mid):
             continue
         is_drafts = _is_drafts_url(url)
@@ -423,7 +434,8 @@ def find_own_draft(
             found.append(Draft("one", url, mid))
             continue
         if sent_twins and _is_inbox_url(url):
-            delivered.append((url, mid))  # judged once every copy is set aside
+            # judged once every copy is set aside
+            delivered.append((url, mid, received))
             continue
         if is_drafts:
             reason = "drafts_late" if late else "drafts_not_own"
@@ -434,8 +446,9 @@ def find_own_draft(
         else:
             reason = "other_mailbox"
         found.append(Draft("unproven", url, mid, reason))
-    for url, mid in delivered:
-        if _norm_mid(mid) not in twin_mids:  # twin_mids never holds ""
+    for url, mid, received in delivered:
+        # twin_mids never holds ""; a draft or a Sent copy has no `Received` field
+        if not (received and _norm_mid(mid) in twin_mids):
             found.append(Draft("unproven", url, mid, "inbox_row"))
     if not found:
         return Draft("none")
