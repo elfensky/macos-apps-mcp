@@ -813,7 +813,14 @@ def _churn(
     end = time.monotonic() + seconds
     try:
         while time.monotonic() < end:
-            _write_marker(pb, "P052-CHURN")
+            pre = int(pb.changeCount())
+            try:
+                _write_marker(pb, "P052-CHURN")
+            except BaseException:
+                # our own half-done write emptied the pasteboard: it counts as ours
+                if int(pb.changeCount()) == pre + 1:
+                    last = pre + 1
+                raise
             last = int(pb.changeCount())
             writes += 1
             if after_write:
@@ -1044,6 +1051,23 @@ def cmd_selftest(_a) -> int:
         writes, restored = _churn(pb, 0.2, 0.05)
         assert writes >= 2 and restored
         assert _hash_items(_snapshot(pb)[0]) == before
+        # ... also when a marker write fails right after it emptied the pasteboard
+        real = _write_marker
+
+        def broken(p, _text):
+            p.clearContents()
+            raise RuntimeError("marker write failed")
+
+        globals()["_write_marker"] = broken
+        try:
+            _churn(pb, 0.2, 0.05)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("a failed marker write must raise")
+        finally:
+            globals()["_write_marker"] = real
+        assert _hash_items(_snapshot(pb)[0]) == before, "failed write: not restored"
         # ... and a copy made after the last churn write stays (one iteration only)
         copied = []
 
