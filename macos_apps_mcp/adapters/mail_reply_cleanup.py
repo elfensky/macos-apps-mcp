@@ -191,10 +191,10 @@ def _is_sent_url(url: str) -> bool:
 
 def _is_inbox_url(url: str) -> bool:
     """The INBOX directly under an account. Only this mailbox may hold the delivered
-    copy of a sent message: a delivered message lands there, a draft never does, and
-    the Drafts autosave may share the sent message's Message-ID, so a Message-ID match
-    in any other mailbox (a localized Drafts, ``Projects/INBOX``, a user folder) proves
-    nothing."""
+    copy of a sent message: a delivered message lands there, and the Drafts autosave
+    may share the sent message's Message-ID, so a Message-ID match in any other mailbox
+    (a localized Drafts, ``Projects/INBOX``, a user folder) proves nothing. That an
+    INBOX never holds a draft is assumed, not run on device."""
     return mailbox_url.path(url) == "INBOX"
 
 
@@ -365,8 +365,9 @@ def find_own_draft(
     text and the attribution (``_is_own``), for the Drafts copy and the sent twins
     alike. After a refusal nothing was sent, so nothing is set aside. An ``unproven``
     verdict carries the code of its branch in ``reason`` (the first row that could not
-    be set aside names it). Raises ``NativeError`` when the index cannot be read now
-    (the caller treats that as unavailable)."""
+    be set aside names it; INBOX rows after a send are judged last). Raises
+    ``NativeError`` when the index cannot be read now (the caller treats that as
+    unavailable)."""
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven", reason="too_many_rows")  # too many rows to read all
