@@ -3677,7 +3677,8 @@ def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
     # are pinned in test_mail_reply_cleanup.py. Together they are the fifteen.
     produced = set()
     for _, kw, patch in _FLOW_REASON_CASES:
-        _, out = _flow_result(monkeypatch, kw, patch)
+        with monkeypatch.context() as case:  # a patch of one case must not leak
+            _, out = _flow_result(case, kw, patch)
         produced.add(out["drafts_copy_reason"])
     flow = {"claim_refused", "read_failed", "sweep_failed"} | {
         c for c in _FIFTEEN if c.startswith("delete_")

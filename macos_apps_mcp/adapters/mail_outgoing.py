@@ -1179,6 +1179,8 @@ class _ReplyFlow:
         # the signature Mail put into this reply, read while it exists: compared by the
         # Drafts sweep, never reported
         self.signature = ""
+        # the fixed code of an ``unproven`` sweep (never message text), set by ``sweep``
+        self.sweep_reason = ""
         # the baseline read was just taken: no reply window exists yet
         self.started_at = time.monotonic()
         self.opened_at: float | None = None
@@ -1305,12 +1307,17 @@ class _ReplyFlow:
         except NativeError:
             return "unavailable"
         except Exception:  # noqa: BLE001 - a malformed draft must not hide the refusal
+            self.sweep_reason = "read_failed"
             return "unproven"
         if found.kind == "none":
             discarded = self.discarded_at
             late = discarded is None or read_at - discarded < SWEEP_GAP_S
             return "late" if late else "none"
-        if found.kind != "one" or not self._may_claim(found.url):
+        if found.kind != "one":
+            self.sweep_reason = found.reason
+            return "unproven"
+        if not self._may_claim(found.url):
+            self.sweep_reason = "claim_refused"
             return "unproven"
         try:
             answer = runtime.run_osascript(
@@ -1320,8 +1327,14 @@ class _ReplyFlow:
                 timeout=ORIGINAL_TIMEOUT,
             )
         except Exception:  # noqa: BLE001 - reported as unproven, never raised
+            self.sweep_reason = "delete_failed"
             return "unproven"
-        return "removed" if answer.strip() == "deleted" else "unproven"
+        answer = answer.strip()
+        if answer == "deleted":
+            return "removed"
+        known = answer in ("alive", "gone", "several")
+        self.sweep_reason = f"delete_{answer}" if known else "delete_failed"
+        return "unproven"
 
     def refusal(self, cause: Exception) -> ComposeRefused:
         """The error for a failure after the flow started: discard, sweep, then word
@@ -1353,6 +1366,8 @@ class _ReplyFlow:
             end = _DELETED_WINDOW_LEFT
         else:
             end = _LEFT_OVER
+        if swept == "unproven" and self.sweep_reason:
+            end += f" Drafts check: {self.sweep_reason}."
         return ComposeRefused(f"{self.tool} did not complete ({said}).{end}")
 
     def after_send(self) -> dict:
@@ -1360,13 +1375,18 @@ class _ReplyFlow:
         survives a send (facts 4e `Send after insert`), so wait until 45 s after the
         window opened and sweep as a refusal does. Nothing here can fail the send or
         delete anything but the one Drafts row it proved: the result rides beside
-        ``sent`` as ``drafts_copy`` plus a plain-language note."""
+        ``sent`` as ``drafts_copy`` plus a plain-language note; an ``unproven`` outcome
+        adds ``drafts_copy_reason``, the fixed code of the branch."""
         self.window_gone()
         try:
             outcome = self.sweep(sent=True)
         except Exception:  # noqa: BLE001 - the send happened; the sweep never raises
             outcome = "unproven"
-        return {"drafts_copy": outcome, "drafts_copy_note": _SENT_COPY[outcome]}
+            self.sweep_reason = "sweep_failed"
+        result = {"drafts_copy": outcome, "drafts_copy_note": _SENT_COPY[outcome]}
+        if outcome == "unproven":
+            result["drafts_copy_reason"] = self.sweep_reason
+        return result
 
 
 def open_reply_with_text(
