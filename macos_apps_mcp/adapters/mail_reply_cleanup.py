@@ -33,9 +33,10 @@ is not proven the window's own); it has a Message-ID; it sits in a mailbox that 
 squashed text, optionally followed by the signature Mail put into this reply (equal
 except for white space), then by Mail's own attribution line for this original; AND
 it carries the original's quote and nothing after it (its tail, by letters and digits,
-as the insert's confirmation compares it, is the LAST thing in the draft), or, for a
-reply without a quote, nothing at all after the text. Anything else is ``unproven``:
-reported with the refusal, never deleted.
+as the insert's confirmation compares it, is the LAST thing in the draft; Mail's own
+inline-image placeholders inside the quote are not text, owner decision 2026-11-18),
+or, for a reply without a quote, nothing at all after the text. Anything else is
+``unproven``: reported with the refusal, never deleted.
 
 The selector reads the index and the files only. The flow adds what it alone knows
 before it deletes the claimed row (``mail_outgoing._ReplyFlow._may_claim``): the span
@@ -269,7 +270,7 @@ def _drop_placeholders(quote: str) -> str:
 
     def drop(found: re.Match[str]) -> str:
         text = html.unescape(found.group(1)).strip()
-        return "" if _is_token(text) else found.group(0)
+        return " " if _is_token(text) else found.group(0)
 
     return _PLACEHOLDER.sub(drop, quote)
 
@@ -277,9 +278,10 @@ def _drop_placeholders(quote: str) -> str:
 def _split_quote(msg) -> tuple[str, str]:
     """The squashed text of a draft before its first quote, and the squashed text from
     the quote on: the HTML text before / from the first blockquote, else the plain lines
-    before / from the first ``>`` line. In the quote part of HTML, Mail's inline-image
-    placeholders are not text (``_drop_placeholders``); the part before the quote keeps
-    every element."""
+    before / from the first ``>`` line. Inside the quote of HTML (from the first
+    ``<blockquote`` to the last ``</blockquote>``), Mail's inline-image placeholders are
+    not text (``_drop_placeholders``); the part before the quote, the part below it and
+    plain text keep everything."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
@@ -294,7 +296,12 @@ def _split_quote(msg) -> tuple[str, str]:
         cut = re.search(r"(?i)<blockquote\b", markup)
         at = cut.start() if cut else len(markup)
         parts = []
-        for chunk in (markup[:at], _drop_placeholders(markup[at:])):
+        quote = markup[at:]
+        # the quote ends at the last closing tag; text below it stays text, and an
+        # unclosed quote loses nothing
+        close = quote.lower().rfind("</blockquote>")
+        end = close + len("</blockquote>") if close >= 0 else 0
+        for chunk in (markup[:at], _drop_placeholders(quote[:end]) + quote[end:]):
             chunk = re.sub(r"(?is)<(script|style).*?</\1>", "", chunk)
             parts.append(html.unescape(re.sub(r"<[^>]+>", " ", chunk)))
         head, tail = parts
@@ -329,7 +336,7 @@ def _read_draft(url: str, rowid: int):
         str(head.get("In-Reply-To", "") or ""),
         str(head.get("Message-ID", "") or ""),
         lambda: email.message_from_bytes(payload, policy=email.policy.default),
-        bool(head.get_all("Received")),
+        any(str(value).strip() for value in head.get_all("Received") or ()),
     )
 
 
