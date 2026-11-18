@@ -1127,9 +1127,49 @@ def test_compose_insert_refuses_a_changed_clipboard_before_writing(monkeypatch):
         return real_focus(pid, wid)
 
     monkeypatch.setattr(runtime, "_focused_body", focus)
-    with pytest.raises(runtime.ComposeRefused, match="clipboard"):
+    with pytest.raises(runtime.ComposeRefused, match="clipboard") as refused:
         _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+    # FIX-26 (#589): the refusal names the cause and asks the user not to copy
+    assert "clipboard changed during the call" in str(refused.value)
+    assert "not to copy anything while a reply runs" in str(refused.value)
     assert "write" not in events and keys == []
+
+
+def test_compose_insert_names_the_clipboard_when_it_changed_during_the_paste(
+    monkeypatch,
+):
+    # FIX-26 (#589): the user copies while the paste runs and the body never settles
+    events, clip, keys = _compose_rig(monkeypatch, ["old"])
+    real_read = runtime._read_body
+
+    def read(el):
+        if "write" in events:
+            clip.count += 1  # a copy during the paste
+        return real_read(el)
+
+    monkeypatch.setattr(runtime, "_read_body", read)
+    with pytest.raises(runtime.ComposeRefused) as refused:
+        _REAL_COMPOSE_INSERT(
+            77, _TEXT, quote_tail="tail", rollback=lambda: events.append("rollback")
+        )
+    assert "clipboard changed during the call" in str(refused.value)
+    assert "not to copy anything while a reply runs" in str(refused.value)
+    assert "did not appear" not in str(refused.value)
+    assert "rollback" in events  # the reply is discarded as for every refusal
+    assert "restore" not in events  # the newer copy stays
+
+
+def test_compose_insert_without_a_clipboard_change_keeps_the_settle_refusal(
+    monkeypatch,
+):
+    events, clip, keys = _compose_rig(monkeypatch, ["old"])
+    with pytest.raises(runtime.ComposeRefused) as refused:
+        _REAL_COMPOSE_INSERT(
+            77, _TEXT, quote_tail="tail", rollback=lambda: events.append("rollback")
+        )
+    assert "did not appear in the reply within 1 s" in str(refused.value)
+    assert "clipboard changed" not in str(refused.value)
+    assert events.index("rollback") < events.index("restore")
 
 
 def test_compose_insert_checks_the_clipboard_last_before_the_write(monkeypatch):
