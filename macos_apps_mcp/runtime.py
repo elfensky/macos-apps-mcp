@@ -1138,6 +1138,14 @@ def _confirm(
         )
 
 
+# FIX-26 (#589): the one refusal text for a clipboard that moved under the call
+_CLIPBOARD_CHANGED = (
+    "clipboard: the clipboard changed during the call (something was copied), so your "
+    "text was not inserted. Ask the user not to copy anything while a reply runs, "
+    "then run the call again"
+)
+
+
 def compose_insert(
     window_id: int,
     text: str,
@@ -1189,10 +1197,7 @@ def compose_insert(
             el = _focused_body(pid, window_id)  # right before the write
         before = squash_text(_read_body(el)[0])
         if clip.change_count() != count:  # the last step before the write
-            raise ComposeRefused(
-                "clipboard: the clipboard changed after it was saved, so nothing was "
-                "pasted; run the call again"
-            )
+            raise ComposeRefused(_CLIPBOARD_CHANGED)
         mine = None  # the change count right after OUR write
         settled = False
         try:
@@ -1208,9 +1213,12 @@ def compose_insert(
             raise
         finally:
             # a newer copy by the user stays; a write that failed midway is undone
-            if mine is None or clip.change_count() == mine:
+            moved = mine is not None and clip.change_count() != mine  # a newer copy
+            if not moved:
                 clip.restore(snap)
         if not settled:
+            if moved:
+                raise ComposeRefused(_CLIPBOARD_CHANGED)
             raise ComposeRefused(
                 "confirmation: your text did not appear in the reply within "
                 f"{_PASTE_SETTLE_S:g} s"
