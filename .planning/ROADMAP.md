@@ -49,8 +49,8 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: one more fix for the check after a sent reply (it fails when the original ends with an inline image), then one more reply test on a real Mac.
-  - Waits for: that fix (plan 05.2-19) and the owner's short reply test after it (plan 05.2-20).
+  - Next: the owner's short reply test on a real Mac (plan 05.2-20). The signed build for it is ready.
+  - Waits for: that reply test. The fix for mails that end with a picture is merged (plan 05.2-19).
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
 - 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
@@ -510,7 +510,7 @@ A real frontend gets a connection error during a daemon outage, and the next cal
 
 Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
-**Plans:** 18/20 plans executed; the 05.2-18 device acceptance failed on the Drafts result after a send (G-05.2-2, cause located); #516 and #589 are closed; gap round 4 (05.2-19, 05.2-20) is planned
+**Plans:** 19/20 plans executed; the code of gap round 4 is merged (05.2-19, PR #604); the owner sitting 05.2-20 remains; #516 and #589 are closed, #348 is open
 
 Plans:
 **Wave 1**
@@ -564,7 +564,7 @@ Plans:
 **Gap closure, round 4** (from the failed 05.2-18 device acceptance, 2026-11-18: G-05.2-2 with its cause located, G-05.2-5, G-05.2-6)
 
 **Round 4 · Gap Wave 1**
-- [ ] 05.2-19-PLAN.md — the reply sweep ignores Mail's own inline-image marker in the quote (two forms, each a `span` with an id that starts with `cid:`), and an INBOX row counts as the delivered copy only with a `Received` header; the facts and the CHANGELOG state both rules (FIX-16; #348)
+- [x] 05.2-19-PLAN.md — the reply sweep ignores Mail's own inline-image marker in the quote (two forms, each a `span` with an id that starts with `cid:`), and an INBOX row counts as the delivered copy only with a `Received` header; the facts and the CHANGELOG state both rules (FIX-16; #348)
 
 **Round 4 · Gap Wave 2** *(blocked on Round 4 · Gap Wave 1 completion)*
 - [ ] 05.2-20-PLAN.md — short owner sitting on the rebuilt `.app`: one delivered `reply_all` on the original that ends with an inline image, one refused `mail_reply`, the two-display state or the owner's answer; #348 closes on device evidence or the owner's explicit answer (FIX-16; #348)
@@ -731,7 +731,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 18/20 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 19/20 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/TBD; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

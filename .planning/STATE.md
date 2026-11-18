@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.2 gap round 4 is planned and checked (05.2-19 code: Mail's inline-image marker and the Received check; 05.2-20 short owner sitting; G-05.2-2, G-05.2-5, G-05.2-6). Next: /gsd-execute-phase 05.2 --gaps-only (plan 19 runs unattended up to a signed build; the install and the sitting wait for the owner)."
-last_updated: "2026-11-18T22:15:00.000Z"
+stopped_at: "Phase 05.2 plan 05.2-19 is merged (PR 604, tip 13417ee): the reply sweep ignores Mail's inline-image marker inside the quote and the INBOX copy needs a Received header. A signed build of 13417ee is ready in the build lane p052-gaps4-build, not installed. Next: the owner sitting 05.2-20 (install, one reply_all, one refused mail_reply, the two-display state or the owner's answer)."
+last_updated: "2026-11-18T23:25:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 10
   total_plans: 99
-  completed_plans: 97
-last_activity: 2026-11-18
-last_activity_desc: "Phase 05.2 gap round 3 executed (PR 601, PR 602; sitting on build c60c899; issues 516 and 589 closed) and gap round 4 planned: 05.2-19, 05.2-20."
+  completed_plans: 98
+last_activity: 2026-11-19
+last_activity_desc: "Phase 05.2 plan 05.2-19 executed unattended: PR 604 merged after a probe review and a re-check; signed build of 13417ee ready for the 05.2-20 sitting."
 ---
 
 # Project State
@@ -37,7 +37,7 @@ Discovery follow-up: 3475 default tests passed; independent review repeated 64 f
 The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 (FIX-26) in Phase 05.2.
 [Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: 97 of 99 plan files have completion summaries (05.2-19 and 05.2-20 are planned). The roadmap records ten phase closures.
+Progress: 98 of 99 plan files have completion summaries (05.2-20, the owner sitting, remains). The roadmap records ten phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -102,6 +102,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.2]: Owner decisions 2026-11-18 (gap round 3): the security Dependabot PR (#594) merges before the acceptance build and the 12-update PR (#597) waits until after 0.16.0; release 0.16.0 may run without a further question up to TestPyPI and the installed, notarized app, and PyPI and the MCP Registry wait for the owner's word; at the 05.2-18 sitting the TextEdit clipboard compare was not repeated on the owner's word (tested before and fine).
 - [Phase 05.2]: Owner decisions 2026-11-18 (gap round 4, after the page `.planning/reports/2026-11-18-reply-sweep-rules.html`): the reply sweep ignores only Mail's own inline-image marker in the quote (the element Mail writes with an id that starts with `cid:`), never any typed `<name.ext>` text; an INBOX row counts as the delivered copy only with a `Received` header (PM-172); plan 05.2-19 may run unattended up to a signed build, and the install and the sitting wait for the owner.
 - [Phase 05.2]: Orchestrator decision 2026-11-18 (unattended, owner may veto): Mail writes that marker in two forms, `<span id="cid:…">` in sent copies and `<span class="AppleTemporaryEditingElement" id="cid:…">` in compose-time copies (42 spans in the evidence folder: 12 and 30, no third form); the rule accepts exactly these two, so a Drafts copy can be proven too.
+- [Phase 05.2]: Orchestrator decisions 2026-11-19 (unattended, owner may veto; 05.2-19-SUMMARY.md): the placeholder rule ends at the last `</blockquote>` (the plan ran it to the end of the HTML; PM-187); a dropped element leaves a space; an empty `Received` field is no postmark. Open for the owner: PM-182 (marks without letters after the quote's tail are not text for `_has_quote`), PM-189 (`include_quote=False` with a quote of placeholders only), PM-193 (two older quadratic patterns).
 - [Phase 05.2]: Orchestrator finding 2026-11-18 (owner may veto): the INBOX rule of PR #601 does not explain the earlier `unproven` results; the cause is the quote-tail check on an original that ends with an inline image. PM-172 (an INBOX is assumed never to hold a draft) is open for the owner.
 - [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.
 Decisions are logged in PROJECT.md Key Decisions table.
@@ -261,6 +262,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-18
-Stopped at: Phase 05.2 gap round 4 is planned and checked (05.2-19 code: Mail's inline-image marker and the Received check; 05.2-20 short owner sitting; G-05.2-2, G-05.2-5, G-05.2-6). Next: /gsd-execute-phase 05.2 --gaps-only (plan 19 runs unattended up to a signed build; the install and the sitting wait for the owner). Then release 0.16.0 (pre-approved up to TestPyPI and the installed app). The Dependabot PR #597 waits for the release. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
+Last session: 2026-11-19
+Stopped at: Phase 05.2 plan 05.2-19 is merged (PR 604, tip 13417ee): the reply sweep ignores Mail's inline-image marker inside the quote and the INBOX copy needs a Received header. A signed build of 13417ee is ready in the build lane p052-gaps4-build, not installed. Next: the owner sitting 05.2-20 (install, one reply_all, one refused mail_reply, the two-display state or the owner's answer). Then release 0.16.0 (pre-approved up to TestPyPI and the installed app). The Dependabot PR #597 waits for the release. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
