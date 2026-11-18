@@ -1130,6 +1130,7 @@ def test_compose_insert_refuses_a_changed_clipboard_before_writing(monkeypatch):
     with pytest.raises(runtime.ComposeRefused, match="clipboard") as refused:
         _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
     # FIX-26 (#589): the refusal names the cause and asks the user not to copy
+    assert str(refused.value).startswith("clipboard:")
     assert "clipboard changed during the call" in str(refused.value)
     assert "not to copy anything while a reply runs" in str(refused.value)
     assert "write" not in events and keys == []
@@ -1152,6 +1153,7 @@ def test_compose_insert_names_the_clipboard_when_it_changed_during_the_paste(
         _REAL_COMPOSE_INSERT(
             77, _TEXT, quote_tail="tail", rollback=lambda: events.append("rollback")
         )
+    assert str(refused.value).startswith("clipboard:")
     assert "clipboard changed during the call" in str(refused.value)
     assert "not to copy anything while a reply runs" in str(refused.value)
     assert "did not appear" not in str(refused.value)
