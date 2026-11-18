@@ -3433,6 +3433,51 @@ def test_send_then_sweep_with_only_the_sent_copy_finds_no_drafts_copy(monkeypatc
     assert "45 s" in out["drafts_copy_note"]
 
 
+# Mail's quote writes each inline image of the original as one span whose text is
+# `<file name>`: the id-only form in a Sent copy, the compose-time form in a draft
+# (facts 4e `Layout`). 05.2-18 read `unproven` because of it.
+_PH = '<span id="cid:ii_t1">&lt;logo.png&gt;</span>'
+_PH_EDIT = (
+    '<span class="AppleTemporaryEditingElement" id="cid:ii_t1">&lt;logo.png&gt;</span>'
+)
+
+
+def _image_body(placeholder: str) -> str:
+    """The call's text above a quote that ends with the original's last words and then
+    Mail's placeholder for an inline image."""
+    return f"<div>Hi</div><blockquote>{_ORIGINAL_TEXT}{placeholder}</blockquote>"
+
+
+def test_send_then_sweep_proves_a_copy_with_an_image_placeholder(monkeypatch):
+    rig, out = _sent_reply(
+        monkeypatch,
+        (_DRAFTS_URL, _image_body(_PH_EDIT), "html", "<draft@x>"),
+        (_SENT_URL, _image_body(_PH), "html", "<sent@x>"),
+    )
+    calls = rig.calls_of("_SWEEP_DELETE")
+    assert [c[1] for c in calls] == [("draft@x", _GMAIL_UUID, "Drafts")]
+    assert out["sent"] is True and out["drafts_copy"] == "removed"
+    assert "drafts_copy_reason" not in out
+
+
+def test_send_then_sweep_with_only_a_sent_copy_with_an_image_placeholder_is_none(
+    monkeypatch,
+):
+    rig, out = _sent_reply(
+        monkeypatch, (_SENT_URL, _image_body(_PH), "html", "<sent@x>")
+    )
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["sent"] is True and out["drafts_copy"] == "none"
+
+
+def test_reply_refusal_deletes_its_own_copy_with_an_image_placeholder(monkeypatch):
+    rig, folder, text = _refuse_with(monkeypatch)
+    _real_selector(monkeypatch, (_DRAFTS_URL, _image_body(_PH_EDIT), "html"))
+    msg = _run_refused(rig, folder, text)
+    assert "_SWEEP_DELETE" in rig.names()
+    assert "nothing was created" in msg and "was found and deleted" in msg
+
+
 @pytest.mark.parametrize(
     "stranger",
     [

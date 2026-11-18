@@ -973,3 +973,140 @@ def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
 def test_a_claimed_or_empty_verdict_carries_no_reason(mailroot, monkeypatch):
     assert _stored(mailroot, monkeypatch, [_DRAFT_ROW]).reason == ""
     assert _find(monkeypatch, rows=[]).reason == ""
+
+
+# --- Mail's inline-image placeholder in the quote (#348, 05.2-19, owner decision 1) --
+
+# Mail's quote writes each inline image of the original as one span whose text is
+# `<file name>`: the id-only form in Sent and delivered copies, the compose-time form
+# (with Mail's editing class) in drafts and autosaves (facts 4e `Layout`).
+_PH = '<span id="cid:ii_t1">&lt;logo.png&gt;</span>'
+_PH_EDIT = (
+    '<span class="AppleTemporaryEditingElement" id="cid:ii_t1">&lt;logo.png&gt;</span>'
+)
+_PH_EDIT_2 = (
+    '<span class="AppleTemporaryEditingElement" id="cid:ii_t2">'
+    "&lt;photo 2.jpg&gt;</span>"
+)
+
+
+def _quoted(inner: str) -> str:
+    """The call's text above a quote whose last part is ``inner``."""
+    return (
+        f'<div>Hi there</div><blockquote type="cite">{_ATTRIBUTION}<br>'
+        f"{inner}</blockquote>"
+    )
+
+
+def test_split_quote_drops_an_image_placeholder_only_from_the_quote():
+    msg = email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        f"<div>Hi there {_PH}</div>"
+        f"<blockquote>quoted words {_PH}{_PH_EDIT}</blockquote>",
+        policy=email.policy.default,
+    )
+    head, tail = mail_reply_cleanup._split_quote(msg)
+    assert "<logo.png>" in head  # the text before the quote never loses an element
+    assert "<logo.png>" not in tail and tail.endswith("quoted words")
+
+
+_PROVEN_SHAPES = [
+    f"quoted words{_PH}",
+    f"quoted words{_PH_EDIT}",
+    f"quoted words{_PH}{_PH_EDIT_2}",
+    f"quoted {_PH_EDIT}words",
+    '<div>quoted words<span class="AppleTemporaryEditingElement" id="cid:ii_t1">'
+    " &lt;logo.png&gt;&nbsp;</span></div>",
+]
+
+
+@pytest.mark.parametrize("inner", _PROVEN_SHAPES)
+@pytest.mark.parametrize("mode", ["refusal", "send_with_drafts", "send_twins_only"])
+def test_find_own_draft_proves_a_copy_whose_quote_holds_an_image_placeholder(
+    mailroot, monkeypatch, inner, mode
+):
+    body = _quoted(inner)
+    drafts = (20, _URL, "d@x", body)
+    twins = [(21, _SENT, "s@x", body), (22, _ALL_MAIL, "a@x", body)]
+    if mode == "refusal":
+        got = _stored(mailroot, monkeypatch, [drafts])
+        assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    elif mode == "send_with_drafts":
+        got = _stored(mailroot, monkeypatch, [drafts, *twins], sent_twins=True)
+        assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    else:
+        got = _stored(mailroot, monkeypatch, twins, sent_twins=True)
+        assert got == mail_reply_cleanup.Draft("none")
+
+
+_ALMOST = "&lt;logo.png&gt;"
+_TEXT_LIKE_A_PLACEHOLDER = [
+    f"quoted words{_ALMOST}",  # typed text
+    f"quoted words<span>{_ALMOST}</span>",  # a span without an id
+    f'quoted words<span id="img1">{_ALMOST}</span>',
+    f'quoted words<span id="xcid:ii_t1">{_ALMOST}</span>',
+    f'quoted words<span id="CID:ii_t1">{_ALMOST}</span>',
+    f'quoted words<SPAN ID="cid:ii_t1">{_ALMOST}</SPAN>',
+    f"quoted words<span id='cid:ii_t1'>{_ALMOST}</span>",
+    f"quoted words<span id=cid:ii_t1>{_ALMOST}</span>",
+    f'quoted words<span class="x" id="cid:ii_t1">{_ALMOST}</span>',
+    # the class after the id is not a form Mail writes
+    'quoted words<span id="cid:ii_t1" class="AppleTemporaryEditingElement">'
+    f"{_ALMOST}</span>",
+    'quoted words<span id="cid:ii_t1">logo.png</span>',  # no brackets
+    'quoted words<span id="cid:ii_t1">&lt;a.png&gt; &lt;b.png&gt;</span>',  # two tokens
+    'quoted words<span id="cid:ii_t1">&lt;logo.png&gt; PS</span>',  # extra text
+    f'quoted words<span id="cid:ii_t1"><span>{_ALMOST}</span></span>',  # a tag inside
+    f'quoted words<span id="cid:ii_t1">{_ALMOST}',  # unclosed
+    f'quoted words<img src="cid:ii_t1" alt="logo.png">{_ALMOST}',  # typed after an img
+]
+
+
+@pytest.mark.parametrize("fragment", _TEXT_LIKE_A_PLACEHOLDER)
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_text_like_an_image_placeholder_unproven(
+    mailroot, monkeypatch, fragment, mode
+):
+    _assert_unproven(mailroot, monkeypatch, _quoted(fragment), mode)
+
+
+def test_find_own_draft_keeps_an_image_placeholder_before_the_quote_unproven(
+    mailroot, monkeypatch
+):
+    # the text before the quote never loses an element: the quote itself is clean
+    body = f"<div>Hi there</div>{_PH}" + _QUOTE_HTML
+    _assert_unproven(mailroot, monkeypatch, body, "refusal")
+    _assert_unproven(mailroot, monkeypatch, body, "send")
+
+
+def _assert_unproven(mailroot, monkeypatch, body, mode):
+    """One copy with ``body``: a refusal with the Drafts copy alone, or a send with a
+    Sent twin alone. It is ``unproven`` with its reason, and nothing is claimed."""
+    if mode == "refusal":
+        got = _stored(mailroot, monkeypatch, [(20, _URL, "d@x", body)])
+        assert got.kind == "unproven" and got.reason == "drafts_not_own"
+    else:
+        got = _stored(
+            mailroot, monkeypatch, [(21, _SENT, "s@x", body)], sent_twins=True
+        )
+        assert got.kind == "unproven" and got.reason == "sent_not_own"
+
+
+@pytest.mark.parametrize("token", ["&lt;&gt;", "&lt; &gt;", "&lt;&nbsp;&gt;"])
+@pytest.mark.parametrize(
+    "opening",
+    [
+        '<span id="cid:ii_t1">',
+        '<span class="AppleTemporaryEditingElement" id="cid:ii_t1">',
+    ],
+)
+def test_split_quote_keeps_a_white_space_image_placeholder_as_text(token, opening):
+    # the token needs one character inside that is not white space, so an empty one is
+    # text. The verdict is not pinned here: `_has_quote` compares letters and digits
+    # only, so a quote that ends in `< >` is proven with or without this rule (05.2-19).
+    msg = email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        f"<blockquote>quoted words{opening}{token}</span></blockquote>",
+        policy=email.policy.default,
+    )
+    assert "<" in mail_reply_cleanup._split_quote(msg)[1]
