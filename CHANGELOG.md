@@ -91,7 +91,9 @@ surface may still shift between minor versions.
   send the call does the same sweep once the window is 45 seconds old (the call takes about a
   minute) and reports it as `drafts_copy` beside `sent`; the sent message's own Sent and All Mail
   copies are never touched, and a Drafts copy that cannot be proven this reply's own is left
-  alone and reported. `include_quote=False` replaces the whole body with your text. The
+  alone and reported (the result's `drafts_copy_reason` names why); the delivered copy of a
+  reply to an address whose account is in Mail on this Mac is set aside like the Sent copy.
+  `include_quote=False` replaces the whole body with your text. The
   plain-text quote is gone.
 - **`export_mail` never hides a written file** (#399) — every target path is checked before
   the first write, so a name that already exists, or two ids that derive one file name,
