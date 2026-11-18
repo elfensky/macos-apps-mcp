@@ -25,30 +25,6 @@
       }
     ]
   },
-  "dnspython": {
-    "version": "2.9.0",
-    "distributions": [
-      "dnspython"
-    ],
-    "files": {
-      "dnspython/LICENSE": "c3ea3ff5654b329c19d3bc5f7481af623c3dded4a6145585499f843ad3d741cd"
-    },
-    "sources": [
-      {
-        "name": "dnspython",
-        "version": "2.9.0",
-        "url": "https://files.pythonhosted.org/packages/ef/4a/50822184bd67cc6493f0fb6a880749158fcd31ab3fa07409acfd91f9fc85/dnspython-2.9.0.tar.gz",
-        "sha256": "b44dc6b18f07a8b1c56676a19fbfdb5209415b046a9cece286baafa87ff3f7f1",
-        "members": []
-      },
-      {
-        "url": "https://github.com/rthalley/dnspython/blob/v2.9.0/LICENSE",
-        "sha256": "c3ea3ff5654b329c19d3bc5f7481af623c3dded4a6145585499f843ad3d741cd",
-        "tag_object": "dfc838e79425ced75b857a9e23132e506201e7b9",
-        "commit": "e790c8f20a67ad439c7aafef2321e161c6028eee"
-      }
-    ]
-  },
   "fastmcp-slim": {
     "version": "4.1.6",
     "distributions": [

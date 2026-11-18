@@ -33,10 +33,6 @@ The build uses these local files without network access.
   The same README identifies the bundled `_plistlib.py` source as CPython commit
   `90549676e063c2c818cfc14213d3adb7edcc2bd5`. `CPython-LICENSE` preserves that commit's complete licence.
   [CPython licence](https://github.com/python/cpython/blob/90549676e063c2c818cfc14213d3adb7edcc2bd5/LICENSE) · [🔖 2026-11-03](https://linkding.lav.ren/bookmarks?details=4692).
-- **dnspython 2.9.0:** the release source archive also lacks `LICENSE`.
-  The fallback comes from tag `v2.9.0`, commit `e790c8f20a67ad439c7aafef2321e161c6028eee`.
-  It retains the Dnspython Contributors, Nominum, and Google notices.
-  [Release licence](https://github.com/rthalley/dnspython/blob/v2.9.0/LICENSE) · [🔖 2026-11-03](https://linkding.lav.ren/bookmarks?details=4688).
 - **fastmcp-slim 4.1.6:** the fallback is `LICENSE` from the matching `fastmcp-4.1.6` release archive.
   Slim contains the framework code. The `fastmcp` distribution supplies its dependencies and Apache-2.0 licence.
   The complete recursive release tree contains no `NOTICE` file.
