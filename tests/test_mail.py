@@ -2470,7 +2470,8 @@ def test_reply_sweep_that_finds_nothing_says_when_it_looked(monkeypatch):
 def test_reply_sweep_that_cannot_prove_the_copy_is_its_own_deletes_nothing(
     monkeypatch, kind
 ):
-    rig, msg = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft(kind))
+    found = mail_reply_cleanup.Draft(kind, reason="drafts_not_own")
+    rig, msg = _refused_reply(monkeypatch, found=found)
     assert "_SWEEP_DELETE" not in rig.names()
     assert "nothing was created" not in msg
     assert "Drafts" in msg and "reply window" in msg
@@ -2655,17 +2656,18 @@ _QUOTE_HTML = (
 
 
 def _real_selector(monkeypatch, *stored):
-    """The REAL selector over a faked index: ``stored`` is ``(url, body, kind)`` per new
-    row (rowids 8, 9, ...), each a reply to the original."""
+    """The REAL selector over a faked index: ``stored`` is ``(url, body, kind[, mid])``
+    per new row (rowids 8, 9, ...), each a reply to the original. ``mid`` is the row's
+    Message-ID (default ``<own{rowid}@x>``)."""
     monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
-    rows = [(8 + n, url) for n, (url, _, _) in enumerate(stored)]
+    rows = [(8 + n, row[0]) for n, row in enumerate(stored)]
     monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: rows)
 
     def read(url, rowid):
-        _, body, kind = stored[rowid - 8]
+        _, body, kind, *mid = stored[rowid - 8]
         msg = email.message.EmailMessage(policy=email.policy.default)
         msg.set_content(body, subtype=kind)
-        return ("<abc@x>", f"<own{rowid}@x>", lambda: msg)
+        return ("<abc@x>", mid[0] if mid else f"<own{rowid}@x>", lambda: msg)
 
     monkeypatch.setattr(mail_reply_cleanup, "_read_draft", read)
 
@@ -3077,7 +3079,8 @@ def test_reply_refusal_after_a_proven_discard_does_not_send_the_user_to_a_window
     monkeypatch,
 ):
     # the window is gone (-1728 proof): only a Drafts copy may be left
-    _, msg = _refused_reply(monkeypatch, found=mail_reply_cleanup.Draft("unproven"))
+    found = mail_reply_cleanup.Draft("unproven", reason="drafts_not_own")
+    _, msg = _refused_reply(monkeypatch, found=found)
     assert "The reply window was discarded" in msg
     assert "Look for the open reply window" not in msg
     assert "may NOT be fully removed" in msg and "Drafts" in msg
@@ -3495,7 +3498,7 @@ def test_send_then_sweep_whose_delete_raises_still_reports_the_send(
     "found, outcome",
     [
         (mail_reply_cleanup.Draft("none"), "none"),
-        (mail_reply_cleanup.Draft("unproven"), "unproven"),
+        (mail_reply_cleanup.Draft("unproven", reason="drafts_not_own"), "unproven"),
         (NativeTimeout("gone"), "unavailable"),
         (UnboundLocalError("pos"), "unproven"),
         (OSError("gone"), "unproven"),
@@ -3551,3 +3554,189 @@ def test_send_then_sweep_counts_45_s_from_when_the_open_returned(monkeypatch):
     _patch_run(monkeypatch, osa)
     _reply_all()
     assert rig.waits == [175.0]
+
+
+# --- the delivered copy and the reason of every unproven sweep (05.2-17, #348) ---
+
+_INBOX_URL = f"imap://{_GMAIL_UUID}/INBOX"
+_FIFTEEN = {
+    "too_many_rows",
+    "unreadable_row",
+    "drafts_late",
+    "drafts_not_own",
+    "sent_not_own",
+    "inbox_row",
+    "other_mailbox",
+    "several_rows",
+    "claim_refused",
+    "read_failed",
+    "delete_alive",
+    "delete_gone",
+    "delete_several",
+    "delete_failed",
+    "sweep_failed",
+}
+
+
+def test_send_then_sweep_sets_aside_the_delivered_copy_in_this_macs_inbox(monkeypatch):
+    # the sent reply reached an address whose account is in Mail on this Mac: its
+    # delivered copy is a new INBOX row with the Sent copy's Message-ID. It is the send,
+    # not a leftover (the 05.2-16 result read `unproven` because of it)
+    rig, out = _sent_reply(
+        monkeypatch,
+        (f"imap://{_GMAIL_UUID}/Drafts", _OWN_BODY, "html", "<draft@x>"),
+        (_SENT_URL, _OWN_BODY, "html", "<sent@x>"),
+        (_INBOX_URL, "<div>delivered</div>", "html", "<sent@x>"),
+    )
+    calls = rig.calls_of("_SWEEP_DELETE")
+    assert [c[1] for c in calls] == [("draft@x", _GMAIL_UUID, "Drafts")]
+    assert out["sent"] is True and out["drafts_copy"] == "removed"
+    assert "drafts_copy_reason" not in out
+
+
+def test_send_then_sweep_with_an_inbox_row_of_another_message_names_it(monkeypatch):
+    rig, out = _sent_reply(
+        monkeypatch,
+        (f"imap://{_GMAIL_UUID}/Drafts", _OWN_BODY, "html", "<draft@x>"),
+        (_SENT_URL, _OWN_BODY, "html", "<sent@x>"),
+        (_INBOX_URL, "<div>other</div>", "html", "<other@x>"),
+    )
+    assert "_SWEEP_DELETE" not in rig.names()
+    assert out["drafts_copy"] == "unproven" and out["drafts_copy_reason"] == "inbox_row"
+
+
+def _boom_wait(monkeypatch):
+    monkeypatch.setattr(
+        mail_outgoing,
+        "_wait_until",
+        lambda deadline: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+
+def _boom_sweep(monkeypatch):
+    monkeypatch.setattr(
+        mail_outgoing._ReplyFlow,
+        "sweep",
+        lambda self, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+
+# (reason, the rig's keywords, a patch run before the call): the flow's own codes
+_FLOW_REASON_CASES = [
+    (
+        "claim_refused",
+        {"answers": {"_OUTGOING_IDS": "21", "_BASELINE_CLEAR": "block"}},
+        None,
+    ),
+    ("read_failed", {"found": UnboundLocalError("pos")}, None),
+    ("read_failed", {"found": OSError("gone")}, None),
+    ("delete_alive", {"answers": {"_SWEEP_DELETE": "alive"}}, None),
+    ("delete_gone", {"answers": {"_SWEEP_DELETE": "gone"}}, None),
+    ("delete_several", {"answers": {"_SWEEP_DELETE": "several"}}, None),
+    ("delete_failed", {"answers": {"_SWEEP_DELETE": NativeTimeout("slow")}}, None),
+    ("delete_failed", {"answers": {"_SWEEP_DELETE": RuntimeError("boom")}}, None),
+    ("delete_failed", {"answers": {"_SWEEP_DELETE": "something else"}}, None),
+    ("sweep_failed", {}, _boom_wait),
+    ("sweep_failed", {}, _boom_sweep),
+    (
+        "drafts_not_own",
+        {"found": mail_reply_cleanup.Draft("unproven", reason="drafts_not_own")},
+        None,
+    ),
+]
+
+
+def _flow_result(monkeypatch, kw, patch):
+    rig = _SweepRig(monkeypatch, **kw)
+    if patch:
+        patch(monkeypatch)
+    return rig, _reply_all()
+
+
+@pytest.mark.parametrize("reason, kw, patch", _FLOW_REASON_CASES)
+def test_sweep_reasons_reach_the_result(monkeypatch, reason, kw, patch):
+    rig, out = _flow_result(monkeypatch, kw, patch)
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == reason
+    assert len(rig.calls_of("_SEND_OUTGOING")) == 1
+
+
+def test_a_reason_that_reaches_the_result_does_not_carry_the_rows_data(monkeypatch):
+    # the selector's own verdict holds the row's url and Message-ID; the result holds
+    # the code and nothing else
+    found = mail_reply_cleanup.Draft(
+        "unproven", _DRAFTS_URL, "<secret-id@x>", reason="drafts_not_own"
+    )
+    _, out = _flow_result(monkeypatch, {"found": found}, None)
+    blob = repr(out)
+    assert "secret-id" not in blob and _GMAIL_UUID not in blob
+
+
+def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
+    # the seven codes of the flow, as the result carries them; the eight of the selector
+    # are pinned in test_mail_reply_cleanup.py. Together they are the fifteen.
+    produced = set()
+    for _, kw, patch in _FLOW_REASON_CASES:
+        _, out = _flow_result(monkeypatch, kw, patch)
+        produced.add(out["drafts_copy_reason"])
+    flow = {"claim_refused", "read_failed", "sweep_failed"} | {
+        c for c in _FIFTEEN if c.startswith("delete_")
+    }
+    assert produced == flow | {"drafts_not_own"}
+    assert produced <= _FIFTEEN and len(_FIFTEEN) == 15
+    assert all(re.fullmatch(r"[a-z_]+", code) for code in _FIFTEEN)
+
+
+@pytest.mark.parametrize(
+    "rig_kw, outcome",
+    [
+        ({}, "removed"),
+        ({"found": mail_reply_cleanup.Draft("none")}, "late"),  # reads too soon
+        ({"top": None}, "unavailable"),
+    ],
+)
+def test_drafts_copy_reason_only_beside_unproven(monkeypatch, rig_kw, outcome):
+    rig = _SweepRig(monkeypatch, **rig_kw)
+    if outcome == "late":
+        real = rig._osa
+
+        def osa(script, *argv, **kw):
+            out = real(script, *argv, **kw)
+            if script is mail_outgoing._SEND_OUTGOING:
+                rig.clock[0] += 20.0
+            return out
+
+        _patch_run(monkeypatch, osa)
+    out = _reply_all()
+    assert out["drafts_copy"] == outcome
+    assert "drafts_copy_reason" not in out
+
+
+def test_drafts_copy_reason_is_absent_when_the_sweep_finds_no_copy(monkeypatch):
+    _SweepRig(monkeypatch, found=mail_reply_cleanup.Draft("none"))
+    out = _reply_all()
+    assert out["drafts_copy"] == "none" and "drafts_copy_reason" not in out
+
+
+def test_a_refusal_whose_sweep_is_unproven_names_the_branch(monkeypatch):
+    found = mail_reply_cleanup.Draft("unproven", reason="drafts_not_own")
+    _, msg = _refused_reply(monkeypatch, found=found)
+    assert msg.endswith(" Drafts check: drafts_not_own.")
+    assert "may NOT be fully removed" in msg
+
+
+@pytest.mark.parametrize(
+    "found",
+    [
+        mail_reply_cleanup.Draft("none"),
+        mail_reply_cleanup.Draft("one", _DRAFTS_URL, "<d@x>"),
+    ],
+)
+def test_a_refusal_whose_sweep_is_not_unproven_has_no_drafts_check(monkeypatch, found):
+    _, msg = _refused_reply(monkeypatch, found=found)
+    assert "Drafts check" not in msg
+
+
+def test_a_refusal_names_a_delete_that_was_not_confirmed(monkeypatch):
+    _, msg = _refused_reply(monkeypatch, answers={"_SWEEP_DELETE": "alive"})
+    assert msg.endswith(" Drafts check: delete_alive.")
