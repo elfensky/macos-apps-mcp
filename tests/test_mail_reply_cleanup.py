@@ -1206,6 +1206,48 @@ def test_find_own_draft_keeps_an_image_placeholder_in_an_unclosed_quote_unproven
     _assert_unproven(mailroot, monkeypatch, body, mode)
 
 
+def _html_draft(markup: str):
+    return email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n" + markup,
+        policy=email.policy.default,
+    )
+
+
+def test_split_quote_drops_an_image_placeholder_up_to_the_last_closing_tag():
+    # two quotes side by side: the rule runs to the LAST closing tag
+    markup = f"hi<blockquote>a</blockquote><blockquote>b{_PH}</blockquote>"
+    assert "logo.png" not in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_split_quote_finds_an_upper_case_closing_tag():
+    markup = f"hi<BLOCKQUOTE>a{_PH}</BLOCKQUOTE>"
+    assert "logo.png" not in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_split_quote_leaves_a_space_for_a_dropped_image_placeholder():
+    markup = f"hi<blockquote>foo{_PH}bar</blockquote>"
+    assert mail_reply_cleanup._split_quote(_html_draft(markup))[1] == "foo bar"
+
+
+def test_split_quote_ends_the_quote_where_it_ends_when_lower_casing_adds_characters():
+    # "\u0130".lower() is two characters: an end found in the lower-cased text lies
+    # past the real end, and the placeholder below the quote would be dropped
+    grown = "\u0130" * 60
+    assert len(grown.lower()) > len(grown)
+    markup = f"own<blockquote>{grown}</blockquote>{_PH}"
+    assert "logo.png" in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_read_draft_takes_no_postmark_from_a_received_field_of_white_space(mailroot):
+    path = mailroot(22, _ORIGINAL, "s@x", _OTHER_BODY, url=_INBOX, received=True)
+    payload = mail_index.emlx_payload(path.read_bytes())
+    blank = payload.replace(b"Received:", b"X-Was:").replace(
+        b"\r\n\r\n", "\r\nReceived: \u00a0\r\n\r\n".encode(), 1
+    )
+    path.write_bytes(str(len(blank)).encode() + b"\n" + blank + b"\n<plist></plist>")
+    assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False
+
+
 def test_split_quote_keeps_placeholder_characters_in_a_plain_text_draft():
     msg = email.message_from_string(
         "Content-Type: text/plain; charset=utf-8\r\n\r\n"

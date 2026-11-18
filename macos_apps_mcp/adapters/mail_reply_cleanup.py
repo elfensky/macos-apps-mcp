@@ -299,8 +299,9 @@ def _split_quote(msg) -> tuple[str, str]:
         quote = markup[at:]
         # the quote ends at the last closing tag; text below it stays text, and an
         # unclosed quote loses nothing
-        close = quote.lower().rfind("</blockquote>")
-        end = close + len("</blockquote>") if close >= 0 else 0
+        # (a search in ``quote.lower()`` would shift: lower-casing can add characters)
+        closes = list(re.finditer(r"(?i)</blockquote>", quote))
+        end = closes[-1].end() if closes else 0
         for chunk in (markup[:at], _drop_placeholders(quote[:end]) + quote[end:]):
             chunk = re.sub(r"(?is)<(script|style).*?</\1>", "", chunk)
             parts.append(html.unescape(re.sub(r"<[^>]+>", " ", chunk)))
