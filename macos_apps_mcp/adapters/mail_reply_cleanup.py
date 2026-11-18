@@ -243,7 +243,21 @@ def _emlx_path(url: str, rowid: int) -> Path | None:
 _PLACEHOLDER = re.compile(
     r'<span (?:class="AppleTemporaryEditingElement" )?id="cid:[^"<>]*">([^<]*)</span>'
 )
-_TOKEN = re.compile(r"<[^<>]*[^<>\s][^<>]*>")
+
+
+def _is_token(text: str) -> bool:
+    """``<...>`` with something inside that is not white space and no other angle
+    bracket. Plain string checks: the text comes from a stored message, and a pattern
+    here took quadratic time on a long text with no closing bracket."""
+    inner = text[1:-1]
+    return (
+        len(text) > 2
+        and text[0] == "<"
+        and text[-1] == ">"
+        and "<" not in inner
+        and ">" not in inner
+        and bool(inner.strip())
+    )
 
 
 def _drop_placeholders(quote: str) -> str:
@@ -255,7 +269,7 @@ def _drop_placeholders(quote: str) -> str:
 
     def drop(found: re.Match[str]) -> str:
         text = html.unescape(found.group(1)).strip()
-        return "" if _TOKEN.fullmatch(text) else found.group(0)
+        return "" if _is_token(text) else found.group(0)
 
     return _PLACEHOLDER.sub(drop, quote)
 
