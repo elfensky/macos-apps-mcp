@@ -1065,6 +1065,39 @@ def _quoted(inner: str) -> str:
     )
 
 
+@pytest.mark.parametrize(
+    "text, token",
+    [
+        ("<logo.png>", True),
+        ("<a b>", True),
+        ("<>", False),
+        ("< >", False),
+        ("<\u00a0>", False),
+        ("<a><b>", False),
+        ("<a>b", False),
+        ("a<b>", False),
+        ("<a<b>", False),
+        ("<a", False),
+        ("a>", False),
+        ("", False),
+        ("<", False),
+    ],
+)
+def test_image_placeholder_token_is_one_bracketed_name(text, token):
+    assert mail_reply_cleanup._is_token(text) is token
+
+
+def test_drop_placeholders_stays_fast_on_a_long_unclosed_image_placeholder():
+    # the text is another party's mail: a pattern here once took quadratic time
+    # (3.5 s for 32,000 characters); plain string checks take milliseconds
+    import time
+
+    quote_html = '<blockquote><span id="cid:x">&lt;' + "a" * 400_000 + "</span>"
+    started = time.perf_counter()
+    assert mail_reply_cleanup._drop_placeholders(quote_html) == quote_html
+    assert time.perf_counter() - started < 2.0
+
+
 def test_split_quote_drops_an_image_placeholder_only_from_the_quote():
     msg = email.message_from_string(
         "Content-Type: text/html; charset=utf-8\r\n\r\n"
