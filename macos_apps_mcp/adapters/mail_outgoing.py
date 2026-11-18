@@ -1282,8 +1282,9 @@ class _ReplyFlow:
         `Refusal cleanup` (2), (3)): the window went within ``CLAIM_SPAN_S`` of the
         baseline read, the row sits in the account the reply is SENT FROM, and no
         other scripted compose window for this original was open at the start
-        (``baseline``). ``sent``: the reply was sent, so its own Sent copies are set
-        aside (``find_own_draft``)."""
+        (``baseline``). ``sent``: the reply was sent, so its own Sent copies and its
+        delivered copy are set aside (``find_own_draft``)."""
+        self.sweep_reason = ""
         if self.index_top is None:
             return "unavailable"
         _wait_until((self.opened_at or time.monotonic()) + SWEEP_AFTER_S)

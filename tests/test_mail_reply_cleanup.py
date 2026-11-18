@@ -854,6 +854,8 @@ def test_find_own_draft_keeps_every_other_inbox_row_unproven(
         (f"imap://{_ACCT}/Projects/INBOX", "other_mailbox"),  # not directly under it
         (f"imap://{_ACCT}/Projects/Drafts", "other_mailbox"),
         (f"imap://{_ACCT}/inbox", "other_mailbox"),  # another spelling
+        (f"imap://{_ACCT}/INBOX/Drafts", "other_mailbox"),  # an INBOX-rooted server
+        (f"imap://{_ACCT}/INBOX.Drafts", "other_mailbox"),
         (_URL, "several_rows"),  # a second Drafts row: both look like the call's own
     ],
 )
@@ -867,6 +869,32 @@ def test_find_own_draft_never_sets_aside_a_row_outside_the_inbox_by_message_id(
         rows.insert(0, _DRAFT_ROW)
     got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
     assert got.kind == "unproven" and got.reason == reason
+
+
+@pytest.mark.parametrize(
+    "body, kw, reason",
+    [
+        (_OTHER_BODY, {}, "drafts_not_own"),
+        (_OWN, {"landed_by": 21}, "drafts_late"),
+    ],
+)
+def test_find_own_draft_never_sets_aside_a_drafts_row_by_message_id(
+    mailroot, monkeypatch, body, kw, reason
+):
+    # a Drafts row that is not provably own stays in the way, even with the Message-ID
+    # of the Sent copy that was set aside
+    rows = [(21, _SENT, "s@x", _OWN), (22, _URL, "s@x", body)]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True, **kw)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+def test_find_own_draft_never_sets_aside_an_inbox_row_by_the_drafts_copys_message_id(
+    mailroot, monkeypatch
+):
+    # only a Sent or All Mail copy that was set aside vouches for an INBOX row
+    rows = [_DRAFT_ROW, (22, _INBOX, "d@x", _OTHER_BODY)]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got.kind == "unproven" and got.reason == "inbox_row"
 
 
 # (stored rows, find kwargs, reason): one per code. A body of None leaves the file out.
