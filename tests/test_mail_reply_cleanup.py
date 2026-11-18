@@ -1081,6 +1081,8 @@ def _quoted(inner: str) -> str:
         ("a>", False),
         ("", False),
         ("<", False),
+        ("ab>", False),
+        ("<ab", False),
     ],
 )
 def test_image_placeholder_token_is_one_bracketed_name(text, token):
@@ -1159,6 +1161,11 @@ _TEXT_LIKE_A_PLACEHOLDER = [
     f'quoted words<span id="cid:ii_t1"><span>{_ALMOST}</span></span>',  # a tag inside
     f'quoted words<span id="cid:ii_t1">{_ALMOST}',  # unclosed
     f'quoted words<img src="cid:ii_t1" alt="logo.png">{_ALMOST}',  # typed after an img
+    'quoted words<span id="cid:ii_t1">PS &lt;logo.png&gt;</span>',  # text before
+    'quoted words<span id="cid:ii_t1">logo.png&gt;</span>',  # no opening bracket
+    'quoted words<span id="cid:ii_t1">&lt;logo.png</span>',  # no closing bracket
+    'quoted words<span id="cid:ii_t1">&amp;lt;logo.png&amp;gt;</span>',  # escaped twice
+    'quoted words<span id="cid:a>b">&lt;logo.png&gt;</span>',  # a bracket in the id
 ]
 
 
@@ -1177,6 +1184,72 @@ def test_find_own_draft_keeps_an_image_placeholder_before_the_quote_unproven(
     body = f"<div>Hi there</div>{_PH}" + _QUOTE_HTML
     _assert_unproven(mailroot, monkeypatch, body, "refusal")
     _assert_unproven(mailroot, monkeypatch, body, "send")
+
+
+@pytest.mark.parametrize("placeholder", [_PH, _PH_EDIT])
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_an_image_placeholder_below_the_quote_unproven(
+    mailroot, monkeypatch, placeholder, mode
+):
+    # the rule ends at the last closing tag of the quote: where a PS would be, the
+    # same element is text
+    body = _quoted("quoted words") + f"<div>{placeholder}</div>"
+    _assert_unproven(mailroot, monkeypatch, body, mode)
+
+
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_an_image_placeholder_in_an_unclosed_quote_unproven(
+    mailroot, monkeypatch, mode
+):
+    body = _quoted(f"quoted words{_PH}").replace("</blockquote>", "")
+    assert "<blockquote" in body and "</blockquote>" not in body
+    _assert_unproven(mailroot, monkeypatch, body, mode)
+
+
+def test_split_quote_keeps_placeholder_characters_in_a_plain_text_draft():
+    msg = email.message_from_string(
+        "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        f"Hi there\r\n> quoted words {_PH}\r\n",
+        policy=email.policy.default,
+    )
+    assert "logo.png" in mail_reply_cleanup._split_quote(msg)[1]
+
+
+@pytest.mark.parametrize("inbox_first", [True, False])
+@pytest.mark.parametrize("with_drafts", [True, False])
+def test_find_own_draft_keeps_a_postmarked_inbox_row_of_another_message_unproven(
+    mailroot, monkeypatch, inbox_first, with_drafts
+):
+    # a postmark alone proves nothing: the Message-ID must be a set-aside copy's
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, _SENT, "s@x", _OWN)
+    inbox = (first, _INBOX, "other@x", _OTHER_BODY, True)
+    rows = [inbox, twin] if inbox_first else [twin, inbox]
+    got = _stored(
+        mailroot,
+        monkeypatch,
+        [_DRAFT_ROW, *rows] if with_drafts else rows,
+        sent_twins=True,
+    )
+    assert got.kind == "unproven" and got.reason == "inbox_row"
+
+
+def test_read_draft_takes_the_postmark_from_a_received_header_only(mailroot):
+    in_body = "<div>d</div>\r\nReceived: from mx2.example.net by mx1.example.net\r\n"
+    mailroot(21, _ORIGINAL, "s@x", in_body, url=_INBOX)
+    assert mail_reply_cleanup._read_draft(_INBOX, 21)[3] is False
+    path = mailroot(22, _ORIGINAL, "s@x", _OTHER_BODY, url=_INBOX, received=True)
+    payload = mail_index.emlx_payload(path.read_bytes())
+    for other in (b"X-Received:", b"Received-SPF:"):
+        changed = payload.replace(b"Received:", other)
+        framed = str(len(changed)).encode() + b"\n" + changed + b"\n<plist></plist>"
+        path.write_bytes(framed)
+        assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False
+    empty = payload.replace(b"Received:", b"X-Was:").replace(
+        b"\r\n\r\n", b"\r\nReceived: \r\n\r\n", 1
+    )
+    path.write_bytes(str(len(empty)).encode() + b"\n" + empty + b"\n<plist></plist>")
+    assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False  # an empty field
 
 
 def _assert_unproven(mailroot, monkeypatch, body, mode):

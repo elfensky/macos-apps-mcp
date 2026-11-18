@@ -92,8 +92,8 @@ surface may still shift between minor versions.
   minute) and reports it as `drafts_copy` beside `sent`; the sent message's own Sent and All Mail
   copies are never touched, and a Drafts copy that cannot be proven this reply's own is left
   alone and reported (the result's `drafts_copy_reason` names why); the delivered copy of a
-  reply to an address whose account is in Mail on this Mac is set aside like the Sent copy,
-  when it carries a mail server's `Received` header. A quote that ends with an inline image of
+  reply to an address whose account is in Mail on this Mac is set aside like the Sent copy
+  (a copy in an INBOX only when it carries a mail server's `Received` header). A quote that ends with an inline image of
   the original is recognized too: Mail's own `<file name>` marker for the image does not count
   as text after the quote, while text typed to look like it does.
   `include_quote=False` replaces the whole body with your text. The
