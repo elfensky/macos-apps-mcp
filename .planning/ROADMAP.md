@@ -22,7 +22,7 @@ people run it safely: per-adapter toggles and a loopback dashboard, then distrib
 **Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
 The migration is complete (Phase 05.4, 2026-11-06), and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
 Remaining bugs use the migrated server. Installed-device acceptance and release remain separate from implementation.
-Phase 05.2 device acceptance remains incomplete; migration does not establish Mail acceptance.
+Phase 05.2 device acceptance remains incomplete (#348 is open; #516 and #589 closed on 2026-11-18); migration does not establish Mail acceptance.
 Release 0.16.0 ships the migration after the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
@@ -49,8 +49,8 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: one code fix (plan 05.2-17), then the owner's test of reply drafts on a real Mac.
-  - Waits for: the owner's test of reply drafts on a real Mac (plan 05.2-18), after the code fix of plan 05.2-17.
+  - Next: one more fix for the check after a sent reply (it fails when the original ends with an inline image), then one more reply test on a real Mac.
+  - Waits for: that fix (gap round 4 of Phase 05.2, not planned yet) and the owner's reply test after it.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
 - 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
@@ -510,7 +510,7 @@ A real frontend gets a connection error during a daemon outage, and the next cal
 
 Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
-**Plans:** 16/18 plans executed; gap round 3 (05.2-17, 05.2-18) is planned; device acceptance remains incomplete
+**Plans:** 18/18 plans executed; the 05.2-18 device acceptance failed on the Drafts result after a send (G-05.2-2, cause located); #516 and #589 are closed; gap round 4 is not planned yet
 
 Plans:
 **Wave 1**
@@ -556,10 +556,10 @@ Plans:
 **Gap closure, round 3** (from the failed 05.2-16 device acceptance, 2026-11-03: gaps G-05.2-2 to G-05.2-6, diagnosed 2026-11-14; and FIX-26, #589)
 
 **Round 3 · Gap Wave 1**
-- [ ] 05.2-17-PLAN.md — the after-send sweep sets aside the delivered copy of the sent reply and names every `unproven` branch with a reason code; the clipboard-changed refusal text (FIX-26); the device probe compares the signature by its text and the clipboard by its `changeCount` change; the facts `Layout` row is corrected (FIX-16, FIX-26; #348, #589)
+- [x] 05.2-17-PLAN.md — the after-send sweep sets aside the delivered copy of the sent reply and names every `unproven` branch with a reason code; the clipboard-changed refusal text (FIX-26); the device probe compares the signature by its text and the clipboard by its `changeCount` change; the facts `Layout` row is corrected (FIX-16, FIX-26; #348, #589)
 
 **Round 3 · Gap Wave 2** *(blocked on Round 3 · Gap Wave 1 completion)*
-- [ ] 05.2-18-PLAN.md — owner sitting on the rebuilt `.app`: one delivered `reply_all` with the corrected timing, the signature check by text, the clipboard checks, the two-display state, a FIX-26 refusal, and refusal-after-autosave when it occurs; the gaps close on device evidence or the owner's explicit answer (FIX-16, FIX-18, FIX-26; #348, #516, #589)
+- [x] 05.2-18-PLAN.md — owner sitting on the rebuilt `.app`: one delivered `reply_all` with the corrected timing, the signature check by text, the clipboard checks, the two-display state, a FIX-26 refusal, and refusal-after-autosave when it occurs; the gaps close on device evidence or the owner's explicit answer (FIX-16, FIX-18, FIX-26; #348, #516, #589)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
 
@@ -723,7 +723,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 16/18 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 18/18 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/TBD; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

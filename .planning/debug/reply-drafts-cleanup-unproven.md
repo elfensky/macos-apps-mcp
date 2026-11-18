@@ -2,7 +2,7 @@
 status: diagnosed
 trigger: "reply-drafts-cleanup-unproven: A sent reply reports a proven Drafts cleanup result and has the required timed observations."
 created: 2026-11-14T00:00:00Z
-updated: 2026-11-14T00:00:00Z
+updated: 2026-11-18T21:15:00Z
 ---
 
 ## Current Focus
@@ -105,7 +105,7 @@ started: Discovered during UAT
 
 ## Resolution
 
-root_cause: "(a) product: the in-call after-send sweep (`_ReplyFlow.after_send` -> `sweep(sent=True)`, read at about 45 s after the window opened) returned `unproven` through a fail-safe branch that leaves nothing in Drafts. The branch is one of: R1 `_SWEEP_DELETE` did not answer `deleted` (its one `delay 3` re-count, first run on device) although the copy was removed; R2 the delivered reply's Sent or Gmail All Mail copy failed the `_is_own`/`_has_quote` set-aside (the device body shape differs from the 05.2-15 assumption, UAT gap 3); R3 a new row in any account had no readable `.emlx` at +45 s. The sweep records no reason, so the branch cannot be named from the records; (b) procedure, independent: the plan's +45 s Drafts check after the send falls about 0-10 s after the call returns (the call blocks until opened_at + 45 s), and it was taken at 111 s. (b) explains only the missing observation, not the `unproven` value."
+root_cause: "Product, located on device 2026-11-18 (05.2-18, build c60c899, reason code sent_not_own). The reply's own Sent copy and its delivered copy pass `_is_own` and fail `_has_quote`: the test original ends with an inline image, and Mail's quote in the sent reply replaces it with a span (id `cid:…`) whose text is the file name in angle brackets, so letters follow the original's last words. R1 (delete not confirmed) and R3 (unreadable row) did not occur; R2 (a sent twin not set aside) is the branch, through the quote check and not through the signature. See 05.2-18-SUMMARY.md `## Gaps`."
 fix:
 verification:
 files_changed: []
