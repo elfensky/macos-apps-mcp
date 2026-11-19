@@ -36,9 +36,9 @@ on run argv
 	with timeout of 180 seconds
 		tell application "Mail"
 			set dm to drafts mailbox
-			set before to {}
+			set baseIds to {}
 			repeat with x in (messages of dm)
-				set before to before & {(id of x)}
+				set baseIds to baseIds & {(id of x)}
 			end repeat
 			set m to item 1 of (messages of inbox whose message id is mid)
 			set r to reply m opening window withWindow
@@ -65,12 +65,15 @@ on run argv
 				set report to report & " write=ERR" & n & " " & e
 			end try
 			-- Mail's autosave lands ~15 s late: 25 s, never 3 s (facts section 2).
-			delay 25
+			delay 45
 			set found to missing value
 			repeat with x in (messages of dm)
-				if (id of x) is not in before then
-					set found to contents of x
-					exit repeat
+				if (id of x) is not in baseIds then
+					-- only this probe's own reply: the drafts mailbox spans every account
+					if (subject of x) starts with "Re: Probe 05.2" then
+						set found to contents of x
+						exit repeat
+					end if
 				end if
 			end repeat
 			if found is missing value then

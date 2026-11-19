@@ -171,6 +171,13 @@ def test_target_path_refuses_an_existing_file(root):
     assert (root / "x.pdf").read_bytes() == b"mine"  # untouched
 
 
+def test_target_path_refuses_a_dangling_symlink(root):
+    (root / "x.pdf").symlink_to("planted.pdf")
+    with pytest.raises(WriteRefused, match="already exists"):
+        files.target_path("", "x.pdf")
+    assert not (root / "planted.pdf").exists()
+
+
 def test_exists_refusal_is_a_typed_write_refusal():
     e = files.exists_refusal(Path("/x/y"))
     assert isinstance(e, WriteRefused) and e.kind == "write_refused"

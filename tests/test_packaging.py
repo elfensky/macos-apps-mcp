@@ -84,8 +84,8 @@ def test_osxphotos_is_a_capped_base_dependency():
     """Photos (D-01) reads the library through osxphotos: a base dependency, capped
     below 0.78 (0.x, its export must never start a download). D-16: the Python 3.12
     floor is what lets it lock beside pyobjc 10+, and UniformTypeIdentifiers is a base
-    line with no marker, because the bundle install drops a platform_release marker
-    in silence."""
+    line whose only marker is the darwin platform, never platform_release, which the
+    bundle install drops in silence."""
     text = (ROOT / "pyproject.toml").read_text()
     project = tomllib.loads(text)["project"]
     reqs = [Requirement(d) for d in project["dependencies"]]
@@ -100,7 +100,21 @@ def test_osxphotos_is_a_capped_base_dependency():
     assert project["requires-python"] == ">=3.12"
     assert not any("3.11" in c for c in project["classifiers"])
     (uti,) = [r for r in reqs if r.name == "pyobjc-framework-uniformtypeidentifiers"]
-    assert uti.marker is None
+    assert str(uti.marker) == 'sys_platform == "darwin"'
+
+
+def test_macos_only_dependencies_install_on_macos_only():
+    """Glama's build test installs the package on Linux: every PyObjC framework and
+    osxphotos must carry exactly the darwin marker (never platform_release, which the
+    bundle install drops), so a Mac gets them all and Linux gets none."""
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    reqs = [Requirement(d) for d in project["dependencies"]]
+    mac_only = [r for r in reqs if r.name.startswith("pyobjc") or r.name == "osxphotos"]
+    assert len(mac_only) == 5
+    for r in mac_only:
+        assert str(r.marker) == 'sys_platform == "darwin"', r.name
+        assert r.marker.evaluate({"sys_platform": "darwin"})
+        assert not r.marker.evaluate({"sys_platform": "linux"})
 
 
 def test_ruff_targets_the_python_floor():
@@ -187,13 +201,14 @@ def test_build_script_gates_universal2():
     """A missing slice or a too-new binary installs fine and fails only on the user's
     Mac; only the build gate sees it (#205)."""
     src = (ROOT / "scripts" / "build_app.sh").read_text()
+    # MCP 2 imports cryptography for request state even without configured auth (#470).
+    assert "--prune cryptography" not in src
     install = '--target "$WORK/site-$a" -r "$WORK/reqs"'
     rm_dylibs = 'rm -f "$WORK/site-$a/osxphotos/lib/"libdisclaim_*.dylib'
     guard = 'if grep -q platform_release "$WORK/reqs"; then'
     for needle in (
         "plutil -extract LSMinimumSystemVersion raw",
         'MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN"',
-        "--prune cryptography",
         "lipo -archs",
         '"x86_64 arm64"',
         "vtool -arch",
@@ -349,3 +364,65 @@ def test_only_the_intel_slice_carries_the_memory_exception():
     assert "alarm shift; exec @ARGV' 120" in src
     sign = src.index('if [[ -n "$SIGN" ]]')
     assert sign < src.index("entitlements ok") < src.index("signed smoke ok")
+
+
+def _run_sitecustomize(monkeypatch, orig_argv):
+    """Run packaging/sitecustomize.py as Python does at start; record os.execv."""
+    import os
+    import sys
+
+    execs = []
+    monkeypatch.setattr(os, "execv", lambda exe, argv: execs.append(argv))
+    monkeypatch.setattr(sys, "orig_argv", orig_argv)
+    src = (PKG / "sitecustomize.py").read_text()
+    exec(compile(src, "sitecustomize.py", "exec"), {"__name__": "sitecustomize"})
+    return execs
+
+
+def test_sitecustomize_turns_only_a_bare_start_into_launch(monkeypatch):
+    """Opening the .app starts the bundled interpreter with no arguments; every other
+    caller passes some. Only the bare start may become `launch`, or the daemon would."""
+    import sys
+
+    exe = "/Applications/macos-apps-mcp.app/Contents/MacOS/macos-apps-mcp"
+    for argv in (
+        [exe, "-E", "-s", "-P", "-m", "macos_apps_mcp", "daemon"],
+        [exe, "-E", "-s", "-P", "-m", "macos_apps_mcp", "shim"],
+        [exe, "-I", "-c", "pass"],
+    ):
+        assert _run_sitecustomize(monkeypatch, argv) == []
+    assert _run_sitecustomize(monkeypatch, [exe]) == [
+        [sys.executable, "-E", "-s", "-P", "-m", "macos_apps_mcp", "launch"]
+    ]
+
+
+def test_build_ships_the_open_hook_and_the_cli_wrapper():
+    """The hook goes into the bundle's site-packages only (in the wheel it would take
+    over every environment), before precompile and signing seal the bundle; the
+    wrapper lands where deploy links it from."""
+    from macos_apps_mcp import deploy
+
+    src = (ROOT / "scripts" / "build_app.sh").read_text()
+    hook = 'cp "$REPO/packaging/sitecustomize.py" "$SITE/sitecustomize.py"'
+    wrapper = f'install -m 755 "$REPO/packaging/cli.sh" "$APP/{deploy._CLI_WRAPPER}"'
+    assert hook in src and wrapper in src
+    assert src.index(hook) < src.index("-m compileall") < src.index('[[ -n "$SIGN" ]]')
+    assert not list((ROOT / "macos_apps_mcp").rglob("sitecustomize.py"))
+
+
+def test_cli_wrapper_runs_the_bundle_interpreter_through_a_link(tmp_path):
+    """The ~/.local/bin link resolves back into the bundle and keeps the isolation
+    flags (docs/DAEMON.md section 4) in front of the caller's arguments."""
+    app = tmp_path / "x.app/Contents"
+    (app / "MacOS").mkdir(parents=True)
+    (app / "MacOS/macos-apps-mcp").write_text('#!/bin/sh\necho "$@"\n')
+    (app / "MacOS/macos-apps-mcp").chmod(0o755)
+    (app / "Resources/bin").mkdir(parents=True)
+    shutil.copy2(PKG / "cli.sh", app / "Resources/bin/macos-apps-mcp")
+    link = tmp_path / "bin/macos-apps-mcp"
+    link.parent.mkdir()
+    link.symlink_to(app / "Resources/bin/macos-apps-mcp")
+    out = subprocess.run(
+        [str(link), "dashboard", "health"], capture_output=True, text=True, check=True
+    ).stdout
+    assert out == "-E -s -P -m macos_apps_mcp dashboard health\n"

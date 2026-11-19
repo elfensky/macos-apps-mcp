@@ -15,31 +15,44 @@ below — this module owns the worker, not the store.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
+import ctypes
+import errno
 import logging
 import os
 import re
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-import Foundation as F
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through require_macos().
+if sys.platform == "darwin":
+    import Foundation as F
+else:
+    F = None
 
 from .errors import (
     PRIVACY_PANE,
     AppNotRunning,
     AutomationDenied,
+    ComposeRefused,
     FullDiskAccessDenied,
     NativeError,
     NativeTimeout,
     SchemaDrift,
+    UnsupportedPlatform,
 )
+from .text import squash_text
 
 # ponytail: one process-wide native thread. If a future app needs a *second* isolated
 # native context, give it its own executor — don't widen this one to max_workers>1
@@ -47,13 +60,30 @@ from .errors import (
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mac-native")
 
 
+def require_macos() -> None:
+    """Raise ``UnsupportedPlatform`` unless this process runs on macOS.
+
+    Called first by ``run_native``, ``tracked_run``, ``mac_region``, ``doctor.diagnose``
+    and the server's ``_guard``. Reads ``sys.platform`` at call time.
+    """
+    if sys.platform != "darwin":
+        raise UnsupportedPlatform(
+            f"macos-apps-mcp runs only on macOS: this server is running on "
+            f"{sys.platform}, where Mail, Calendar, Reminders and the other Mac apps "
+            "do not exist. Use it on a Mac. Do not retry."
+        )
+
+
 def run_native[T](fn: Callable[[], T]) -> T:
     """Run a blocking native callable on the single dedicated worker thread and return
     its result.
 
     Adapters wrap every EventKit / osascript call in this so the work always lands on
-    one thread, regardless of which thread FastMCP invoked the tool from.
+    one thread, regardless of which thread FastMCP invoked the tool from. Off macOS it
+    refuses first; ``run_osascript``, ``read_via_sqlite`` and ``photos_db`` dispatch
+    through it off the worker, so they refuse too.
     """
+    require_macos()
     return _executor.submit(fn).result()
 
 
@@ -103,8 +133,10 @@ def app_process_info(app: str) -> dict | None:
     the timeout classification (#183) and doctor's automation report."""
     try:
         pid = int(tracked_run(["pgrep", "-x", app], timeout=5.0).stdout.split()[0])
+        # #580: the C locale, so %cpu reads "0.9" and never "0,9" or "0٫9" (U+066B)
         state, cpu, etime = tracked_run(
-            ["ps", "-o", "state=,%cpu=,etime=", "-p", str(pid)], timeout=5.0
+            ["env", "LC_ALL=C", "ps", "-o", "state=,%cpu=,etime=", "-p", str(pid)],
+            timeout=5.0,
         ).stdout.split()
         return {"pid": pid, "state": state, "cpu": float(cpu), "etime": etime}
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
@@ -162,8 +194,8 @@ def _classify_osascript_failure(stderr: str, script: str = "") -> NativeError:
         return AutomationDenied(
             "macOS blocked macos-apps-mcp from controlling the app (Automation consent "
             f"not granted). Tell the user to enable it in {PRIVACY_PANE} → "
-            "Automation, for whichever app launched macos-apps-mcp, then "
-            "restart macos-apps-mcp. Do not retry until the next user message. "
+            "Automation, for whichever app launched macos-apps-mcp. "
+            "Do not retry until the next user message. "
             f"[{detail}]"
         )
     if any(code in stderr for code in _APP_NOT_RUNNING):
@@ -230,8 +262,10 @@ def tracked_run(
     escapes the exit-path cleanup — an orphaned server could leave e.g. a ``shortcuts
     run`` in flight forever. Adapters that shell out to a CLI use this instead. Raises
     ``subprocess.TimeoutExpired`` (the child is killed and reaped first) exactly like
-    ``run(timeout=...)`` so callers translate it to their own typed timeout.
+    ``run(timeout=...)`` so callers translate it to their own typed timeout. Refuses
+    off macOS.
     """
+    require_macos()
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE if input is not None else None,
@@ -559,15 +593,684 @@ def photos_db():
     return work() if on_worker() else run_native(work)
 
 
+_TYPE_BUNDLE_ID = 0x62756E64  # 'bund' = typeApplicationBundleID
+_TYPE_WILD = 0x2A2A2A2A  # '****' = typeWildCard
+
+
+class _AEDesc(ctypes.Structure):
+    # struct AEDesc { DescType descriptorType; AEDataStorage dataHandle; }
+    _fields_ = [("descriptorType", ctypes.c_uint32), ("dataHandle", ctypes.c_void_p)]
+
+
+def _ae_lib():
+    """CoreServices with the three AppleEvent calls bound. Lazy, so nothing loads at
+    import time (the server must import off macOS), and a test replaces it."""
+    lib = ctypes.CDLL("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+    lib.AECreateDesc.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_long,
+        ctypes.POINTER(_AEDesc),
+    ]
+    lib.AECreateDesc.restype = ctypes.c_int16  # OSErr
+    lib.AEDisposeDesc.argtypes = [ctypes.POINTER(_AEDesc)]
+    lib.AEDisposeDesc.restype = ctypes.c_int16  # OSErr
+    determine = lib.AEDeterminePermissionToAutomateTarget
+    determine.argtypes = [
+        ctypes.POINTER(_AEDesc),
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_ubyte,  # Boolean askUserIfNeeded
+    ]
+    determine.restype = ctypes.c_int32  # OSStatus
+    return lib
+
+
+def automation_permission(bundle_id: str) -> int:
+    """The OSStatus of THIS process's Automation grant to ``bundle_id``: ``0`` granted,
+    ``-1743`` denied, ``-1744`` not asked yet, ``-600`` target not running or unknown.
+
+    Never prompts (askUserIfNeeded is the constant 0) and sends no Apple Event. Safe on
+    or off the worker; it dispatches itself, so it waits behind a job that holds the
+    one worker. A stalled call would hold that worker: a child process via
+    ``tracked_run`` is the upgrade if a device ever shows one.
+    """
+
+    def _probe() -> int:
+        lib, raw, desc = _ae_lib(), bundle_id.encode("utf-8"), _AEDesc()
+        err = lib.AECreateDesc(_TYPE_BUNDLE_ID, raw, len(raw), ctypes.byref(desc))
+        if err != 0:
+            return err
+        try:
+            return lib.AEDeterminePermissionToAutomateTarget(
+                ctypes.byref(desc), _TYPE_WILD, _TYPE_WILD, 0
+            )
+        finally:
+            lib.AEDisposeDesc(ctypes.byref(desc))
+
+    return _probe() if on_worker() else run_native(_probe)
+
+
+# --- FIX-16 (#348): the Accessibility seams of the Mail reply flow -----------------
+#
+# Facts section 4e is the recipe; the phase 05.2 `reply_gui_probe.py` (in
+# `.planning/phases/05.2-*/05.2-proto/`) is the device-proven reference for every
+# binding below. `accessibility_trusted` and `compose_insert` are the ONLY two public
+# doors: every AX, CoreGraphics and general pasteboard call sits behind them, in
+# private helpers a test replaces. The target is a constant (Mail) plus the one reply
+# window the caller opened: there is no app, pid or bundle parameter, so the grant
+# cannot be steered at another app (T-05.2-36).
+
+_HISERVICES = (
+    "/System/Library/Frameworks/ApplicationServices.framework/Frameworks/"
+    "HIServices.framework"
+)
+# The child program of `accessibility_trusted`: the plain trust read through ctypes, no
+# PyObjC. 05.2-proto/g2_ax_trust_probe.py builds the same text.
+_AX_CHILD = (
+    "import ctypes;"
+    f"l=ctypes.CDLL({_HISERVICES + '/HIServices'!r});"
+    "l.AXIsProcessTrusted.restype=ctypes.c_bool;"
+    "print(int(l.AXIsProcessTrusted()))"
+)
+_AX_CHILD_TIMEOUT = 5.0  # a normal child takes about 40 ms
+_COREGRAPHICS = "/System/Library/Frameworks/CoreGraphics.framework"
+_COREFOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+_MAIL_EXECUTABLE = b"/System/Applications/Mail.app/Contents/MacOS/Mail"
+_PROC_UID_ONLY = 4  # <sys/proc_info.h>; 1 is all pids, 5 the real uid
+_PROC_PATH_MAX = 4 * 1024  # PROC_PIDPATHINFO_MAXSIZE
+_KEY_A, _KEY_V = 0, 9  # kVK_ANSI_A, kVK_ANSI_V
+_CMD_FLAG = 0x100000  # kCGEventFlagMaskCommand
+# Clipboard-history tools skip an item that carries these (nspasteboard.org).
+_TRANSIENT_TYPES = (
+    "org.nspasteboard.TransientType",
+    "org.nspasteboard.ConcealedType",
+)
+# facts 4e `Pasteboard`: the largest settle was 133 ms over 5 runs; the bound is at
+# least twice that. Calculated, not run.
+_PASTE_SETTLE_S = 1.0
+_FOCUS_WAIT_S = 3.0  # a fresh reply's body takes AX focus late (untested bound)
+_ACTIVATE_WAIT_S = 0.4
+_SELECT_ALL_WAIT_S = 0.2
+# shortcut: the AX walk of the sitting stops after 400 nodes, so on a much longer
+# original the read is incomplete and the quote check refuses ("too long to check",
+# facts 4e `Confirm`); raise it if a device run shows a refusal of that kind. The walk
+# is bounded by this budget alone (no depth cut): a cut walk is reported, never trusted.
+_AX_WALK_BUDGET = 400
+_COMPOSE_OSA_TIMEOUT = 120.0  # equals each script's own `with timeout` backstop
+
+_WINDOW_INDEX = """on run argv
+  set wid to (item 1 of argv) as integer
+  with timeout of 120 seconds
+    tell application "Mail"
+      set idx to index of window id wid
+    end tell
+  end timeout
+  return idx
+end run"""
+
+_ACTIVATE_WINDOW = """on run argv
+  set wid to (item 1 of argv) as integer
+  with timeout of 120 seconds
+    tell application "Mail"
+      activate
+      set index of window id wid to 1
+    end tell
+  end timeout
+  return "activated"
+end run"""
+
+_AX: dict = {}
+
+
+def _ax_lib() -> dict:
+    """The HIServices calls, bound once through PyObjC. Lazy, so nothing loads at
+    import time (the server must import off macOS), and a test replaces it. The trust
+    read is not bound here: ``accessibility_trusted`` reads it in a fresh child."""
+    if not _AX:
+        import objc
+
+        lib: dict = {}
+        hi = objc.loadBundle("HIServices", {}, bundle_path=_HISERVICES)
+        objc.loadBundleFunctions(
+            hi,
+            lib,
+            [
+                ("AXUIElementGetTypeID", b"Q"),
+                ("AXUIElementCreateApplication", b"^{__AXUIElement=}i"),
+                (
+                    "AXUIElementCopyAttributeValue",
+                    b"i^{__AXUIElement=}^{__CFString=}o^@",
+                ),
+                ("_AXUIElementGetWindow", b"i^{__AXUIElement=}o^I"),  # SPI
+            ],
+        )
+        objc.registerCFSignature(
+            "AXUIElementRef", b"^{__AXUIElement=}", lib["AXUIElementGetTypeID"]()
+        )
+        _AX.update(lib)
+    return _AX
+
+
+def accessibility_trusted() -> bool:
+    """Whether THIS app holds the Accessibility grant (macOS 27: "Device Control and
+    Data Access"). Reads the switch only: it never asks macOS to show a prompt. Safe on
+    or off the worker; it dispatches itself, so it waits behind a job that holds the one
+    worker.
+
+    A fresh child interpreter reads it on every call, because the in-process read keeps
+    its first answer for the life of a daemon that never turns a run loop (05.2-13 G2).
+    ``-I`` keeps the child from loading code from the environment, the user site or the
+    current folder. A failed check is an error, never a guess."""
+
+    def work() -> bool:
+        try:
+            done = tracked_run(
+                [sys.executable, "-I", "-c", _AX_CHILD],
+                timeout=_AX_CHILD_TIMEOUT,
+                errors="replace",  # junk output becomes the "unexpected answer" error
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            raise NativeError(
+                f"Accessibility check could not run ({type(e).__name__}), so the "
+                "grant is unknown."
+            ) from e
+        out = done.stdout.strip()
+        if done.returncode != 0:
+            raise NativeError(
+                "Accessibility check could not run (the check process answered exit "
+                f"{done.returncode}), so the grant is unknown."
+            )
+        if out not in ("0", "1"):
+            raise NativeError(
+                "Accessibility check could not run (an unexpected answer), so the "
+                "grant is unknown."
+            )
+        return out == "1"
+
+    return work() if on_worker() else run_native(work)
+
+
+# AX errors that only say "this element has no such attribute / no value": an empty
+# read, not a failed one (a leaf has no children). Any other error is a failed read.
+_AX_NO_ATTRIBUTE = (-25205, -25212)  # kAXErrorAttributeUnsupported, ...NoValue
+
+
+def _ax_read(el, attr: str):
+    """``(value, readable)``: the AX attribute of ``el`` (None when absent) and whether
+    the read itself worked. ``readable`` is False only for a failed read, so a caller
+    that must not act on a partial walk can tell it from an empty one."""
+    err, val = _ax_lib()["AXUIElementCopyAttributeValue"](el, attr, None)
+    return (val if err == 0 else None), err == 0 or err in _AX_NO_ATTRIBUTE
+
+
+def _ax_get(el, attr: str):
+    """One AX attribute of ``el``, or None when it cannot be read."""
+    return _ax_read(el, attr)[0]
+
+
+def _proc_lib():
+    """libproc with the two process-table calls bound. Lazy; a test replaces it."""
+    lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    lib.proc_listpids.argtypes = [
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    lib.proc_listpids.restype = ctypes.c_int
+    lib.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    lib.proc_pidpath.restype = ctypes.c_int
+    return lib
+
+
+def _mail_pid() -> int:
+    """The pid of THIS user's Mail, read from the kernel process table (libproc).
+
+    05.2-13 G3: the earlier running-applications read answered "no Mail" in 3 of 11
+    windowed calls inside the daemon while Mail ran, a cause not reproduced in a plain
+    process, so that dependency is removed. This user's processes only (the table also
+    answers for other users); the exact executable path rejects helpers. A list or a
+    path read that fails refuses naming the process list, never "Mail is not running":
+    Mail may be the process that could not be read."""
+    unreadable = ComposeRefused("window check: the process list could not be read")
+    lib, uid = _proc_lib(), os.getuid()
+    size = lib.proc_listpids(_PROC_UID_ONLY, uid, None, 0)
+    if size <= 0:
+        raise unreadable
+    # +64 slots: processes may start between the two calls
+    pids = (ctypes.c_int * (size // ctypes.sizeof(ctypes.c_int) + 64))()
+    got = lib.proc_listpids(_PROC_UID_ONLY, uid, pids, ctypes.sizeof(pids))
+    if got <= 0 or got >= ctypes.sizeof(pids):  # a full buffer: the list may be cut
+        raise unreadable
+    path = ctypes.create_string_buffer(_PROC_PATH_MAX)
+    matches: list[int] = []
+    read_ok = failed = 0
+    for pid in pids[: got // ctypes.sizeof(ctypes.c_int)]:
+        if pid <= 0:
+            continue
+        ctypes.set_errno(0)
+        if lib.proc_pidpath(pid, path, _PROC_PATH_MAX) > 0:
+            read_ok += 1
+            if path.value == _MAIL_EXECUTABLE:
+                matches.append(pid)
+        elif ctypes.get_errno() not in (errno.ESRCH, errno.ENOENT):
+            # ESRCH: exited between the calls; ENOENT: executable deleted (an update),
+            # never Mail, whose binary sits on the sealed system volume
+            failed += 1
+    if not matches and (failed or not read_ok):
+        raise unreadable
+    if not matches:
+        raise ComposeRefused("window check: Mail is not running")
+    if len(matches) > 1:
+        raise ComposeRefused("window check: more than one Mail process is running")
+    return matches[0]
+
+
+def _mail_active(pid: int) -> bool:
+    """Whether Mail is the ACTIVE app, read live from Mail's own process: its
+    AXFrontmost attribute. The earlier live reads were each wrong somewhere.
+    NSWorkspace's ``frontmostApplication`` caches until the MAIN run loop turns, which
+    the daemon never runs (stale in 43 of 44 reads on the worker, review of #348). The
+    owner of the top layer-0 window follows window order, not activity: with two
+    displays the app that was active had its window under the other display's (152 of
+    557 reads wrong against ``lsappinfo front``), and an active app with no layer-0
+    window (a panel or menu-bar app, Spotlight) is invisible to it. Needs
+    Accessibility, which the flow already requires. The reply being at index 1 is a
+    separate check (``_window_held``)."""
+    app = _ax_lib()["AXUIElementCreateApplication"](pid)
+    return bool(_ax_get(app, "AXFrontmost"))  # unreadable: not active
+
+
+def _window_index(window_id: int) -> int | None:
+    out = run_osascript(_WINDOW_INDEX, str(window_id), timeout=_COMPOSE_OSA_TIMEOUT)
+    return int(out) if out.strip().isdigit() else None
+
+
+def _window_held(window_id: int) -> bool:
+    return _mail_active(_mail_pid()) and _window_index(window_id) == 1
+
+
+def _hold_window(window_id: int) -> None:
+    """Facts 4e `Activation`: Mail is active and the reply window is at index 1, else
+    activate Mail, put the window at index 1 and check again. The window is named by its
+    id (never by title, never by `window 1`); a reply can open BEHIND another window."""
+    if _window_held(window_id):
+        return
+    run_osascript(_ACTIVATE_WINDOW, str(window_id), timeout=_COMPOSE_OSA_TIMEOUT)
+    time.sleep(_ACTIVATE_WAIT_S)
+    if not _window_held(window_id):
+        raise ComposeRefused(
+            "window check: the reply window is not Mail's front window, so the text "
+            "was not inserted"
+        )
+
+
+def _window_number(win) -> int | None:
+    """The CoreGraphics window number of an AX window element (the id Mail's scripting
+    reports), through the SPI the sitting used; None when it is not readable."""
+    spi = _ax_lib().get("_AXUIElementGetWindow")
+    if spi is None:
+        return None
+    err, num = spi(win, None)
+    return int(num) if err == 0 and num else None
+
+
+def _focused_body(pid: int, window_id: int):
+    """Facts 4e `Insert`, the focus check: Mail's focused element is an AXWebArea whose
+    window is the bound one. A fresh reply's body takes focus late, so wait up to
+    ``_FOCUS_WAIT_S`` for it (AX reads only). Returns the element."""
+    app = _ax_lib()["AXUIElementCreateApplication"](pid)
+    t0 = time.monotonic()
+    el = _ax_get(app, "AXFocusedUIElement")
+    while el is None and time.monotonic() - t0 < _FOCUS_WAIT_S:
+        time.sleep(0.05)
+        el = _ax_get(app, "AXFocusedUIElement")
+    if el is None:
+        raise ComposeRefused("focus check: Mail has no focused element in the reply")
+    if _ax_get(el, "AXRole") != "AXWebArea":
+        raise ComposeRefused("focus check: the focused element is not a compose body")
+    win = _ax_get(el, "AXWindow")
+    if win is None or _window_number(win) != window_id:
+        raise ComposeRefused(
+            "focus check: the focused body is not inside the reply window"
+        )
+    return el
+
+
+def _read_body(el) -> tuple[str, bool]:
+    """``(text, complete)``: the compose body text through AX, the AXStaticText parts in
+    document order. The walk drops empty lines, so callers compare squashed text only.
+    ``complete`` is False when the walk was cut short (the node budget ran out or an AX
+    read failed), so the text may be missing its end: a caller must not treat "nothing
+    follows" as proof then."""
+    val = _ax_get(el, "AXValue")
+    if isinstance(val, str) and val:
+        return val, True
+    parts: list[str] = []
+    state = {"budget": _AX_WALK_BUDGET, "complete": True}
+
+    def walk(node) -> None:
+        if state["budget"] <= 0:
+            state["complete"] = False
+            return
+        state["budget"] -= 1
+        role, ok = _ax_read(node, "AXRole")
+        if role == "AXStaticText":
+            text, text_ok = _ax_read(node, "AXValue")
+            ok = ok and text_ok
+            if isinstance(text, str):
+                parts.append(text)
+        children, children_ok = _ax_read(node, "AXChildren")
+        if not (ok and children_ok):
+            state["complete"] = False
+        for child in children or []:
+            walk(child)
+
+    walk(el)
+    return "\n".join(parts), state["complete"]
+
+
+def _cg_lib():
+    """CoreGraphics with the three event calls bound (+ CFRelease). Lazy; a test
+    replaces it."""
+    lib = ctypes.CDLL(_COREGRAPHICS + "/CoreGraphics")
+    lib.CGEventCreateKeyboardEvent.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint16,
+        ctypes.c_bool,
+    ]
+    lib.CGEventCreateKeyboardEvent.restype = ctypes.c_void_p
+    lib.CGEventSetFlags.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+    lib.CGEventPostToPid.argtypes = [ctypes.c_int, ctypes.c_void_p]
+    lib.CFRelease = ctypes.CDLL(_COREFOUNDATION).CFRelease
+    lib.CFRelease.argtypes = [ctypes.c_void_p]
+    return lib
+
+
+def _post_cmd_key(pid: int, keycode: int) -> None:
+    """Cmd+<key>, one key down and one key up, delivered to ONE process. Never the
+    global event post, so a focus change cannot send the key to another app."""
+    lib = _cg_lib()
+    for down in (True, False):
+        ev = lib.CGEventCreateKeyboardEvent(None, keycode, down)
+        lib.CGEventSetFlags(ev, _CMD_FLAG)
+        lib.CGEventPostToPid(pid, ev)
+        lib.CFRelease(ev)
+
+
+def _require_complete_snapshot(items: list, unreadable: int, type_count: int) -> None:
+    """A lossy snapshot would let the restore destroy the user's clipboard. Complete =
+    every type of every item returned data. No items but types present refuses; no
+    items and no types (an emptied pasteboard) is complete and restores by clearing."""
+    if unreadable or (not items and type_count):
+        raise ComposeRefused(
+            "clipboard: the clipboard could not be saved completely, so it was left "
+            "alone and nothing was pasted"
+        )
+
+
+class _Clipboard:
+    """The general pasteboard, as far as the paste needs it. AppKit loads lazily, so a
+    test that replaces ``_clipboard`` never touches it."""
+
+    def __init__(self) -> None:
+        import AppKit
+
+        self._ak = AppKit
+        self._pb = AppKit.NSPasteboard.generalPasteboard()
+
+    def change_count(self) -> int:
+        return int(self._pb.changeCount())
+
+    def snapshot(self) -> list[dict[str, bytes]]:
+        items, unreadable = [], 0
+        for item in self._pb.pasteboardItems() or []:
+            one: dict[str, bytes] = {}
+            for t in item.types():
+                data = item.dataForType_(t)
+                if data is None:
+                    unreadable += 1
+                else:
+                    one[str(t)] = bytes(data)
+            items.append(one)
+        _require_complete_snapshot(items, unreadable, len(self._pb.types() or []))
+        return items
+
+    def write_text(self, text: str) -> None:
+        item = self._ak.NSPasteboardItem.alloc().init()
+        item.setString_forType_(text, self._ak.NSPasteboardTypeString)
+        for t in _TRANSIENT_TYPES:
+            item.setData_forType_(F.NSData.data(), t)
+        self._pb.clearContents()
+        self._pb.writeObjects_([item])
+
+    def restore(self, snap: list[dict[str, bytes]]) -> None:
+        items = []
+        for types in snap:
+            item = self._ak.NSPasteboardItem.alloc().init()
+            for t, raw in types.items():
+                item.setData_forType_(F.NSData.dataWithBytes_length_(raw, len(raw)), t)
+            items.append(item)
+        self._pb.clearContents()
+        if items:
+            self._pb.writeObjects_(items)
+
+
+def _clipboard() -> _Clipboard:
+    return _Clipboard()
+
+
+def _body_text(body: str) -> str:
+    """The squashed body without the leading blanks and object-replacement marks the AX
+    walk can emit before the first real text."""
+    return squash_text(body.lstrip(" \n\t\ufffc"))
+
+
+def _alnum(text: str) -> str:
+    """Only the letters and digits of ``text``, for the quote-tail compare. The AX walk
+    joins the parts of one line with a separator the original's own text does not have
+    (a link or bold run followed by punctuation reads 'example.com .' for
+    'example.com.'), and list bullets and '>' marks differ too. Squashed whitespace
+    alone misses those; letters and digits carry the words and nothing else."""
+    return "".join(c for c in squash_text(text) if c.isalnum())
+
+
+def _starts_with(body: str, text: str) -> bool:
+    return _body_text(body).startswith(squash_text(text))
+
+
+def _wait_settled(el, text: str, before: str) -> bool:
+    """Settled = the body starts with the text AND changed since just before the key
+    event (facts 4e: a body that already started with the text once read as settled at
+    4 ms, the clipboard was restored, and Mail's late Cmd-V pasted the user's own
+    clipboard). Reads AX only, for at most ``_PASTE_SETTLE_S``."""
+    t0 = time.monotonic()
+    while True:
+        body = _read_body(el)[0]
+        if _starts_with(body, text) and squash_text(body) != before:
+            return True
+        if time.monotonic() - t0 >= _PASTE_SETTLE_S:
+            return False
+        time.sleep(0.05)
+
+
+def _confirm(
+    el, text: str, replace_all: bool, quote_tail: str | None, tool: str = "mail_reply"
+) -> None:
+    """Facts 4e `Confirm`, after a settled paste: the text is first and, in a quoted
+    reply, the original's own tail follows it; after a whole-body replace nothing
+    follows. Compared squashed (the AX walk drops empty lines); the tail compares by
+    letters and digits only (``_alnum``). A body read that was cut short proves nothing
+    about what follows, so it never confirms a whole-body replace and gets its own
+    refusal reason when the tail was not seen."""
+    read, complete = _read_body(el)
+    body = _body_text(read)
+    want = squash_text(text)
+    if not body.startswith(want):
+        raise ComposeRefused("confirmation: the reply does not start with your text")
+    rest = body[len(want) :]
+    if replace_all:
+        if rest:
+            raise ComposeRefused(
+                "confirmation: text is left in the reply after your text, so the "
+                "whole body was not replaced"
+            )
+        if not complete:
+            raise ComposeRefused(
+                "confirmation: the reply could not be read to its end through "
+                "Accessibility, so the whole-body replace cannot be confirmed"
+            )
+    elif _alnum(quote_tail or "") not in _alnum(rest):
+        if not complete:
+            raise ComposeRefused(
+                "confirmation: the reply is too long to check through Accessibility, "
+                "so Mail's quote of the original could not be confirmed. To reply "
+                f"without the quote, call {tool} with include_quote=False"
+            )
+        raise ComposeRefused(
+            "confirmation: Mail's quote of the original does not follow your text. "
+            "Mail's setting 'Quote the text of the original message' (Mail > "
+            "Settings > Composing > Responding; 'Include original message text' "
+            "before Mail 16) may be off, or a text selection is left in Mail's "
+            f"message viewer. Click the original once, or call {tool} with "
+            "include_quote=False"
+        )
+
+
+# FIX-26 (#589): the one refusal text for a clipboard that moved under the call
+_CLIPBOARD_CHANGED = (
+    "clipboard: the clipboard changed during the call (something was copied), so your "
+    "text was not inserted. Ask the user not to copy anything while a reply runs, "
+    "then run the call again"
+)
+
+
+def compose_insert(
+    window_id: int,
+    text: str,
+    *,
+    replace_all: bool = False,
+    quote_tail: str | None = None,
+    rollback: Callable[[], object] | None = None,
+    tool: str = "mail_reply",
+) -> None:
+    """Put ``text`` at the top of the reply window ``window_id`` that the caller opened
+    in Mail, and confirm it landed (facts 4e, mechanism M2: one Cmd-V from a borrowed
+    and restored clipboard). Raises ``ComposeRefused`` naming the failed step.
+
+    ``replace_all`` first selects the whole body (a reply with no quote). Otherwise
+    ``quote_tail`` (the last words of the original) must follow the text, else the
+    call refuses: an unknown tail refuses before any write. ``rollback`` is called when
+    the paste did not settle, BEFORE the clipboard comes back, so a late Cmd-V cannot
+    paste the user's own clipboard into a reply that stays. ``tool`` is the tool whose
+    refusal this is (``mail_reply`` or ``reply_all``): the refusal names it, so the
+    advice to retry with ``include_quote=False`` points at the tool the model called.
+
+    Identity rule: the target is Mail (constant), the window is the id the caller
+    bound, and right before the write Mail's AX focused element must be a body inside
+    that window. The key goes to Mail's pid only; the borrowed item is marked
+    transient and concealed; the clipboard is restored unless the user copied
+    something newer. No text or clipboard content reaches a message or a log. Safe on
+    or off the worker.
+    """
+
+    def work() -> None:
+        if not accessibility_trusted():
+            raise ComposeRefused(
+                "Accessibility is off for this process, so nothing was inserted"
+            )
+        if not replace_all and not _alnum(quote_tail or ""):
+            raise ComposeRefused(
+                "confirmation: the original's last words are unknown, so Mail's "
+                "quote cannot be confirmed and nothing was inserted"
+            )
+        pid = _mail_pid()
+        clip = _clipboard()
+        count = clip.change_count()  # BEFORE the snapshot: a copy during it is caught
+        snap = clip.snapshot()
+        _hold_window(window_id)
+        el = _focused_body(pid, window_id)
+        if replace_all:
+            _post_cmd_key(pid, _KEY_A)
+            time.sleep(_SELECT_ALL_WAIT_S)
+            el = _focused_body(pid, window_id)  # right before the write
+        before = squash_text(_read_body(el)[0])
+        if clip.change_count() != count:  # the last step before the write
+            raise ComposeRefused(_CLIPBOARD_CHANGED)
+        mine = None  # the change count right after OUR write
+        settled = False
+        try:
+            clip.write_text(text)
+            mine = clip.change_count()
+            _post_cmd_key(pid, _KEY_V)
+            settled = _wait_settled(el, text, before)
+            if not settled and rollback is not None:
+                rollback()  # BEFORE the restore (facts 4e `Pasteboard`)
+        except Exception:
+            if rollback is not None:
+                rollback()
+            raise
+        finally:
+            # a newer copy by the user stays; a write that failed midway is undone
+            moved = mine is not None and clip.change_count() != mine  # a newer copy
+            if not moved:
+                clip.restore(snap)
+        if not settled:
+            if moved:
+                raise ComposeRefused(_CLIPBOARD_CHANGED)
+            raise ComposeRefused(
+                "confirmation: your text did not appear in the reply within "
+                f"{_PASTE_SETTLE_S:g} s"
+            )
+        _confirm(el, text, replace_all, quote_tail, tool)
+
+    return work() if on_worker() else run_native(work)
+
+
 def mac_region() -> str | None:
     """The Mac's locale region code (e.g. ``'BE'``), for the locale-derived phone
     country-code default (#59 — never a hardcoded +1). ``None`` if unavailable.
 
     A pure read of NSLocale: no EventKit thread affinity, no TCC — so it needs neither
     run_native nor a permission. Kept here so Foundation stays out of the adapters.
+    Refuses off macOS.
     """
+    require_macos()
     region = F.NSLocale.currentLocale().objectForKey_(F.NSLocaleCountryCode)
     return str(region) if region else None
+
+
+def mail_attribution_stamp(when: datetime) -> tuple[str, str]:
+    """``(date, time)`` of a naive local ``when`` in the Mac's own region, the two
+    pieces of Mail's reply attribution ``On <date>, at <time>, <sender> wrote:`` (#348).
+
+    The date (medium style) and the time (short style) are formatted apart: the
+    combined style is not Mail's line. A Foundation read: no TCC. It runs on the worker
+    like every native call and takes microseconds. Kept here so Foundation stays out of
+    the adapters. Refuses off macOS (through ``run_native``).
+    """
+
+    def work() -> tuple[str, str]:
+        # the wall clock passes through unchanged: read it as UTC, format it as UTC
+        nsdate = F.NSDate.dateWithTimeIntervalSince1970_(
+            calendar.timegm(when.timetuple())
+        )
+
+        def fmt(date_style, time_style) -> str:
+            f = F.NSDateFormatter.alloc().init()
+            f.setLocale_(F.NSLocale.currentLocale())
+            f.setTimeZone_(F.NSTimeZone.timeZoneWithAbbreviation_("UTC"))
+            f.setDateStyle_(date_style)
+            f.setTimeStyle_(time_style)
+            return str(f.stringFromDate_(nsdate))
+
+        return (
+            fmt(F.NSDateFormatterMediumStyle, F.NSDateFormatterNoStyle),
+            fmt(F.NSDateFormatterNoStyle, F.NSDateFormatterShortStyle),
+        )
+
+    return work() if on_worker() else run_native(work)
 
 
 log = logging.getLogger("macos_apps_mcp")

@@ -9,7 +9,10 @@ request stops waiting after ``_WAIT`` seconds: it then renders what it knows wit
 the worker and says so. The abandoned thread finishes by itself and frees the lock.
 
 Nothing here prompts: doctor runs in its read-only mode only, so no EventKit request
-and no Apple Event leaves this page (D-14). "Open Settings" is a plain link.
+and no Apple Event leaves this page (D-14). "Open Settings" is a plain link. The
+Automation rows come from doctor's live, non-prompting check, which waits behind the
+worker like the EventKit read; the TCC map answers only where that check cannot tell
+(an app that is not running, an error) (#455).
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime
 
 import anyio
 
@@ -27,7 +31,7 @@ from .html import Safe, h, join
 from .html import page as render_page
 
 _lock = threading.Lock()  # held by the one thread that is running doctor
-_last: dict | None = None  # the last full report, with the TCC read reasons
+_last: dict | None = None  # last full report, TCC read reasons, and completion time
 _dot: str | None = None  # the sidebar dot of the last full render
 _WAIT = 10.0  # seconds a request waits for doctor before it renders the busy state
 _STARTED = time.time()  # the daemon imports the dashboard at start: uptime
@@ -45,7 +49,12 @@ def _run() -> dict | None:
         report = doctor.diagnose(request=False)
         # doctor reports the identities but not why a TCC database could not be read;
         # the reasons decide between "not asked" and "cannot tell" (PM-20).
-        _last = {"report": report, "reasons": deploy.grant_report()["reasons"]}
+        reasons = deploy.grant_report()["reasons"]
+        _last = {
+            "report": report,
+            "reasons": reasons,
+            "checked_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+        }
         return _last
     finally:
         _lock.release()
@@ -92,6 +101,7 @@ _SETTINGS = "x-apple.systempreferences:com.apple.preference.security?"
 _PANES = {
     "automation": "Privacy_Automation",
     "fda": "Privacy_AllFiles",
+    "accessibility": "Privacy_Accessibility",
     "calendar": "Privacy_Calendars",
     "reminders": "Privacy_Reminders",
 }
@@ -149,6 +159,22 @@ def _fda_row(report: dict) -> Safe:
     )
 
 
+def _accessibility_row(report: dict, active: list[str]) -> Safe:
+    """The grant the two Mail reply tools need. No banner and no sidebar dot: it blocks
+    two tools, not an adapter (Phase 05 contract)."""
+    s = _surfaces(report).get("accessibility", {})
+    if "mail" not in active or s.get("status") == "adapter_off":
+        return _row(
+            "", "Accessibility", "The Mail adapter is off, so this does not matter"
+        )
+    if s.get("ok") is True:
+        return _row("ok", "Accessibility", "Granted")
+    if s.get("ok") is None:
+        return _row("", "Accessibility", "Could not be read")
+    sub = s.get("remediation") or s.get("status") or "unknown"
+    return _row("bad", "Accessibility", sub, action=_settings("accessibility"))
+
+
 def _eventkit_row(report: dict) -> Safe:
     surfaces = _surfaces(report)
     label = {"full_access": "full access", "adapter_off": "adapter is off"}
@@ -186,10 +212,56 @@ def _state(got: dict, adapter: str, service: str | None = None) -> str | None:
     return grants.grant_state(ids, adapter, complete=_complete(got), service=service)
 
 
+_LIVE = {
+    "granted": "granted",
+    "denied": "denied",
+    "not_asked": "not asked",
+    "not_running": "not running",
+}
+
+
+def _live(report: dict, adapter: str) -> str | None:
+    """The live Automation answer for ``adapter`` from doctor's surfaces; None when
+    there is no automation surface, the check errored or the adapter is off."""
+    s = _surfaces(report).get(adapter, {})
+    return _LIVE.get(s.get("status")) if s.get("kind") == "automation" else None
+
+
+def _automation_state(got: dict, adapter: str) -> str | None:
+    """A live granted, denied or not-asked answer wins (O1); the TCC row answers only
+    when the live check cannot tell, and ``not running`` is the last resort."""
+    live = _live(got["report"], adapter)
+    if live in ("granted", "denied", "not asked"):
+        return live
+    return _state(got, adapter, grants.EVENTS) or live
+
+
+def last_permissions(known: list[str]) -> tuple[dict[str, str | None], str] | None:
+    """Adapter grant states and completion time from one report, without native work.
+
+    None before the first completed Health check. An unfinished or failed check
+    leaves the previous report available to the Adapters page (#497).
+    """
+    got = _last
+    if got is None:
+        return None
+    probed = _refused_by_probe(got["report"])
+    states = {
+        n: "denied"
+        if n in probed
+        else grants.combined_state(
+            _automation_state(got, n) if svc == grants.EVENTS else _state(got, n, svc)
+            for svc, _ in grants.ADAPTER_GRANTS.get(n, ())
+        )
+        for n in known
+    }
+    return states, got["checked_at"]
+
+
 def _refused_by_probe(report: dict) -> set[str]:
-    """Adapters whose own live probe was refused: an EventKit surface with status
-    ``denied`` and every adapter that needs Full Disk Access when that probe is denied.
-    The probes run in the daemon, so they answer even when TCC cannot be read."""
+    """Adapters whose own live probe was refused: an EventKit surface
+    with status ``denied`` and every adapter that needs Full Disk Access when that probe
+    is denied. The probes run in the daemon, so they answer when TCC cannot be read."""
     surfaces = _surfaces(report)
     out = {
         n
@@ -208,25 +280,43 @@ def _refused_by_probe(report: dict) -> set[str]:
 def _denied(got: dict, active: list[str]) -> list[str]:
     """The active adapters macOS refused (D-14): a denied TCC row or a refused probe."""
     probed = _refused_by_probe(got["report"])
-    return [a for a in active if _state(got, a) == "denied" or a in probed]
+
+    def refused(a: str) -> bool:
+        # a live Automation answer replaces the TCC AppleEvents part (O1)
+        return a in probed or any(
+            (_automation_state(got, a) if svc == grants.EVENTS else _state(got, a, svc))
+            == "denied"
+            for svc, _ in grants.ADAPTER_GRANTS[a]
+        )
+
+    return [a for a in active if refused(a)]
 
 
 def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
     """One ``Automation → App`` row per AppleEvents grant that is not granted. An OFF
     adapter's row says it does not matter; when TCC cannot say, one row says that
-    instead of guessing "not asked" (PM-20)."""
-    rows, unreadable = [], []
+    instead of guessing "not asked" (PM-20); an app that is not running gets one grey
+    row with no Settings action, since its grant may already be on (#455)."""
+    rows, unreadable, waiting = [], [], []
     for adapter, needs in grants.ADAPTER_GRANTS.items():
         if not any(svc == grants.EVENTS for svc, _ in needs):
             continue
-        state = _state(got, adapter, grants.EVENTS)
+        state = _automation_state(got, adapter)
         on = adapter in active
-        if state is None:
+        if state == "not running":
+            if on:
+                waiting.append(adapter.capitalize())
+        elif state is None:
             if on:
                 unreadable.append(adapter.capitalize())
         elif state != "granted":
             dot = ("bad" if state == "denied" else "warn") if on else ""
-            sub = "Denied" if state == "denied" else "Not asked yet"
+            sub = (
+                "Denied"
+                if state == "denied"
+                else "Not asked yet: run doctor(request=True) so the app asks, "
+                "then switch it on in the Automation pane"
+            )
             if not on:
                 sub += " · adapter is off, so this does not matter"
             rows.append(
@@ -237,6 +327,15 @@ def _automation_rows(got: dict, active: list[str]) -> list[Safe]:
                     action=_settings("automation") if on else _NONE,
                 )
             )
+    if waiting:
+        rows.append(
+            _row(
+                "",
+                "Automation",
+                "Cannot be told until the app is running: " + ", ".join(waiting) + ". "
+                "Open the app, then reload this page.",
+            )
+        )
     if unreadable:
         rows.append(
             _row(
@@ -257,8 +356,9 @@ def _unreadable_banner(got: dict) -> Safe:
     if failed == {"user": "absent"}:  # #261: macOS 27 keeps no per-user TCC.db
         return Safe(
             '<p class="muted note">This macOS keeps no per-user grant database, so '
-            "Automation, Calendar and Reminders grants cannot be read here: those rows "
-            "show no grant state. The EventKit rows come from live checks.</p>\n"
+            "Calendar and Reminders grants cannot be read here. The Automation and "
+            "EventKit rows come from live checks; an app that is not running cannot be "
+            "checked.</p>\n"
         )
     why = ", ".join(f"{k} db: {v}" for k, v in failed.items())
     return h(
@@ -304,6 +404,7 @@ def _render(request, got: dict | None, failure: str | None):
             _daemon_row(),
             _adapters_row(),
             _fda_row(report),
+            _accessibility_row(report, active),
             _eventkit_row(report),
             *_automation_rows(got, active),
             _outbound_row(),

@@ -494,7 +494,7 @@ directly.
   - `tests/test_native_seam.py` (confirms the glob is Mail-scoped today)
   - `pyproject.toml` (confirms `httpx` already a dependency; MapKit/CoreLocation/
     WeatherKit frameworks NOT currently vendored)
-  - `docs/ROADMAP.md` (issue numbers, prior-art column, "entitlement-blocked"/
+  - `docs/landscape.md` (issue numbers, prior-art column, "entitlement-blocked"/
     "headless CoreLocation TCC is the spike" phrasing)
   - `docs/DAEMON.md`, `CLAUDE.md`, `DESIGN.md`, `.planning/codebase/{ARCHITECTURE,
     STRUCTURE,CONCERNS}.md`, `.planning/PROJECT.md` (required reading, cited

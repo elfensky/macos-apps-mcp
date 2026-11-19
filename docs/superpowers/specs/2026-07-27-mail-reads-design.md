@@ -245,7 +245,7 @@ question was "where did I file this". Reversing it means putting a folder *list*
 which changes a contract shared by every adapter — deliberately not done here.
 
 **`mail_overview` labels depend on machine state.** Counts never need Mail; account names do. The
-same call returns `Personal` with Mail running and `AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1` without
+same call returns `Personal` with Mail running and `<personal-account-uuid>` without
 it. Same data, different labels. Preferred over failing the whole call for a cosmetic field.
 Note the corollary the implementation had to face: because the name lookup runs `osascript`, it
 **launches Mail** if Mail is not running. So `account=` as a display *name* is not a

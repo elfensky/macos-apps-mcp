@@ -15,6 +15,7 @@ _ROLES = (
     "uninstall-agent",
     "allow-send",
     "dashboard",
+    "launch",
     "dedupe-mail",
     "index-mail-ids",
 )
@@ -22,6 +23,26 @@ _ROLES = (
 
 def main() -> None:
     args = sys.argv[1:]
+    if args and args[0] in _ROLES:  # named roles require macOS, before storage access
+        from . import runtime
+        from .errors import UnsupportedPlatform
+
+        try:
+            runtime.require_macos()
+        except UnsupportedPlatform as e:
+            print(e, file=sys.stderr)
+            raise SystemExit(1) from None
+    if not args or args[0] in ("daemon", "dedupe-mail", "index-mail-ids"):
+        from .audit import state_dir
+        from .text import sanitize_line
+
+        try:
+            state_dir()  # #540: attempt repair before serving; each writer rechecks
+        except OSError as e:
+            # Keep tools/list and doctor available. Private storage still refuses
+            # unsafe paths; audit persistence retains its existing best-effort policy.
+            reason = sanitize_line(str(e))[:400]
+            print(f"cannot protect state storage: {reason}", file=sys.stderr)
     if not args:
         from . import server
 
@@ -56,6 +77,10 @@ def main() -> None:
         from . import deploy
 
         deploy.dashboard(args[1:])
+    elif role == "launch":  # opening the .app: the bundle's sitecustomize starts it
+        from . import deploy
+
+        deploy.launch()
     elif role == "dedupe-mail":
         # CLI-only by design (#140): thousands of ~0.1s deletes against a 30s-capped
         # serialized worker is a job a human starts, not a tool call. The MCP surface

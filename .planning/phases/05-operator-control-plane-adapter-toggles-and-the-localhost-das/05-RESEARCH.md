@@ -120,7 +120,7 @@
   (`state_dir()/backup/mail/*`) joined to plan metadata where found; it never calls
   `_backup_dir()` (it runs `mkdir`). `backup_usage()` runs only on the Backups and Health pages,
   never in the sidebar. No delete, prune, clean-up or dedupe control anywhere (#163, sketch
-  rule 10). This supersedes the #126 comment of 2026-08-04 and the `docs/ROADMAP.md` floating
+  rule 10). This supersedes the #126 comment of 2026-08-04 and the `docs/landscape.md` floating
   note that asked for a clean-up button and a dedupe runner.
 - **D-14:** Health runs `diagnose(request=False)` and Usage runs `usage_report(...)` in Starlette's
   thread pool (`run_in_threadpool`), never on the event loop and never with EventKit off the

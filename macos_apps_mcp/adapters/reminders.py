@@ -7,10 +7,16 @@ Reads return Pointers; writes take ``ReminderData``. All EventKit access goes th
 from __future__ import annotations
 
 import dataclasses
+import sys
 import unicodedata
 from datetime import datetime, timedelta
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
 from ..contracts import (
     Pointer,
@@ -169,7 +175,7 @@ def _is_reminder(item) -> bool:
     return hasattr(item, "isCompleted")
 
 
-def _apply_reminder(s, r, data: ReminderData) -> None:
+def _apply_reminder(s, r, data: ReminderData, *, update: bool = False) -> None:
     r.setTitle_(data.title)
     r.setNotes_(data.notes)  # full-replace: None clears
     r.setPriority_(data.priority)  # 0 none, 1–9 (1 highest)
@@ -185,7 +191,8 @@ def _apply_reminder(s, r, data: ReminderData) -> None:
         if isinstance(data.recurrence, Recurrence)
         else None
     )
-    r.setCalendar_(_resolve_list(s, data.list_name))
+    if data.list_name is not None or not update:  # an update keeps its list (#572)
+        r.setCalendar_(_resolve_list(s, data.list_name))
 
 
 def _due_tuple(comps) -> tuple | None:
@@ -450,7 +457,7 @@ class RemindersAdapter:
                     "recurrence='none' to stop it repeating, then retry. "
                     "No change was made."
                 )
-            _apply_reminder(s, r, data)
+            _apply_reminder(s, r, data, update=True)
             list_id = container_id(r)  # read EXPECTED list before save (#55)
             ok, err = s.saveReminder_commit_error_(r, True, None)
             if not ok:

@@ -2,6 +2,8 @@
 <!-- mcp-name: io.github.elfensky/macos-apps-mcp -->
 <img alt="macos-apps-mcp logo" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/logo.png" width="96" align="right">
 
+[![elfensky/macos-apps-mcp MCP server](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp/badges/score.svg)](https://glama.ai/mcp/servers/elfensky/macos-apps-mcp)
+
 One local [MCP](https://modelcontextprotocol.io) server for Mail, Calendar, Reminders, Notes,
 Messages, Contacts, Photos, Safari, Music and Shortcuts on macOS. Searches and lists return pointers: an
 id, a one-line summary and a link that opens the item in its app. Bodies are a separate, capped fetch.
@@ -66,10 +68,11 @@ that teaches the dry-run workflow. In Claude Code, run `/plugin marketplace add 
 
 The CLI commands further down (`allow-send`, `dedupe-mail`) run the same way: `uvx macos-apps-mcp allow-send`.
 
-**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (Automation shows `unprobed`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
+**Run `doctor` first.** The `doctor` tool reports what is granted and opens no dialog (each Automation grant is read live; an app that is not running shows `not_running`). `doctor(request=True)`, with you at the screen, opens the EventKit and Automation dialogs. The server needs:
 
 - **EventKit**: Calendar and Reminders.
 - **Automation**, one dialog per app: Mail, Notes, Contacts, Safari, Messages, Music.
+- **Accessibility** (optional, no dialog: turn it on in System Settings → Privacy & Security → Device Control and Data Access, called Accessibility before macOS 27, for the app that starts the server): `mail_reply` and `reply_all` put your text above Mail's own quote. Without it, those two refuse and create nothing. `doctor` and the Health page show whether it is on.
 - **Full Disk Access** (optional, no dialog: turn it on in System Settings → Privacy & Security → Full Disk Access, for the app that starts the server): Messages content, Photos, Mail's index reads, reminder tags and subtasks, and the fast Notes path. Without it, Notes and some Mail reads use a slower path. The rest return an error or a `coverage` note.
 
 Under stdio, macOS gives each grant to the app that starts the server (Claude Desktop, Terminal, VS Code), so each client needs its own. The signed `.app` daemon holds one set for all: [docs/DAEMON.md](https://github.com/elfensky/macos-apps-mcp/blob/develop/docs/DAEMON.md).
@@ -117,9 +120,9 @@ fetch. Writes/actions are skipped entirely when `MACOS_APPS_READ_ONLY` is set (s
 | `free_busy` | `start`, `end` (ISO), optional `calendars` ids | merged busy intervals + free gaps in the window; no event details |
 | `reminders` | `due` = `today` \| `overdue` \| `this-week` \| a list name | list reminders as `{results, coverage?}`; each result carries `folder`, `tags` and `parent` (read-only; needs EventKit and Full Disk Access) |
 | `calendars` / `reminder_lists` | — | containers (id + name) to target writes |
-| `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence`, `alarms` (minutes before the start, at most 5; all-day: from local midnight, `-540` = 09:00 on the day) | `update` is a full replace by id, except `alarms`: omitted keeps the event's alarms, `[]` removes them |
+| `create_event` / `update_event` | title, start, end (ISO), calendar, location, notes, `all_day`, `recurrence`, `alarms` (minutes before the start, at most 5; all-day: from local midnight, `-540` = 09:00 on the day) | `update` is a full replace by id, except `calendar` and `alarms`: an omitted `calendar` keeps the event in its calendar, omitted `alarms` keeps its alarms, `[]` removes them |
 | `delete_event` | id, `span`, `dry_run` | `dry_run` previews without deleting; a real delete is verified gone (the occurrence, not the series) |
-| `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id |
+| `create_reminder` / `update_reminder` | title, due, list_name, notes, `priority` (0–9), start, `recurrence` | `update` is a full replace by id, except `list_name`: omitted keeps the reminder in its list |
 | `create_reminder_list` | name | new list on the default account; an exact duplicate name is refused |
 | `complete_reminder` | id | marks complete; completing a parent lists the subtasks it leaves open under `subtasks`; refused, changing nothing, when the Reminders store cannot be read (needs EventKit and Full Disk Access) |
 | `delete_reminder` | id, `dry_run` (default **true**), `with_subtasks` | deletes by id and proves it gone; a parent with subtasks is refused unless `with_subtasks=true`, since deleting it deletes them too (needs EventKit and Full Disk Access) |
@@ -161,7 +164,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `mail_needs_response` | — | inbox mail likely needing your reply, ranked with a `reason` (flagged / unread-direct / unanswered-direct); headers only, no bodies read |
 | `mail_awaiting_reply` | `days` (1–365, default 3) | mail **you** sent ≥ `days` ago with no reply (real In-Reply-To/References threading), oldest first, reason `awaiting-reply` |
 | `create_draft` | to, subject, body | opens a draft for review — **never sends**; returns a locator |
-| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References), quoted original, opens for review — **never sends** |
+| `mail_reply` | message_id, mailbox, reply_body, `include_quote` | native threaded reply (sets In-Reply-To/References) that keeps Mail's own quote, your text on top through Accessibility; opens for review — **never sends** |
 | `drafts` | — | list Mail drafts as pointers (id + subject — to recipient) |
 | `delete_draft` | id, `dry_run` | delete one draft by message-id; `dry_run` previews |
 | `create_mailbox` | name (`/` nests), account | creates the folder; missing parents auto-created. **No delete counterpart** — `delete <mailbox>` is not scriptable, so removing one is a Mail.app action. In a Gmail account the new folder is a label, which `move_mail` refuses |
@@ -171,7 +174,7 @@ open a compose window for you to review. Outbound (`send_mail`, `reply_all`,
 | `update_mail_status` | ids (≤25), mailbox, `read`, `flagged`, `flag_color` | mark read/unread, flag (+colour). Re-issuing with the opposite value **is** the undo, so `dry_run` defaults to `False` |
 | `mail_duplicates` | `limit` | **report only** — per-mailbox redundant-copy counts + worst offenders. Cleanup is the `dedupe-mail` CLI below; this tool cannot delete |
 | `send_mail` | `to`, `subject`, `body`, `cc`, `bcc`, `html`, `from_address`, `dry_run` | **gated** by `MACOS_APPS_ALLOW_SEND`; `dry_run` defaults to `True` |
-| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native threading headers |
+| `reply_all` | `message_id`, `mailbox`, `body`, `include_quote`, `dry_run` | **gated**; native reply-all that keeps Mail's own quote, your text on top through Accessibility; sends only after the text is confirmed, then sweeps its own Drafts copy (`drafts_copy`) |
 | `forward_mail` | `message_id`, `mailbox`, `to`, `dry_run` | **gated**; original + attachments forwarded intact — no covering-note param (writing the body destroys both, device-verified) |
 
 ### Messages — content via chat.db (read-only; Full Disk Access)
@@ -231,7 +234,8 @@ same list and takes effect after a restart. Details: [docs/DAEMON.md](docs/DAEMO
 ### Dashboard
 
 Under the daemon, `http://127.0.0.1:47632` shows the audit trail, Health, the adapter switches,
-usage and the Mail backups. Run `macos-apps-mcp dashboard` to open it with its page key. Details:
+usage and the Mail backups. Open the app, or run `macos-apps-mcp dashboard`, to open it with its
+page key. The first open of the app also installs the daemon and links the CLI. Details:
 [docs/DAEMON.md](docs/DAEMON.md#7-the-localhost-dashboard). Both screenshots use invented data.
 
 <img alt="One calendar edit in the dashboard: the old time struck through, the new time beside it, and the exact tool call the model made" src="https://raw.githubusercontent.com/elfensky/macos-apps-mcp/develop/docs/images/dashboard-diff.png" width="800">
@@ -306,6 +310,12 @@ recipient-less message can jam the outbox so later, valid sends queue behind it 
 Every result also reports `outbox_pending`, Mail's current outbox count; when it's greater than
 zero the result carries a `note` explaining that delivery is not confirmed and to check Mail ▸
 Outbox.
+
+A real `reply_all` keeps Mail's own quote and takes about a minute: Mail can autosave a copy of the
+reply into Drafts that survives the send, so the call waits until 45 seconds after the reply window
+opened and deletes that copy only when it is provably its own. The result's `drafts_copy`
+(`removed`, `none`, `late`, `unproven` or `unavailable`) and a plain note say what it found; `sent`
+stays true whatever that is, and nothing in Sent or All Mail is touched.
 
 Run the `doctor` tool to check whether sending is actually enabled — `deployment.outbound` lists
 every adapter currently send-enabled (`[]` if none), derived from the same registration logic

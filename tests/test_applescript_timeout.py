@@ -10,8 +10,8 @@ fire (#140/dedupe: ``_DEDUPE_TIMEOUT = 900.0`` but the script backstop was
 ``with timeout of 600 seconds`` — the host cap never got a chance to matter). The
 invariant is: **the script's own backstop must be >= the host cap that gates it.**
 
-``_call_sites()`` walks every adapter module (``macos_apps_mcp/adapters/*.py``, minus
-``__init__.py``) plus ``macos_apps_mcp/doctor.py``, finds every call whose callee is
+``_call_sites()`` walks every module of the package (``tests.scripts.modules()``, #581 —
+the adapters, ``doctor`` and ``runtime`` alike), finds every call whose callee is
 (qualified or unqualified) ``run_osascript``, and resolves:
 
 - the TEMPLATE string passed as the first positional argument — a bare name looked up
@@ -39,32 +39,26 @@ from __future__ import annotations
 
 import ast
 import dataclasses
-import importlib
-import pathlib
-import pkgutil
 import re
 
 import pytest
 
-import macos_apps_mcp.adapters as adapters_pkg
 from macos_apps_mcp import runtime
 from macos_apps_mcp.adapters import mail_recover as _mail_recover_mod
+from tests import scripts
 
 
 def _osascript_templates():
     """(label, source) for each module-level string that drives an app via osascript."""
-    for mod_info in pkgutil.iter_modules(adapters_pkg.__path__):
-        mod = importlib.import_module(f"macos_apps_mcp.adapters.{mod_info.name}")
-        for name in dir(mod):
-            val = getattr(mod, name)
-            if isinstance(val, str) and "tell application" in val and "\n" in val:
-                yield f"{mod_info.name}.{name}", val
+    yield from scripts.templates().items()
 
 
 def test_templates_are_discovered():
     # guard the introspection itself — an empty sweep would make the checks vacuous.
     labels = [label for label, _ in _osascript_templates()]
-    assert len(labels) >= 10, labels
+    assert len(labels) >= scripts.MIN_TEMPLATES, labels
+    # #581: the walk reaches past the adapters
+    assert "runtime._WINDOW_INDEX" in labels, labels
 
 
 def test_every_osascript_template_carries_with_timeout():
@@ -83,20 +77,8 @@ class _Unresolved(Exception):
     """The resolver could not pin down a template, backstop, or host cap."""
 
 
-_ADAPTERS_DIR = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "adapters"
-_DOCTOR_PATH = pathlib.Path(__file__).parent.parent / "macos_apps_mcp" / "doctor.py"
-
 _ON_RUN_RE = re.compile(r"\bon run\b")
 _WITH_TIMEOUT_RE = re.compile(r"with timeout of (\d+) seconds")
-
-
-def _source_files():
-    """(path, dotted module name) for every adapter module (minus __init__) + doctor."""
-    for path in sorted(_ADAPTERS_DIR.glob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        yield path, f"macos_apps_mcp.adapters.{path.stem}"
-    yield _DOCTOR_PATH, "macos_apps_mcp.doctor"
 
 
 def _is_run_osascript_call(func: ast.expr) -> bool:
@@ -187,8 +169,7 @@ class _CallSite:
 
 def _call_sites() -> list[_CallSite]:
     sites: list[_CallSite] = []
-    for path, modname in _source_files():
-        module = importlib.import_module(modname)
+    for path, module in scripts.modules():
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not _is_run_osascript_call(node.func):
@@ -225,9 +206,10 @@ _CALL_SITES = _call_sites()
 def test_call_sites_are_discovered():
     # guard the walk itself — a broken one would make every check below vacuous.
     ids = [s.id for s in _CALL_SITES]
-    assert len(ids) >= 40, ids
+    assert len(ids) >= scripts.MIN_CALL_SITES, ids
     assert any(s.startswith("mail.py:") and s.endswith(":_DEDUPE") for s in ids), ids
     assert any(s.startswith("doctor.py:") and s.endswith(":_PROBE") for s in ids), ids
+    assert any(s.startswith("runtime.py:") for s in ids), ids  # #581
 
 
 @pytest.mark.parametrize("site", _CALL_SITES, ids=lambda s: s.id)

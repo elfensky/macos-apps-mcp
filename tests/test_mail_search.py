@@ -268,8 +268,8 @@ def test_mail_search_tool_registered_read_only():
         async with Client(srv.mcp) as c:
             tools = {t.name: t for t in await c.list_tools()}
             assert "mail_search" in tools and "mail_index_bodies" in tools
-            assert tools["mail_search"].annotations.readOnlyHint is True
-            assert tools["mail_index_bodies"].annotations.readOnlyHint is True
+            assert tools["mail_search"].annotations.read_only_hint is True
+            assert tools["mail_index_bodies"].annotations.read_only_hint is True
 
     asyncio.run(go())
 
@@ -1123,7 +1123,7 @@ def test_mail_search_exposes_new_filters():
         async with Client(srv.mcp) as c:
             return {t.name: t for t in await c.list_tools()}
 
-    props = asyncio.run(go())["mail_search"].inputSchema["properties"]
+    props = asyncio.run(go())["mail_search"].input_schema["properties"]
     assert "has_attachments" in props and "account" in props
 
 

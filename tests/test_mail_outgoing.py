@@ -88,7 +88,11 @@ def test_every_send_path_previews_the_same_keys(monkeypatch):
     ]
     for p in previews:
         assert p["dry_run"] is True
-        assert set(p["would_send"]) == _PREVIEW_KEYS
+        # reply_all alone adds `recipients_note`: its to/cc are computed (#516)
+        extra = (
+            {"recipients_note"} if p["would_send"]["action"] == "reply_all" else set()
+        )
+        assert set(p["would_send"]) == _PREVIEW_KEYS | extra
     assert [p["would_send"]["action"] for p in previews] == [
         "send",
         "reply_all",
@@ -105,58 +109,6 @@ def test_forward_builder_has_no_body_parameter():
 
     params = inspect.signature(mail_outgoing.forward_of).parameters
     assert set(params) == {"message_id", "mailbox", "to"}
-
-
-def test_the_quote_preamble_exists_once(monkeypatch):
-    """reply and reply_all each carried a copy of fetch/guard/partition/sanitize/build.
-    Both go through ``quoted_body`` now — proved by patching that one function and
-    seeing both paths change."""
-    seen = []
-    monkeypatch.setattr(
-        mail_outgoing,
-        "quoted_body",
-        lambda body, mid, mb: seen.append(mid) or (body + " [QUOTE]"),
-    )
-    bodies = []
-
-    class _FakeFile:
-        def __init__(self, text):
-            bodies.append(text)
-
-        def __enter__(self):
-            return "/tmp/fake"
-
-        def __exit__(self, *a):
-            return False
-
-    def fake(script, *argv, **_):
-        if script is mail_outgoing._REPLY_ALL_RECIPIENTS:
-            return f"to{US}a@x{RS}sender{US}s@x{RS}subject{US}Re: hi{RS}"
-        if script is mail_outgoing._OUTBOX_COUNT:
-            return "0"
-        return "sent"
-
-    _patch_run(monkeypatch, fake)
-    monkeypatch.setattr(runtime, "body_file", _FakeFile)
-    mail.MailAdapter().reply("<a@x>", "inbox", "hello")
-    mail.MailAdapter().reply_all("<b@x>", "inbox", "hello", dry_run=False)
-    assert seen == ["a@x", "b@x"]
-    assert bodies == ["hello [QUOTE]", "hello [QUOTE]"]
-
-
-def test_quoted_body_reads_the_original_with_a_120s_cap(monkeypatch):
-    """#230: a body that is not downloaded makes the content read an IMAP fetch that
-    ran past the 30s default on device. 120.0 equals the script's own backstop
-    (GATE-10's >= invariant passes on equality; D-13)."""
-    seen = {}
-
-    def fake(script, *argv, **kw):
-        seen["kw"] = kw
-        return ""
-
-    _patch_run(monkeypatch, fake)
-    mail_outgoing.quoted_body("hi", "a@b", ("ACCT", "inbox"))
-    assert seen["kw"] == {"timeout": 120.0}
 
 
 # --- #157: send an approved draft by id ----------------------------------------------
@@ -206,7 +158,7 @@ def test_draft_send_uses_the_drafts_own_bytes_and_removes_the_source(monkeypatch
         def __exit__(self, *a):
             return False
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_outgoing._DRAFT_ENVELOPE:
             return _draft_payload()
@@ -248,7 +200,7 @@ def test_draft_cleanup_failure_never_turns_a_completed_send_into_an_error(monkey
         def __exit__(self, *a):
             return False
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         if script is mail_outgoing._DRAFT_ENVELOPE:
             return _draft_payload()
         if script is mail_outgoing._OUTBOX_COUNT:
@@ -371,7 +323,7 @@ def test_send_passes_mails_spelling_for_an_owned_from_address(monkeypatch, typed
     which returns ('', '') on that shape)."""
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_addressing._MY_ADDRESSES:
             return _owned("Me@Corp.com", "other@corp.com")
@@ -463,7 +415,7 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
     """A blank from_address means omitted: no ownership read, argv item 4 is empty."""
     seen = {}
 
-    def fake(script, *argv):
+    def fake(script, *argv, **_):
         seen[script] = argv
         if script is mail_addressing._MY_ADDRESSES:
             raise AssertionError(
@@ -484,9 +436,9 @@ def test_send_blank_from_address_is_treated_as_omitted(monkeypatch):
 def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
     """#230: a reply, reply-all or forward acts on the ORIGINAL message, whose body may
     still be on the IMAP server. On device the fetch ran past the 30s default with Mail
-    idle — first in `_ORIGINAL` (fixed in 0.13.0), then in `_REPLY`. Every such call
-    must carry the 120s cap that equals its script's own backstop."""
-    acting = {"_ORIGINAL", "_REPLY", "_REPLY_ALL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
+    idle — first in `_ORIGINAL` (fixed in 0.13.0), then in the reply script. Every such
+    call must carry the 120s cap that equals its script's own backstop."""
+    acting = {"_ORIGINAL", "_REPLY_ALL_RECIPIENTS", "_FORWARD"}
     found = set()
     for module in (mail_outgoing, mail_drafts):
         for node in ast.walk(ast.parse(inspect.getsource(module))):
@@ -505,3 +457,198 @@ def test_every_script_acting_on_the_original_waits_for_its_imap_fetch():
             found.add(node.args[0].id)
     assert found == acting
     assert mail_outgoing.ORIGINAL_TIMEOUT == 120.0
+
+
+# --- FIX-16 (#348): the native-reply scripts (facts section 4e) ------------------
+
+_REPLY_FLOW = (
+    "_OUTGOING_IDS",
+    "_REPLY_OPEN",
+    "_DISCARD_OUTGOING",
+    "_DISCARD_NEW_REPLY",
+    "_ACCOUNT_ADDRESSES",
+    "_BASELINE_CLEAR",
+)
+
+
+def test_reply_open_never_writes_content():
+    script = mail_outgoing._REPLY_OPEN
+    assert "opening window yes" in script and "reply to all" in script
+    assert "my rollback(" in script and "with timeout of 120 seconds" in script
+    # the only `content of` is the read of the reply's signature (never the body)
+    assert "set content" not in script and "content of r" not in script
+    assert script.count("content of") == 1 and "content of sg" in script
+    assert "on rollback(msg)" in script  # composes ROLLBACK
+    assert "on mailboxFor(" in script
+    discard = mail_outgoing._DISCARD_OUTGOING
+    assert "on rollback(msg)" in discard and "my rollback(" in discard
+    assert "with timeout of 120 seconds" in discard
+
+
+def test_reply_open_binds_the_new_window():
+    script = mail_outgoing._REPLY_OPEN
+    before = script.index("id of every window")
+    verb = script.index("reply m opening window yes")
+    after = script.index("id of every window", verb)
+    assert before < verb < after  # B1: ids before the verb and again after it
+    assert "id of window 1" not in script  # never the front window by index
+    # facts 4e: only CLOSEABLE new windows count (a tiled viewer adds a divider window)
+    assert "closeable of window id" in script
+    # zero or several new windows: error -> the rollback in the same script
+    assert "count of found) is not 1" in script
+    assert script.index("count of found) is not 1") < script.index("my rollback(r)")
+    assert "(id of r)" in script  # returns the outgoing id beside the window id
+    # ... and the From of the reply, read while the reply exists (never a failure)
+    assert "sender of r" in script
+
+
+def test_reply_open_reads_the_replys_own_signature():
+    # G4: read inside its own try after the window count check, before the return, and
+    # returned as the LAST field (a US character inside it cannot shift the others)
+    script = mail_outgoing._REPLY_OPEN
+    read = script.index("message signature of r")
+    assert script.index("count of found) is not 1") < read
+    assert read < script.index("return ((id of r)")
+    block = script[script.rindex("try", 0, read) : script.index("end try", read)]
+    assert "set sig to" in block and "missing value" in block
+    assert script.index('set sig to ""') < script.rindex("try", 0, read)
+    ret = script[script.index("return ((id of r)") :].split("on error")[0]
+    assert ret.rstrip().endswith("us & sig")
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (f"28{US}15927{US}s{US}sig", (28, 15927, "s", "sig")),
+        (f"28{US}15927{US}{US}sig", (28, 15927, "", "sig")),
+        (f"28{US}15927{US}s{US}", (28, 15927, "s", "")),
+        (f"28{US}15927{US}s", (28, 15927, "s", "")),
+        (f"28{US}15927", (28, 15927, "", "")),
+        (f"28{US}15927{US}s{US}a{US}b", (28, 15927, "s", f"a{US}b")),
+    ],
+)
+def test_parse_open_returns_the_signature_last(raw, expected):
+    assert mail_outgoing._parse_open(raw) == expected
+
+
+def test_reply_open_strips_framing_from_the_sender_and_guards_a_missing_content():
+    # a US in the sender must not shift into the signature field; a signature whose
+    # `content` is missing value must not become the text "missing value"
+    script = mail_outgoing._REPLY_OPEN
+    assert "set snd to my stripFraming((sender of r) as text)" in script
+    assert "on stripFraming(t)" in script
+    assert "if sc is not missing value then set sig to sc as text" in script
+    assert "(content of sg) as text" not in script
+
+
+def test_reply_open_binds_only_from_closeable_new_windows():
+    # B1 is pinned by its structure (an AppleScript cannot run in a unit test): `found`
+    # is only ever assigned an empty list or the result of newWindowIds, and that
+    # handler adds an id only when the window is closeable. Zero new windows reaches
+    # the error and the rollback; no fallback binds `window 1`, the front window, or
+    # a second read.
+    import re
+
+    script = mail_outgoing._REPLY_OPEN
+    handler = script[script.index("on newWindowIds") : script.index("end newWindowIds")]
+    assert re.findall(r"set end of found to \w+", handler) == ["set end of found to wi"]
+    assert "if cl then set end of found to wi" in handler
+    assert "wi is not in idsBefore" in handler
+    assert set(re.findall(r"set found to (.+)", script)) == {
+        "{}",
+        "my newWindowIds(idsBefore, id of every window)",
+    }
+    run = script[script.index("on run argv") :]
+    assert run.count("newWindowIds(") == 1  # read once: no second read can add a window
+    assert "(count of found) is not 1 then error" in run  # zero AND several refuse
+    assert run.index("is not 1 then error") < run.index("my rollback(r)")
+
+
+def test_reply_open_has_no_delayed_retry_that_could_bind_the_owners_window():
+    # a `delay` then a second read could pick a window the owner opened in that second
+    assert "delay" not in mail_outgoing._REPLY_OPEN
+
+
+def test_quote_tail_refuses_an_original_with_no_letter_or_digit_to_compare(
+    monkeypatch,
+):
+    # the confirm compares letters and digits: a tail of marks only would match anything
+    from macos_apps_mcp.errors import ComposeRefused
+
+    raw = US.join(["5", "a", "b", "c", "d", "e", "f", "-- ... --"])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    with pytest.raises(ComposeRefused, match="no readable text"):
+        mail_outgoing._quote_facts("mid", ("x", "y"))
+    raw = US.join(["5", "a", "b", "c", "d", "e", "f", "see example.com."])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    tail, attribution, _ = mail_outgoing._quote_facts("mid", ("x", "y"))
+    assert tail == "see example.com."
+    assert attribution == "a wrote:"  # an unreadable date: the line has no date
+    raw = US.join(["5", "Jane <j@x.com>", "2026", "7", "1", "14", "39", "last words"])
+    monkeypatch.setattr(mail_outgoing.runtime, "run_osascript", lambda *a, **k: raw)
+    assert mail_outgoing._quote_facts("mid", ("x", "y"))[1] == (
+        "On 1 Jul 2026, at 14:39, Jane <j@x.com> wrote:"  # the date stamp is faked
+    )
+
+
+def test_reply_flow_scripts_wait_as_long_as_their_backstop():
+    found = set()
+    names = set(_REPLY_FLOW) | {"_SWEEP_DELETE", "_SEND_OUTGOING"}
+    for node in ast.walk(ast.parse(inspect.getsource(mail_outgoing))):
+        if not (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "attr", None) == "run_osascript"
+            and node.args
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id in names
+        ):
+            continue
+        caps = [k.value for k in node.keywords if k.arg == "timeout"]
+        assert [getattr(c, "id", None) for c in caps] == ["ORIGINAL_TIMEOUT"], (
+            node.args[0].id
+        )
+        found.add(node.args[0].id)
+    assert found >= set(_REPLY_FLOW) | {"_SEND_OUTGOING"}  # the send waits 120 s too
+    for name in found:
+        assert "with timeout of 120 seconds" in getattr(mail_outgoing, name), name
+
+
+def test_discard_new_reply_deletes_one_matching_reply_only():
+    script = mail_outgoing._DISCARD_NEW_REPLY
+    assert "on rollback(msg)" in script and "on mailboxFor(" in script
+    assert "with timeout of 120 seconds" in script
+    assert "ends with subj" in script  # the subject suffix rule
+    assert (
+        'if subj is "" then return "none"' in script
+    )  # an empty subject deletes nothing
+    assert "known does not contain" in script  # compared with the baseline
+    assert '(count of cands) > 1 then return "several"' in script
+    assert script.count("my rollback(") == 1  # one delete, only after both checks
+
+
+def test_outgoing_ids_reads_only_ids():
+    script = mail_outgoing._OUTGOING_IDS
+    assert "id of every outgoing message" in script
+    assert "with timeout of 120 seconds" in script
+    assert "messages of" not in script  # does not touch the original
+
+
+def test_reply_all_recipients_reads_the_account_addresses_into_a_variable_first():
+    # G1 (05.2-13): a `repeat with ea in (email addresses of …)` loop gives an
+    # application reference; `ea as text` raised -1700 inside the try, so the preview
+    # subtracted nothing. Read the list into a variable first (device-proven form).
+    import re
+    from pathlib import Path
+
+    script = mail_outgoing._REPLY_ALL_RECIPIENTS
+    read = script.index("set addrs to (email addresses of (account of (mailbox of m)))")
+    loop = script.index("repeat with ea in addrs")
+    assert script.rindex("try", 0, read) > script.index("set rt to reply to of m")
+    assert read < loop < script.index("end try", read)
+    root = Path(mail_outgoing.__file__).resolve().parents[1]
+    bad = [
+        str(p)
+        for p in root.rglob("*.py")
+        if re.search(r"repeat with \w+ in \(email addresses", p.read_text())
+    ]
+    assert bad == []

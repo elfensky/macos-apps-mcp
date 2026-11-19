@@ -1,39 +1,44 @@
 ---
 gsd_state_version: "1.0"
 milestone: v0.11.0
-current_phase: "05.2"
-current_phase_name: "Bug fixes — every open bug before Phase 6 (#455, #399, #348)"
+current_phase: "05.6"
+current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-last_updated: "2026-10-25T20:51:38.083Z"
-last_activity: 2026-10-25
-last_activity_desc: "Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); researcher defaults O1-O14 adopted, owner vetoes at verify-work"
-state_head: 5f899213edfd2bc9fd63f0ca590e67967b9cac7b
+stopped_at: "Phase 05.2 is complete (2026-11-19): the 05.2-20 reply test passed on build 13417ee, issue 348 is closed, the phase-close audits are recorded and the verifier passed 6 of 6 criteria. Review finding CR-01 is fixed in PR 608, device-checked on a signed build of its branch (26ba78a, installed), and merges after the 0.16.0 cut for 0.16.1 (owner). Next: release 0.16.0 from develop without PR 608, then merge PR 608 and release 0.16.1; then Phase 05.6 (the Notes and Drafts probe sitting) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories)."
+last_updated: "2026-11-19T13:10:00.000Z"
+state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
-  total_phases: 13
-  completed_phases: 9
-  total_plans: 79
-  completed_plans: 72
-  percent: 90
+  total_phases: 21
+  completed_phases: 11
+  total_plans: 99
+  completed_plans: 99
+last_activity: 2026-11-19
+last_activity_desc: "Phase 05.2 closed: reply test passed, issue 348 closed, audits and verification recorded; PR 608 (review finding CR-01) is ready and waits for the 0.16.0 cut."
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-25)
+See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 
-**Core value:** Safe writes — every write gated by tier, addressed by id, dry-runnable, audited and recoverable; the model can never lose, destroy or send something by accident.
-**Current focus:** Phase 05.2 — Bug fixes — every open bug before Phase 6 (#455, #399, #348)
+**Core value:** Safe writes are the goal. Current audit persistence is best effort; recovery applies to selected Mail operations.
+**Current focus:** Phase 05.6 — bugs against the merged MCP 2 and FastMCP 4 implementation.
 
 ## Current Position
 
-Phase: 05.2 (Bug fixes — every open bug before Phase 6 (#455, #399, #348)) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-10-25 - Phase 05.2 planned: 7 plans in 4 waves (FIX-14..17: #455, #399, #348, #464); records PR docs/phase-05.2-records
+Phase: 05.6 — probe-independent bug fixes.
+Plans: 05.6-01/02/03/04 are merged after review and green CI. Phase 05.4 is complete (2026-11-06).
+Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is merged (2026-11-06). The 2026-11-06 review fixes (#572 to #581) are merged in PR #584 (Phase 05.12); #572 and #581 stay open for their remaining parts. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
+Phase 05.2 is complete (2026-11-19, verification passed). 20 of 20 plans executed. The 05.2-20 sitting (build 13417ee, 2026-11-19) passed: `drafts_copy` `none` on the original that ends with an inline image, Drafts clean at +2 and +15 min; #348, #516 and #589 are closed. G-05.2-5 and G-05.2-6 are closed by the owner's answers, without device evidence (05.2-20-SUMMARY.md). The window-check refusal seen at the sitting is #607.
+Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
+Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. On build 3dd93b2, the read-only device suite passed (19 passed, 0 failed), and a real frontend survived a daemon restart and an outage ([05.4 UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)).
+Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
+The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 (FIX-26) in Phase 05.2.
+[Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: [█████████░] 90%
+Progress: 99 of 99 plan files have completion summaries. The roadmap records eleven phase closures.
+Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
 
@@ -83,6 +88,25 @@ Progress: [█████████░] 90%
 
 ### Decisions
 
+- [Roadmap]: Owner decision 2026-11-03: migrate to the new MCP server first. Reassess bugs and architecture after migration, because the new SDK may provide different fixes and supported interfaces.
+- [Phase 05.2]: Owner decision 2026-11-01 (05.2-13 sitting): the device acceptance verdict is failed (C2 dry run FIX-18, C3 live Accessibility read); #348 and #516 stay open; gaps G1-G4 (05.2-13-SUMMARY.md) go to /gsd-plan-phase 05.2 --gaps; build 873b553 stays installed, 0.15.1 kept in ~/p052-gaps-rollback/.
+- [Phase 05.2]: Owner decision 2026-11-01: the reply sweep's residual is accepted as documented (facts §4e `Refusal cleanup` (3)): the owner's own hand draft with the same text and the full quote, in the sending account, saved inside the claim window (at most 120 s), can be taken for the call's copy.
+- [Phase 05.2]: Owner decision 2026-11-01: real Mail account ids are replaced by placeholders in the current files (PR #538); git history is not rewritten.
+- [Phase 05.2]: Owner decision 2026-10-31 (05.2-09 sitting): reply text goes above Mail's native quote through Accessibility — route a, mechanism M2 (Cmd-V to Mail's pid from a borrowed, restored clipboard), no-quote gui-replace, cleanup rollback-sweep. Facts §4e (PRs #523, #525) is the contract for 05.2-10..13.
+- [Phase 05.2]: Owner decision 2026-11-01: a reply tool that must clean up Mail's autosave copy waits until 45 s after the reply window opened, then sweeps its own copy — on a refusal (mail_reply, reply_all) and after every reply_all send.
+- [Phase 05.2]: Owner decisions 2026-11-01 (gap round 2 planning): plan without CONTEXT.md; targeted research on G2/G3 first (05.2-RESEARCH.md D5); scope G1-G4 plus doctor's restart note; the two other 05.2-13 observations go to #543.
+- [Phase 05.2]: Owner decision 2026-11-01 (G4): the Drafts sweep may take the reply's own signature between the call's text and the quote as its own copy — it deletes a draft only when the draft holds nothing the owner wrote (the call's own text, this reply's signature, Mail's attribution, the quote); an empty call text matches nothing (05.2-15, facts §4e).
+- [Phase 05.2]: Orchestrator decision 2026-11-01 (unattended, owner may veto): the reply-all preview keeps subtracting the account that HOLDS the original as the proxy for the sending account — the dry run builds no reply, so Mail's own pick cannot be read; known limit: an original addressed to another account's alias can preview that alias in cc (FIX-18 text clarified).
+- [Roadmap]: Grill session 2026-11-01 (owner, nine answers; decision page `.planning/reports/2026-11-01-phase-plan-grill.html`): plans are written one phase at a time, right before each runs; 05.6 runs in its own lane while 05.2-13 waits for the acceptance sitting; the testers get the brief after 05.10 and 05.3 cut 1 (release 0.18.0), so 05.3 sits right after 05.10; the paged reads (#508) are additive and become Phase 05.11 after 05.3; a release is cut at every phase close that changes the daemon; the rename is 0.17.0 and 1.0.0 is the launch release; one `instructions` builder, started by 05.3 cut 2 and extended by 05.7; the lazy package import stays in 05.3 cut 1; the Homebrew cask stays in Phase 6 (DIST-04); #521 joins 05.6.
+- [Phase 05.6]: Owner decisions 2026-11-01 (discuss, assumptions mode): Mail's Trash, Sent, Junk and Archive are found by translated names in `mailbox_url.py`, not by the private `.mboxCache.plist` role bits; `update_note` backups are kept like Mail backups (until deleted by hand, `0600`/`0700`), which bounds Phase 4 D-13 to the search index; the state folder permissions bug is #540, folded into 05.6. The 05.6 release waits until 05.2 has closed and shipped its own release (05.6-CONTEXT.md D-27).
+- [Phase 05.2]: Owner decisions 2026-11-18 (gap round 3): the security Dependabot PR (#594) merges before the acceptance build and the 12-update PR (#597) waits until after 0.16.0; release 0.16.0 may run without a further question up to TestPyPI and the installed, notarized app, and PyPI and the MCP Registry wait for the owner's word; at the 05.2-18 sitting the TextEdit clipboard compare was not repeated on the owner's word (tested before and fine).
+- [Phase 05.2]: Owner decisions 2026-11-18 (gap round 4, after the page `.planning/reports/2026-11-18-reply-sweep-rules.html`): the reply sweep ignores only Mail's own inline-image marker in the quote (the element Mail writes with an id that starts with `cid:`), never any typed `<name.ext>` text; an INBOX row counts as the delivered copy only with a `Received` header (PM-172); plan 05.2-19 may run unattended up to a signed build, and the install and the sitting wait for the owner.
+- [Phase 05.2]: Orchestrator decision 2026-11-18 (unattended, owner may veto): Mail writes that marker in two forms, `<span id="cid:…">` in sent copies and `<span class="AppleTemporaryEditingElement" id="cid:…">` in compose-time copies (42 spans in the evidence folder: 12 and 30, no third form); the rule accepts exactly these two, so a Drafts copy can be proven too.
+- [Phase 05.2]: Orchestrator decisions 2026-11-19 (unattended, owner may veto; 05.2-19-SUMMARY.md): the placeholder rule ends at the last `</blockquote>` (the plan ran it to the end of the HTML; PM-187); a dropped element leaves a space; an empty `Received` field is no postmark. Open for the owner: PM-182 (marks without letters after the quote's tail are not text for `_has_quote`), PM-189 (`include_quote=False` with a quote of placeholders only), PM-193 (two older quadratic patterns).
+- [Phase 05.2]: Orchestrator finding 2026-11-18 (owner may veto): the INBOX rule of PR #601 does not explain the earlier `unproven` results; the cause is the quote-tail check on an original that ends with an inline image. PM-172 (an INBOX is assumed never to hold a draft) is open for the owner.
+- [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.
+- [Phase 05.2]: Owner decisions 2026-11-19 (05.2-20 sitting, question tool): "F: close" and "H: close" — #348 closes without device evidence for the two-display window order (G-05.2-5) and for a refusal after an autosave (G-05.2-6); the window-check refusal of the first `reply_all` is filed as a bug (#607) and does not block #348 or release 0.16.0.
+- [Phase 05.2]: Owner decision 2026-11-19 (question tool, after the page on the phase-close review): release 0.16.0 ships now from the code tested at the 05.2-20 sitting; the fix for review finding CR-01 (PR #608: a quoted reply is confirmed only when the old reply follows the text) ships in 0.16.1 and merges after the 0.16.0 cut. The device check of PR #608 ran on a signed build of its branch (two `mail_reply` calls, nothing sent) and passed. Review findings WR-01, WR-02 and WR-04 are #609, #610 and #611 in Phase 05.12.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -116,9 +140,13 @@ Recent decisions affecting current work:
 - [Phase 05.1]: A wave that changes UI files needs a `<phase>-UI-SPEC.md`; the pointer form (sketches + plan truths) satisfies `ui.safety-gate`.
 - [Phase 05.1]: Device UAT delegated to the session: sign-only same-Mac build, `ditto` over the moved-aside bundle, kickstart, `doctor().build` proof; a retrying port holder for the "port held" check; the page key never enters a transcript (Chrome gets the link through osascript on stdin).
 - [Phase 04.1]: The Photos device fixture builds its `POSIX file` list outside the Photos tell: inside it Photos gets an object specifier and fails -1728. FIX-08 proven on device on the import path; the one test photo removed by the owner by hand (D-15), album by script, probe `([], [], [])` — PR #402.
+- [Roadmap]: Owner decisions 2026-11-05 (PR #566 wrap-up): PR #566 merges before its device checks, which run on the next signed release candidate; advisory GHSA-xjgg-xphw-h6fp stays private until fixed, then is published, and joins Phase 05.12; #569 takes option 1 (a CLI row on Health); #568 and advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp share bug Phase 05.12 before Phase 05.10.
+- [Roadmap]: Owner decision 2026-11-06 (codebase review): the ten confirmed defects (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581) join bug Phase 05.12 before Phase 05.10.
+- [Roadmap]: Owner decisions 2026-11-06 (fix dispatch): #572 fixes only the calendar or list move in Phase 05.12, and the keep rule for the other omitted fields is designed in Phase 05.10 with the 0.17.0 wire changes; `update_event(recurrence='none')` is refused on a repeating event and names `delete_event(span='future-events')` (#579).
 
 ### Pending Todos
 
+- Next release: run the five open-app device checks from PR #566 ("Not run on device") on the signed candidate in /Applications (owner, 2026-11-05).
 - Phase 3 security advisory A1: the spike 008 alarm harness (`.claude/skills/spike-findings-macos-apps-mcp/sources/008-eventkit-alarms/probe_alarms.py`) takes the first (source, title) match; add a several-match stop before it is reused (03-SECURITY.md).
 - Phase 3 security advisory A2: the `google_calendar` device fixture checks only that `MACOS_APPS_IT_GOOGLE_CALENDAR_ID` exists and is writable; assert its source is "Google" (03-SECURITY.md).
 - `adapters/messages.py` `_apple_date_to_dt` docstring still names `runtime.from_nsdate`, which card 7 moved to `eventkit.py`. Left out of PR #216 because the file was outside plan 01-06's scope; fix in a later card or a `/gsd-quick` task.
@@ -129,7 +157,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon is a develop build: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
+- The installed daemon since 2026-11-18 is a develop build: 0.15.1 at c60c899 (signed, not notarized; `doctor().build` proves it); the builds it replaced are kept in `~/p052-gaps-rollback/` (3dd93b2, 873b553). Earlier record: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -177,6 +205,10 @@ Recent decisions affecting current work:
 | 35 | README: Claude Desktop needs the full uvx path (it does not read the shell PATH) — found while writing the tester brief | 2026-10-25 | 9c5d4a6 | — |
 | 36 | Logo (app icon exported at 512 px with ictool) in the README, the plugin icon and server.json icons, ahead of the 0.15.1 release | 2026-10-25 | e8b1ff5 | — |
 | 37 | Release bump 0.15.1 (pyproject, Info.plist, server.json, uv.lock root line; CHANGELOG section Registry, plugin and dashboard fixes) | 2026-10-25 | 5f89921 | — |
+| 38 | docs/PROMOTION.md (listings, launch plan, X, Glama score, screenshot recipe), docs/tester-brief.md, scripts/dashboard_demo.py (dashboard on invented data); RELEASING step 5 points to the listings | 2026-10-25 | 3bf281b | — |
+| 261025-vuv | The server starts and lists its tools on Linux (Glama build test): macOS-only deps marked, load-time imports guarded, UnsupportedPlatform at every native door and CLI role, Linux CI job; multi-AI review after each task | 2026-10-26 | ee2163c | [261025-vuv-the-server-starts-and-lists-its-tools-on](./quick/261025-vuv-the-server-starts-and-lists-its-tools-on/) |
+| 40 | Glama score badge in the README; PROMOTION.md records the 2026-10-26 score | 2026-10-26 | f7a648c | — |
+| 41 | docs/PROMOTION.md: Next steps — start here (handoff for a fresh session), Glama build spec + pinned-commit trap, review method, X banner + release post; AGENTS.md points to it | 2026-10-26 | 7e23de1 | — |
 
 ### Roadmap Evolution
 
@@ -193,6 +225,34 @@ Recent decisions affecting current work:
 - Phase 05.2 edited: edited fields: title, goal, requirements — #399 and #348 added beside #455, so every open bug is fixed before Phase 6 (owner, 2026-10-25)
 - Phase 05.3 inserted after Phase 05.2: Feedback — problem reports and improvement suggestions (#465); before Phase 6 so the first outside users can report (owner, 2026-10-25)
 - Phase 05.4 inserted after Phase 05.3: Migration — mcp 2 and fastmcp 4 (#470); after Phase 05.3 and before Phase 6 (owner, 2026-10-25)
+- Phase 05.5 inserted after Phase 05.4: Dashboard at a domain — the loader page (#483); after Phase 05.4 and before Phase 6 (owner, 2026-10-25)
+- Phase 05.6 inserted after Phase 05.2: Bug fixes — Notes write safety and system folders in any language (#500, #501); before Phase 05.3, bugs before features (owner, 2026-10-26)
+- Phase 05.7 inserted after Phase 05.5: Agent guidance — error codes, server instructions and per-app skills (#502, #503, #504); before Phase 6 (owner, 2026-10-26)
+- Phase 05.8 inserted after Phase 05.7: Notes depth — Markdown input and note attachments (#505, #506); before Phase 6 (owner, 2026-10-26)
+- Phase 05.9 inserted after Phase 05.8: CLI and paged reads — tools from the shell, pages past the cap (#507, #508); before Phase 6 (owner, 2026-10-26)
+- Phase 05.10 inserted after Phase 05.6: Tool surface — parameter descriptions, verb_noun names, merged duplicates (#514); before Phase 05.3, so the breaking rename lands before the testers and before Phases 05.7–05.9 add skills and tools (owner, 2026-10-26)
+- Pending phases reordered by dependency, not insertion (owner, 2026-10-31, roadmap audit): 05.2 → 05.6 → 05.4 → 05.10 → 05.9 → 05.8 → 05.3 → 05.7 → 05.5 → 6 — the mcp 2/fastmcp 4 migration before every phase built on the middleware, proxy and registration it changes; the rename, error codes and cursors in one breaking release; agent guidance after the last tool lands; the domain loader optional and last. Every pending `Depends on` re-pointed; the execution-order line and the progress table list every pending phase
+- Phase 05.6 edited: edited fields: title, goal, requirements (+#497 Adapters page grant chips on macOS 27, +#471 MIT notices in the `.app`) — open bugs with no phase (2026-10-31)
+- Phase 05.10 edited: edited fields: title, goal, requirements, depends_on (05.4) — +#502 error codes from 05.7, +#508 paged reads from 05.9, one breaking release; `update_contact`/`delete_contact` dropped — Contacts depth is v2 (#94, 2026-08-28 review) (2026-10-31)
+- Phase 05.9 edited: edited fields: title, goal, requirements, depends_on (05.10) — CLI only (#507); phase directory renamed to the new slug (2026-10-31)
+- Phase 05.7 edited: edited fields: title, goal, requirements, depends_on (05.3) — #502 moved to 05.10; phase directory renamed to the new slug (2026-10-31)
+- Phase 05.4 edited: edited fields: goal, depends_on (05.6) (2026-10-31)
+- Phase 05.8 edited: edited fields: goal, depends_on (05.9) (2026-10-31)
+- Phase 05.3 edited: edited fields: goal, depends_on (05.8) (2026-10-31)
+- Phase 05.5 edited: edited fields: goal (optional), depends_on (05.7) (2026-10-31)
+- Phase 6 edited: edited fields: depends_on (05.7), success_criteria (1, 2 and 6 landed as quick tasks in October; 4 partly) — DIST-01, DIST-02 and DIST-06 marked complete in REQUIREMENTS.md (2026-10-31)
+- Phase 05.11 inserted after Phase 05.3: Paged reads — a cursor bound to the query (#508), split out of Phase 05.10 (additive, not breaking) so the breaking release reaches the testers sooner (owner, 2026-11-01, grill session)
+- Phase 05.3 moved to right after Phase 05.10: the testers get the brief after cut 1 (release 0.18.0); its goal names the registry-driven `instructions` builder that Phase 05.7 extends, and the lazy package import stays in cut 1 (owner, 2026-11-01)
+- Phase 05.10 edited: edited fields: title, goal, requirements — #508 moved to 05.11; the breaking release is 0.17.0, 1.0.0 is the launch release (owner, 2026-11-01)
+- Phase 05.6 edited: edited fields: title, goal, requirements (+#521 `delete_draft` times out on a busy Mail, found at the 05.2-09 sitting) (2026-11-01)
+- Phase 05.9 edited: depends_on (05.11); Phase 05.7 edited: goal, depends_on (05.8) (2026-11-01)
+- Release rule (owner, 2026-11-01): one release at every phase close that changes the daemon; no per-phase release decision from now on
+- Phase 05.6 edited: edited fields: title, goal, requirements (+#540 the state folder and its private files are readable by other local accounts, found at the 05.6 discuss session) (owner, 2026-11-01)
+- Phase 05.12 inserted after Phase 05.6: Bug fixes — the app after an upgrade (#568) and two private advisories; before Phase 05.10, bugs before features; Phase 05.10 depends on 05.12 (owner, 2026-11-05)
+- Phase 05.12 scope extended: the ten defects of the 2026-11-06 codebase review join the phase (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581); the title names them and the phase folder keeps its slug (owner, 2026-11-06)
+- Phase 05.12 scope extended: #585 (each AppleScript Mail tool fails while Mail.app is closed) joins the phase under the bugs-before-features rule (2026-11-06)
+- Phase 05.4 completed: verification passed; the device read suite and a real-frontend restart and outage passed on build 3dd93b2 (2026-11-06)
+- Phase 05.2 scope extended: #589 (the clipboard refusal text, from #543) joins the phase as FIX-26 (owner, 2026-11-06)
 
 ## Deferred Items
 
@@ -204,6 +264,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-24T23:03:30Z
-Stopped at: Phase 05.2 planned (7 plans, 4 waves); ready to execute wave 1 (05.2-01, FIX-17)
-Resume file: None
+Last session: 2026-11-19
+Stopped at: Phase 05.2 is complete (2026-11-19): the 05.2-20 reply test passed on build 13417ee, issue 348 is closed, the phase-close audits are recorded and the verifier passed 6 of 6 criteria. Review finding CR-01 is fixed in PR 608, device-checked on a signed build of its branch (26ba78a, installed), and merges after the 0.16.0 cut for 0.16.1 (owner). Next: release 0.16.0 from develop without PR 608, then merge PR 608 and release 0.16.1; then Phase 05.6 (the Notes and Drafts probe sitting) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories).
+Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md

@@ -133,7 +133,7 @@ Not in this phase: `MACOS_APPS_READ_ONLY=1` green (GATE-07), doctor tests off li
 
 ### Mail (cards 3, 4, 9)
 - `docs/mail-applescript-facts.md` — read FIRST before any Mail change. Device-verified traps. The scratch mailbox is `Personal/macos-apps-mcp-test` (line ~231).
-- `.planning/debug/mail-index-schema-sequoia.md`, `.planning/design/mail-sequoia-id-sidecar.md` — the Sequoia shape and the #201 sidecar that card 3's fixture must carry.
+- `.planning/research/mail-index-schema-sequoia.md`, `.planning/design/mail-sequoia-id-sidecar.md` — the Sequoia shape and the #201 sidecar that card 3's fixture must carry.
 
 ### Release and daemon (D-05, D-06)
 - `docs/RELEASING.md` — two-file version bump, `--no-ff` cut, `doctor().version` + `doctor().build` proof.

@@ -6,7 +6,7 @@
 
 This file has two source classes, kept distinguishable throughout:
 
-- **Device-verified** — already proven on this Mac, cited to `docs/mail-applescript-facts.md`, `docs/ROADMAP.md`, or `.planning/codebase/CONCERNS.md`. Treat as fact.
+- **Device-verified** — already proven on this Mac, cited to `docs/mail-applescript-facts.md`, `docs/landscape.md`, or `.planning/codebase/CONCERNS.md`. Treat as fact.
 - **External** — from Apple docs, forums, or prior-art repos (iMCP, mcp-ical, osxphotos, FradSer, etc.), fetched this session. Treat as a strong hypothesis to be device-probed before it ships, per this repo's own discipline: *"ten consecutive 0.9.x cuts had their premise overturned by device probing before code was written."* Every pitfall below that is External says so, and says what probe would settle it.
 
 ## Critical Pitfalls
@@ -345,7 +345,7 @@ New domains phase, #101 (Capture) — build the recurring-reprompt possibility i
 
 **Device-verified (this repo, HIGH confidence within their own claims):**
 - [docs/mail-applescript-facts.md](../../docs/mail-applescript-facts.md) — the device-verification discipline this file's External/Device-verified split is modeled on
-- [docs/ROADMAP.md](../../docs/ROADMAP.md) — the 0.9.x table (ten consecutive premise-overturning device probes), #99/#100/#127 issue sketches
+- [docs/landscape.md](../../docs/landscape.md) — the 0.9.x table (ten consecutive premise-overturning device probes), #99/#100/#127 issue sketches
 - [.planning/codebase/CONCERNS.md](../codebase/CONCERNS.md) — native seam leak, tool registration clipboards, `HEADER_FINGERPRINT` gap, tier-policy import cycle, #166's daemon-role timing bug
 - `.planning/PROJECT.md` — spike-branch rebase discipline, menubar companion / platform decisions
 

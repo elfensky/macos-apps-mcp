@@ -6,6 +6,136 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19 — Runs on MCP 2, and replies keep Mail's quote
+
+### Changed
+
+- **MCP 2 and FastMCP 4** (#470): the local shim uses httpx2, preserves unlimited read duration,
+  and mirrors the frontend protocol era. Caller identity uses public model fields and an advisory shim header.
+  Abandoned streams return a tool error with the uncertain-outcome warning; requests are never replayed automatically.
+  The former `-32001` wire code is not preserved. Local SSE responses have no size limit.
+  HTTP request bodies retain the upstream 4 MiB limit, including the serialized envelope.
+
+### Added
+
+- **Opening the app opens the dashboard** (#126). Before, opening `macos-apps-mcp.app` from
+  Finder, the Dock or Spotlight did nothing. The first open registers the daemon and shows the
+  consent dialogs once. Then it opens the Health page. A first open that stops early runs again
+  on the next open. Later opens go to the dashboard home. When the app starts with no
+  arguments, a `sitecustomize.py` that only the bundle carries runs the new `launch` role. The
+  daemon keeps its executable and its grants.
+- **The CLI on PATH** (#126). The app carries a CLI wrapper. Opening the app and
+  `install-agent` link it as `~/.local/bin/macos-apps-mcp`. `uninstall-agent` removes the link.
+  The link never replaces another file of that name.
+- **`macos-apps-mcp dashboard <page>` opens a named page** (#126), for example `health`.
+- **The server starts and lists its tools on Linux.** Glama scores an MCP server only after
+  a build test in a Linux container that starts it and reads `tools/list`, and the
+  awesome-mcp-servers list requires a scored Glama listing. The PyObjC and osxphotos
+  dependencies now install only on macOS. On any other system every tool that needs a Mac
+  answers `unsupported_platform` ("macos-apps-mcp runs only on macOS"). Nothing changes on a
+  Mac. A Linux CI job keeps it that way.
+- **`doctor` and the Health page show the Accessibility grant** (#348) — the reply tools need it
+  to keep Mail's own quote; the Health row links to the Settings pane when it is off.
+
+### Fixed
+
+- **An update without `calendar` or `list_name` keeps the item where it is** (#572) —
+  `update_event` and `update_reminder` no longer move an event or a reminder to the default
+  calendar or list when the container is omitted. Every other field is still a full replace: an
+  omitted `notes`, `location`, `priority`, `due` or `start` still clears.
+- **`update_event(recurrence='none')` no longer reports success on a series** (#579) — on a
+  repeating event it is refused and changes nothing, and the error names
+  `delete_event(span='future-events')` as the way to end the series. On a single event `'none'`
+  is a harmless no-op.
+- **A send that times out no longer tells the agent to retry** (#573) — `send_mail`, the
+  stored-draft send and `forward_mail` now report that the message may have been sent, and ask
+  for a check of Mail's Outbox and Sent before any retry. A retry after a timeout could send the
+  same mail twice. The two `send_mail` paths now wait 120 seconds, the script's own limit,
+  instead of 30.
+- **`doctor()` reports the code that is running, not the files on disk** (#574) — the version,
+  the build and the bundled library versions are read once at process start. A daemon that was
+  not restarted after an upgrade no longer reports the new build.
+- **`mail_undo` finds receipts after the audit log rotates** (#575) — `audit`, `usage`,
+  `mail_undo` and the dashboard now read `audit.jsonl.1` and `audit.jsonl`. Before, a rotation
+  at 5 MB hid every earlier receipt from `mail_undo`. A recoverable Mail operation now also
+  refuses before it moves anything when its recovery record cannot be written.
+- **`messages_search` finds messages whose text is only in `attributedBody`** (#576) — the
+  search matched the raw blob, which SQLite `LIKE` reads only up to the first NUL byte, so
+  modern iMessages never matched. Search and the list snippets now use the decoded body.
+- **A failure in one cross-account dedupe batch no longer skips the keeper check** (#577) —
+  after a timeout, another native error or a refused argument,
+  `dedupe-mail --cross-account --execute` stops, prints the error with its receipt, still proves
+  that every keeper copy is present, and exits with status 2.
+- **`mail_undo` restores a message that moved only in part** (#578) — when some copies of a
+  duplicated Message-ID moved and others did not, the receipt records that the target left its
+  source, so undo moves it back instead of skipping it. Older receipts keep the old rule.
+- **`doctor` sees running apps in a comma-decimal locale** (#580) — `ps` now runs with
+  `LC_ALL=C`. A `0,0` or `0٫0` value no longer turns a running app into "not running", and
+  timeouts keep their busy-or-wedged hint.
+- **Replies keep Mail's own quote** (#348) — `mail_reply` and `reply_all` let Mail build its
+  normal reply and put your text on top through Accessibility, so the quote bar, Mail's
+  attribution line, formatting, inline images and the whole original stay, and a sent reply's
+  plain-text part no longer quotes your own text. `reply_all` sends only after your text is
+  confirmed in place. Without Accessibility, or when Mail's reply window or its quote cannot be
+  confirmed, both refuse and send nothing. A refusal after the reply window opened waits 45
+  seconds for Mail's autosave and deletes that Drafts copy, only when it is provably the call's
+  own: a new reply to the same message, in a mailbox named Drafts of the account the reply is sent
+  from (the call reads the reply's From address and matches it to the one account that holds it;
+  another account's Drafts is never touched), that landed between the reply verb and the discard
+  (within the 120 second open timeout), whose text above the quote is exactly yours (followed
+  only by the signature Mail put into this reply, equal except for white space, when your account
+  places it above the quote)
+  and that still carries the original's quote with nothing below it, and only when no other reply window to that
+  message was open when the call started (a retry cannot delete the first call's copy). The
+  original is found before the reply opens and the reply is opened by Mail's own id for it, so
+  the slow search for the message is not part of that window. Anything else is left alone and
+  the error says where a copy may be left; only "nothing was created" is clean. After a `reply_all`
+  send the call does the same sweep once the window is 45 seconds old (the call takes about a
+  minute) and reports it as `drafts_copy` beside `sent`; the sent message's own Sent and All Mail
+  copies are never touched, and a Drafts copy that cannot be proven this reply's own is left
+  alone and reported (the result's `drafts_copy_reason` names why); the delivered copy of a
+  reply to an address whose account is in Mail on this Mac is set aside like the Sent copy
+  (a copy in an INBOX only when it carries a mail server's `Received` header). A quote that ends with an inline image of
+  the original is recognized too: Mail's own `<file name>` marker for the image does not count
+  as text after the quote, while text typed to look like it does.
+  `include_quote=False` replaces the whole body with your text. The
+  plain-text quote is gone.
+- **`export_mail` never hides a written file** (#399) — every target path is checked before
+  the first write, so a name that already exists, or two ids that derive one file name,
+  refuse the whole batch with nothing written. Files are created exclusively, and a refusal
+  after a write names the files already written, so a retry writes no duplicate. A write that fails midway removes its partial file, and
+  two ids that derive one name get their own refusal (export them in separate calls).
+
+- **A name where a symlink already sits is refused before any write** — a dangling symlink
+  at the target name was written through. `export_mail`, `save_mail_attachment` and
+  `export_photo` now refuse any existing entry at the name.
+
+- **Automation grants show on macOS 27** (#455) — `doctor` and the dashboard Health page
+  read each Automation adapter's grant live, with no prompt and no Apple Event: granted,
+  denied or not asked yet (the Health row says to run `doctor(request=True)`), and `not_running` when the app is quit, because its state cannot
+  be told until it runs. Both read the same check, so they agree. macOS 27 keeps no readable
+  database of these grants.
+
+- **`reply_all`'s dry run lists the reply's own recipients** (#516) — the preview
+  showed the original's To and Cc, and its sender as `from`. It now shows who the reply
+  reaches: `to` is the original's sender (its Reply-To when it has one), `cc` is everyone
+  else on the original minus your own addresses. The dry run still builds nothing.
+
+- **The denied-Automation message no longer asks for a restart** — a grant switched back
+  on takes effect at once (seen on device, 2026-10-27).
+
+- **The Accessibility switch is read live, and `doctor` names the restarts** (#348) — a running
+  daemon kept its first answer, so a switch turned off still read granted and a switch turned on
+  still refused until a restart; each check now runs in a fresh process. The reply tools no
+  longer refuse with a false "Mail is not running": Mail is found in the system's process
+  list. `doctor`'s note says that Automation and Accessibility need no restart, and that
+  Full Disk Access, Calendars and Reminders may need one, not tested on a device.
+
+- **A reply refused because the clipboard changed says so** (#589) — when something is copied
+  while `mail_reply` or `reply_all` pastes its text, the refusal says that the clipboard changed
+  and asks the user not to copy while a reply runs. The reply is discarded as for every refusal;
+  nothing is sent.
+
 ## [0.15.1] - 2026-10-25 — Registry, plugin and dashboard fixes
 
 ### Added

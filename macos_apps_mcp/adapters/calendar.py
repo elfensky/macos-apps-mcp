@@ -7,13 +7,20 @@ reached-into).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; the native doors
+# refuse through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
 from ..contracts import (
+    CLEAR_RECURRENCE,
     CalendarEventData,
     Pointer,
     deletion_result,
@@ -23,6 +30,7 @@ from ..contracts import (
 from ..errors import (
     SpanRequired,
     VerificationFailed,
+    WriteRefused,
     refused_write,
     resolve_container,
     verify_persisted,
@@ -230,7 +238,7 @@ def _iso_interval(pair: tuple[int, int]) -> dict[str, str]:
     }
 
 
-def _apply_event(s, e, data: CalendarEventData) -> None:
+def _apply_event(s, e, data: CalendarEventData, *, update: bool = False) -> None:
     e.setTitle_(data.title)
     e.setAllDay_(data.all_day)
     start, end = data.start, data.end
@@ -246,7 +254,8 @@ def _apply_event(s, e, data: CalendarEventData) -> None:
     # one occurrence and leave the series recurring. Leave the rule untouched.
     if data.recurrence is not None:
         e.setRecurrenceRules_([to_recurrence_rule(data.recurrence)])
-    e.setCalendar_(_resolve_calendar(s, data.calendar))
+    if data.calendar is not None or not update:  # an update keeps its calendar (#572)
+        e.setCalendar_(_resolve_calendar(s, data.calendar))
     # Relative offsets only: an absolute alarm is rewritten by Google and lands on the
     # wrong day of a floating all-day event. On an all-day event they count from local
     # midnight (#51, D-02). None, never [], clears.
@@ -264,10 +273,14 @@ Span = Literal["this-event", "future-events"]
 
 # EKSpanThisEvent == 0 (falsy!), EKSpanFutureEvents == 1 — so map via membership, never
 # a truthy test.
-_SPANS = {
-    "this-event": EK.EKSpanThisEvent,
-    "future-events": EK.EKSpanFutureEvents,
-}
+_SPANS = (
+    {
+        "this-event": EK.EKSpanThisEvent,
+        "future-events": EK.EKSpanFutureEvents,
+    }
+    if EK is not None
+    else {}
+)
 
 
 def _resolve_span(e, span: Span | None, *, adds_recurrence: bool = False) -> int:
@@ -496,15 +509,29 @@ class CalendarAdapter:
         self, ident: str, data: CalendarEventData, span: Span | None = None
     ) -> Pointer:
         def work():
+            nonlocal data
             s = store()
             e = _resolve_event(s, ident)
+            # 'none' (#579): EventKit cannot stop a series through an occurrence
+            # edit, so refuse before any setter; a single event already has no rule.
+            if data.recurrence is CLEAR_RECURRENCE:
+                if e.recurrenceRules():
+                    # a refused write, not a missing span: a span on THIS call
+                    # would not help, so the kind must not say span_required
+                    raise WriteRefused(
+                        "update_event cannot stop a repeating event, so "
+                        "recurrence='none' is refused. To end the series, call "
+                        "delete_event with span='future-events': it deletes this "
+                        "occurrence and all later ones. No change was made."
+                    )
+                data = replace(data, recurrence=None)
             # Resolve span BEFORE saving: a recurring target with no span raises here,
             # so no write happens (#51). Checks the ORIGINAL event's rules, so a
             # single→recurring conversion is series-defining, not ambiguous.
             ek_span = _resolve_span(
                 e, span, adds_recurrence=data.recurrence is not None
             )
-            _apply_event(s, e, data)
+            _apply_event(s, e, data, update=True)
             cal_id = container_id(e)  # read before save (#55 review)
             ok, err = s.saveEvent_span_commit_error_(e, ek_span, True, None)
             if not ok:

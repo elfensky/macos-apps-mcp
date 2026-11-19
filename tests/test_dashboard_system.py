@@ -62,6 +62,7 @@ def make_report(ids="default", **surface_overrides):
         "calendar": ("eventkit", True, "full_access"),
         "reminders": ("eventkit", True, "full_access"),
         "full_disk_access": ("fda", True, "ok"),
+        "accessibility": ("accessibility", True, "granted"),
     }
     surfaces.update(surface_overrides)
     return {
@@ -263,6 +264,57 @@ def banner(text):
     return (html.unescape(m.group(1)), html.unescape(m.group(2))) if m else None
 
 
+AX_OFF = doctor._AX_REMEDIATION  # the real text: its "&" proves the row escapes
+
+
+def ax_report(status, ok, remediation=None):
+    report = make_report(make_ids(skip=()))
+    s = {
+        "surface": "accessibility",
+        "kind": "accessibility",
+        "ok": ok,
+        "status": status,
+    }
+    if remediation:
+        s["remediation"] = remediation
+    report["surfaces"].append(s)
+    return report
+
+
+def test_health_shows_the_accessibility_grant(doc, monkeypatch):
+    titles_ = ["Full Disk Access", "EventKit"]
+    doc.report = ax_report("granted", True)
+    text = get("/health").text
+    row = row_of(text, "Accessibility")
+    assert "dot ok" in row and ">Granted<" in row and "Open Settings" not in row
+    # right after Full Disk Access, before EventKit
+    order = titles(text)
+    assert order.index("Accessibility") == order.index(titles_[0]) + 1
+
+    doc.report = ax_report("not_granted", False, AX_OFF)
+    row = row_of(get("/health").text, "Accessibility")
+    assert "dot bad" in row and html.escape(AX_OFF, quote=False) in row
+    assert f'href="{SETTINGS}Privacy_Accessibility">Open Settings</a>' in row
+
+    only_active(monkeypatch, ["photos"])  # the Mail adapter is off
+    row = row_of(get("/health").text, "Accessibility")
+    assert "does not matter" in row and "Open Settings" not in row
+    assert "dot bad" not in row and "dot ok" not in row
+
+    only_active(monkeypatch, EVERYONE)
+    doc.report = ax_report("probe_error", None)
+    row = row_of(get("/health").text, "Accessibility")
+    assert "Could not be read" in row and "Open Settings" not in row
+    assert "dot bad" not in row and "dot ok" not in row
+
+
+def test_accessibility_row_raises_no_banner(doc):
+    doc.report = ax_report("not_granted", False, AX_OFF)
+    text = get("/health").text
+    assert "banner bad" not in text
+    assert '<span class="dot ok"></span>' in nav_health(get("/usage").text)
+
+
 def test_every_banner_glyph_is_hidden_from_screen_readers(doc):
     sources = "".join(
         p.read_text() for p in Path(dashboard.__file__).parent.glob("*.py")
@@ -333,6 +385,76 @@ def test_automation_row_not_asked_has_an_accent_dot_and_a_settings_link(doc):
     row = row_of(get("/health").text, "Automation → Music")  # no TCC row for Music
     assert "dot warn" in row and "not asked" in row.lower()
     assert f'href="{SETTINGS}Privacy_Automation">Open Settings</a>' in row
+
+
+def live_report(ids=None, **status):
+    """A report whose Automation surfaces come from the live check (#455): every
+    adapter ``granted`` except the ones named in ``status`` (a status string)."""
+    names = ("mail", "notes", "contacts", "safari", "messages", "music")
+    kw = {}
+    for n in names:
+        st = status.get(n, "granted")
+        ok = {"granted": True, "denied": False}.get(st)
+        kw[n] = ("automation", ok, st)
+    return make_report(ids, **kw)
+
+
+def test_live_granted_automation_needs_no_tcc_row(doc):
+    doc.report = live_report()
+    doc.reasons = {"user": "absent", "system": None}  # macOS 27: no per-user TCC.db
+    text = get("/health").text
+    assert "Could not be read" not in text and "Automation →" not in text
+
+
+def test_live_denied_automation_is_a_row_and_a_banner_entry(doc):
+    doc.report = live_report(notes="denied")
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    row = row_of(text, "Automation → Notes")
+    assert "dot bad" in row and ">Denied<" in row and "Open Settings" in row
+    assert banner(text)[1].startswith("Notes (denied).")
+    assert health.last_dot() == "bad"
+
+
+def test_live_not_asked_automation_has_an_accent_dot(doc):
+    doc.report = live_report(music="not_asked")
+    doc.reasons = {"user": "absent", "system": None}
+    row = row_of(get("/health").text, "Automation → Music")
+    assert "dot warn" in row and ">Not asked yet" in row
+    # PM-13: a never-asked app has no entry in the Automation pane to switch
+    assert "doctor(request=True)" in sub_of(get("/health").text, "Automation → Music")
+
+
+def test_not_running_automation_says_the_state_cannot_be_told(doc, monkeypatch):
+    doc.report = live_report(
+        **dict.fromkeys(
+            ("notes", "contacts", "safari", "messages", "music"), "not_running"
+        )
+    )
+    doc.reasons = {"user": "absent", "system": None}
+    text = get("/health").text
+    assert sub_of(text, "Automation") == (
+        "Cannot be told until the app is running: Contacts, Messages, Music, Notes, "
+        "Safari. Open the app, then reload this page."
+    )
+    assert "Open Settings" not in row_of(text, "Automation")
+    assert "Could not be read" not in text and "Automation →" not in text
+    # PM-11: an OFF adapter is left out of the grey row
+    only_active(monkeypatch, [a for a in EVERYONE if a != "music"])
+    assert "Music" not in sub_of(get("/health").text, "Automation")
+
+
+def test_tcc_rows_still_answer_when_the_live_check_cannot(doc):
+    # (a) the live check cannot tell: the readable TCC map answers, so no row
+    doc.report = live_report(
+        make_ids(skip=()), notes="not_running", contacts="probe_error"
+    )
+    text = get("/health").text
+    assert "Automation" not in titles(text) and "Automation →" not in text
+    # (b) a live granted beats a TCC denial (O1): no row and no banner
+    doc.report = live_report(make_ids(skip=(), denied=("notes",)))
+    text = get("/health").text
+    assert "Automation → Notes" not in text and "banner bad" not in text
 
 
 def test_an_off_adapter_raises_no_banner_and_says_it_does_not_matter(doc, monkeypatch):
@@ -605,6 +727,7 @@ def test_an_absent_user_grant_db_is_a_note_not_a_warning(doc):
     text = get("/health").text
     assert "did not answer" not in text and 'class="banner warn"' not in text
     assert "keeps no per-user grant database" in text
+    assert "an app that is not running cannot be checked" in text
     assert "not asked" not in text
 
 

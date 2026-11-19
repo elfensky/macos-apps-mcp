@@ -12,7 +12,11 @@ Two separate leaks, isolated two different ways — the difference matters:
   agree on one path — see the comment on the constant). So they are isolated by
   monkeypatching the constants themselves, NOT by moving XDG_STATE_HOME. Without this
   a test run could read/write Andrei's live outbound-send toggle or adapter deny-list
-  (D-17).
+  (D-17). ``deploy._CLI_LINK`` and ``deploy._SETUP_PENDING_FILE`` are home paths
+  too, patched the same way so no test touches the real ``~/.local``.
+* The daemon socket moves through its own override, ``MACOS_APPS_MCP_SOCKET``: a test
+  that reaches ``uninstall_agent()`` unlinks ``socket_path()``, and the live daemon's
+  socket once went with it (clients could no longer connect until a restart).
 
 Session-scoped so both apply before any test (including collection-time fixtures)
 touches either; ``pytest.MonkeyPatch`` (not the function-scoped ``monkeypatch``
@@ -21,12 +25,19 @@ per session.
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import deploy, doctor, runtime
-from macos_apps_mcp.adapters import mail_addressing, mail_ids, mail_index
+from macos_apps_mcp import deploy, doctor, eventkit, runtime
+from macos_apps_mcp.adapters import (
+    mail_addressing,
+    mail_ids,
+    mail_index,
+    mail_reply_cleanup,
+)
+from macos_apps_mcp.errors import NativeError
 from tests.envelope import SCHEMA, Envelope, seed_base
 
 
@@ -35,9 +46,12 @@ def _isolated_state(tmp_path_factory):
     state_home = tmp_path_factory.mktemp("xdg-state-home")
     mp = pytest.MonkeyPatch()
     mp.setenv("XDG_STATE_HOME", str(state_home))
+    mp.setenv("MACOS_APPS_MCP_SOCKET", str(state_home / "daemon" / "mcp.sock"))
     mp.setattr(deploy, "_ALLOW_SEND_FILE", state_home / "allow_send")
     mp.setattr(deploy, "_ADAPTERS_OFF_FILE", state_home / "adapters_off")
     mp.setattr(deploy, "_DASHBOARD_KEY_FILE", state_home / "daemon" / "dashboard_key")
+    mp.setattr(deploy, "_CLI_LINK", state_home / "bin" / "macos-apps-mcp")
+    mp.setattr(deploy, "_SETUP_PENDING_FILE", state_home / "setup_pending")
     tcc_user = state_home / "absent-tcc-user" / "TCC.db"
     tcc_system = state_home / "absent-tcc-system" / "TCC.db"
     mp.setattr(deploy, "_TCC_DB", tcc_user)
@@ -195,8 +209,11 @@ def blank_envelope(tmp_path, monkeypatch, envelope_mode):
     for a test that needs exact control over row counts (an arithmetic assertion,
     or a specific url list) that layering onto the canonical seed would shift.
     Still parametrized over ``envelope_mode``, so these queries get real
-    native+sidecar coverage too."""
-    db = tmp_path / "Envelope Index"
+    native+sidecar coverage too. The file sits where Mail keeps it
+    (``<mail root>/V10/MailData/Envelope Index``), so the ``V10`` folder beside it is
+    the tree of the ``.emlx`` files this index describes."""
+    db = tmp_path / "V10" / "MailData" / "Envelope Index"
+    db.parent.mkdir(parents=True)
     conn = sqlite3.connect(db)
     conn.executescript(SCHEMA)
     conn.commit()
@@ -212,8 +229,10 @@ def _no_real_osascript(request, monkeypatch):
     subprocess against a live app (#176, GATE-01).
 
     Covers every seam name — ``run_osascript``, ``body_file``, ``tracked_run``,
-    ``photos_db`` — and only reaches code that calls each one qualified
-    (``runtime.<seam>``); adapters still holding a module-global copy are
+    ``photos_db``, ``automation_permission``, ``accessibility_trusted``,
+    ``compose_insert`` (the last two drive AX, CoreGraphics and the general pasteboard
+    for the Mail reply flow, #348) — and only reaches code that calls each
+    one qualified (``runtime.<seam>``); adapters still holding a module-global copy are
     unaffected. A test's own
     ``monkeypatch.setattr(runtime, <seam>, ...)`` simply overrides this fixture (last
     write wins), and a seam's own self-tests bind the real function at test-module
@@ -224,7 +243,15 @@ def _no_real_osascript(request, monkeypatch):
     if "integration" in request.keywords:
         return
 
-    for seam in ("run_osascript", "body_file", "tracked_run", "photos_db"):
+    for seam in (
+        "run_osascript",
+        "body_file",
+        "tracked_run",
+        "photos_db",
+        "automation_permission",
+        "accessibility_trusted",
+        "compose_insert",
+    ):
 
         def _refuse(*_args, _seam=seam, **_kwargs):
             raise AssertionError(
@@ -233,3 +260,35 @@ def _no_real_osascript(request, monkeypatch):
             )
 
         monkeypatch.setattr(runtime, seam, _refuse)
+
+    # eventkit.store() creates the process's real EKEventStore (#581). The Calendar
+    # and Reminders adapters hold by-name copies (``from ..eventkit import store``),
+    # so refuse every module attribute that IS the real function, not only the source.
+    def _no_store(*_args, **_kwargs):
+        raise AssertionError(
+            "a unit test reached eventkit.store (a real EKEventStore) — fake it with "
+            "monkeypatch.setattr(<module>, 'store', lambda: <fake store>)"
+        )
+
+    # Package modules only: a test module's own by-name import stays real, the
+    # convention the runtime seams use for their self-tests.
+    real_store = eventkit.store
+    for name, mod in list(sys.modules.items()):
+        if name.startswith("macos_apps_mcp") and getattr(mod, "store", 0) is real_store:
+            monkeypatch.setattr(mod, "store", _no_store)
+
+    # The index read of the reply sweep (#348) reads the user's real Envelope Index
+    # unless a test supplies its own rows: refuse like an unreadable index, which the
+    # flow tolerates (no sweep) instead of failing a test that never asked for one.
+    def _no_index(*_args, **_kwargs):
+        raise NativeError("the Envelope Index is not readable in a unit test")
+
+    monkeypatch.setattr(mail_reply_cleanup, "_read", _no_index)
+
+    # A pure formatter, not a native door to refuse: a deterministic stand-in so a
+    # quote test needs no Foundation (tests/test_runtime.py binds the real one).
+    monkeypatch.setattr(
+        runtime,
+        "mail_attribution_stamp",
+        lambda when: (f"{when.day} {when:%b} {when.year}", f"{when:%H:%M}"),
+    )

@@ -20,14 +20,21 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
+import sys
 from pathlib import Path
 
-import EventKit as EK
+# Off macOS the server must still import and list its tools; diagnose() refuses
+# through runtime.require_macos().
+if sys.platform == "darwin":
+    import EventKit as EK
+else:
+    EK = None
 
-from . import deploy, registry, runtime, tiers
+from . import audit, deploy, registry, runtime, tiers
 from .adapters import mail_ids, mail_index
-from .errors import PRIVACY_PANE, NativeError, SchemaDrift
+from .errors import ACCESSIBILITY_PANE, PRIVACY_PANE, NativeError, SchemaDrift
 from .eventkit import request_access_each
 from .runtime import app_process_info, run_native
 
@@ -94,8 +101,12 @@ _EK_STATUS = {
     4: "write_only",
 }
 _EK_ENTITIES = (
-    ("calendar", EK.EKEntityTypeEvent, "Calendars"),
-    ("reminders", EK.EKEntityTypeReminder, "Reminders"),
+    (
+        ("calendar", EK.EKEntityTypeEvent, "Calendars"),
+        ("reminders", EK.EKEntityTypeReminder, "Reminders"),
+    )
+    if EK is not None
+    else ()
 )
 
 
@@ -166,6 +177,63 @@ def _process_line(app: str) -> str:
     )
 
 
+# Must equal the EVENTS targets of dashboard/grants.py ADAPTER_GRANTS, which doctor may
+# not import (pinned by test_automation_bundle_ids_match_the_grant_map).
+_AUTOMATION_BUNDLES = {
+    "mail": "com.apple.mail",
+    "notes": "com.apple.Notes",
+    "contacts": "com.apple.AddressBook",
+    "safari": "com.apple.Safari",
+    "messages": "com.apple.MobileSMS",
+    "music": "com.apple.Music",
+}
+
+# runtime.automation_permission OSStatus -> (status, ok); anything else is probe_error.
+_AE_STATUS = {
+    0: ("granted", True),
+    -1743: ("denied", False),
+    -1744: ("not_asked", None),
+    -600: ("not_running", None),
+}
+_AE_REMEDIATION = {
+    "denied": (
+        f"Automation for {{app}} is off: switch it on in {PRIVACY_PANE} → Automation."
+    ),
+    "not_asked": (
+        "{app} has not been asked yet: run doctor(request=True) with someone at the "
+        "screen (one-time dialog)."
+    ),
+    "not_running": (
+        "{app} is not running, so its Automation state cannot be told yet: open "
+        "{app}, then run doctor again."
+    ),
+    "probe_error": (
+        "Automation check returned OSStatus {rc}; run doctor(request=True) to probe "
+        "by Apple Event."
+    ),
+}
+
+
+def _live_automation(name: str, app: str) -> dict:
+    """One Automation surface from the live, non-prompting check (no Apple Event)."""
+    try:
+        rc = runtime.automation_permission(_AUTOMATION_BUNDLES[name])
+    except (OSError, AttributeError) as e:
+        # A missing framework or symbol is reported, never raised — diagnosis is the
+        # one place a swallowed error is correct (module docstring).
+        return _surface(
+            name,
+            "automation",
+            None,
+            "probe_error",
+            f"Automation check failed ({type(e).__name__}); run "
+            "doctor(request=True) to probe by Apple Event.",
+        )
+    status, ok = _AE_STATUS.get(rc, ("probe_error", None))
+    remediation = _AE_REMEDIATION.get(status, "").format(app=app, rc=rc)
+    return _surface(name, "automation", ok, status, remediation or None)
+
+
 def _automation_surfaces(request: bool) -> list[dict]:
     out = []
     for app in _AUTOMATION_APPS:
@@ -174,16 +242,7 @@ def _automation_surfaces(request: bool) -> list[dict]:
             out.append(_surface(name, "automation", None, "adapter_off"))
             continue  # D-04: no Apple Event, no process line
         if not request:
-            out.append(
-                _surface(
-                    name,
-                    "automation",
-                    None,
-                    "unprobed",
-                    f"Run doctor(request=True) to probe Automation consent for {app} "
-                    "(a never-authorized app may show a one-time dialog).",
-                )
-            )
+            out.append(_live_automation(name, app))
         else:
             try:
                 runtime.run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
@@ -240,6 +299,37 @@ def _fda_surface() -> dict:
     )
 
 
+# No restart clause: the seam reads the switch in a fresh process on every call
+# (05.2-13 G2).
+_AX_REMEDIATION = (
+    "Accessibility is off for macos-apps-mcp, so mail_reply and reply_all refuse: "
+    f"switch it on in {ACCESSIBILITY_PANE}."
+)
+
+
+def _accessibility_surface() -> dict:
+    """The Accessibility grant the Mail reply tools need (FIX-16, #348). Only the plain
+    trust read through the seam: it never prompts and sends no Apple Event (D-14)."""
+    if not tiers.adapter_enabled("mail"):
+        return _surface("accessibility", "accessibility", None, "adapter_off")
+    try:
+        trusted = runtime.accessibility_trusted()
+    except Exception as e:  # PyObjC fails with ImportError/KeyError too: report it
+        return _surface(
+            "accessibility",
+            "accessibility",
+            None,
+            "probe_error",
+            f"Accessibility check failed ({type(e).__name__}); mail_reply and "
+            "reply_all may refuse.",
+        )
+    if trusted:
+        return _surface("accessibility", "accessibility", True, "granted")
+    return _surface(
+        "accessibility", "accessibility", False, "not_granted", _AX_REMEDIATION
+    )
+
+
 def _mail_index_surface() -> dict:
     """The Envelope Index schema (#199) — read-only and prompt-free, like the sqlite
     reads it stands for. A pre-Tahoe macOS reports ok=False carrying the platform-
@@ -287,12 +377,7 @@ def _responsible_process() -> str:
     return f"{_process_name(os.getpid())} (this), launched by {_process_name(ppid)}"
 
 
-def version(dist: str = "macos-apps-mcp") -> str:
-    """The version of the code actually SERVING this call. The daemon is a separate
-    long-lived process from the repo you edit — it sat three releases behind for weeks
-    with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
-    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
-    reads it too (#430 IN-02): one lookup, one fallback."""
+def _read_version(dist: str) -> str:
     from importlib.metadata import PackageNotFoundError
     from importlib.metadata import version as dist_version
 
@@ -302,8 +387,34 @@ def version(dist: str = "macos-apps-mcp") -> str:
         return "unknown"
 
 
+# #574: read once at import (process start). A bundle replaced on disk under a daemon
+# that was not restarted must not change what the running code reports.
+_SERVING_VERSIONS = {d: _read_version(d) for d in ("macos-apps-mcp", "mcp", "fastmcp")}
+
+
+def version(dist: str = "macos-apps-mcp") -> str:
+    """The version of the code actually SERVING this call. The daemon is a separate
+    long-lived process from the repo you edit — it sat three releases behind for weeks
+    with nothing surfacing the gap. Rebuild + `launchctl kickstart -k` when this trails
+    the repo. ``libs`` reuses it for the bundled libraries, and the dashboard footer
+    reads it too (#430 IN-02): one lookup, one fallback."""
+    if dist in _SERVING_VERSIONS:
+        return _SERVING_VERSIONS[dist]
+    return _read_version(dist)
+
+
 # Baked into the installed package by scripts/build_app.sh — absent in a dev checkout.
 _BUILD_STAMP_PATH = Path(__file__).with_name("build_stamp")
+
+
+def _read_build_stamp() -> str:
+    try:
+        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+_SERVING_BUILD = _read_build_stamp()  # #574: read once at import, like the versions
 
 
 def build_stamp() -> str:
@@ -311,10 +422,7 @@ def build_stamp() -> str:
     same-version rebuild (every 0.x.y re-deploy sits in that gap). The stamp is
     `<short-sha> <utc-build-time>`, written by scripts/build_app.sh; a dev checkout
     has no stamp file and honestly reports "dev"."""
-    try:
-        return _BUILD_STAMP_PATH.read_text().strip() or "dev"
-    except OSError:
-        return "dev"
+    return _SERVING_BUILD
 
 
 def _outbound_state() -> dict[str, list[str]]:
@@ -341,17 +449,43 @@ def _tcc_note(reasons: dict[str, str | None]) -> str:
     return f"TCC.db unreadable ({detail}) — not an FDA denial; see the reason codes."
 
 
+def _state_directory_status() -> str:
+    """Inspect without repair, including a repair made before doctor (#540)."""
+    try:
+        info = audit.state_path().lstat()
+    except FileNotFoundError:
+        return "absent; created private on use"
+    except OSError as e:
+        reason = e.strerror or type(e).__name__
+        return f"unverified: {reason}; check state directory access"
+    if not stat.S_ISDIR(info.st_mode):
+        return "unsafe path; state directory must be a real directory, not a symlink"
+    if info.st_uid != os.geteuid():
+        return "unsafe owner; state directory must belong to this account"
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & 0o077:
+        return f"exposed ({mode:04o}); restrict the state directory to 0700"
+    if (old := audit.state_dir_repaired_mode()) is not None:
+        return f"private ({mode:04o}); repaired from {old:04o} by this process"
+    return f"private ({mode:04o})"
+
+
 def diagnose(request: bool = False) -> dict:
     """Per-surface macOS permission + health report with exact remediation (#48).
 
     ``request=False`` (default) is read-only and prompt-free. ``request=True`` also
-    triggers the EventKit consent prompt and runs the Automation probes.
+    triggers the EventKit consent prompt and runs the Automation probes. Refuses off
+    macOS with ``UnsupportedPlatform``.
     """
+    runtime.require_macos()
+    # Read before other probes: they can call state_dir() and repair it.
+    state_storage = _state_directory_status()
     surfaces = [
         *_eventkit_surfaces(request),
         *_automation_surfaces(request),
         _shortcuts_surface(),
         _fda_surface(),
+        _accessibility_surface(),
         _mail_index_surface(),
     ]
     # An OFF adapter's surface is not probed, so it is neither a need nor unverified.
@@ -363,15 +497,13 @@ def diagnose(request: bool = False) -> dict:
             f"{len(needs)} of {len(probed)} surfaces need attention: "
             + ", ".join(needs)
         )
-    elif request:
+    else:
         # An unprobeable surface (ok=None) must not be counted as OK.
         summary = (
             f"all {len(probed)} surfaces OK"
             if not unknown
             else f"no denied surfaces; {len(unknown)} unverified: " + ", ".join(unknown)
         )
-    else:
-        summary = "no denied surfaces; Automation unprobed — run doctor(request=True)"
 
     grants = deploy.grant_report()
     ids = grants["identities"]
@@ -382,6 +514,7 @@ def diagnose(request: bool = False) -> dict:
     ob = _outbound_state()
     outbound = ob["registered"]  # what this process actually serves, not the config
     deployment = {
+        "state_directory": state_storage,
         # argv, not the env var alone — see deploy.is_daemon_role()
         "mode": "daemon" if deploy.is_daemon_role() else "stdio",
         "agent": agent,
@@ -400,11 +533,10 @@ def diagnose(request: bool = False) -> dict:
         "note": (
             _tcc_note(grants["reasons"])
             if ids is None
-            else "grants listed per identity; the daemon identity is "
-            "ren.lav.macos-apps-mcp. A limited(3) grant (partial access) reports "
-            'granted=False plus status="limited" — not a plain denial. A '
-            'reason="prompt-timeout" entry is a consent prompt nobody answered, which '
-            "macOS keeps as a denial (#318): run its `remediation` command, then "
+            else "Daemon identity: ren.lav.macos-apps-mcp. A limited(3) grant has "
+            'granted=False and status="limited" (partial access). A '
+            'reason="prompt-timeout" entry is an unanswered consent prompt, stored '
+            "as denial (#318). Run its `remediation` command, then "
             "doctor(request=True) with someone at the screen."
         ),
     }
@@ -494,8 +626,9 @@ def diagnose(request: bool = False) -> dict:
         "libs": {name: version(name) for name in ("mcp", "fastmcp")},
         "responsible_process": _responsible_process(),
         "note": (
-            "TCC attributes permissions to the process that launched macos-apps-mcp "
-            "(above). Grant each permission to THAT app, then restart macos-apps-mcp."
+            "Grant each permission to the launching app (above). Automation and "
+            "Accessibility need no restart; Full Disk Access, Calendars and Reminders "
+            "may need one."
         ),
         "probed_automation": request,
         "summary": summary,

@@ -17,6 +17,7 @@ import pytest
 from macos_apps_mcp import audit, cli, daemon, deploy, doctor, runtime
 from macos_apps_mcp import server as _server  # noqa: F401 — fills registry.TOOLS
 from tests._dashboard import FORM, KEY, ORIGIN, TOKEN, build, get, request
+from tests._fakes import fake_automation
 
 SECURITY_HEADERS = (
     "content-security-policy",
@@ -214,6 +215,23 @@ def test_the_link_sets_the_cookie_and_redirects_home():
     _has_headers(r)
 
 
+@pytest.mark.parametrize(
+    ("to", "where"),
+    [
+        ("/health", "/health"),
+        ("%2F%2Fevil.example", "/"),  # protocol-relative: another site
+        ("https://evil.example", "/"),
+        ("/health/../x", "/"),
+        ("/Health", "/"),
+        ("", "/"),
+    ],
+)
+def test_the_link_follows_only_a_one_segment_page(to, where):
+    r = get(f"/key?k={KEY}&to={to}", cookie=False)
+    assert r.status_code == 303 and r.headers["location"] == where
+    assert r.headers.get_list("set-cookie") == [LINK_COOKIE]
+
+
 @pytest.mark.parametrize("path", ["/key", "/key?k=", "/key?k=wrong", f"/key?x={KEY}"])
 def test_the_link_with_a_wrong_key_is_refused_without_a_cookie(path):
     r = get(path, cookie=False)
@@ -308,6 +326,16 @@ def test_dashboard_role_prints_the_link_and_opens_it(
     assert (keyfile.read_bytes(), keyfile.stat().st_mtime_ns) == before
 
 
+def test_dashboard_role_names_a_page(keyfile, opener, capsys):
+    keyfile.parent.mkdir()
+    keyfile.write_text(KEY)
+    deploy.dashboard(["health"])
+    assert opener == [LINK + "&to=/health"]
+    assert get(f"/key?k={KEY}&to=/health", cookie=False).headers["location"] == (
+        "/health"
+    )
+
+
 @pytest.mark.parametrize("content", [None, "short"])
 def test_dashboard_role_without_a_usable_key_exits_2(keyfile, opener, capsys, content):
     if content is not None:
@@ -346,6 +374,7 @@ def test_cli_dispatches_the_dashboard_role(monkeypatch):
 
 
 def _doctor(monkeypatch):
+    fake_automation(monkeypatch)
     monkeypatch.setattr(
         deploy,
         "grant_report",

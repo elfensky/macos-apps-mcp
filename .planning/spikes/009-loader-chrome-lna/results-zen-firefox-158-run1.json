@@ -1,0 +1,78 @@
+{
+  "at": "2026-10-25T21:47:54.146Z",
+  "secure": true,
+  "key_present": true,
+  "perm_before": {
+    "loopback": "prompt",
+    "local": "prompt"
+  },
+  "steps": [
+    {
+      "id": "011-live-nocors",
+      "ok": true,
+      "status": 0,
+      "type": "opaque",
+      "error": null,
+      "message": null,
+      "ms": 3798
+    },
+    {
+      "id": "011-live-cors",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "NetworkError when attempting to fetch resource.",
+      "ms": 6
+    },
+    {
+      "id": "009-paired-get",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 17
+    },
+    {
+      "id": "009-paired-nokey",
+      "ok": true,
+      "status": 401,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 19
+    },
+    {
+      "id": "009-paired-post",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 14
+    },
+    {
+      "id": "009-paired-tas",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 8
+    },
+    {
+      "id": "009-unpaired-get",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "NetworkError when attempting to fetch resource.",
+      "ms": 4
+    }
+  ],
+  "perm_after": {
+    "loopback": "granted",
+    "local": "prompt"
+  }
+}

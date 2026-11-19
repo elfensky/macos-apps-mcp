@@ -66,6 +66,7 @@ the same statement.
 from __future__ import annotations
 
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import replace
 from datetime import datetime
@@ -73,7 +74,13 @@ from functools import partial
 
 from .. import files, runtime
 from ..contracts import Pointer, read_result
-from ..errors import BatchTooLarge, NativeError, OutputOverflow, WriteRefused
+from ..errors import (
+    AmbiguousTarget,
+    BatchTooLarge,
+    NativeError,
+    OutputOverflow,
+    WriteRefused,
+)
 from ..runtime import log
 from ..text import (
     BODY_HARD_MAX,
@@ -1315,15 +1322,30 @@ class MailAdapter:
         dry_run: bool = True,
     ) -> dict:
         """Reply-all to a message and SEND it. Mail's native reply verb sets the
-        threading headers; ``include_quote`` appends the `On <date>, <sender> wrote:`
-        block, built in Python exactly as ``reply`` builds it. The sending account is
+        threading headers and builds the reply; ``include_quote`` (the default) keeps
+        Mail's OWN quote of the original (quote bar, attribution line, formatting,
+        inline images) and puts the text on top of it through Accessibility (#348,
+        FIX-16, facts §4e). ``include_quote=False`` replaces the whole body with the
+        text, also through Accessibility. The reply opens in a Mail window that comes
+        to the front for about a second, and the clipboard is borrowed and restored.
+        The message is sent only after the text is confirmed in place; without
+        Accessibility, or when the reply window, the text or Mail's quote cannot be
+        confirmed, the call raises (``AccessibilityDenied`` / ``ComposeRefused``) and
+        sends nothing: there is no plain-text fallback. The sending account is
         inherited from the original message — the correct identity for a thread.
+        After the send Mail can leave an autosaved copy in Drafts; the call waits
+        until 45 s after the window opened and deletes that copy only when it is
+        provably its own (the result's ``drafts_copy`` says what it found; ``sent``
+        stays true whatever it finds).
 
-        ``dry_run=True`` (default) reads the original's ACTUAL to/cc recipients and
-        reports them — not merely what the caller typed — because reply-all's recipient
-        set is exactly the surprising one (a long cc list). That read is safe where
-        CONSTRUCTING a message is not; the rule and its rationale live once at
-        ``mail_outgoing``'s module docstring (rule 2), not here.
+        ``dry_run=True`` (default) reads the original and reports the reply's own ``to``
+        (the sender, or its Reply-To) and ``cc`` (everyone else on the original minus
+        this account's addresses) — the set Mail's reply-all reaches, not the original's
+        header (#516) — because that set is exactly the surprising one (a long cc list).
+        The lists are computed; Mail's reply-all decides delivery. ``from`` reads "(the
+        account that holds the original)": Mail picks the sending address itself. That
+        read is safe where CONSTRUCTING a message is not; the rule and its rationale
+        live once at ``mail_outgoing``'s module docstring (rule 2), not here.
 
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
         produced ``message_id``, verbatim.
@@ -1377,14 +1399,26 @@ class MailAdapter:
         """Reply to a message by its RFC822 message-id: opens a threaded draft
         for the human to review/send — NEVER sends. Uses Mail's native reply verb so
         In-Reply-To/References are set by Mail (real Gmail/Outlook threading).
-        include_quote appends `On <date>, <sender> wrote:` + the `> `-quoted original.
-        Keystroke-free (#46); atomic (#44). Returns the same locator dict as
+
+        ``include_quote`` (the default) keeps Mail's OWN quote of the original (quote
+        bar, attribution line, formatting, inline images) and puts the text on top of
+        it through Accessibility (#348, FIX-16, facts §4e); ``include_quote=False``
+        replaces the whole body with the text, also through Accessibility. Accessibility
+        must be on for macos-apps-mcp; Mail comes to the front for about a second and
+        the clipboard is borrowed and restored. Without Accessibility, or when the
+        reply window, the text or Mail's quote cannot be confirmed, the call raises
+        (``AccessibilityDenied`` / ``ComposeRefused``): there is no plain-text
+        fallback. It leaves no draft only when the error says "nothing was created": a
+        refusal after the window opened discards the reply and deletes a Drafts copy
+        that is provably its own, and otherwise reports where a copy may be (facts
+        §4e `Refusal cleanup`). Atomic (#44). Returns the same locator dict as
         create_draft — save it to Drafts and it gets a stable message-id, addressable
         via drafts()/delete_draft().
 
         ``mailbox`` is required (#146): the ``folder`` value from the search result that
-        produced ``message_id``, verbatim. It scopes BOTH native calls — the quote read
-        and the draft build — so a filed original can't reply with an empty quote."""
+        produced ``message_id``, verbatim. It scopes every native call of the flow — the
+        quote-tail read, the reply and the cleanup — so a filed original can't reply
+        against the wrong mailbox."""
         return mail_drafts.reply(
             message_id, mailbox, reply_body, include_quote=include_quote
         )
@@ -1656,7 +1690,7 @@ class MailAdapter:
             # Message-ID below.
             statuses = _parse_statuses(raw)
             after = _counts(dst)
-            result: dict[str, str] = {}
+            result: dict[str, str | mail_recover.Outcome] = {}
             for mid in ids:
                 copy_ids = copies.get(mid, [])
                 if not copy_ids:
@@ -1667,9 +1701,10 @@ class MailAdapter:
                     result[mid] = (
                         "ok"
                         if after[mid] > before[mid]
-                        else (
+                        else mail_recover.Outcome(  # every copy left (#578)
                             "ERROR move returned cleanly but the message is not "
-                            "in the destination"
+                            "in the destination",
+                            mail_recover.LEFT,
                         )
                     )
                 elif all(o == "not-in-source" for o in outcomes):
@@ -1680,7 +1715,11 @@ class MailAdapter:
                     moved_n = sum(1 for o in outcomes if o == "moved")
                     if errors:
                         result[mid] = (
-                            f"{errors[0]} ({moved_n} of {len(outcomes)} copies moved)"
+                            mail_recover.Outcome(
+                                f"{errors[0]} ({moved_n} of {len(outcomes)} "
+                                "copies moved)",
+                                mail_recover.LEFT,
+                            )
                             if moved_n > 0
                             else errors[0]
                         )
@@ -1732,6 +1771,9 @@ class MailAdapter:
 
         A Gmail label folder as ``mailbox`` is refused (``WriteRefused``) before any
         native call, dry runs included (#287).
+        Multiple distinct Trash candidates are refused before backup or native
+        access, including previews (#556). Mail's own delete chooses the real Trash;
+        this selector supplies the receipt, verification and already-in-Trash guard.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -1788,7 +1830,7 @@ class MailAdapter:
             # Message-ID below.
             statuses = _parse_statuses(raw)
             after = _counts(dst)
-            result: dict[str, str] = {}
+            result: dict[str, str | mail_recover.Outcome] = {}
             for mid in ids:
                 copy_ids = copies.get(mid, [])
                 if not copy_ids:
@@ -1814,7 +1856,11 @@ class MailAdapter:
                     acted_n = sum(1 for o in outcomes if o in ("deleted", "gone"))
                     if errors:
                         result[mid] = (
-                            f"{errors[0]} ({acted_n} of {len(outcomes)} copies deleted)"
+                            mail_recover.Outcome(
+                                f"{errors[0]} ({acted_n} of {len(outcomes)} "
+                                "copies deleted)",
+                                mail_recover.LEFT,
+                            )
                             if acted_n > 0
                             else errors[0]
                         )
@@ -1911,6 +1957,8 @@ class MailAdapter:
         it can no longer report "planned" for ids nobody checked, the same preflight
         ``move_mail``/``trash_mail`` get. The CLI (#140/#153) only ever calls this with
         ``dry_run=False``, so that caller's behaviour is unchanged.
+        Ambiguous Trash candidates refuse before backup or native access, including
+        previews (#556); the CLI preflights every planned account before any batch.
         """
         mids = _split_ids(ids)
         mail_recover.check_batch(mids)
@@ -1942,9 +1990,16 @@ class MailAdapter:
                 )
             )
             # "ok 3" carries how many copies went to Trash; the plane's success test is
-            # the bare "ok", so normalise while keeping the count in the log line.
+            # the bare "ok", so normalise while keeping the count in the log line. Too
+            # many survivors means some losers may already be in Trash (#578).
             return {
-                mid: ("ok" if status.startswith("ok") else status)
+                mid: (
+                    "ok"
+                    if status.startswith("ok")
+                    else mail_recover.Outcome(status, "unknown")
+                    if status.startswith("ERROR expected 1 copy to survive")
+                    else status
+                )
                 for mid, status in statuses.items()
             }
 
@@ -1978,6 +2033,10 @@ class MailAdapter:
         a label is proven (#287), and a unified name cannot be a move source (#291). The
         error names the source folder and how to restore by hand.
 
+        Trash and dedupe receipts also require a unique current Trash whose decoded
+        path equals the recorded destination (#556). The recorded URL is never
+        replaced. Some old receipts therefore require recovery by hand.
+
         ponytail: every receipt today comes from ``move_mail``, which takes ONE source
         mailbox, so a receipt has exactly one source and the undo is one move. Group by
         ``Target.folder`` here if an op ever gathers targets from several mailboxes.
@@ -2010,6 +2069,24 @@ class MailAdapter:
                 f"came from {source!r}, and their backed-up bytes are in {backup}. "
                 "Remove the label, or move them back, in Mail by hand. Do not retry."
             )
+        if rec.get("op") in ("trash", "dedupe"):
+            recovery = (
+                f"The messages came from {clean_summary(source)!r}. Find them with "
+                "mail_search, confirm their current location, and restore them in "
+                "Mail by hand."
+            )
+            try:
+                current = mail_index.query_trash_url(mail_index.account_of(dest))
+            except AmbiguousTarget as exc:
+                raise WriteRefused(
+                    f"Cannot undo this receipt. {exc} {recovery}"
+                ) from exc
+            if current is None or mailbox_url.path(current) != mailbox_url.path(dest):
+                raise WriteRefused(
+                    "Cannot undo this receipt: the account's current Trash is absent "
+                    "or differs from the recorded destination. Nothing was changed "
+                    f"by this call. {recovery} Do not retry unchanged."
+                )
         return self.move_mail(
             [t.id for t in targets],
             dest,
@@ -2470,9 +2547,11 @@ class MailAdapter:
 
         Each file is named ``<sanitized-subject-or-id>.eml`` under ``dest_dir`` — inside
         the allowlisted root, derived not concatenated, never overwriting (see
-        ``files``). A message that cannot be located is reported per-id as
-        ``absent`` rather than failing the batch: 62% of local messages are
-        ``.partial``, and a message with no local file has no bytes here to write.
+        ``files``). Every path is checked before the first write, so a collision
+        refuses the whole batch and writes nothing. A message that cannot be located
+        is reported per-id as ``absent`` rather than failing the batch: 62% of local
+        messages are ``.partial``, and a message with no local file has no bytes here
+        to write.
         """
         mids = _split_ids(ids)
         if not mids:
@@ -2486,14 +2565,64 @@ class MailAdapter:
             [mail_recover.Target(id=m, folder="") for m in mids]
         )
         payloads = mail_recover.read_payloads(located)
-        out = []
+        # Plan every write first: one refusal (an existing file, or two ids that derive
+        # one name) leaves nothing written (#399).
+        plan = []
+        seen: dict[str, str] = {}
         for t in located:
             payload = payloads.get(t.id)
             if payload is None:
-                out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
                 continue
             path = files.target_path(dest_dir, f"{t.id}.eml", fallback="message")
-            path.write_bytes(payload)
+            # APFS is case-insensitive and canonically caseless: fold, then decompose
+            key = unicodedata.normalize(
+                "NFD", unicodedata.normalize("NFD", path.name).casefold()
+            )
+            if key in seen:
+                raise WriteRefused(
+                    f"{seen[key]!r} and {t.id!r} both export to {path.name}, which is "
+                    "one file; nothing was written. Export them in separate calls "
+                    "into different dest_dirs. Do not retry the same batch."
+                )
+            seen[key] = t.id
+            plan.append((t, path, payload))
+        written: list[str] = []
+        for _, path, payload in plan:
+            try:
+                # O_EXCL fails on any existing entry, a symlink included, so a file made
+                # after the check is never written through.
+                f = open(path, "xb")  # noqa: SIM115 - the write is a separate try
+            except FileExistsError as e:
+                raise WriteRefused(
+                    f"{files.exists_refusal(path)} Already written by this call: "
+                    f"{', '.join(written) or 'none'}."
+                ) from e
+            except OSError as e:
+                raise WriteRefused(
+                    f"cannot write {path.name} in {path.parent} ({e.strerror}). "
+                    f"Already written by this call: {', '.join(written) or 'none'}. "
+                    "Move those files or choose another dest_dir before a retry."
+                ) from e
+            try:
+                with f:
+                    f.write(payload)
+            except OSError as e:
+                # our O_EXCL create made it, so no partial file may stay
+                path.unlink(missing_ok=True)
+                raise WriteRefused(
+                    f"cannot write {path.name} in {path.parent} ({e.strerror}); the "
+                    f"partial file was removed. Already written by this call: "
+                    f"{', '.join(written) or 'none'}. "
+                    "Move those files or choose another dest_dir before a retry."
+                ) from e
+            written.append(str(path))
+        planned = {t.id: (path, payload) for t, path, payload in plan}
+        out = []
+        for t in located:
+            if t.id not in planned:
+                out.append({"id": t.id, "status": "absent", "fidelity": t.fidelity})
+                continue
+            path, payload = planned[t.id]
             out.append(
                 {
                     "id": t.id,

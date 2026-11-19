@@ -4,20 +4,28 @@ EventKit, osascript, or TCC is touched. One @integration test exercises the real
 
 from __future__ import annotations
 
+import ctypes
 import json
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 import macos_apps_mcp.doctor as doc
 from macos_apps_mcp import runtime
 from macos_apps_mcp.errors import (
+    ACCESSIBILITY_PANE,
     AppNotRunning,
     AutomationDenied,
     FullDiskAccessDenied,
     SchemaDrift,
 )
+from tests._fakes import fake_automation
+
+# Bound at import: the conftest seam lock replaces runtime.automation_permission.
+_REAL_AUTOMATION_PERMISSION = runtime.automation_permission
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +42,7 @@ def _no_live_process_probe(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, "", "")
 
     monkeypatch.setattr(runtime, "tracked_run", _fake_pgrep_or_ps)
+    fake_automation(monkeypatch)
 
 
 def _boom_osascript(*args, **kwargs):
@@ -90,20 +99,209 @@ def test_eventkit_request_routes_request_access_each_through_run_native(monkeypa
 # --- Automation surfaces (prompt-gated) ----------------------------------------------
 
 
-def test_automation_unprobed_when_request_false(monkeypatch):
+_APPS = ["mail", "notes", "contacts", "safari", "messages", "music"]
+
+
+@pytest.mark.parametrize(
+    ("rc", "ok", "status"),
+    [
+        (0, True, "granted"),
+        (-1743, False, "denied"),
+        (-1744, None, "not_asked"),
+        (-600, None, "not_running"),
+        (-1, None, "probe_error"),
+        (42, None, "probe_error"),
+    ],
+)
+def test_automation_live_status_table(monkeypatch, rc, ok, status):
+    fake_automation(monkeypatch, rc)
+    surfaces = doc._automation_surfaces(request=False)
+    assert [s["surface"] for s in surfaces] == _APPS
+    for s in surfaces:
+        assert s["ok"] is ok and s["status"] == status
+    if status == "granted":
+        assert all("remediation" not in s for s in surfaces)
+    if status == "not_running":
+        for s, app in zip(surfaces, doc._AUTOMATION_APPS, strict=True):
+            assert app in s["remediation"] and "Settings" not in s["remediation"]
+    if status == "probe_error":
+        assert all("OSStatus" in s["remediation"] for s in surfaces)
+        assert all(str(rc) in s["remediation"] for s in surfaces)
+
+
+def test_denied_automation_remediation_needs_no_restart(monkeypatch):
+    # FIX-14 follow-up: a grant switched back on reads `granted` at once on device
+    # (2026-10-27), so the text asks only for the switch.
+    fake_automation(monkeypatch, -1743)
+    for s, app in zip(
+        doc._automation_surfaces(request=False), doc._AUTOMATION_APPS, strict=True
+    ):
+        assert app in s["remediation"] and "Automation" in s["remediation"]
+        assert "restart" not in s["remediation"].lower()
+
+
+def test_automation_live_check_sends_no_apple_event(monkeypatch):
     # The no-prompt guarantee: with request=False we never send an Apple event.
     monkeypatch.setattr(runtime, "run_osascript", _boom_osascript)
+    calls = fake_automation(monkeypatch, 0)
     surfaces = doc._automation_surfaces(request=False)
-    assert [s["surface"] for s in surfaces] == [
-        "mail",
-        "notes",
-        "contacts",
-        "safari",
-        "messages",
-        "music",
+    assert [s["surface"] for s in surfaces] == _APPS
+    assert calls == [
+        "com.apple.mail",
+        "com.apple.Notes",
+        "com.apple.AddressBook",
+        "com.apple.Safari",
+        "com.apple.MobileSMS",
+        "com.apple.Music",
     ]
-    assert all(s["ok"] is None and s["status"] == "unprobed" for s in surfaces)
-    assert all("request=True" in s["remediation"] for s in surfaces)
+    assert all(s["status"] != "unprobed" for s in surfaces)
+
+
+def test_automation_live_check_skips_off_adapters(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", ",".join(_APPS))
+    calls = fake_automation(monkeypatch, 0)
+    surfaces = doc._automation_surfaces(request=False)
+    assert calls == []
+    assert all(s["status"] == "adapter_off" for s in surfaces)
+
+
+@pytest.mark.parametrize("exc", [OSError("dlopen"), AttributeError("no symbol")])
+def test_automation_live_check_survives_a_broken_seam(monkeypatch, tmp_path, exc):
+    def broken(bundle_id):
+        raise exc
+
+    monkeypatch.setattr(runtime, "automation_permission", broken)
+    surfaces = doc._automation_surfaces(request=False)
+    assert [s["surface"] for s in surfaces] == _APPS
+    for s in surfaces:
+        assert s["ok"] is None and s["status"] == "probe_error"
+        assert type(exc).__name__ in s["remediation"]
+    _all_granted(monkeypatch, tmp_path)
+    assert doc.diagnose(request=False)["surfaces"]
+
+
+# --- FIX-16 (#348): the Accessibility surface ----------------------------------------
+
+
+def _fake_trusted(monkeypatch, value=True):
+    """Fake ``runtime.accessibility_trusted``; ``value`` may be an exception class."""
+    calls: list[int] = []
+
+    def _fake() -> bool:
+        calls.append(1)
+        if isinstance(value, type) and issubclass(value, BaseException):
+            raise value("no AX")
+        return value
+
+    monkeypatch.setattr(runtime, "accessibility_trusted", _fake)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("trusted", "ok", "status"),
+    [
+        (True, True, "granted"),
+        (False, False, "not_granted"),
+        (OSError, None, "probe_error"),
+        (AttributeError, None, "probe_error"),
+        (ImportError, None, "probe_error"),  # PyObjC: a bundle that does not load
+        (KeyError, None, "probe_error"),  # PyObjC: a symbol that was not bound
+    ],
+)
+def test_accessibility_surface_reports_the_grant(monkeypatch, trusted, ok, status):
+    _fake_trusted(monkeypatch, trusted)
+    s = doc._accessibility_surface()
+    assert s["surface"] == "accessibility" and s["kind"] == "accessibility"
+    assert s["ok"] is ok and s["status"] == status
+    if status == "granted":
+        assert "remediation" not in s
+    if status == "not_granted":
+        for word in ("Accessibility", "mail_reply", "reply_all", "Privacy & Security"):
+            assert word in s["remediation"]
+        assert "restart" not in s["remediation"].lower()  # facts 4e: no restart
+        assert ACCESSIBILITY_PANE in s["remediation"]  # the macOS 27 pane name too
+    if status == "probe_error":
+        assert "remediation" in s
+
+
+def test_accessibility_surface_follows_the_seam_across_reports(monkeypatch):
+    # G2 (05.2-13): two reports in one process follow the switch, no cached answer
+    answers = iter([True, False])
+    monkeypatch.setattr(runtime, "accessibility_trusted", lambda: next(answers))
+    first = doc._accessibility_surface()["status"]
+    second = doc._accessibility_surface()["status"]
+    assert (first, second) == ("granted", "not_granted")
+
+
+def test_note_names_the_permissions_that_need_a_restart(monkeypatch, tmp_path):
+    _all_granted(monkeypatch, tmp_path)
+    _fake_trusted(monkeypatch, True)
+    note = doc.diagnose(request=False)["note"]
+    assert note == (
+        "Grant each permission to the launching app (above). Automation and "
+        "Accessibility need no restart; Full Disk Access, Calendars and Reminders "
+        "may need one."
+    )
+    assert "Only" not in note and "then restart" not in note
+
+
+def test_accessibility_surface_is_off_with_the_mail_adapter(monkeypatch):
+    monkeypatch.setenv("MACOS_APPS_ADAPTERS_OFF", "mail")
+    calls = _fake_trusted(monkeypatch, False)
+    s = doc._accessibility_surface()
+    assert s["status"] == "adapter_off" and s["ok"] is None
+    assert calls == []
+
+
+@pytest.mark.parametrize("request_", [False, True])
+def test_accessibility_surface_makes_one_seam_call_and_no_apple_event(
+    monkeypatch, tmp_path, request_
+):
+    # D-14: the check is the plain trust read through the seam, for both modes.
+    _all_granted(monkeypatch, tmp_path)
+    events: list[tuple] = []
+
+    def record(*a, **k):
+        events.append(a)
+        return "AppName"
+
+    monkeypatch.setattr(runtime, "run_osascript", record)
+    calls = _fake_trusted(monkeypatch, True)
+    surfaces = doc.diagnose(request=request_)["surfaces"]
+    assert len(calls) == 1
+    assert [s["surface"] for s in surfaces].count("accessibility") == 1
+    # the surface sits right after Full Disk Access and sent no Apple Event itself
+    names = [s["surface"] for s in surfaces]
+    assert names.index("accessibility") == names.index("full_disk_access") + 1
+    sent_for_it = [
+        e for e in events if "accessibility" in " ".join(map(str, e)).lower()
+    ]
+    assert sent_for_it == []
+
+
+def test_no_module_binds_the_accessibility_prompt():
+    # The only call path that can show the prompt is the options variant of the trust
+    # call; no module of the package may bind it or its prompt option.
+    import macos_apps_mcp
+
+    root = Path(macos_apps_mcp.__file__).parent
+    hits = [
+        str(p.relative_to(root))
+        for p in root.rglob("*.py")
+        if any(
+            word in p.read_text("utf-8")
+            for word in ("AXIsProcessTrustedWithOptions", "kAXTrustedCheckOptionPrompt")
+        )
+    ]
+    assert hits == []
+
+
+def test_automation_bundle_ids_match_the_grant_map():
+    from macos_apps_mcp.dashboard.grants import ADAPTER_GRANTS, EVENTS
+
+    assert set(doc._AUTOMATION_BUNDLES) == {a.lower() for a in doc._AUTOMATION_APPS}
+    for name, bundle in doc._AUTOMATION_BUNDLES.items():
+        assert [t for svc, t in ADAPTER_GRANTS[name] if svc == EVENTS] == [bundle]
 
 
 def test_automation_surfaces_carry_process_line(monkeypatch):
@@ -368,11 +566,11 @@ def test_diagnose_shape(monkeypatch, tmp_path):
         "deployment",
     }
     assert set(report["libs"]) == {"mcp", "fastmcp"}
-    # 2 EventKit + 6 Automation + shortcuts + FDA + mail_index
-    assert len(report["surfaces"]) == 11
+    # 2 EventKit + 6 Automation + shortcuts + FDA + Accessibility + mail_index
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     assert report["probed_automation"] is True
-    assert report["summary"] == "all 11 surfaces OK"
+    assert report["summary"] == "all 12 surfaces OK"
 
 
 def test_version_reads_any_distribution():
@@ -401,14 +599,19 @@ def test_summary_names_denied_surfaces(monkeypatch, tmp_path):
     monkeypatch.setattr(doc, "run_native", lambda fn: 2)  # EventKit denied
     report = doc.diagnose(request=True)
     assert "calendar" in report["summary"] and "reminders" in report["summary"]
-    assert report["summary"].startswith("2 of 11 surfaces need attention")
+    assert report["summary"].startswith("2 of 12 surfaces need attention")
 
 
-def test_default_summary_flags_unprobed_automation(monkeypatch, tmp_path):
+def test_default_summary_reads_live_automation(monkeypatch, tmp_path):
     _all_granted(monkeypatch, tmp_path)
+    fake_automation(monkeypatch, 0)
     report = doc.diagnose(request=False)
     assert report["probed_automation"] is False
-    assert "Automation unprobed" in report["summary"]
+    assert report["summary"] == "all 12 surfaces OK"
+    fake_automation(monkeypatch, -600)
+    report = doc.diagnose(request=False)
+    assert report["summary"].startswith("no denied surfaces; 6 unverified:")
+    assert "Automation unprobed" not in report["summary"]
 
 
 def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
@@ -419,7 +622,7 @@ def test_summary_reports_unverified_surface_not_all_ok(monkeypatch, tmp_path):
     report = doc.diagnose(request=True)
     assert "unverified" in report["summary"]
     assert "full_disk_access" in report["summary"]
-    assert "all 11 surfaces OK" not in report["summary"]
+    assert "all 12 surfaces OK" not in report["summary"]
 
 
 def test_diagnose_reads_eventkit_status_once_per_entity(monkeypatch, tmp_path):
@@ -452,10 +655,27 @@ def _budget_cases():
     ]
 
 
+@pytest.mark.parametrize(
+    "probes", [pytest.param(True, id="probed"), pytest.param(False, id="live")]
+)
 @pytest.mark.parametrize(("role", "state"), _budget_cases())
-def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
+def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state, probes):
+    monkeypatch.setattr(
+        doc,
+        "_state_directory_status",
+        lambda: "unsafe path; state directory must be a real directory, not a symlink",
+    )
     # Acceptance: output stays under ~2k tokens. Worst case = everything denied (longest
-    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars — assert well under.
+    # remediation strings). ~4 chars/token, so 2k tokens ≈ 8k chars. The largest
+    # request=False live report (daemon, not-built state), with the Accessibility
+    # surface NOT granted (#348, FIX-16) measures, per status of the six Automation
+    # surfaces: not_running 7477, denied 7466, not_asked 7459, probe_error 7411
+    # (OSStatus -1708); with Accessibility granted the same cases read 7236, 7225,
+    # 7218 and 7170 (re-measured with the per-permission restart note, 05.2-14, 10
+    # chars longer than before). not_running is the worst case, so 7500 keeps 23 chars
+    # of margin (the Accessibility remediation names both panes, as the reply tools'
+    # refusal does): a `ps` executable name longer by 23 chars would fail it. The next
+    # text added to a surface must shorten something here, never raise 7500.
     if role == "daemon":
         # The daemon adds the dashboard keys, and the deny-list is operator input:
         # pending deltas both ways and many unknown names (PM-05, #421 review).
@@ -495,6 +715,10 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
         "app_process_info",
         lambda app: {"pid": 99999, "state": "S+", "cpu": 99.9, "etime": "11-22:33:44"},
     )
+    # #464: the unpinned field made the length depend on the runner's PIDs.
+    monkeypatch.setattr(
+        doc, "_responsible_process", lambda: "pid 99999 (this), launched by pid 99999"
+    )
     # deterministic grant map too: the machine's real TCC.db made this length depend
     # on the runner (#318). The daemon's own rows, every AppleEvents target denied by a
     # timed-out prompt — the longest entry the map can carry.
@@ -511,7 +735,9 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
     )
     monkeypatch.setattr(doc.deploy, "_TCC_DB", db)
     monkeypatch.setattr(doc.deploy, "_TCC_SYSTEM_DB", tmp_path / "absent" / "TCC.db")
-    report = doc.diagnose(request=True)
+    # O14: the live path (request=False) with every app denied, the longest live text.
+    fake_automation(monkeypatch, -1743, trusted=False)
+    report = doc.diagnose(request=probes)
     assert report["deployment"]["grant_identities"]["kTCCServiceAppleEvents"]
     assert "doctor(request=True)" in report["deployment"]["note"]  # the #318 why, once
     sizes = {k: len(json.dumps(v, ensure_ascii=False)) for k, v in report.items()}
@@ -520,7 +746,33 @@ def test_report_stays_under_token_budget(monkeypatch, tmp_path, role, state):
         for k, v in report["deployment"].items()
     }
     largest = sorted(sizes.items(), key=lambda kv: -kv[1])[:8]
-    assert len(json.dumps(report, ensure_ascii=False)) < 7000, largest
+    assert len(json.dumps(report, ensure_ascii=False)) < 7500, largest
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="loads CoreServices")
+def test_ae_lib_binds_the_three_calls_with_exact_types():
+    # PM-07: the fakes in test_runtime.py never reach the real ctypes bindings, and a
+    # wrong restype (an unsigned OSStatus) turns -1743 into 4294965553. Loads the real
+    # CoreServices and calls no Apple Event function.
+    lib = runtime._ae_lib()
+    desc = ctypes.POINTER(runtime._AEDesc)
+    create = lib.AECreateDesc
+    assert create.restype is ctypes.c_int16
+    assert create.argtypes == [
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_long,
+        desc,
+    ]
+    assert lib.AEDisposeDesc.restype is ctypes.c_int16
+    determine = lib.AEDeterminePermissionToAutomateTarget
+    assert determine.restype is ctypes.c_int32
+    assert determine.argtypes == [
+        desc,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_ubyte,
+    ]
 
 
 def test_probe_carries_applescript_side_timeout():
@@ -540,13 +792,21 @@ def test_probe_carries_applescript_side_timeout():
 def test_doctor_integration_real():
     report = doc.diagnose(request=False)
     # 2 eventkit (calendar, reminders) + 6 automation (mail, notes, contacts,
-    # safari, messages, music) + shortcuts_cli + full_disk_access + mail_index = 11.
+    # safari, messages, music) + shortcuts_cli + full_disk_access + accessibility
+    # + mail_index = 12. Accessibility guards the Mail reply-window insertion.
     # Photos left the Automation list in Phase 4 (osxphotos reads it at rest).
-    assert len(report["surfaces"]) == 11
+    assert len(report["surfaces"]) == 12
     assert "launched by" in report["responsible_process"]
     # every surface is well-formed regardless of grant state (the acceptance contract)
     for s in report["surfaces"]:
         assert {"surface", "kind", "ok", "status"} <= set(s)
+
+
+@pytest.mark.integration
+def test_automation_permission_real_is_non_prompting():
+    # Real CoreServices call, never prompts; run manually, never in CI.
+    assert isinstance(_REAL_AUTOMATION_PERMISSION("com.apple.finder"), int)
+    assert _REAL_AUTOMATION_PERMISSION("com.example.nope") == -600
 
 
 # --- #143: the build stamp — version alone cannot see a same-version rebuild ---------
@@ -555,14 +815,14 @@ def test_doctor_integration_real():
 def test_build_stamp_reports_dev_without_a_stamp_file(tmp_path, monkeypatch):
     # a dev checkout (and any bundle whose build script predates #143) has no stamp
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", tmp_path / "build_stamp")
-    assert doc.build_stamp() == "dev"
+    assert doc._read_build_stamp() == "dev"
 
 
 def test_build_stamp_reads_the_baked_file(tmp_path, monkeypatch):
     stamp = tmp_path / "build_stamp"
     stamp.write_text("b7fbde6 2026-08-20T10:00:00Z\n")
     monkeypatch.setattr(doc, "_BUILD_STAMP_PATH", stamp)
-    assert doc.build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
+    assert doc._read_build_stamp() == "b7fbde6 2026-08-20T10:00:00Z"
 
 
 def test_report_carries_the_build_stamp(monkeypatch):
@@ -570,3 +830,19 @@ def test_report_carries_the_build_stamp(monkeypatch):
     monkeypatch.setattr(doc, "build_stamp", lambda: "b7fbde6 2026-08-20T10:00:00Z")
     report = doc.diagnose(request=False)
     assert report["build"] == "b7fbde6 2026-08-20T10:00:00Z"
+
+
+@pytest.mark.parametrize(
+    ("trusted", "head"),
+    [
+        (False, "1 of 12 surfaces need attention: "),
+        (OSError, "no denied surfaces; "),  # live Automation reads: unverified too
+    ],
+)
+def test_summary_names_the_accessibility_surface(monkeypatch, tmp_path, trusted, head):
+    # Off is a need; unreadable is unverified: neither is ever counted as OK.
+    _all_granted(monkeypatch, tmp_path)
+    _fake_trusted(monkeypatch, trusted)
+    summary = doc.diagnose(request=False)["summary"]
+    assert summary.startswith(head)
+    assert "accessibility" in summary.split(": ", 1)[1].split(", ")

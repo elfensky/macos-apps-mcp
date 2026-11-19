@@ -42,7 +42,7 @@ _VERBS = {"move": "moved", "trash": "trashed", "dedupe": "deduplicated"}
 def backup_root() -> Path:
     """``<state>/backup/mail``, only computed: ``mail_recover._backup_dir`` creates the
     folder it names, and a page must not."""
-    return audit.state_dir() / "backup" / "mail"
+    return audit.state_path() / "backup" / "mail"
 
 
 def receipt_dir(receipt) -> Path | None:

@@ -15,9 +15,10 @@ Merge commits before that point are historical, not the convention.
 
 ## Feature work
 
-Every change — the release bump included — is made in its own worktree under `.worktrees/` and
-reaches `develop` by a PR; the procedure is in [AGENTS.md](../AGENTS.md) ("Worktrees — one lane,
-always"). The main checkout never branches or commits.
+Every change — the release bump included — is made in its own worktree,
+`~/Developer/.worktrees/macos-apps-mcp/<branch-with-hyphens>`, and reaches `develop` by a PR; the
+procedure is the developer handbook's (`git-and-prs.md` § Worktrees). The main checkout never
+branches or commits.
 
 Rebase-merge, always — `--merge` would put a bubble on the trunk, `--squash` would collapse
 commits whose messages are written to stand alone.
@@ -32,14 +33,21 @@ reporting the wrong version). A missed `server.json` lists a stale version in th
 - `packaging/Info.plist` → `CFBundleShortVersionString`
 - `server.json` → `version` and `packages[0].version`
 
-Make the bump in a worktree (`.worktrees/release-X.Y.Z`, branch `chore/release-X.Y.Z`) and land it
-on `develop` by PR like any other change:
+`.planning/ROADMAP.md` § Releases has one line per minor release, and the roadmap page reads it (2026-11-17). An
+`X.Y.0` cut while phases of its release are still open changes no status: the line stays `🚧`, and the bump PR updates
+its `Next:` and `Waits for:` lines. When GSD has marked the last phase of the release done, the next bump PR turns the
+line `✅` with `(shipped YYYY-MM-DD)`, the date of the `X.Y.0` heading in CHANGELOG.md. It moves `🚧`, `Next:` and
+`Waits for:` to the next release.
+
+Make the bump in a worktree (`~/Developer/.worktrees/macos-apps-mcp/chore-release-X.Y.Z`,
+branch `chore/release-X.Y.Z`) and land it on `develop` by PR like any other change:
 
 ```sh
 uv run pytest tests/test_packaging.py
 git commit -am "chore(release): X.Y.Z — <milestone name>"
 git push -u origin HEAD && gh pr create --base develop --fill
-gh pr checks --watch --required && gh pr merge --rebase --delete-branch
+gh pr checks --watch --required && gh pr merge --rebase
+git push origin --delete chore/release-X.Y.Z   # not --delete-branch from the lane: git-and-prs.md § Merging
 ```
 
 **2. Verify develop is green** — the tree you are about to release, not one from earlier:
@@ -96,7 +104,8 @@ If the registry step fails after the PyPI upload, publish by hand from the tag c
 `mcp-publisher login github`, then `mcp-publisher publish`.
 
 **5. Publish the GitHub release** with `gh release create vX.Y.Z`, and close the milestone if the
-release completes it. A release may ship without closing its milestone — see below.
+release completes it. A release may ship without closing its milestone — see below. Then check the
+listings in [PROMOTION.md](PROMOTION.md): Glama's Auto-Release rebuilds from the GitHub release.
 
 ## Deploying to the daemon
 
@@ -115,6 +124,36 @@ doctor().build     # must report the sha you just built (#143) — version alone
 
 Judge that output. A successful build says nothing about which binary launchd is running.
 
+Then run the device suite against the installed daemon. It reaches the Mac only through the
+daemon's socket (`MACOS_APPS_DEVICE_SOCKET`, default `~/.local/state/macos-apps-mcp/daemon/mcp.sock`),
+and every call passes one guard that refuses a write to anything this run did not make:
+
+```sh
+uv run pytest -m device                                 # reads only
+MACOS_APPS_DEVICE_WRITES=1 MACOS_APPS_TEST_ADDRESS=<your own address> \
+  uv run pytest -m device                               # + Calendar, Reminders, one Mail flow
+```
+
+The write tests need one calendar named `macos-apps-mcp-test` (create it in Calendar.app). The
+reminder list of that name is created when absent. The Mail flow sends one mail and one
+forward to `MACOS_APPS_TEST_ADDRESS`, so the daemon must list `send_mail`
+(`MACOS_APPS_ALLOW_SEND=mail`). It takes about 5 minutes: its cleanup waits 2 minutes for a
+Gmail put-back. Without the socket every device test skips.
+
+To test the daemon of another Mac, name that Mac as an ssh destination that logs in with a key:
+
+```sh
+MACOS_APPS_DEVICE_SSH=<user>@<other-mac>.local uv run pytest -m device
+```
+
+The suite then forwards that Mac's socket for the session, and it asks that Mac which apps
+run, so a read never opens a closed app there. `MACOS_APPS_DEVICE_SOCKET` then names the path
+on that Mac. The write tests use the test calendar, the test list and the Mail accounts of
+that Mac. The `ps` locale check skips: it reads this checkout on this Mac.
+
+Before notarization, run `xcrun notarytool history --keychain-profile notary` on the build Mac.
+The existing profile is named `notary`, not an account email. See [profile checks and recovery](DAEMON.md#notarization-profile).
+
 ## Milestones vs releases
 
 They are not the same thing and do not have to line up. A milestone is a body of work; a release is
@@ -122,9 +161,14 @@ a cut of the trunk on a given day. `0.9.0` shipped with its milestone still open
 issues land in `0.9.1`, `0.9.2`, and so on. Do not hold a release hostage to a milestone, and do
 not close a milestone just because a same-numbered release went out.
 
+The roadmap page shows releases, not GSD milestones: `.planning/ROADMAP.md` § Releases holds one line per minor
+release, and each open phase stands in exactly one of them (owner, 2026-11-17).
+
 ## Checklist
 
 - [ ] Version bumped in `pyproject.toml`, `packaging/Info.plist` **and** `server.json` (both fields)
+- [ ] `.planning/ROADMAP.md` § Releases: the line of the release in work has current `Next:` and `Waits for:` lines.
+      When all its phases are done, it is `✅` with the shipped date, and `🚧` stands on the next release
 - [ ] `uv run pytest` green, gated **and** ungated
 - [ ] `ruff check` + `ruff format --check` clean
 - [ ] Release PR `develop` → `main` merged with a merge commit, tagged `vX.Y.Z`, tag pushed
@@ -133,8 +177,9 @@ not close a milestone just because a same-numbered release went out.
 - [ ] MCP Registry lists X.Y.Z (the `/v0.1` search check in step 4)
 - [ ] GitHub release published
 - [ ] Daemon rebuilt, reinstalled, kickstarted
-- [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed the import and stream smokes (#205, #286)
+- [ ] Build log shows `smokes ok: arm64` and `smokes ok: x86_64` — each slice passed imports and actual-shim smokes for both protocol eras, notifications, large responses and abandoned streams (#205, #286, #470)
 - [ ] Build log shows `entitlements ok: x86_64 has the exception, arm64 is strict` — only the Intel slice carries `allow-unsigned-executable-memory` (#205)
 - [ ] Build log shows `signed smoke ok: arm64` and `signed smoke ok: x86_64` — each signed slice loads the server and allocates a ctypes closure under the hardened runtime (#205)
 - [ ] Build log shows `universal2 gate ok` — every binary is arm64 + x86_64 and needs no newer macOS than `LSMinimumSystemVersion` (#205)
 - [ ] `doctor().version` reports the new version and `doctor().build` the built sha
+- [ ] `uv run pytest -m device` green on the installed daemon, reads and writes (see Deploying to the daemon)

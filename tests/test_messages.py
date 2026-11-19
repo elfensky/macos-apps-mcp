@@ -257,7 +257,7 @@ def test_search_matches_attributedbody_when_text_null(tmp_path, monkeypatch):
         tmp_path / "chat.db",
         handles=[(1, "+3210")],
         messages_rows=[
-            ("g-ab", None, b"streamtyped...hello from body...", d, 0, 0, 0, 0, 1)
+            ("g-ab", None, _typedstream(b"hello from body"), d, 0, 0, 0, 0, 1)
         ],
     )
     monkeypatch.setattr(messages, "CHAT_DB", path)

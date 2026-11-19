@@ -24,15 +24,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Iterable, Mapping
+import stat
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime
 from pathlib import Path
 
 import anyio
+from fastmcp.server.dependencies import get_http_headers
 from fastmcp.server.middleware import Middleware
-
-# pydantic arrives through mcp's declared `pydantic>=2.11,<3` (>=2.12 on Python 3.14).
-# pyproject.toml is not edited: version.yml fails a PR that edits it without a bump.
 from pydantic import TypeAdapter, ValidationError
 
 from .contracts import Snapshotter
@@ -44,14 +43,50 @@ log = logging.getLogger("macos_apps_mcp")
 
 AUDIT_LIMIT = 50
 _AUDIT_MAX_BYTES = 5 * 1024 * 1024  # rotate past ~5 MB; one backup
+_STATE_DIR_REPAIRS: dict[Path, int] = {}
+
+
+def state_path() -> Path:
+    """Resolve the state path without creating or repairing it (doctor's read path)."""
+    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
+    return Path(base) / "macos-apps-mcp"
+
+
+def private_directory(path: Path) -> int | None:
+    """Create at 0700; narrow wider modes. Return the old mode only after repair.
+
+    Only this directory is changed. Refuse symlinks and foreign ownership before
+    chmod; the descriptor binds the check and chmod to the same directory.
+    Existing owner-only modes are preserved. Any failure stops the caller's write.
+    """
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid():
+            raise PermissionError(f"private directory is owned by another user: {path}")
+        mode = stat.S_IMODE(info.st_mode)
+        if mode & 0o077:
+            os.fchmod(fd, 0o700)
+            return mode
+    finally:
+        os.close(fd)
+    return None
 
 
 def state_dir() -> Path:
-    """The XDG state dir for this server, created on use."""
-    base = os.environ.get("XDG_STATE_HOME") or (Path.home() / ".local" / "state")
-    d = Path(base) / "macos-apps-mcp"
-    d.mkdir(parents=True, exist_ok=True)
+    """The state directory, private before use. Never sweep existing contents."""
+    d = state_path()
+    if (old_mode := private_directory(d)) is not None:
+        # Startup and usage logging can run before doctor. Keep that repair visible
+        # for this process, without writing another file into the state directory.
+        _STATE_DIR_REPAIRS[d] = old_mode
     return d
+
+
+def state_dir_repaired_mode() -> int | None:
+    """The last exposed mode repaired by this process at the configured state path."""
+    return _STATE_DIR_REPAIRS.get(state_path())
 
 
 def _audit_path() -> Path:
@@ -84,8 +119,32 @@ def _instant(ts) -> datetime | None:
         return None
 
 
+def _records(live: Path) -> Iterator[dict | OSError]:
+    """Every JSON record of ``<live>.1`` then ``<live>``, oldest to newest: the one
+    reader of a rotated log (#575). A missing file contributes nothing and a corrupt
+    line is skipped. An unreadable file yields its ``OSError`` in place, so each
+    caller says so in its own documented way."""
+    for path in (live.with_name(live.name + ".1"), live):
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            log.debug("reading %s failed: %s", path, e)
+            yield e
+            continue
+        for line in text.split("\n"):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue  # a truncated/corrupt line never fails the read
+            if isinstance(rec, dict):  # ``true`` or a list is no record: corrupt too
+                yield rec
+
+
 def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]:
-    """Recent audit entries, newest first, at most ``limit``. ``since`` (ISO datetime)
+    """Recent audit entries from both retained files, newest first, at most ``limit``.
+    ``since`` (ISO datetime)
     drops older entries by INSTANT compare, not string compare: entries are written
     naive-local, but the audit tool tells the model to ground ``since`` via now() —
     which returns an offset-carrying ISO string, and lexically ``…T12:00:00`` <
@@ -93,23 +152,16 @@ def audit_read(since: str | None = None, limit: int = AUDIT_LIMIT) -> list[dict]
     back to the old lexical compare. Malformed lines are skipped; a missing log is
     empty. NEVER raises: an unreadable log yields a single explicit error entry —
     never a raw ``OSError``, and never an empty list masquerading as "no writes"."""
-    path = _audit_path()
-    if not path.exists():
-        return []
     try:
-        text = path.read_text(encoding="utf-8")
+        records = list(_records(_audit_path()))
     except OSError as e:
-        log.debug("audit_read failed: %s", e)
-        return [{"error": f"audit log unreadable: {e}"}]
+        records = [e]
+    for rec in records:
+        if isinstance(rec, OSError):
+            return [{"error": f"audit log unreadable: {rec}"}]
     since_i = _instant(since) if since else None
     out = []
-    for line in text.split("\n"):
-        try:
-            rec = json.loads(line)
-        except ValueError:
-            continue  # skip a truncated/corrupt line, never fail the read
-        if not isinstance(rec, dict):
-            continue  # a JSON line that is no record (``true``, a list) is corrupt too
+    for rec in records:
         if since:
             ts = rec.get("ts", "")
             rec_i = _instant(ts) if ts else None
@@ -128,27 +180,14 @@ def read_all() -> list[dict]:
     the dashboard's reader (D-12). No cache and no limit: the whole log is two plain
     file reads. A missing file contributes nothing and a corrupt line is skipped; an
     unreadable file adds one ``{"error": …}`` entry so the page can say so (never an
-    empty list masquerading as "no writes"). ``audit_read`` and the ``audit`` tool are
-    deliberately unchanged."""
-    live = _audit_path()
-    out: list[dict] = []
-    for path in (live.with_name(live.name + ".1"), live):
-        if not path.exists():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            log.debug("read_all failed: %s", e)
-            out.append({"error": f"audit log unreadable: {e}"})
-            continue
-        for line in text.split("\n"):
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                continue  # a truncated/corrupt line never fails the read
-            if isinstance(rec, dict):
-                out.append(rec)
-    return out
+    empty list masquerading as "no writes")."""
+    try:
+        return [
+            {"error": f"audit log unreadable: {r}"} if isinstance(r, OSError) else r
+            for r in _records(_audit_path())
+        ]
+    except OSError as e:
+        return [{"error": f"audit log unreadable: {e}"}]
 
 
 # --- per-tool usage tally (#67 addendum) -------------------------------------------
@@ -175,24 +214,21 @@ def usage_log(tool: str) -> None:
 
 
 def usage_read() -> dict[str, dict]:
-    """Per-tool tally from the usage log: ``{tool: {"count", "first", "last"}}``.
+    """Per-tool tally from both retained usage files: ``{tool: {"count", "first",
+    "last"}}``.
     Malformed lines are skipped; a missing log is empty. NEVER raises: an unreadable
     log reads as empty (logged) — a lost tally must not fail the ``usage`` tool."""
-    path = _usage_path()
     out: dict[str, dict] = {}
-    if not path.exists():
-        return out
     try:
-        text = path.read_text(encoding="utf-8")
+        records = list(_records(_usage_path()))
     except OSError as e:
         log.debug("usage_read failed: %s", e)
         return out
-    for line in text.split("\n"):
+    for rec in records:
         try:
-            rec = json.loads(line)
             tool, ts = rec["tool"], rec.get("ts", "")
-        except (ValueError, KeyError, TypeError):
-            continue  # skip a truncated/corrupt line, never fail the read
+        except (KeyError, TypeError):
+            continue  # an OSError (logged by the reader) or a record with no tool
         entry = out.get(tool)
         if entry is None:
             out[tool] = {"count": 1, "first": ts, "last": ts}
@@ -262,6 +298,7 @@ def _safe_snapshot(source: Snapshotter, ident: str) -> dict | None:
 
 _BOOL = TypeAdapter(bool)  # the coercion the tool's own validation applies to dry_run
 _FALLBACK_CALLER = "unknown-client"
+SHIM_ID_HEADER = "x-macos-apps-shim-id"
 
 
 def resolve_dry_run(tool: str, args: Mapping, defaults: Mapping[str, bool]) -> bool:
@@ -286,17 +323,19 @@ def _label(text: object) -> str:
 
 
 def _caller(context) -> tuple[str, str | None]:
-    """``("<name> <version>", shim id | None)`` from the MCP client's ``clientInfo``.
+    """Client name/version and the local transport's optional shim header.
 
     Advisory labels, reported by the client: never an identity check, never a gate.
     A context without ``fastmcp_context`` (in-process call, test double), without a
-    session, or without ``clientInfo`` gives the fixed fallback."""
+    session, or without ``client_info`` gives the fixed fallback."""
     try:
-        info = context.fastmcp_context.session.client_params.clientInfo
+        info = context.fastmcp_context.session.client_params.client_info
         caller = _label(f"{info.name} {info.version}")
-        session = _label(getattr(info, "session", None) or "")
     except (AttributeError, RuntimeError):
-        return _FALLBACK_CALLER, None
+        caller = _FALLBACK_CALLER
+    # The public accessor returns {} outside HTTP requests. Keep the shim label
+    # independent of client_info, including during initialization and fallback.
+    session = _label(get_http_headers().get(SHIM_ID_HEADER, ""))
     return caller or _FALLBACK_CALLER, session or None
 
 

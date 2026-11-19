@@ -1,0 +1,78 @@
+{
+  "at": "2026-10-25T21:48:19.606Z",
+  "secure": true,
+  "key_present": true,
+  "perm_before": {
+    "loopback": "unsupported (TypeError)",
+    "local": "unsupported (TypeError)"
+  },
+  "steps": [
+    {
+      "id": "011-live-nocors",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 1
+    },
+    {
+      "id": "011-live-cors",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 1
+    },
+    {
+      "id": "009-paired-get",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 1
+    },
+    {
+      "id": "009-paired-nokey",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 0
+    },
+    {
+      "id": "009-paired-post",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 1
+    },
+    {
+      "id": "009-paired-tas",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 0
+    },
+    {
+      "id": "009-unpaired-get",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "Load failed",
+      "ms": 1
+    }
+  ],
+  "perm_after": {
+    "loopback": "unsupported (TypeError)",
+    "local": "unsupported (TypeError)"
+  }
+}

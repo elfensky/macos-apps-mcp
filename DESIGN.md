@@ -19,8 +19,13 @@ native data-plane adapter, so clean module boundaries are load-bearing.
 ## Stack decisions (settled by an adversarial four-way debate)
 
 - **FastMCP (standalone)** — not the official SDK's vendored `mcp.server.fastmcp` (1.x, lags the
-  spec), not the low-level `Server` (boilerplate). Thin tool layer → low lock-in. The unbounded
-  `fastmcp>=2.0` pin currently resolves to FastMCP 3.x (see `uv.lock`).
+  spec), not the low-level `Server` (boilerplate). Thin tool layer → low lock-in. The supported pair is
+  `fastmcp>=4.1.6,<5` and `mcp>=2.3.0,<3` (see `uv.lock`).
+  The shim uses public httpx2 transport interfaces and mirrors the frontend protocol era.
+  MCP 2 reports abandoned streams; shim middleware adds the uncertain-outcome warning without replay.
+  Caller name/version use `client_info`; an advisory HTTP header identifies each shim.
+  Local SSE responses have no size limit. HTTP request bodies retain the upstream 4 MiB limit.
+  **eli14:** The SDK is the cable between client and server. A broken cable cannot prove that a command stopped.
 - **`uv`** for dev (`uv sync` / `uv lock` / `uv run`); the MCP launches deterministically **off the
   venv python**: `command: <repo>/.venv/bin/python`, `args: ["-m","macos_apps_mcp"]` (or `uv run --frozen
   --project <repo> macos-apps-mcp`). Not `uvx` (ephemeral), not a system console_script (no lockfile / may

@@ -214,7 +214,7 @@ These are documented design choices, not debt:
 
 - **No permanent delete implemented** — Facts doc §5c proves AppleScript offers no targeted permanent delete on current macOS. The `PERMANENT_OPS` set stays empty with a comment explaining why (`mail_recover.py:72-85`).
 
-- **Mail exports `.eml` instead of `.html`/`.txt`** — `.eml` is lossless and opens in Mail; the FTS body search already covers text extraction. Documented in `mail.py` and ROADMAP as deliberate.
+- **Mail exports `.eml` instead of `.html`/`.txt`** — `.eml` is lossless and opens in Mail; the FTS body search already covers text extraction. Documented in `mail.py` and `docs/landscape.md` as deliberate.
 
 - **MailAdapter keeps thin delegation methods** — #178's proposal was rejected because the methods carry distinct engineer-facing docstrings and the hand-list of Mail tools became simpler to maintain. #179 (docstring-only alternative) is floating, not committed.
 

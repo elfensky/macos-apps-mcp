@@ -12,9 +12,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+import httpx2
 import pytest
 import uvicorn
-from fastmcp import Client, FastMCP
+from fastmcp import Client, Context, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.providers.proxy import FastMCPProxy
 from mcp.types import Implementation
@@ -360,15 +361,13 @@ def test_slow_tool_returns_over_the_socket(sockdir):
 
 
 def test_dead_response_stream_errors_instead_of_hanging(sockdir):
-    """#170 second bug: mcp swallows any error on a request's SSE stream and returns
-    without answering, so the request hangs forever instead of failing. Simulated with
-    a deliberately tiny client timeout — on the old behaviour this never returns."""
-    daemon.fail_loud_on_dead_stream()
+    """#170: an abandoned SSE request must answer with outcome guidance."""
     app = FastMCP("deadtest")
 
     @app.tool
-    def slow() -> dict:
-        time.sleep(3)
+    async def slow(ctx: Context) -> dict:
+        await ctx.info("dispatched")  # Start SSE before the deliberate read timeout.
+        await asyncio.sleep(3)
         return {"ok": True}
 
     p = sockdir / "mcp.sock"
@@ -376,14 +375,21 @@ def test_dead_response_stream_errors_instead_of_hanging(sockdir):
 
     def impatient(**kwargs):  # 0.5s read deadline → the stream dies mid-call
         kwargs.pop("transport", None)
-        kwargs["timeout"] = httpx.Timeout(0.5)
-        return httpx.AsyncClient(
-            transport=httpx.AsyncHTTPTransport(uds=str(p)), **kwargs
+        kwargs["timeout"] = httpx2.Timeout(0.5)
+        return httpx2.AsyncClient(
+            transport=httpx2.AsyncHTTPTransport(uds=str(p)), **kwargs
         )
 
     async def go():
         async with Client(
-            StreamableHttpTransport("http://daemon/mcp", httpx_client_factory=impatient)
+            FastMCPProxy(
+                client_factory=daemon._shim_client_factory(
+                    StreamableHttpTransport(
+                        "http://daemon/mcp", httpx_client_factory=impatient
+                    )
+                ),
+                middleware=[daemon._InterruptedToolWarning()],
+            )
         ) as c:
             await asyncio.wait_for(c.call_tool("slow"), timeout=30)
 
@@ -539,7 +545,7 @@ def test_factory_keeps_an_existing_handler(sockdir):
 def test_factory_without_a_running_loop_still_builds_the_client(sockdir):
     """#302: no running loop means nothing to install on; the client is returned."""
     client = daemon._uds_client_factory(sockdir / "s.sock")()
-    assert isinstance(client, httpx.AsyncClient)
+    assert isinstance(client, httpx2.AsyncClient)
 
 
 def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch):
@@ -564,12 +570,7 @@ def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch)
     app.tool(delete_x)
     p = sockdir / "mcp.sock"
     s = _serve(app, p)
-    transport = StreamableHttpTransport(
-        "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
-    )
-    proxy = FastMCPProxy(
-        client_factory=daemon._shim_client_factory(transport, "abc12345")
-    )
+    proxy = daemon.build_shim(p)
 
     async def go():
         async with Client(
@@ -588,58 +589,54 @@ def test_shim_forwards_client_and_records_resolved_dry_run(sockdir, monkeypatch)
     first, second = records
     assert first["op"] == "delete" and first["args"] == {"id": "A"}
     assert first["dry_run"] is True
-    assert first["caller"] == "claude-code 2.1.9" and first["session"] == "abc12345"
+    assert first["caller"] == "claude-code 2.1.9" and len(first["session"]) == 32
     assert second["args"] == {"id": "B", "dry_run": "false"}
     assert second["dry_run"] is False
     assert second["caller"] == "claude-code 2.1.9"
+    assert second["session"] == first["session"]
 
 
-def _factory_calls(monkeypatch, get_context, shim_id="abc12345", n=1):
-    """Drive `_shim_client_factory` with `daemon.get_context` and `daemon._Client`
-    patched; returns the `client_info` of each client the factory built."""
+def _factory_call(monkeypatch, get_context):
     seen = []
     monkeypatch.setattr(daemon, "get_context", get_context)
-    monkeypatch.setattr(
-        daemon, "_Client", lambda transport, client_info: seen.append(client_info)
+    monkeypatch.setattr(daemon, "ProxyClient", lambda transport, **kw: seen.append(kw))
+    daemon._shim_client_factory(object())()
+    return seen[0]
+
+
+def _context_with(client_params, version=None):
+    return lambda: SimpleNamespace(
+        session=SimpleNamespace(client_params=client_params),
+        request_context=SimpleNamespace(protocol_version=version) if version else None,
     )
-    f = daemon._shim_client_factory(object(), shim_id)
-    for _ in range(n):
-        f()
-    return seen
 
 
-def _context_with(client_params):
-    return lambda: SimpleNamespace(session=SimpleNamespace(client_params=client_params))
-
-
-def test_shim_client_factory_copies_the_client_info(monkeypatch):
+@pytest.mark.parametrize("version", ["2025-11-25", *daemon.MODERN_PROTOCOL_VERSIONS])
+def test_shim_client_factory_copies_identity_and_protocol(monkeypatch, version):
     params = SimpleNamespace(
-        clientInfo=Implementation(name="claude-code", version="2.1.9")
+        client_info=Implementation(name="claude-code", version="2.1.9")
     )
-    (info,) = _factory_calls(monkeypatch, _context_with(params))
+    result = _factory_call(monkeypatch, _context_with(params, version))
+    info = result["client_info"]
     assert (info.name, info.version) == ("claude-code", "2.1.9")
-    assert info.session == "abc12345"
+    assert result["mode"] == (
+        version if version in daemon.MODERN_PROTOCOL_VERSIONS else "legacy"
+    )
+    assert result["forward_incoming_headers"] is False
 
 
-def test_shim_client_factory_initialize_path_uses_the_shim_identity(monkeypatch):
-    # proxy.py:90 — initialize runs before the front session stores client_params
-    (info,) = _factory_calls(monkeypatch, _context_with(None))
+def test_shim_client_factory_initialize_falls_back_to_legacy(monkeypatch):
+    result = _factory_call(monkeypatch, _context_with(None))
+    info = result["client_info"]
     assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
-    assert info.session == "abc12345"
+    assert result["mode"] == "legacy"
 
 
-def test_shim_client_factory_ping_path_uses_the_shim_identity(monkeypatch):
-    # proxy.py:921 — ping_remote runs outside a request, so get_context() raises
+def test_shim_client_factory_ping_without_context_falls_back_to_legacy(monkeypatch):
     def no_context():
         raise RuntimeError("No active context found.")
 
-    (info,) = _factory_calls(monkeypatch, no_context)
+    result = _factory_call(monkeypatch, no_context)
+    info = result["client_info"]
     assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
-    assert info.session == "abc12345"
-
-
-def test_shim_client_factory_session_is_stable_per_factory(monkeypatch):
-    first, second = _factory_calls(monkeypatch, _context_with(None), n=2)
-    assert first.session == second.session == "abc12345"
-    (other,) = _factory_calls(monkeypatch, _context_with(None), shim_id="def67890")
-    assert other.session == "def67890"
+    assert result["mode"] == "legacy"

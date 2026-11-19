@@ -303,14 +303,15 @@ def test_caller_without_a_fastmcp_context_is_the_fallback(monkeypatch):
 def _ctx_with_client(info, name="create_event"):
     ctx = _ctx(name, {})
     ctx.fastmcp_context = SimpleNamespace(
-        session=SimpleNamespace(client_params=SimpleNamespace(clientInfo=info))
+        session=SimpleNamespace(client_params=SimpleNamespace(client_info=info))
     )
     return ctx
 
 
 def test_caller_names_the_client_and_the_shim_session(monkeypatch):
     records = _capture(monkeypatch)
-    info = SimpleNamespace(name="claude-code", version="2.1.9", session="abc12345")
+    info = SimpleNamespace(name="claude-code", version="2.1.9")
+    monkeypatch.setattr(au, "get_http_headers", lambda: {au.SHIM_ID_HEADER: "abc12345"})
     _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
     assert records[0]["caller"] == "claude-code 2.1.9"
     assert records[0]["session"] == "abc12345"
@@ -326,7 +327,10 @@ def test_caller_without_a_shim_session_has_no_session_key(monkeypatch):
 
 def test_caller_is_one_bounded_line(monkeypatch):
     records = _capture(monkeypatch)
-    info = SimpleNamespace(name="x" * 500 + "\nforged", version="1", session="s\n2")
+    info = SimpleNamespace(name="x" * 500 + "\nforged", version="1")
+    monkeypatch.setattr(
+        au, "get_http_headers", lambda: {au.SHIM_ID_HEADER: "s\n\x1b" * 500}
+    )
     _run(_mw(), _ctx_with_client(info), _Result({"id": "E-1"}))
     for key in ("caller", "session"):
         assert "\n" not in records[0][key] and len(records[0][key]) <= 200

@@ -30,7 +30,7 @@ from macos_apps_mcp.adapters.mail_addressing import MAILBOX_REF, bare_id, mailbo
 
 HERE = Path(__file__).parent
 US, RS = "\x1f", "\x1e"
-FICTION = "imap://BDA93031-756E-4487-BEDD-F2768006926A"
+FICTION = "imap://<fiction-account-uuid>"
 SRC, DST = f"{FICTION}/INBOX", f"{FICTION}/Archive"
 SENDER = "questionablequesting.com"
 

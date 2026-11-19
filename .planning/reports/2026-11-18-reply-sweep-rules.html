@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The reply check: two rule questions (2026-11-18)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: var(--font-sans, system-ui, sans-serif); color: var(--foreground, #1c1c1c); line-height: 1.45; font-size: 14px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+  p { margin: 6px 0; }
+  .muted { color: var(--muted-foreground, #6b6b6b); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch; }
+  .box { flex: 1 1 180px; background: var(--card, #f4f4f4); border: 1px solid var(--border, #d9d9d9); border-radius: var(--radius, 8px); padding: 12px; min-width: 0; }
+  .box b.t { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted-foreground, #6b6b6b); margin-bottom: 6px; }
+  .mail { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; border-left: 3px solid var(--border, #bbb); padding-left: 8px; margin: 6px 0; }
+  .tail { background: var(--success-surface, rgba(46,160,67,.18)); border-radius: 3px; padding: 0 3px; }
+  .img { display: inline-block; border: 1px dashed var(--border, #999); border-radius: 4px; padding: 6px 14px; margin-top: 4px; font-family: var(--font-sans, system-ui); }
+  .chip { display: inline-block; background: var(--warning-surface, rgba(210,153,34,.25)); border: 1px solid var(--warning, #b8860b); border-radius: 4px; padding: 0 5px; }
+  .typed { display: inline-block; background: var(--destructive-surface, rgba(218,54,51,.16)); border: 1px solid var(--destructive, #c0392b); border-radius: 4px; padding: 0 5px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 13px; }
+  th, td { border: 1px solid var(--border, #d0d0d0); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--secondary, #ececec); font-weight: 600; }
+  .ok { color: var(--success, #1a7f37); font-weight: 600; }
+  .no { color: var(--destructive, #c0392b); font-weight: 600; }
+  .hm { color: var(--warning, #9a6700); font-weight: 600; }
+  .rec { outline: 2px solid var(--primary, #2f6feb); outline-offset: -2px; }
+  .tag { display: inline-block; font-size: 11px; border-radius: 10px; padding: 0 7px; background: var(--primary, #2f6feb); color: var(--primary-foreground, #fff); margin-left: 6px; vertical-align: 1px; }
+  .stamp { display: inline-block; border: 2px solid var(--info, #2f6feb); color: var(--info, #2f6feb); border-radius: 50%; padding: 6px 5px; font-size: 10px; font-weight: 700; transform: rotate(-12deg); margin-left: 8px; }
+  hr { border: 0; border-top: 1px solid var(--border, #d0d0d0); margin: 22px 0 16px; }
+</style>
+</head>
+<body>
+
+<h2>Question 1: the image rule</h2>
+<p class="muted">After a reply is sent, the tool must prove that a stored copy is the reply's own. One part of the proof: the quoted mail must end with the original's last words.</p>
+
+<h3>What happens today</h3>
+<div class="row">
+  <div class="box">
+    <b class="t">1. The mail you reply to</b>
+    <div class="mail">…see you on Friday.<br><span class="tail">Kind regards, Anna</span><br><span class="img">🖼 logo.png</span></div>
+    <p class="muted">It ends with a picture.</p>
+  </div>
+  <div class="box">
+    <b class="t">2. The quote in the sent reply</b>
+    <div class="mail">…see you on Friday.<br><span class="tail">Kind regards, Anna</span><br><span class="chip">&lt;logo.png&gt;</span></div>
+    <p class="muted">Mail replaces the picture with a text marker. Mail writes it as a hidden element with the id <code>cid:…</code>.</p>
+  </div>
+  <div class="box">
+    <b class="t">3. The check</b>
+    <p>Last words found: <span class="ok">yes</span></p>
+    <p>Nothing after them: <span class="no">no</span> ("logopng" follows)</p>
+    <p><b>Result: "not sure"</b> (<code>unproven</code>). Nothing is deleted.</p>
+  </div>
+</div>
+
+<h3>The three options</h3>
+<table>
+  <tr><th style="width:27%">Option</th><th>The tool's own copy</th><th>A draft you wrote by hand, with <span class="typed">&lt;x.png&gt;</span> typed below the quote</th><th>If Mail changes its marker one day</th></tr>
+  <tr class="rec"><td><b>A. Ignore only Mail's own marker</b><span class="tag">recommended</span><br><span class="muted">the element with id <code>cid:…</code></span></td><td><span class="ok">proven</span>: cleaned or reported clean</td><td><span class="ok">"not sure"</span>: left alone. Typed text is not Mail's element.</td><td><span class="hm">back to "not sure"</span>: safe, only less helpful</td></tr>
+  <tr><td><b>B. Ignore any text like &lt;name.ext&gt;</b></td><td><span class="ok">proven</span></td><td><span class="no">can pass as the tool's copy</span>: your draft could be deleted</td><td><span class="ok">still works</span></td></tr>
+  <tr><td><b>C. No change, document it</b></td><td><span class="hm">"not sure"</span> after each reply to a mail that ends with a picture (logo signatures)</td><td><span class="ok">"not sure"</span>: left alone</td><td>no effect</td></tr>
+</table>
+<p class="muted">Picture in one line: the cleaner may ignore the label that Mail itself glued on (A), any label that looks like it (B), or no label (C).</p>
+
+<hr>
+
+<h2>Question 2: the INBOX rule</h2>
+<p class="muted">New tonight: after a send, a mail in an INBOX with the same Message-ID as the proven Sent copy counts as "the delivered copy" and is set aside. That rule assumes an INBOX never holds a draft. Nobody tested that.</p>
+
+<h3>The two things that can sit in an INBOX with that Message-ID</h3>
+<div class="row">
+  <div class="box">
+    <b class="t">A delivered mail</b>
+    <div class="mail">Received: from server-1…<br>Received: from server-2…<br>Message-ID: &lt;abc&gt;<span class="stamp">POST<br>MARK</span></div>
+    <p>Each mail server adds a <code>Received:</code> line. It is the postmark.</p>
+    <p><span class="ok">Set it aside.</span> This is the reply that came back to you.</p>
+  </div>
+  <div class="box">
+    <b class="t">A leftover draft (unusual setup)</b>
+    <div class="mail">Message-ID: &lt;abc&gt;<br><span class="muted">(no Received: line)</span></div>
+    <p>Only possible when an account uses its INBOX as its Drafts mailbox, and Mail's autosave keeps the same Message-ID.</p>
+    <p><span class="hm">Today's rule sets it aside too</span>, and the tool reports "no copy left" although one is left. It deletes nothing wrong.</p>
+  </div>
+</div>
+
+<h3>The two options</h3>
+<table>
+  <tr><th style="width:30%">Option</th><th>Delivered mail in the INBOX</th><th>Leftover draft in the INBOX (unusual setup)</th><th>Cost</th></tr>
+  <tr class="rec"><td><b>Add the postmark check</b><span class="tag">recommended</span><br><span class="muted">set aside only with a <code>Received:</code> line</span></td><td><span class="ok">set aside</span></td><td><span class="ok">"not sure"</span>: reported, as it should be</td><td>a few lines and one test, in the same PR</td></tr>
+  <tr><td><b>Leave it, documented</b></td><td><span class="ok">set aside</span></td><td><span class="hm">reported as "no copy left"</span> (false report, no wrong delete)</td><td>none</td></tr>
+</table>
+<p class="muted">Picture in one line: only an envelope with a postmark counts as "delivered"; a sheet without one is treated as a possible draft.</p>
+
+</body>
+</html>

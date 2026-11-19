@@ -56,7 +56,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D3
-    description: "Task 3 seed + landing: SEED_MARKERS run once, sending 2 real mails to andrei@lav.ren; they landed in the Personal account's INBOX (AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1), not the Business account (02B406D0-99D4-4E9A-9A7C-0DB912FD1D93) that the old _scratch_account picked (whose INBOX has 0 messages). Historical record of the original halt — resolved by the owner decision and fix below."
+    description: "Task 3 seed + landing: SEED_MARKERS run once, sending 2 real mails to andrei@lav.ren; they landed in the Personal account's INBOX (<personal-account-uuid>), not the Business account (<business-account-uuid>) that the old _scratch_account picked (whose INBOX has 0 messages). Historical record of the original halt — resolved by the owner decision and fix below."
     verification: []
     human_judgment: true
     rationale: "Historical: at the time this was recorded, only the owner could decide between two real folders. See D4/D5 for the applied resolution."
@@ -212,7 +212,7 @@ cd .worktrees/sweep-02 && uv run pytest -m integration tests/test_integration.py
 ERROR at setup of test_move_mail_dry_run_reads_mail_and_moves_nothing
 tests/test_integration.py:1572: in inbox_messages
     pytest.fail(
-Failed: found 0 of 2 marker mails (subject='macos-apps-mcp sweep marker') in imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/INBOX — seed them once: uv run python -c "from macos_apps_mcp.adapters.mail import MailAdapter as M; [M().send('andrei@lav.ren', 'macos-apps-mcp sweep marker', 'Marker mail for the integration sweep (D-04). Leave it in the INBOX.', dry_run=False) for _ in range(2)]"
+Failed: found 0 of 2 marker mails (subject='macos-apps-mcp sweep marker') in imap://<business-account-uuid>/INBOX — seed them once: uv run python -c "from macos_apps_mcp.adapters.mail import MailAdapter as M; [M().send('andrei@lav.ren', 'macos-apps-mcp sweep marker', 'Marker mail for the integration sweep (D-04). Leave it in the INBOX.', dry_run=False) for _ in range(2)]"
 50 deselected, 1 error in 2.20s
 ```
 
@@ -251,19 +251,19 @@ litter_count: 0
 transcription error:
 
 ```
-real _scratch_account(): 02B406D0-99D4-4E9A-9A7C-0DB912FD1D93   # account "Business"
+real _scratch_account(): <business-account-uuid>   # account "Business"
 ```
 
 `MailAdapter().search(subject="macos-apps-mcp sweep marker", limit=5)` — both hits:
 
 ```
-hit folder: imap://AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1/INBOX  # account "Personal"
-hit folder: imap://AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1/INBOX  # account "Personal"
+hit folder: imap://<personal-account-uuid>/INBOX  # account "Personal"
+hit folder: imap://<personal-account-uuid>/INBOX  # account "Personal"
 ```
 
 **The 2 marker mails landed in the `Personal` account's INBOX
-(`AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1`, 50 total / 17 unread), not in the `Business` account
-(`02B406D0-99D4-4E9A-9A7C-0DB912FD1D93`) that the OLD `_scratch_account` deterministically
+(`<personal-account-uuid>`, 50 total / 17 unread), not in the `Business` account
+(`<business-account-uuid>`) that the OLD `_scratch_account` deterministically
 picked — whose INBOX had 0 messages.** `andrei@lav.ren` routes to the Personal account on this
 Mac; the old "first non-Gmail account, sorted by account id" rule had no way to know that.
 
@@ -278,7 +278,7 @@ Re-ran the step 1 command to document the resulting state before the fix:
 
 ```
 ERROR at setup of test_move_mail_dry_run_reads_mail_and_moves_nothing
-Failed: found 0 of 2 marker mails (subject='macos-apps-mcp sweep marker') in imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/INBOX — seed them once: ...
+Failed: found 0 of 2 marker mails (subject='macos-apps-mcp sweep marker') in imap://<business-account-uuid>/INBOX — seed them once: ...
 50 deselected, 1 error in 1.96s
 ```
 
@@ -297,10 +297,10 @@ account holds any marker, fall back to the prior rule (first non-Gmail IMAP acco
 id) so `inbox_messages` still fails loud with the seed command.
 
 **Research recorded per the owner's request:** both accounts on this Mac are plain IMAP (no
-`[Gmail]` folders); the old rule always picked Business (`02B406D0-99D4-4E9A-9A7C-0DB912FD1D93`).
+`[Gmail]` folders); the old rule always picked Business (`<business-account-uuid>`).
 01-08's "Personal/macos-apps-mcp-test" label was a mislabel — its printed URL is
-`imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/macos-apps-mcp-test` (Business). `andrei@lav.ren`
-delivers to Personal (`AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1`). The empty
+`imap://<business-account-uuid>/macos-apps-mcp-test` (Business). `andrei@lav.ren`
+delivers to Personal (`<personal-account-uuid>`). The empty
 `Business/macos-apps-mcp-test` mailbox stays as a leftover, not deleted — confirmed still empty
 below.
 
@@ -385,10 +385,10 @@ Watchdog loaded, last log line ~10 s old (well under 60 s), Mail idle at read ti
 from macos_apps_mcp.adapters.mail import MailAdapter
 from test_integration import _scratch_account
 print(_scratch_account(MailAdapter()))
-# -> AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1
+# -> <personal-account-uuid>
 ```
 
-Confirmed: `AE0EAE3D-449A-4B33-A923-FBFDB3DD13A1` (Personal) — matches the required pick.
+Confirmed: `<personal-account-uuid>` (Personal) — matches the required pick.
 
 ### Post-seed proof — PASSES
 
@@ -407,10 +407,10 @@ limit=5)["results"]` is what proves that).
 ### Business leftover — confirmed still empty (read-only)
 
 ```python
-MailAdapter().overview() -> {'account': 'Business', 'account_id': '02B406D0-99D4-4E9A-9A7C-0DB912FD1D93',
-  'mailbox': 'macos-apps-mcp-test', 'folder': 'imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/macos-apps-mcp-test',
+MailAdapter().overview() -> {'account': 'Business', 'account_id': '<business-account-uuid>',
+  'mailbox': 'macos-apps-mcp-test', 'folder': 'imap://<business-account-uuid>/macos-apps-mcp-test',
   'total': 0, 'unread': 0}
-MailAdapter().search(mailbox='imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/macos-apps-mcp-test', limit=5) -> {'results': []}
+MailAdapter().search(mailbox='imap://<business-account-uuid>/macos-apps-mcp-test', limit=5) -> {'results': []}
 ```
 
 `Business/macos-apps-mcp-test` remains a harmless empty leftover (01-08's mislabeled scratch

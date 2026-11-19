@@ -11,7 +11,7 @@ import functools
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from . import notices, registry, tiers
+from . import notices, registry, runtime, tiers
 from .adapters.calendar import CalendarAdapter
 from .adapters.contacts import ContactsAdapter
 from .adapters.mail import MailAdapter
@@ -70,37 +70,22 @@ def _guard(fn):
     ``ValueError`` — boundary validation (bad datetime/RRULE, unknown id) — takes the
     same channel: its message is already agent-directed, so it too becomes a
     ``ToolError`` instead of leaking through the protocol as a raw exception.
+
+    Off macOS every guarded tool answers ``UnsupportedPlatform`` before its body runs.
     """
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
+            # Mail and Reminders would otherwise answer from a store-path lookup
+            # ("no Mail data found") that names the wrong cause off macOS.
+            runtime.require_macos()
             return fn(*args, **kwargs)
         except (NativeError, ValueError) as e:
             raise ToolError(str(e)) from e
 
     return wrapper
 
-
-# MCP tool annotations (#57) — a host (Claude Code's permission system) gates
-# safari_tabs differently from delete_event. Read-only comes straight from the
-# read/write seam. The destructive/additive split is the ONE per-tool judgment
-# (maintainer call): a write that only ADDS a new item (create_*, safari_open opens a
-# fresh tab) is additive; one that modifies/overwrites/deletes existing state — or runs
-# arbitrary automation (run_shortcut) — is destructive. ping/now read; doctor reads.
-_READ_ANNOTATIONS = {"readOnlyHint": True, "destructiveHint": False}
-_ADDITIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": False}
-_DESTRUCTIVE_ANNOTATIONS = {"readOnlyHint": False, "destructiveHint": True}
-
-# Outbound leaves this machine — a sent mail cannot be recalled by any tool here.
-# MCP's openWorldHint is exactly that signal ("interacts with external entities"), so a
-# host can gate send_mail differently from delete_event, which is destructive but purely
-# local.
-_SEND_ANNOTATIONS = {
-    "readOnlyHint": False,
-    "destructiveHint": True,
-    "openWorldHint": True,
-}
 
 # The #133 autosave paragraph, stated ONCE (#179): it is the one docstring invariant
 # that is genuinely byte-identical across every mail send tool (the folder-VERBATIM /
@@ -622,7 +607,9 @@ def export_mail(ids: str, dest_dir: str) -> dict:
     launches Mail and needs no Automation. `ids` are RFC822 message-ids from a mail
     read, comma-separated, max 25. `dest_dir` must be inside the allowed root
     (~/Downloads by default; MACOS_APPS_FILE_ROOT moves it) and is created if needed;
-    a path outside it is REFUSED. Filenames are derived, never overwritten.
+    a path outside it is REFUSED. Filenames are derived, never overwritten. A name that
+    already exists refuses the whole batch before any file is written; a refusal after
+    a write names the files already written.
 
     .eml is the only format — it is lossless and opens in Mail and everything else,
     and `mail_body` already covers "give me the text".
@@ -701,18 +688,42 @@ def create_draft(
     return _mail.create_draft(to, subject, body, from_address)
 
 
-@_additive_tool(audit="reply", adapter="mail", permission="Automation")
+@_additive_tool(
+    audit="reply", adapter="mail", permission=("Automation", "Accessibility")
+)
 def mail_reply(
     message_id: str, mailbox: str, reply_body: str, include_quote: bool = True
 ) -> dict:
-    """Reply to a message, opening a threaded draft for review (Automation).
+    """Reply to a message, opening a threaded draft for review (Automation +
+    Accessibility).
 
     NEVER sends. message_id: the RFC822 id from a mail read. mailbox is REQUIRED: the
     `folder` value from the SAME search result, passed back VERBATIM (an opaque
-    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
-    threading headers natively; include_quote appends the quoted original. Returns a
-    locator dict — save the draft to Drafts and `drafts()` resolves it by a stable
-    message-id.
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail builds its
+    normal reply and sets the threading headers natively. include_quote (the default)
+    keeps Mail's own quote of the original — quote bar, Mail's attribution line,
+    formatting, inline images, the whole message — with your text put on top through
+    Accessibility. include_quote=False replaces the whole body with your text alone
+    (also through Accessibility), so no quote at all.
+    Accessibility is needed for macos-apps-mcp (System Settings > Privacy & Security >
+    Device Control and Data Access; called Accessibility before macOS 27). Mail comes
+    to the front for about a second, and the clipboard is borrowed and restored. The
+    call REFUSES when Accessibility is off, when Mail's reply window cannot be
+    confirmed, when the text does not land first, or when Mail's own reply has no quote
+    (Mail's setting "Quote the text of the original message" is off, or a text
+    selection is left in Mail's message viewer). A refusal before the reply window
+    opened leaves nothing. A refusal after it opened takes about 45 seconds: the call
+    discards the reply, waits for Mail's autosave, and deletes a Drafts copy only when
+    that copy is provably its own (it sits in the Drafts of the account the reply is
+    sent from, it landed between the reply verb and the discard, the text above Mail's
+    quote is exactly yours, the quote is still there with nothing below it, and no other
+    reply window to that message was open when the call started). A copy it cannot
+    prove, or cannot look for (not exactly your text, a localized Drafts, no Full Disk
+    Access), is left alone: the error then says a copy MAY be left. Look in the Drafts
+    of the account the reply is sent from, and again after a minute, because Mail saves
+    its copy late. Only "nothing was created" is clean.
+    Returns a locator dict — save the draft to Drafts and `drafts()` resolves it by a
+    stable message-id.
 
     THE AUTOSAVE WINDOW: that message-id is stamped only when Mail autosaves the draft,
     ~10-15 SECONDS after this returns — asynchronously, and nothing can hurry it. So
@@ -987,7 +998,7 @@ def send_mail(
     )
 
 
-@_send_tool("mail", permission="Automation")
+@_send_tool("mail", permission=("Automation", "Accessibility"))
 def reply_all(
     message_id: str,
     mailbox: str,
@@ -995,15 +1006,48 @@ def reply_all(
     include_quote: bool = True,
     dry_run: bool = True,
 ) -> dict:
-    """Reply-all to a message and SEND it — this leaves your machine.
+    """Reply-all to a message and SEND it — this leaves your machine (Automation +
+    Accessibility).
 
     `dry_run` DEFAULTS TO TRUE: preview first, then pass `dry_run=False` to send.
     message_id is the RFC822 id from a mail read and mailbox is REQUIRED — the `folder`
     value from the SAME search result, passed back VERBATIM (an opaque
-    `imap://<uuid>/<path>` token; the five canonical names also work). Mail sets the
-    threading headers natively and the sending account is inherited from the original.
+    `imap://<uuid>/<path>` token; the five canonical names also work). Mail builds its
+    normal reply-all and sets the threading headers natively; the sending account is
+    inherited from the original. include_quote (the default) keeps Mail's own quote of
+    the original — quote bar, Mail's attribution line, formatting, inline images, the
+    whole message — with your text put on top through Accessibility.
+    include_quote=False replaces the whole body with your text alone (also through
+    Accessibility), so no quote at all.
+    The dry run lists the reply's own `to` and `cc` (computed; Mail's reply-all decides
+    delivery), so check them before `dry_run=False`; `from` reads "(the account that
+    holds the original)" because Mail picks the sending address itself. The dry run
+    opens no window and needs no Accessibility.
+    A real send needs Accessibility for macos-apps-mcp (System Settings > Privacy &
+    Security > Device Control and Data Access; called Accessibility before macOS 27).
+    The reply opens in a Mail window that comes to the front for about a second, and
+    the clipboard is borrowed and restored. The call sends ONLY after your text is
+    confirmed in place above Mail's quote. It REFUSES, and sends nothing, when
+    Accessibility is off, when Mail's reply window cannot be confirmed, when the text
+    does not land first, or when Mail's own reply has no quote (Mail's setting "Quote
+    the text of the original message" is off, or a text selection is left in Mail's
+    message viewer). A refusal before the reply window opened leaves nothing. A refusal
+    after it opened takes about 45 seconds: the call discards the reply, waits for
+    Mail's autosave, and deletes a Drafts copy only when that copy is provably its own
+    (in the Drafts of the account the reply is sent from, as for mail_reply). A copy it
+    cannot prove, or cannot look for, is left alone: the error then says a copy MAY be
+    left. Only "nothing was created" is clean.
+    After a send, Mail can leave an autosaved copy of the reply in Drafts. The call
+    then waits until about 45 seconds after the window opened (so it returns after about
+    a minute), looks for that copy and deletes it only when it is provably this reply's
+    own. The result carries `drafts_copy` (removed, none, late, unproven or
+    unavailable) and a plain note; `sent` stays true whatever that check finds, and
+    nothing in Sent or All Mail is ever touched. Do NOT retry the send because of a
+    `drafts_copy` that is not "removed" or "none": look in Drafts instead.
+    If the send call itself fails or times out, the reply may have been sent: check
+    Mail's Outbox and Sent before retrying.
     Registered ONLY when MACOS_APPS_ALLOW_SEND enables the mail adapter. Needs
-    Automation access for Mail."""
+    Automation access for Mail and Accessibility for macos-apps-mcp."""
     return _mail.reply_all(message_id, mailbox, body, include_quote, dry_run=dry_run)
 
 
@@ -1232,7 +1276,8 @@ def update_reminder(
     start: str | None = None,
     recurrence: str | None = None,
 ) -> dict[str, str]:
-    """Update a reminder by id (full replace). `due`/`start` ISO (naive = local).
+    """Update a reminder by id (full replace). Omit `list_name` to keep the reminder in
+    its list; name one to move it. `due`/`start` ISO (naive = local).
     `recurrence`: RRULE to set ('none' to stop repeating) with FREQ, INTERVAL, COUNT,
     UNTIL, BYDAY (ordinals such as 2TU or -1FR for monthly and yearly), BYMONTHDAY,
     BYMONTH, BYYEARDAY, BYSETPOS; BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are
@@ -1340,7 +1385,8 @@ def update_event(
     span: str | None = None,
     alarms: list[int] | None = None,
 ) -> dict[str, str]:
-    """Update an event by id (full replace). `start`/`end` ISO — naive = local time.
+    """Update an event by id (full replace). Omit `calendar` to keep the event in its
+    calendar; name one to move it. `start`/`end` ISO — naive = local time.
     `recurrence` an RRULE with FREQ, INTERVAL, COUNT, UNTIL, BYDAY (ordinals such as
     2TU or -1FR for monthly and yearly), BYMONTHDAY, BYMONTH, BYYEARDAY, BYSETPOS;
     BYWEEKNO, BYHOUR, BYMINUTE, BYSECOND and WKST are refused. `all_day` takes a
@@ -1354,6 +1400,10 @@ def update_event(
     removes them all.
     `span` REQUIRED if the target is recurring: 'this-event' (only this occurrence) or
     'future-events' (this + all later); ignored for single events.
+    `recurrence='none'` on a repeating event is refused and changes nothing:
+    update_event cannot stop a series. To end it, use
+    `delete_event(span='future-events')`, which deletes this occurrence and all later
+    ones. On a single event 'none' changes nothing about recurrence.
     Side effect (full-replace update); needs EventKit (Calendar) access. `id` from
     events."""
     data = CalendarEventData(
@@ -1364,7 +1414,7 @@ def update_event(
         location=location,
         notes=notes,
         all_day=all_day,
-        recurrence=parse_recurrence(recurrence),
+        recurrence=parse_recurrence_update(recurrence),
         alarms=None if alarms is None else tuple(alarms),
     )
     return _calendar.update_event(id, data, span=span).as_dict()

@@ -49,16 +49,16 @@ def test_every_tool_is_annotated_from_the_read_write_seam():
     for t in _tools():
         a = t.annotations
         assert a is not None, f"{t.name} has no annotations"
-        assert isinstance(a.readOnlyHint, bool), f"{t.name} readOnlyHint not set"
+        assert isinstance(a.read_only_hint, bool), f"{t.name} readOnlyHint not set"
         expected_readonly = t.name not in _WRITE_TOOLS
-        assert a.readOnlyHint is expected_readonly, (
-            f"{t.name} readOnlyHint={a.readOnlyHint}, expected {expected_readonly}"
+        assert a.read_only_hint is expected_readonly, (
+            f"{t.name} readOnlyHint={a.read_only_hint}, expected {expected_readonly}"
         )
         # reads + additive writes (create/open) are non-destructive; only
         # modify/overwrite/delete/run-automation tools are destructive (#57).
         want_destructive = t.name in _DESTRUCTIVE_TOOLS
-        assert a.destructiveHint is want_destructive, (
-            f"{t.name} destructiveHint={a.destructiveHint}, want {want_destructive}"
+        assert a.destructive_hint is want_destructive, (
+            f"{t.name} destructiveHint={a.destructive_hint}, want {want_destructive}"
         )
 
 

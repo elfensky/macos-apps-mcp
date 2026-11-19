@@ -1,0 +1,1327 @@
+"""FIX-16 (#348): the Drafts sweep of a refused native reply (facts section 4e
+`Refusal cleanup`) — the read half. The index and the ``.emlx`` files are fixtures in a
+tmp dir; nothing here touches Mail or the real Envelope Index."""
+
+from __future__ import annotations
+
+import email
+import re
+import shutil
+import sqlite3
+from pathlib import Path
+from urllib.parse import quote, unquote
+
+import pytest
+
+from macos_apps_mcp.adapters import mail_index, mail_reply_cleanup
+from macos_apps_mcp.errors import NativeError
+
+# The conftest lock replaces ``_read``; the self-tests bind the real one here.
+_REAL_READ = mail_reply_cleanup._read
+_ACCT = "11111111-2222-3333-4444-555555555555"
+_OTHER = "99999999-8888-7777-6666-555555555555"
+_ORIGINAL = "orig-1@example.com"
+_ATTRIBUTION = "On 1 Jul 2026, at 14:39, Jane wrote:"
+_QUOTE_HTML = f'<blockquote type="cite">{_ATTRIBUTION}<br>quoted words</blockquote>'
+_TAIL = "quoted words"  # the last words of the original, as the flow reads them
+# what the flow passes besides the text: the original's tail, and the index top right
+# after the discard (above every row these tests store)
+_KW = {"tail": _TAIL, "landed_by": 10**6}
+_URL = f"imap://{_ACCT}/Drafts"
+
+
+def _emlx(
+    in_reply_to: str,
+    mid: str,
+    body: str,
+    kind: str = "html",
+    received: bool = False,
+) -> bytes:
+    """``received``: the two ``Received`` lines a mail server adds to a delivered
+    message (a draft and a Sent copy carry none)."""
+    postmark = (
+        "Received: from mx2.example.net by mx1.example.net; "
+        "Wed, 18 Nov 2026 10:00:00 +0000\r\n"
+        "Received: from mx3.example.net by mx2.example.net; "
+        "Wed, 18 Nov 2026 09:59:59 +0000\r\n"
+        if received
+        else ""
+    )
+    raw = (
+        f"{postmark}Message-ID: <{mid}>\r\nIn-Reply-To: <{in_reply_to}>\r\n"
+        f"Subject: Re: x\r\nContent-Type: text/{kind}; charset=utf-8\r\n\r\n"
+        f"{body}"
+    ).encode()
+    return str(len(raw)).encode() + b"\n" + raw + b"\n<plist></plist>"
+
+
+@pytest.fixture
+def mailroot(tmp_path, monkeypatch):
+    """``put(rowid, in_reply_to, mid, body)`` stores one message where Mail does:
+    ``<V10>/<account>/<one .mbox folder per segment>/<guid>/Data/<shard>/Messages``,
+    beside the ``V10/MailData/Envelope Index`` the sweep reads."""
+    monkeypatch.setattr(
+        mail_index,
+        "envelope_index_path",
+        lambda: tmp_path / "V10" / "MailData" / "Envelope Index",
+    )
+
+    def put(
+        rowid,
+        in_reply_to,
+        mid,
+        body,
+        *,
+        url=_URL,
+        kind="html",
+        partial=False,
+        received=False,
+    ):
+        account, _, path = url.partition("://")[2].partition("/")
+        folder = tmp_path / "V10" / account
+        for segment in unquote(path).split("/"):
+            folder = folder / f"{segment}.mbox"
+        shard = "/".join(reversed(str(rowid // 1000))) if rowid >= 1000 else ""
+        box = folder / "GUID" / "Data" / shard / "Messages"
+        box.mkdir(parents=True, exist_ok=True)
+        name = f"{rowid}.partial.emlx" if partial else f"{rowid}.emlx"
+        (box / name).write_bytes(_emlx(in_reply_to, mid, body, kind, received))
+        return box / name
+
+    return put
+
+
+@pytest.fixture
+def index(blank_envelope, monkeypatch):
+    """The real index reads over a schema-only Envelope Index."""
+    monkeypatch.setattr(mail_reply_cleanup, "_read", _REAL_READ)
+    return blank_envelope
+
+
+def _rows(monkeypatch, rows):
+    """The new rows the sweep sees, without an index."""
+    monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: rows)
+
+
+# --- the baseline and the new rows -------------------------------------------
+
+
+def test_index_top_is_the_highest_message_row(index):
+    assert mail_reply_cleanup.index_top() == 0  # an empty index is still readable
+    box = index.add_mailbox(f"imap://{_ACCT}/INBOX")
+    index.add_message(mailbox=box)
+    top = index.add_message(mailbox=box, deleted=1)  # a deleted row still sets the top
+    assert mail_reply_cleanup.index_top() == top
+
+
+def test_index_top_is_none_when_the_index_cannot_be_read():
+    # the conftest lock stands in for an unreadable index (no Full Disk Access)
+    assert mail_reply_cleanup.index_top() is None
+
+
+def test_new_rows_reads_every_live_row_above_the_top_in_any_mailbox(index):
+    # the copy lands in the Drafts of the account the reply is SENT from: no account,
+    # no mailbox name is assumed
+    mine = index.add_mailbox(f"imap://{_ACCT}/INBOX")
+    other = index.add_mailbox(f"imap://{_OTHER}/Concepten")
+    old = index.add_message(mailbox=mine)
+    a = index.add_message(mailbox=mine)
+    b = index.add_message(mailbox=other)
+    index.add_message(mailbox=other, deleted=1)  # not live
+    assert mail_reply_cleanup.new_rows(old) == [
+        (a, f"imap://{_ACCT}/INBOX"),
+        (b, f"imap://{_OTHER}/Concepten"),
+    ]
+    assert mail_reply_cleanup.new_rows(b) == []
+
+
+def test_new_rows_returns_one_row_over_the_cap_so_the_caller_can_tell(
+    index, monkeypatch
+):
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 3)
+    box = index.add_mailbox(f"imap://{_ACCT}/INBOX")
+    for _ in range(6):
+        index.add_message(mailbox=box)
+    assert len(mail_reply_cleanup.new_rows(0)) == 4
+
+
+# --- where a stored message lives --------------------------------------------
+
+
+def test_emlx_path_follows_mails_folder_and_shard_layout(mailroot):
+    # 174504 -> the digits of 174 reversed: Data/4/7/1 (measured on a real store)
+    put = mailroot(174504, _ORIGINAL, "a@x", "<div>x</div>", url=_URL)
+    assert put.parent.as_posix().endswith("Drafts.mbox/GUID/Data/4/7/1/Messages")
+    assert mail_reply_cleanup._emlx_path(_URL, 174504) == put
+    small = mailroot(20, _ORIGINAL, "b@x", "<div>x</div>")
+    assert small.parent.as_posix().endswith("Drafts.mbox/GUID/Data/Messages")
+    assert mail_reply_cleanup._emlx_path(_URL, 20) == small
+
+
+def test_emlx_path_nests_a_folder_per_segment_and_finds_a_partial_file(mailroot):
+    url = f"imap://{_ACCT}/%5BGmail%5D/Drafts"
+    put = mailroot(31, _ORIGINAL, "g@x", "<div>x</div>", url=url, partial=True)
+    assert put.as_posix().count("[Gmail].mbox/Drafts.mbox") == 1
+    assert mail_reply_cleanup._emlx_path(url, 31) == put
+
+
+def test_emlx_path_searches_only_the_one_mailbox_folder(mailroot):
+    # the shard rule missed (an unknown layout): the walk stays inside the mailbox
+    put = mailroot(31, _ORIGINAL, "g@x", "<div>x</div>")
+    odd = put.parent.parent / "7" / "Messages"
+    odd.mkdir(parents=True)
+    put.rename(odd / put.name)
+    inbox = f"imap://{_ACCT}/INBOX"
+    elsewhere = mailroot(31, _ORIGINAL, "e@x", "<div>x</div>", url=inbox)
+    assert mail_reply_cleanup._emlx_path(_URL, 31) == odd / put.name
+    assert mail_reply_cleanup._emlx_path(inbox, 31) == elsewhere
+    assert mail_reply_cleanup._emlx_path(f"imap://{_ACCT}/Nope", 31) is None
+
+
+# --- the selector ------------------------------------------------------------
+
+
+def _find(monkeypatch, rows=None, own="Hi there", attribution=_ATTRIBUTION, **kw):
+    _rows(monkeypatch, [(20, _URL)] if rows is None else rows)
+    return mail_reply_cleanup.find_own_draft(
+        10, _ORIGINAL, own, attribution, **{**_KW, **kw}
+    )
+
+
+def _kind(mailroot, monkeypatch, body, own="Hi there", *, tail=_TAIL, **kw) -> str:
+    mailroot(20, _ORIGINAL, "draft-x@example.com", body, **kw)
+    return _find(monkeypatch, own=own, tail=tail).kind
+
+
+def test_find_own_draft_claims_exactly_one_new_reply_with_the_calls_text(
+    mailroot, monkeypatch
+):
+    mailroot(20, _ORIGINAL, "draft-a@example.com", "<div>Hi there</div>" + _QUOTE_HTML)
+    got = _find(monkeypatch)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<draft-a@example.com>")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<div>Hi  there</div>",  # whitespace is folded
+        f"<div>Hi there</div><div>{_ATTRIBUTION}</div>",  # then Mail's own line
+        f"<div>Hi there {_ATTRIBUTION}</div>",
+    ],
+)
+def test_find_own_draft_claims_the_calls_text_alone_or_with_mails_attribution(
+    mailroot, monkeypatch, body
+):
+    assert _kind(mailroot, monkeypatch, body + _QUOTE_HTML) == "one"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "",  # no text at all: could be any hand reply that was opened and saved
+        f"<div>{_ATTRIBUTION}</div>",  # only Mail's attribution line
+        f"<div>{_ATTRIBUTION} Hi there</div>",  # the attribution BEFORE the text
+        f"<div>Hi there {_ATTRIBUTION} and more</div>",  # text typed after it
+        "<div>Hi there Jane wrote:</div>",  # not this original's line
+        "<div>Hi there On 2 Jul 2026, at 14:39, Jane wrote:</div>",  # another date
+        "<div>On my way, see you at five.</div>",  # a hand reply that starts with "On "
+        "<div>Sure, thanks</div>",  # a hand reply
+        "<div>Hi</div>",  # a PREFIX of the call's text is not the call's text
+        "<div>Hi there, Jane</div>",  # the call's text is only a PREFIX of this
+        "<div>Hi there Hi there</div>",  # a double paste
+    ],
+)
+def test_find_own_draft_deletes_nothing_it_cannot_prove_is_the_calls_own(
+    mailroot, monkeypatch, body
+):
+    # the owner rule: refuse and leave nothing, never touch what is not ours. A copy
+    # whose text before the quote is not exactly the call's text (plus Mail's own line)
+    # is reported, never claimed.
+    assert _kind(mailroot, monkeypatch, body + _QUOTE_HTML) == "unproven"
+
+
+@pytest.mark.parametrize(
+    "own, hand",
+    [
+        ("Hi", "Hi Jane, I will call you tonight."),
+        ("Thanks!", "Thanks! I'll check it tomorrow and send the figures."),
+        ("Thanks", "Thanks. Not now."),
+    ],
+)
+@pytest.mark.parametrize("kind", ["html", "plain"])
+def test_find_own_draft_never_claims_a_hand_reply_that_starts_with_the_calls_text(
+    mailroot, monkeypatch, own, hand, kind
+):
+    # the reviewers' cases: a short call text is the start of an owner's own reply
+    if kind == "html":
+        body = f"<div>{hand}</div>" + _QUOTE_HTML
+    else:
+        body = f"{hand}\r\n\r\n{_ATTRIBUTION}\r\n> quoted words\r\n"
+    assert _kind(mailroot, monkeypatch, body, own=own, kind=kind) == "unproven"
+
+
+def test_find_own_draft_reads_a_plain_text_draft_up_to_the_first_quote_line(
+    mailroot, monkeypatch
+):
+    body = "Hi there\r\n\r\n> quoted words\r\n"
+    assert _kind(mailroot, monkeypatch, body, kind="plain") == "one"
+    body = f"Hi there\r\n\r\n{_ATTRIBUTION}\r\n> quoted words\r\n"
+    assert _kind(mailroot, monkeypatch, body, kind="plain") == "one"
+
+
+def test_find_own_draft_gives_a_plain_text_hand_reply_that_starts_with_on_no_claim(
+    mailroot, monkeypatch
+):
+    body = f"On my way, see you at five.\r\n\r\n{_ATTRIBUTION}\r\n> quoted\r\n"
+    assert _kind(mailroot, monkeypatch, body, kind="plain") == "unproven"
+
+
+def test_find_own_draft_without_an_attribution_accepts_only_the_text_itself(
+    mailroot, monkeypatch
+):
+    # a reply without a quote (include_quote=False): the body is the text, nothing else
+    mailroot(20, _ORIGINAL, "a@x", f"<div>Hi there {_ATTRIBUTION}</div>")
+    assert _find(monkeypatch, attribution=None, tail=None).kind == "unproven"
+    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>")
+    assert _find(monkeypatch, attribution=None, tail=None).kind == "one"
+
+
+def test_find_own_draft_never_claims_with_an_empty_own_text(mailroot, monkeypatch):
+    # an empty call text proves nothing, even against an empty draft
+    assert _kind(mailroot, monkeypatch, "<div>anything</div>", own="  ") == "unproven"
+    assert _kind(mailroot, monkeypatch, "", own="  ") == "unproven"
+
+
+@pytest.mark.parametrize("body", ["", "<div></div>"])
+def test_find_own_draft_empty_text_guard_stands_on_its_own(mailroot, monkeypatch, body):
+    # rv533: with no quote and no attribution to fail on, an empty call text would
+    # EQUAL an empty draft: only the empty-text guard keeps this unproven
+    mailroot(20, _ORIGINAL, "draft-x@example.com", body)
+    got = _find(monkeypatch, own="  ", attribution=None, tail=None)
+    assert got.kind == "unproven"
+
+
+@pytest.mark.parametrize(
+    "url, kind",
+    [
+        (f"imap://{_ACCT}/Drafts", "one"),
+        (f"imap://{_ACCT}/Draft", "one"),  # a Yahoo-style server
+        (f"imap://{_ACCT}/%5BGmail%5D/Drafts", "one"),
+        (f"imap://{_ACCT}/%5BGoogle%20Mail%5D/Drafts", "one"),  # a German Gmail
+        (f"imap://{_ACCT}/%5BArchive%202019%5D/Drafts", "unproven"),  # a user folder
+        (f"imap://{_OTHER}/Drafts", "one"),  # the account the reply is sent FROM
+        (f"imap://{_ACCT}/Concepten", "unproven"),  # a localized Drafts: loud
+        (f"imap://{_ACCT}/%5BGmail%5D/All%20Mail", "unproven"),  # a label-backed Drafts
+        (f"imap://{_ACCT}/Projects/Drafts", "unproven"),  # a user folder
+        (f"imap://{_ACCT}/INBOX/Drafts", "unproven"),
+        (f"imap://{_ACCT}/drafts", "unproven"),
+        (f"imap://{_ACCT}/INBOX", "unproven"),
+    ],
+)
+def test_find_own_draft_claims_only_a_mailbox_named_drafts(
+    mailroot, monkeypatch, url, kind
+):
+    mailroot(20, _ORIGINAL, "d@x", "<div>Hi there</div>" + _QUOTE_HTML, url=url)
+    assert _find(monkeypatch, [(20, url)]).kind == kind
+
+
+def test_find_own_draft_with_several_candidates_claims_none(mailroot, monkeypatch):
+    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    mailroot(21, _ORIGINAL, "b@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    got = _find(monkeypatch, [(20, _URL), (21, _URL)])
+    assert got.kind == "unproven" and got.mid == ""
+
+
+def test_find_own_draft_with_a_copy_in_two_accounts_claims_none(mailroot, monkeypatch):
+    other = f"imap://{_OTHER}/Drafts"
+    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    mailroot(21, _ORIGINAL, "b@x", "<div>Hi there</div>" + _QUOTE_HTML, url=other)
+    assert _find(monkeypatch, [(20, _URL), (21, other)]).kind == "unproven"
+
+
+def test_find_own_draft_ignores_other_threads(mailroot, monkeypatch):
+    mailroot(20, "other@example.com", "new@example.com", "<div>Hi there</div>")
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("none")
+    assert _find(monkeypatch, rows=[]) == mail_reply_cleanup.Draft("none")
+
+
+def test_find_own_draft_with_an_unreadable_new_row_proves_nothing(
+    mailroot, monkeypatch
+):
+    # no .emlx on disk for row 20: it might be the call's own copy, in any mailbox
+    assert _find(monkeypatch).kind == "unproven"
+    mailroot(21, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    assert _find(monkeypatch, [(20, _URL), (21, _URL)]).kind == "unproven"
+
+
+def test_find_own_draft_with_more_new_rows_than_it_reads_proves_nothing(
+    mailroot, monkeypatch
+):
+    # the rows beyond the cap are never read, so "no copy" cannot be said
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2)
+    rows = [(20 + n, _URL) for n in range(3)]
+    for rowid, _ in rows:  # all readable, none a reply to the original
+        mailroot(rowid, "other@example.com", f"m{rowid}@x", "<div>hello</div>")
+    assert _find(monkeypatch, rows) == mail_reply_cleanup.Draft(
+        "unproven", reason="too_many_rows"
+    )
+    assert _find(monkeypatch, rows[:2]) == mail_reply_cleanup.Draft("none")
+
+
+def _land(index, mailroot, url, text="Hi there"):
+    """The index and the disk after Mail autosaved a reply copy into ``url``."""
+    box = index.add_mailbox(url)
+    rowid = index.add_message(mailbox=box)
+    mailroot(rowid, _ORIGINAL, "own@x", f"<div>{text}</div>" + _QUOTE_HTML, url=url)
+
+
+def test_find_own_draft_finds_a_copy_beside_a_decoy_drafts_folder(index, mailroot):
+    # a localized Drafts next to a user folder NAMED Drafts: no mailbox is guessed, so
+    # the copy is found where it landed and reported, never read as "no copy"
+    index.add_mailbox(f"imap://{_ACCT}/Drafts")
+    top = mail_reply_cleanup.index_top()
+    _land(index, mailroot, f"imap://{_ACCT}/Concepten")
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
+    assert got.kind == "unproven"
+
+
+def test_find_own_draft_finds_the_gmail_copy_beside_a_labelled_drafts_folder(
+    index, mailroot
+):
+    index.add_mailbox(f"imap://{_ACCT}/Work/Drafts")  # a label with the same leaf
+    top = mail_reply_cleanup.index_top()
+    url = f"imap://{_ACCT}/%5BGmail%5D/Drafts"
+    _land(index, mailroot, url)
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
+    assert got == mail_reply_cleanup.Draft("one", url, "<own@x>")
+
+
+def test_find_own_draft_finds_a_copy_in_another_accounts_drafts(index, mailroot):
+    # the reply is sent from an account other than the one that holds the original
+    index.add_mailbox(f"imap://{_ACCT}/INBOX")
+    top = mail_reply_cleanup.index_top()
+    url = f"imap://{_OTHER}/Drafts"
+    _land(index, mailroot, url)
+    got = mail_reply_cleanup.find_own_draft(
+        top, _ORIGINAL, "Hi there", _ATTRIBUTION, **_KW
+    )
+    assert got == mail_reply_cleanup.Draft("one", url, "<own@x>")
+
+
+def test_find_own_draft_raises_when_the_index_cannot_be_read():
+    with pytest.raises(NativeError):
+        mail_reply_cleanup.find_own_draft(0, _ORIGINAL, "Hi", None, **_KW)
+
+
+# --- ownership proof beyond equal text (rv532) ---------------------------------
+
+
+def test_find_own_draft_never_claims_a_row_that_landed_after_the_discard(
+    mailroot, monkeypatch
+):
+    # landed_by is the index top right after the discard answered: a row above it
+    # landed once the window was gone, so a family or hand draft with the same text
+    # cannot be taken for the call's own
+    mailroot(20, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    assert _find(monkeypatch, landed_by=20).kind == "one"  # up to the top: its own
+    assert _find(monkeypatch, landed_by=19).kind == "unproven"
+    assert _find(monkeypatch, landed_by=None).kind == "unproven"  # top unreadable
+
+
+@pytest.mark.parametrize(
+    "body, tail",
+    [
+        ("<div>Hi there</div>", _TAIL),  # the quote was removed
+        ("<div>Hi there</div><blockquote>owner trimmed it</blockquote>", _TAIL),
+        ("<div>Hi there</div>" + _QUOTE_HTML, None),  # a no-quote reply with a quote
+        ("<div>Hi there</div><div>and a signature</div>", None),
+        # rv533: nothing may follow the original's tail. The call pastes only at the
+        # top, so text below the quote (a PS, a signature) is a hand copy
+        ("<div>Hi there</div>" + _QUOTE_HTML + "<div>PS: bring the forms</div>", _TAIL),
+        ("<div>Hi there</div>" + _QUOTE_HTML + "<div>--<br>Jane</div>", _TAIL),
+    ],
+)
+def test_find_own_draft_needs_the_originals_quote_after_the_text(
+    mailroot, monkeypatch, body, tail
+):
+    # a hand copy of the text with a trimmed or removed quote is not the call's
+    # (include_quote=True: the original's tail follows; False: nothing follows)
+    assert _kind(mailroot, monkeypatch, body, tail=tail) == "unproven"
+
+
+def test_find_own_draft_compares_the_quote_the_way_the_insert_confirms_it(
+    mailroot, monkeypatch
+):
+    # letters and digits only: link and bullet marks differ between Mail's HTML and
+    # what the AX walk read (runtime._alnum)
+    body = "<div>Hi there</div><blockquote>quoted <b>words</b></blockquote>"
+    assert _kind(mailroot, monkeypatch, body) == "one"
+    plain = "Hi there\r\n\r\n> * quoted\r\n> words.\r\n"
+    assert _kind(mailroot, monkeypatch, plain, kind="plain") == "one"
+    # ... and a plain-text PS below the quote is a hand copy
+    ps = plain + "\r\nPS: bring the forms\r\n"
+    assert _kind(mailroot, monkeypatch, ps, kind="plain") == "unproven"
+
+
+def test_find_own_draft_never_claims_a_copy_without_a_message_id(mailroot, monkeypatch):
+    # `whose message id is ""` would match nothing or the wrong message
+    mailroot(20, _ORIGINAL, "", "<div>Hi there</div>" + _QUOTE_HTML)
+    assert _find(monkeypatch).kind == "unproven"
+
+
+def test_find_own_draft_stops_at_the_first_unreadable_row(mailroot, monkeypatch):
+    # the verdict is unproven whatever follows: nothing after it is located or read
+    mailroot(21, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    seen: list[int] = []
+    real = mail_reply_cleanup._read_draft
+
+    def spy(url, rowid):
+        seen.append(rowid)
+        return real(url, rowid)
+
+    monkeypatch.setattr(mail_reply_cleanup, "_read_draft", spy)
+    rows = [(20, _URL), (21, _URL), (22, _URL)]  # row 20 has no file
+    assert _find(monkeypatch, rows).kind == "unproven"
+    assert seen == [20]
+
+
+def test_find_own_draft_parses_the_body_of_a_threaded_row_only(mailroot, monkeypatch):
+    mailroot(20, "other@example.com", "p@x", "<div>private</div>")
+    mailroot(21, _ORIGINAL, "a@x", "<div>Hi there</div>" + _QUOTE_HTML)
+    mailroot(22, "other@example.com", "q@x", "<div>private</div>")
+    parsed: list[bytes] = []
+    real = email.message_from_bytes
+    monkeypatch.setattr(
+        mail_reply_cleanup.email,
+        "message_from_bytes",
+        lambda raw, **kw: parsed.append(raw) or real(raw, **kw),
+    )
+    rows = [(20, _URL), (21, _URL), (22, _URL)]
+    assert _find(monkeypatch, rows).kind == "one"
+    assert len(parsed) == 1 and b"a@x" in parsed[0]
+
+
+# --- where the files are (rv532) -----------------------------------------------
+
+
+def test_shard_is_the_reversed_digits_of_rowid_div_1000():
+    assert mail_reply_cleanup._shard(999) == ""
+    assert mail_reply_cleanup._shard(1000) == "1"
+    assert mail_reply_cleanup._shard(12345) == "2/1"
+    assert mail_reply_cleanup._shard(174504) == "4/7/1"
+
+
+def test_emlx_path_finds_a_file_by_its_shard_without_the_fallback_walk(
+    mailroot, monkeypatch
+):
+    # the rglob fallback finds the file whatever the shard rule says; with it disabled
+    # a wrong shard rule (always '') misses the file and fails here
+    put = mailroot(174504, _ORIGINAL, "a@x", "<div>x</div>")
+
+    def no_walk(self, pattern):
+        raise AssertionError("the fallback walk ran")
+
+    monkeypatch.setattr(Path, "rglob", no_walk)
+    assert mail_reply_cleanup._emlx_path(_URL, 174504) == put
+
+
+def test_emlx_path_reads_only_the_v_folder_of_the_index_being_read(mailroot, tmp_path):
+    # a stale V9 tree beside V10 holds an unrelated file under the same name
+    url = _URL
+    live = mailroot(20, _ORIGINAL, "own@x", "<div>live</div>", url=url)
+    decoy = tmp_path / "V9" / _ACCT / "Drafts.mbox" / "GUID" / "Data" / "Messages"
+    decoy.mkdir(parents=True)
+    (decoy / "20.emlx").write_bytes(_emlx("old@example.com", "old@x", "<div>old</div>"))
+    assert mail_reply_cleanup._emlx_path(url, 20) == live
+    live.unlink()  # a row with no file in V10 is unreadable, never read from V9
+    assert mail_reply_cleanup._emlx_path(url, 20) is None
+
+
+def test_emlx_path_is_none_without_an_index(monkeypatch):
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: None)
+    assert mail_reply_cleanup._emlx_path(_URL, 20) is None
+
+
+# --- ROWID is AUTOINCREMENT (rv532) --------------------------------------------
+
+
+def test_index_top_checks_once_that_rowid_is_autoincrement(index, monkeypatch):
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    assert mail_reply_cleanup.index_top() == 0
+    # the table definition is read once per index file: a later read does not look
+    monkeypatch.setattr(mail_reply_cleanup, "_TABLE_SQL", "SELECT NULL WHERE 0")
+    assert mail_reply_cleanup.index_top() == 0
+
+
+def test_index_top_is_none_when_rowid_is_not_autoincrement(index):
+    # without AUTOINCREMENT SQLite may reuse the number of a deleted top row, so a new
+    # row would not sort above the baseline: the sweep is unavailable, not wrong
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    index.execute("ALTER TABLE messages RENAME TO kept")
+    index.execute(
+        "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
+        "deleted INT NOT NULL DEFAULT 0)"
+    )
+    assert mail_reply_cleanup.index_top() is None
+    # rv533 (I2): the refusal is not cached as a pass: a second call refuses too
+    assert mail_reply_cleanup.index_top() is None
+
+
+def test_index_top_checks_every_index_file_on_its_own(index, monkeypatch, tmp_path):
+    # rv533 (I3): the check is per file (the set holds paths): a later index without
+    # AUTOINCREMENT (another version's folder) is refused although the first passed
+    mail_reply_cleanup._AUTOINCREMENT_SEEN.clear()
+    assert mail_reply_cleanup.index_top() == 0
+    other = tmp_path / "V11" / "MailData" / "Envelope Index"
+    other.parent.mkdir(parents=True)
+    shutil.copy(index.path, other)  # the full schema, so only AUTOINCREMENT differs
+    conn = sqlite3.connect(other)
+    conn.execute("ALTER TABLE messages RENAME TO kept")
+    conn.execute(
+        "CREATE TABLE messages(ROWID INTEGER PRIMARY KEY, mailbox INT, "
+        "deleted INT NOT NULL DEFAULT 0)"
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(mail_index, "envelope_index_path", lambda: other)
+    assert mail_reply_cleanup.index_top() is None
+
+
+# --- the sent message's own copies (reply_all, owner decision 2026-11-01) --------
+
+_SENT = f"imap://{_ACCT}/Sent%20Messages"
+_ALL_MAIL = f"imap://{_ACCT}/%5BGmail%5D/All%20Mail"
+_OWN = "<div>Hi there</div>" + _QUOTE_HTML
+
+
+def test_find_own_draft_treats_the_sent_copies_as_the_send_only_after_a_send(
+    mailroot, monkeypatch
+):
+    # a refusal sent nothing, so a threaded row outside Drafts is never explained away
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "d@x", _OWN, url=_SENT)
+    mailroot(22, _ORIGINAL, "d@x", _OWN, url=_ALL_MAIL)
+    rows = [(20, _URL), (21, _SENT), (22, _ALL_MAIL)]
+    assert _find(monkeypatch, rows).kind == "unproven"
+    got = _find(monkeypatch, rows, sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def test_find_own_draft_after_a_send_with_only_the_sent_copy_finds_no_draft(
+    mailroot, monkeypatch
+):
+    mailroot(21, _ORIGINAL, "s@x", _OWN, url=_SENT)
+    got = _find(monkeypatch, [(21, _SENT)], sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize(
+    "body, url",
+    [
+        ("<div>Something else</div>" + _QUOTE_HTML, _SENT),  # another text
+        ("<div>Hi there, Jane</div>" + _QUOTE_HTML, _SENT),  # only starts with ours
+        ("<div>Hi there</div>", _SENT),  # the quote is gone
+        (_OWN, f"imap://{_ACCT}/Projects/Drafts"),  # a user folder, still not ours
+        (_OWN, f"imap://{_ACCT}/verzonden"),  # case variant stays unproven (D-14)
+        (_OWN, f"imap://{_ACCT}/E%CC%81le%CC%81ments%20envoye%CC%81s"),  # NFD
+        (_OWN, f"imap://{_ACCT}/Projects/Verzonden"),  # nested user folder
+        (_OWN, f"imap://{_ACCT}/Concepten"),  # a localized Drafts leftover is reported
+        (_OWN, f"imap://{_ACCT}/Projects/Sent"),  # a user folder named Sent
+        (_OWN, f"imap://{_ACCT}/All%20Mail"),  # All Mail only under Google's root
+    ],
+)
+def test_find_own_draft_after_a_send_still_reports_any_other_threaded_row(
+    mailroot, monkeypatch, body, url
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "s@x", body, url=url)
+    got = _find(monkeypatch, [(20, _URL), (21, url)], sent_twins=True)
+    assert got.kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_needs_a_message_id_on_the_sent_copy(
+    mailroot, monkeypatch
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "", _OWN, url=_SENT)
+    got = _find(monkeypatch, [(20, _URL), (21, _SENT)], sent_twins=True)
+    assert got.kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_never_lets_a_second_drafts_row_pass(
+    mailroot, monkeypatch
+):
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "e@x", _OWN)  # a second copy in Drafts
+    mailroot(22, _ORIGINAL, "d@x", _OWN, url=_SENT)
+    rows = [(20, _URL), (21, _URL), (22, _SENT)]
+    assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"
+
+
+def test_find_own_draft_after_a_send_never_calls_a_localized_drafts_leftover_none(
+    mailroot, monkeypatch
+):
+    # the own autosave in a localized Drafts must not be taken for the Sent copy
+    url = f"imap://{_ACCT}/Concepten"
+    mailroot(20, _ORIGINAL, "d@x", _OWN, url=url)
+    assert _find(monkeypatch, [(20, url)], sent_twins=True).kind == "unproven"
+
+
+def test_sent_mailbox_names(monkeypatch):
+    sent = mail_reply_cleanup._is_sent_url
+    for name in (
+        "Sent",
+        "Sent%20Messages",
+        "Sent%20Items",
+        "%5BGmail%5D/Sent%20Mail",
+        "Verzonden",
+        "%5BGoogle%20Mail%5D/%C3%89l%C3%A9ments%20envoy%C3%A9s",
+    ):
+        assert sent(f"imap://{_ACCT}/{name}"), name
+    assert sent(f"imap://{_ACCT}/%5BGoogle%20Mail%5D/All%20Mail")
+    for name in (
+        "verzonden",
+        "Projects/Sent",
+        "All%20Mail",
+        "%5BArchive%5D/Sent",
+        "E%CC%81le%CC%81ments%20envoye%CC%81s",
+        "Projects/Verzonden",
+    ):
+        assert not sent(f"imap://{_ACCT}/{name}"), name
+
+
+@pytest.mark.parametrize("name", ["Verzonden", "Éléments envoyés", "Отправленные"])
+def test_localized_sent_twin_uses_exact_shared_vocabulary(mailroot, monkeypatch, name):
+    url = f"imap://{_ACCT}/" + quote(name)
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    mailroot(21, _ORIGINAL, "s@x", _OWN, url=url)
+    rows = [(20, _URL), (21, url)]
+    assert _find(monkeypatch, rows).kind == "unproven"  # nothing was sent
+    assert _find(monkeypatch, rows, sent_twins=True) == mail_reply_cleanup.Draft(
+        "one", _URL, "<d@x>"
+    )
+
+
+# --- the reply's own signature (FIX-16 gap G4, owner decision 2026-11-01) ---------
+
+_SIG = "Jane Doe\nExample Corp"
+_SIG_HTML = '<div id="AppleMailSignature">Jane Doe<br>Example Corp</div>'
+# the same words, broken into lines and links differently: white space only
+_SIG_WS = '<div>Jane  Doe<br>\n<a href="https://x.example">Example&nbsp;Corp</a></div>'
+
+
+def _signed(before: str, **kw):
+    """The kind of the one Drafts copy whose HTML is ``before`` + the quote."""
+    return _find_kind_with_signature(before + _QUOTE_HTML, **kw)
+
+
+def _find_kind_with_signature(body, *, signature=_SIG, own="Hi there"):
+    return mail_reply_cleanup._is_own(
+        mail_reply_cleanup._split_quote(
+            email.message_from_string(
+                "Content-Type: text/html; charset=utf-8\r\n\r\n" + body,
+                policy=email.policy.default,
+            )
+        )[0],
+        own,
+        _ATTRIBUTION,
+        signature,
+    )
+
+
+@pytest.mark.parametrize(
+    "before, accepted",
+    [
+        ("<div>Hi there</div>", True),
+        (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>", True),
+        (f"<div>Hi there</div>{_SIG_HTML}", True),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>{_ATTRIBUTION}</div>", True),
+        (f"<div>Hi there</div>{_SIG_WS}", True),  # differs in white space only
+        (f"<div>Hi there</div>{_SIG_WS}<div>{_ATTRIBUTION}</div>", True),
+        # owner content without a letter or a digit is still owner content
+        (f"<div>Hi there</div><div>!!!</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div><div>\U0001f44d \U0001f600</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>?? :-)</div>", False),
+        (
+            f"<div>Hi there</div><div>\u2014 \u2014 \u2014</div>{_SIG_HTML}"
+            f"<div>\u2014 \u2713</div><div>{_ATTRIBUTION}</div>",
+            False,
+        ),
+        ("<div>Hi there</div><div>Jane Doe - Example Corp</div>", False),
+        (_SIG_HTML, False),  # the signature alone
+        (f"<div>Hi there</div><div>and more</div>{_SIG_HTML}", False),
+        (f"<div>Hi there</div>{_SIG_HTML}<div>and more</div>", False),
+        (f"<div>Hi there</div><div>{_ATTRIBUTION}</div>{_SIG_HTML}", False),
+        (f"<div>{_ATTRIBUTION}</div><div>Hi there</div>{_SIG_HTML}", False),
+        ("<div>Hi there</div><div>Jane Doe Other Corp</div>", False),
+        ("<div>Hi there Jane Doe Example Corp</div>", True),  # same squashed text
+        ("<div>Hi thereJane Doe Example Corp</div>", False),  # glued, no space
+    ],
+)
+def test_is_own_accepts_the_replys_own_signature_and_nothing_else(before, accepted):
+    assert _signed(before) is accepted
+
+
+def test_is_own_accepts_no_signature_when_the_signature_read_was_empty():
+    assert _signed(f"<div>Hi there</div>{_SIG_HTML}", signature="") is False
+    assert _signed("<div>Hi there</div>", signature="") is True
+
+
+@pytest.mark.parametrize("own", ["", "   ", "\n\t "])
+@pytest.mark.parametrize(
+    "before",
+    [
+        _SIG_HTML,
+        f"{_SIG_HTML}<div>{_ATTRIBUTION}</div>",
+        "",
+        f"<div>{_ATTRIBUTION}</div>",
+    ],
+)
+def test_is_own_never_matches_an_empty_or_blank_call_text(own, before):
+    # owner decision 2026-11-01: a draft that holds only the signature is not the call's
+    assert _signed(before, own=own) is False
+
+
+def test_find_own_draft_after_a_send_sets_aside_a_sent_copy_with_the_signature(
+    mailroot, monkeypatch
+):
+    signed = "<div>Hi there</div>" + _SIG_HTML + _QUOTE_HTML
+    mailroot(20, _ORIGINAL, "d@x", signed)
+    mailroot(21, _ORIGINAL, "d@x", signed, url=_SENT)
+    mailroot(22, _ORIGINAL, "d@x", signed, url=_ALL_MAIL)
+    rows = [(20, _URL), (21, _SENT), (22, _ALL_MAIL)]
+    got = _find(monkeypatch, rows, sent_twins=True, signature=_SIG)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # without the signature read the same rows stay unproven (today's rule)
+    assert _find(monkeypatch, rows, sent_twins=True).kind == "unproven"
+
+
+# --- the delivered copy and the reason of every unproven verdict (#348, 05.2-17) ------
+
+_INBOX = f"imap://{_ACCT}/INBOX"
+
+
+def _stored(mailroot, monkeypatch, rows, **kw):
+    """Store ``(rowid, url, mid, body[, received])`` rows (a ``None`` body leaves the
+    file out; ``received`` writes the postmark of a delivered message, default none) and
+    run the selector over them."""
+    for rowid, url, mid, body, *received in rows:
+        if body is not None:
+            mailroot(
+                rowid,
+                _ORIGINAL,
+                mid,
+                body,
+                url=url,
+                received=bool(received and received[0]),
+            )
+    return _find(monkeypatch, [(row[0], row[1]) for row in rows], **kw)
+
+
+_DRAFT_ROW = (20, _URL, "d@x", _OWN)
+_OTHER_BODY = "<div>not the reply</div>"
+
+
+@pytest.mark.parametrize(
+    "inbox_first, twin_url",
+    [(True, _SENT), (False, _SENT), (True, _ALL_MAIL), (False, _ALL_MAIL)],
+)
+def test_find_own_draft_after_a_send_sets_aside_the_postmarked_delivered_inbox_copy(
+    mailroot, monkeypatch, inbox_first, twin_url
+):
+    # the sent message reached an address whose account is in Mail on this Mac: its
+    # delivered copy is an INBOX row with the Sent copy's Message-ID (any case), and
+    # the order of the two rows in the index is not ours to know
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, twin_url, "s@x", _OWN)
+    # its body is never judged; a mail server's `Received` header is the postmark
+    inbox = (first, _INBOX, "S@X", _OTHER_BODY, True)
+    rows = [_DRAFT_ROW, inbox, twin] if inbox_first else [_DRAFT_ROW, twin, inbox]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # without the own Drafts copy nothing is left to report
+    got = _stored(mailroot, monkeypatch, rows[1:], sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize(
+    "inbox_first, twin_url",
+    [(True, _SENT), (False, _SENT), (True, _ALL_MAIL), (False, _ALL_MAIL)],
+)
+@pytest.mark.parametrize("with_drafts", [True, False])
+def test_find_own_draft_keeps_an_inbox_row_without_a_postmark_unproven(
+    mailroot, monkeypatch, inbox_first, twin_url, with_drafts
+):
+    # the Message-ID matches a set-aside copy, but no mail server stamped the row: an
+    # account whose Drafts mailbox is its INBOX could hold a leftover draft like this
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, twin_url, "s@x", _OWN)
+    inbox = (first, _INBOX, "s@x", _OTHER_BODY)  # no `Received` header
+    rows = [inbox, twin] if inbox_first else [twin, inbox]
+    got = _stored(
+        mailroot,
+        monkeypatch,
+        [_DRAFT_ROW, *rows] if with_drafts else rows,
+        sent_twins=True,
+    )
+    assert got.kind == "unproven" and got.reason == "inbox_row"
+
+
+def test_read_draft_reads_the_postmark_from_the_headers(mailroot):
+    mailroot(20, _ORIGINAL, "d@x", _OWN, received=True)
+    mailroot(21, _ORIGINAL, "s@x", _OWN)
+    stamped = mail_reply_cleanup._read_draft(_URL, 20)
+    plain = mail_reply_cleanup._read_draft(_URL, 21)
+    assert stamped[3] is True and plain[3] is False
+    assert callable(stamped[2]) and callable(plain[2])  # the body is not parsed here
+
+
+@pytest.mark.parametrize(
+    "rows, kw, reason",
+    [
+        # no Message-ID: nothing ties it to the sent message
+        ([(21, _SENT, "s@x", _OWN), (22, _INBOX, "", _OTHER_BODY)], {}, "inbox_row"),
+        # a Message-ID no set-aside copy carries
+        (
+            [(21, _SENT, "s@x", _OWN), (22, _INBOX, "other@x", _OTHER_BODY)],
+            {},
+            "inbox_row",
+        ),
+        # after a refusal nothing was sent: no copy is set aside, whatever it carries
+        ([(22, _INBOX, "s@x", _OWN)], {"sent_twins": False}, "inbox_row"),
+        # the Sent row failed the text check, so it set nothing aside: the INBOX row
+        # with its Message-ID is not set aside either, and nothing is claimed
+        (
+            [(21, _SENT, "s@x", _OTHER_BODY), (22, _INBOX, "s@x", _OTHER_BODY)],
+            {},
+            "sent_not_own",
+        ),
+        (
+            [(22, _INBOX, "s@x", _OTHER_BODY), (23, _SENT, "s@x", _OTHER_BODY)],
+            {},
+            "sent_not_own",
+        ),
+    ],
+)
+def test_find_own_draft_keeps_every_other_inbox_row_unproven(
+    mailroot, monkeypatch, rows, kw, reason
+):
+    got = _stored(mailroot, monkeypatch, rows, **{"sent_twins": True, **kw})
+    assert got.kind == "unproven" and got.reason == reason
+
+
+@pytest.mark.parametrize(
+    "url, reason",
+    [
+        (f"imap://{_ACCT}/Concepten", "other_mailbox"),  # a localized Drafts
+        (f"imap://{_ACCT}/Projects/INBOX", "other_mailbox"),  # not directly under it
+        (f"imap://{_ACCT}/Projects/Drafts", "other_mailbox"),
+        (f"imap://{_ACCT}/inbox", "other_mailbox"),  # another spelling
+        (f"imap://{_ACCT}/INBOX/Drafts", "other_mailbox"),  # an INBOX-rooted server
+        (f"imap://{_ACCT}/INBOX.Drafts", "other_mailbox"),
+        (_URL, "several_rows"),  # a second Drafts row: both look like the call's own
+    ],
+)
+def test_find_own_draft_never_sets_aside_a_row_outside_the_inbox_by_message_id(
+    mailroot, monkeypatch, url, reason
+):
+    # the Drafts autosave may share the sent message's Message-ID: only the top-level
+    # INBOX, which never holds a draft, may pass for the delivered copy
+    rows = [(21, _SENT, "s@x", _OWN), (22, url, "s@x", _OWN)]
+    if url == _URL:
+        rows.insert(0, _DRAFT_ROW)
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+@pytest.mark.parametrize(
+    "body, kw, reason",
+    [
+        (_OTHER_BODY, {}, "drafts_not_own"),
+        (_OWN, {"landed_by": 21}, "drafts_late"),
+    ],
+)
+def test_find_own_draft_never_sets_aside_a_drafts_row_by_message_id(
+    mailroot, monkeypatch, body, kw, reason
+):
+    # a Drafts row that is not provably own stays in the way, even with the Message-ID
+    # of the Sent copy that was set aside
+    rows = [(21, _SENT, "s@x", _OWN), (22, _URL, "s@x", body)]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True, **kw)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+def test_find_own_draft_never_sets_aside_an_inbox_row_by_the_drafts_copys_message_id(
+    mailroot, monkeypatch
+):
+    # only a Sent or All Mail copy that was set aside vouches for an INBOX row
+    rows = [_DRAFT_ROW, (22, _INBOX, "d@x", _OTHER_BODY)]
+    got = _stored(mailroot, monkeypatch, rows, sent_twins=True)
+    assert got.kind == "unproven" and got.reason == "inbox_row"
+
+
+# (stored rows, find kwargs, reason): one per code. A body of None leaves the file out.
+_BRANCH_CASES = [
+    ("too_many_rows", [(20 + n, _URL, f"m{n}@x", _OTHER_BODY) for n in range(3)], {}),
+    ("unreadable_row", [(20, _URL, "d@x", None)], {}),
+    ("drafts_late", [_DRAFT_ROW], {"landed_by": 19}),
+    ("drafts_late", [_DRAFT_ROW], {"landed_by": None}),
+    (
+        "drafts_not_own",
+        [(20, _URL, "d@x", "<div>Hi there, Jane</div>" + _QUOTE_HTML)],
+        {},
+    ),
+    ("drafts_not_own", [(20, _URL, "", _OWN)], {}),
+    (
+        "sent_not_own",
+        [(21, _SENT, "s@x", "<div>Hi there, Jane</div>" + _QUOTE_HTML)],
+        {"sent_twins": True},
+    ),
+    ("sent_not_own", [(21, _SENT, "", _OWN)], {"sent_twins": True}),
+    ("inbox_row", [(22, _INBOX, "s@x", _OWN)], {}),
+    ("other_mailbox", [(22, f"imap://{_ACCT}/Archive", "s@x", _OWN)], {}),
+    ("other_mailbox", [(21, _SENT, "s@x", _OWN)], {}),  # a refusal sent nothing
+    ("several_rows", [_DRAFT_ROW, (21, _URL, "e@x", _OWN)], {}),
+    # the first row that cannot be claimed names the branch
+    (
+        "other_mailbox",
+        [_DRAFT_ROW, (21, f"imap://{_ACCT}/Archive", "s@x", _OWN)],
+        {},
+    ),
+    (
+        "other_mailbox",
+        [(19, f"imap://{_ACCT}/Archive", "s@x", _OWN), (20, _URL, "d@x", _OWN)],
+        {},
+    ),
+]
+
+
+@pytest.mark.parametrize("reason, rows, kw", _BRANCH_CASES)
+def test_find_own_draft_names_each_unproven_branch(
+    mailroot, monkeypatch, reason, rows, kw
+):
+    if reason == "too_many_rows":
+        monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2)
+    got = _stored(mailroot, monkeypatch, rows, **kw)
+    assert got.kind == "unproven" and got.reason == reason
+
+
+def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
+    eight = {
+        "too_many_rows",
+        "unreadable_row",
+        "drafts_late",
+        "drafts_not_own",
+        "sent_not_own",
+        "inbox_row",
+        "other_mailbox",
+        "several_rows",
+    }
+    produced = set()
+    for n, (_, rows, kw) in enumerate(_BRANCH_CASES):
+        monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2 if n == 0 else 300)
+        # a fresh row id range per case, so a stored file never answers for the next
+        shifted = [(rowid + 100 * n, *rest) for rowid, *rest in rows]
+        got = _stored(
+            mailroot,
+            monkeypatch,
+            shifted,
+            **{"landed_by": 10**6, **kw},
+        )
+        produced.add(got.reason)
+    assert produced == eight
+    assert all(re.fullmatch(r"[a-z_]+", code) for code in produced)
+
+
+def test_a_claimed_or_empty_verdict_carries_no_reason(mailroot, monkeypatch):
+    assert _stored(mailroot, monkeypatch, [_DRAFT_ROW]).reason == ""
+    assert _find(monkeypatch, rows=[]).reason == ""
+
+
+# --- Mail's inline-image placeholder in the quote (#348, 05.2-19, owner decision 1) --
+
+# Mail's quote writes each inline image of the original as one span whose text is
+# `<file name>`: the id-only form in Sent and delivered copies, the compose-time form
+# (with Mail's editing class) in drafts and autosaves (facts 4e `Layout`).
+_PH = '<span id="cid:ii_t1">&lt;logo.png&gt;</span>'
+_PH_EDIT = (
+    '<span class="AppleTemporaryEditingElement" id="cid:ii_t1">&lt;logo.png&gt;</span>'
+)
+_PH_EDIT_2 = (
+    '<span class="AppleTemporaryEditingElement" id="cid:ii_t2">'
+    "&lt;photo 2.jpg&gt;</span>"
+)
+
+
+def _quoted(inner: str) -> str:
+    """The call's text above a quote whose last part is ``inner``."""
+    return (
+        f'<div>Hi there</div><blockquote type="cite">{_ATTRIBUTION}<br>'
+        f"{inner}</blockquote>"
+    )
+
+
+@pytest.mark.parametrize(
+    "text, token",
+    [
+        ("<logo.png>", True),
+        ("<a b>", True),
+        ("<>", False),
+        ("< >", False),
+        ("<\u00a0>", False),
+        ("<a><b>", False),
+        ("<a>b", False),
+        ("a<b>", False),
+        ("<a<b>", False),
+        ("<a", False),
+        ("a>", False),
+        ("", False),
+        ("<", False),
+        ("ab>", False),
+        ("<ab", False),
+    ],
+)
+def test_image_placeholder_token_is_one_bracketed_name(text, token):
+    assert mail_reply_cleanup._is_token(text) is token
+
+
+def test_drop_placeholders_stays_fast_on_a_long_unclosed_image_placeholder():
+    # the text is another party's mail: a pattern here once took quadratic time
+    # (3.5 s for 32,000 characters); plain string checks take milliseconds
+    import time
+
+    quote_html = '<blockquote><span id="cid:x">&lt;' + "a" * 400_000 + "</span>"
+    started = time.perf_counter()
+    assert mail_reply_cleanup._drop_placeholders(quote_html) == quote_html
+    assert time.perf_counter() - started < 2.0
+
+
+def test_split_quote_drops_an_image_placeholder_only_from_the_quote():
+    msg = email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        f"<div>Hi there {_PH}</div>"
+        f"<blockquote>quoted words {_PH}{_PH_EDIT}</blockquote>",
+        policy=email.policy.default,
+    )
+    head, tail = mail_reply_cleanup._split_quote(msg)
+    assert "<logo.png>" in head  # the text before the quote never loses an element
+    assert "<logo.png>" not in tail and tail.endswith("quoted words")
+
+
+_PROVEN_SHAPES = [
+    f"quoted words{_PH}",
+    f"quoted words{_PH_EDIT}",
+    f"quoted words{_PH}{_PH_EDIT_2}",
+    f"quoted {_PH_EDIT}words",
+    '<div>quoted words<span class="AppleTemporaryEditingElement" id="cid:ii_t1">'
+    " &lt;logo.png&gt;&nbsp;</span></div>",
+]
+
+
+@pytest.mark.parametrize("inner", _PROVEN_SHAPES)
+@pytest.mark.parametrize("mode", ["refusal", "send_with_drafts", "send_twins_only"])
+def test_find_own_draft_proves_a_copy_whose_quote_holds_an_image_placeholder(
+    mailroot, monkeypatch, inner, mode
+):
+    body = _quoted(inner)
+    drafts = (20, _URL, "d@x", body)
+    twins = [(21, _SENT, "s@x", body), (22, _ALL_MAIL, "a@x", body)]
+    if mode == "refusal":
+        got = _stored(mailroot, monkeypatch, [drafts])
+        assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    elif mode == "send_with_drafts":
+        got = _stored(mailroot, monkeypatch, [drafts, *twins], sent_twins=True)
+        assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    else:
+        got = _stored(mailroot, monkeypatch, twins, sent_twins=True)
+        assert got == mail_reply_cleanup.Draft("none")
+
+
+_ALMOST = "&lt;logo.png&gt;"
+_TEXT_LIKE_A_PLACEHOLDER = [
+    f"quoted words{_ALMOST}",  # typed text
+    f"quoted words<span>{_ALMOST}</span>",  # a span without an id
+    f'quoted words<span id="img1">{_ALMOST}</span>',
+    f'quoted words<span id="xcid:ii_t1">{_ALMOST}</span>',
+    f'quoted words<span id="CID:ii_t1">{_ALMOST}</span>',
+    f'quoted words<SPAN ID="cid:ii_t1">{_ALMOST}</SPAN>',
+    f"quoted words<span id='cid:ii_t1'>{_ALMOST}</span>",
+    f"quoted words<span id=cid:ii_t1>{_ALMOST}</span>",
+    f'quoted words<span class="x" id="cid:ii_t1">{_ALMOST}</span>',
+    # the class after the id is not a form Mail writes
+    'quoted words<span id="cid:ii_t1" class="AppleTemporaryEditingElement">'
+    f"{_ALMOST}</span>",
+    'quoted words<span id="cid:ii_t1">logo.png</span>',  # no brackets
+    'quoted words<span id="cid:ii_t1">&lt;a.png&gt; &lt;b.png&gt;</span>',  # two tokens
+    'quoted words<span id="cid:ii_t1">&lt;logo.png&gt; PS</span>',  # extra text
+    f'quoted words<span id="cid:ii_t1"><span>{_ALMOST}</span></span>',  # a tag inside
+    f'quoted words<span id="cid:ii_t1">{_ALMOST}',  # unclosed
+    f'quoted words<img src="cid:ii_t1" alt="logo.png">{_ALMOST}',  # typed after an img
+    'quoted words<span id="cid:ii_t1">PS &lt;logo.png&gt;</span>',  # text before
+    'quoted words<span id="cid:ii_t1">logo.png&gt;</span>',  # no opening bracket
+    'quoted words<span id="cid:ii_t1">&lt;logo.png</span>',  # no closing bracket
+    'quoted words<span id="cid:ii_t1">&amp;lt;logo.png&amp;gt;</span>',  # escaped twice
+    'quoted words<span id="cid:a>b">&lt;logo.png&gt;</span>',  # a bracket in the id
+]
+
+
+@pytest.mark.parametrize("fragment", _TEXT_LIKE_A_PLACEHOLDER)
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_text_like_an_image_placeholder_unproven(
+    mailroot, monkeypatch, fragment, mode
+):
+    _assert_unproven(mailroot, monkeypatch, _quoted(fragment), mode)
+
+
+def test_find_own_draft_keeps_an_image_placeholder_before_the_quote_unproven(
+    mailroot, monkeypatch
+):
+    # the text before the quote never loses an element: the quote itself is clean
+    body = f"<div>Hi there</div>{_PH}" + _QUOTE_HTML
+    _assert_unproven(mailroot, monkeypatch, body, "refusal")
+    _assert_unproven(mailroot, monkeypatch, body, "send")
+
+
+@pytest.mark.parametrize("placeholder", [_PH, _PH_EDIT])
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_an_image_placeholder_below_the_quote_unproven(
+    mailroot, monkeypatch, placeholder, mode
+):
+    # the rule ends at the last closing tag of the quote: where a PS would be, the
+    # same element is text
+    body = _quoted("quoted words") + f"<div>{placeholder}</div>"
+    _assert_unproven(mailroot, monkeypatch, body, mode)
+
+
+@pytest.mark.parametrize("mode", ["refusal", "send"])
+def test_find_own_draft_keeps_an_image_placeholder_in_an_unclosed_quote_unproven(
+    mailroot, monkeypatch, mode
+):
+    body = _quoted(f"quoted words{_PH}").replace("</blockquote>", "")
+    assert "<blockquote" in body and "</blockquote>" not in body
+    _assert_unproven(mailroot, monkeypatch, body, mode)
+
+
+def _html_draft(markup: str):
+    return email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n" + markup,
+        policy=email.policy.default,
+    )
+
+
+def test_split_quote_drops_an_image_placeholder_up_to_the_last_closing_tag():
+    # two quotes side by side: the rule runs to the LAST closing tag
+    markup = f"hi<blockquote>a</blockquote><blockquote>b{_PH}</blockquote>"
+    assert "logo.png" not in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_split_quote_finds_an_upper_case_closing_tag():
+    markup = f"hi<BLOCKQUOTE>a{_PH}</BLOCKQUOTE>"
+    assert "logo.png" not in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_split_quote_leaves_a_space_for_a_dropped_image_placeholder():
+    markup = f"hi<blockquote>foo{_PH}bar</blockquote>"
+    assert mail_reply_cleanup._split_quote(_html_draft(markup))[1] == "foo bar"
+
+
+def test_split_quote_ends_the_quote_where_it_ends_when_lower_casing_adds_characters():
+    # "\u0130".lower() is two characters: an end found in the lower-cased text lies
+    # past the real end, and the placeholder below the quote would be dropped
+    grown = "\u0130" * 60
+    assert len(grown.lower()) > len(grown)
+    markup = f"own<blockquote>{grown}</blockquote>{_PH}"
+    assert "logo.png" in mail_reply_cleanup._split_quote(_html_draft(markup))[1]
+
+
+def test_read_draft_takes_no_postmark_from_a_received_field_of_white_space(mailroot):
+    path = mailroot(22, _ORIGINAL, "s@x", _OTHER_BODY, url=_INBOX, received=True)
+    payload = mail_index.emlx_payload(path.read_bytes())
+    blank = payload.replace(b"Received:", b"X-Was:").replace(
+        b"\r\n\r\n", "\r\nReceived: \u00a0\r\n\r\n".encode(), 1
+    )
+    path.write_bytes(str(len(blank)).encode() + b"\n" + blank + b"\n<plist></plist>")
+    assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False
+
+
+def test_split_quote_keeps_placeholder_characters_in_a_plain_text_draft():
+    msg = email.message_from_string(
+        "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        f"Hi there\r\n> quoted words {_PH}\r\n",
+        policy=email.policy.default,
+    )
+    assert "logo.png" in mail_reply_cleanup._split_quote(msg)[1]
+
+
+@pytest.mark.parametrize("inbox_first", [True, False])
+@pytest.mark.parametrize("with_drafts", [True, False])
+def test_find_own_draft_keeps_a_postmarked_inbox_row_of_another_message_unproven(
+    mailroot, monkeypatch, inbox_first, with_drafts
+):
+    # a postmark alone proves nothing: the Message-ID must be a set-aside copy's
+    first, second = (21, 22) if inbox_first else (22, 21)
+    twin = (second, _SENT, "s@x", _OWN)
+    inbox = (first, _INBOX, "other@x", _OTHER_BODY, True)
+    rows = [inbox, twin] if inbox_first else [twin, inbox]
+    got = _stored(
+        mailroot,
+        monkeypatch,
+        [_DRAFT_ROW, *rows] if with_drafts else rows,
+        sent_twins=True,
+    )
+    assert got.kind == "unproven" and got.reason == "inbox_row"
+
+
+def test_read_draft_takes_the_postmark_from_a_received_header_only(mailroot):
+    in_body = "<div>d</div>\r\nReceived: from mx2.example.net by mx1.example.net\r\n"
+    mailroot(21, _ORIGINAL, "s@x", in_body, url=_INBOX)
+    assert mail_reply_cleanup._read_draft(_INBOX, 21)[3] is False
+    path = mailroot(22, _ORIGINAL, "s@x", _OTHER_BODY, url=_INBOX, received=True)
+    payload = mail_index.emlx_payload(path.read_bytes())
+    for other in (b"X-Received:", b"Received-SPF:"):
+        changed = payload.replace(b"Received:", other)
+        framed = str(len(changed)).encode() + b"\n" + changed + b"\n<plist></plist>"
+        path.write_bytes(framed)
+        assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False
+    empty = payload.replace(b"Received:", b"X-Was:").replace(
+        b"\r\n\r\n", b"\r\nReceived: \r\n\r\n", 1
+    )
+    path.write_bytes(str(len(empty)).encode() + b"\n" + empty + b"\n<plist></plist>")
+    assert mail_reply_cleanup._read_draft(_INBOX, 22)[3] is False  # an empty field
+
+
+def _assert_unproven(mailroot, monkeypatch, body, mode):
+    """One copy with ``body``: a refusal with the Drafts copy alone, or a send with a
+    Sent twin alone. It is ``unproven`` with its reason, and nothing is claimed."""
+    if mode == "refusal":
+        got = _stored(mailroot, monkeypatch, [(20, _URL, "d@x", body)])
+        assert got.kind == "unproven" and got.reason == "drafts_not_own"
+    else:
+        got = _stored(
+            mailroot, monkeypatch, [(21, _SENT, "s@x", body)], sent_twins=True
+        )
+        assert got.kind == "unproven" and got.reason == "sent_not_own"
+
+
+@pytest.mark.parametrize("token", ["&lt;&gt;", "&lt; &gt;", "&lt;&nbsp;&gt;"])
+@pytest.mark.parametrize(
+    "opening",
+    [
+        '<span id="cid:ii_t1">',
+        '<span class="AppleTemporaryEditingElement" id="cid:ii_t1">',
+    ],
+)
+def test_split_quote_keeps_a_white_space_image_placeholder_as_text(token, opening):
+    # the token needs one character inside that is not white space, so an empty one is
+    # text. The verdict is not pinned here: `_has_quote` compares letters and digits
+    # only, so a quote that ends in `< >` is proven with or without this rule (05.2-19).
+    msg = email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        f"<blockquote>quoted words{opening}{token}</span></blockquote>",
+        policy=email.policy.default,
+    )
+    assert "<" in mail_reply_cleanup._split_quote(msg)[1]

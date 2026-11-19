@@ -17,6 +17,7 @@ import pytest
 
 import macos_apps_mcp.server  # noqa: F401  (populates registry.TOOLS)
 from macos_apps_mcp import deploy, doctor, eventkit, registry, runtime, tiers
+from tests._fakes import fake_automation
 from tests.test_doctor_deploy import _gate_off_only, _mock_grants
 
 
@@ -160,6 +161,7 @@ def _quiet_diagnose(monkeypatch):
         "tracked_run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", ""),
     )
+    fake_automation(monkeypatch)
     _mock_grants(monkeypatch, None)
     monkeypatch.setattr(
         deploy, "agent_status", lambda: (_ for _ in ()).throw(Exception("no bundle"))
@@ -285,7 +287,10 @@ def test_summary_counts_only_probed_surfaces(monkeypatch):
     report = doctor.diagnose(request=True)
     names = [s["surface"] for s in report["surfaces"]]
     assert "mail" in names  # listed, as adapter_off
-    assert report["summary"] == f"all {len(names) - 1} surfaces OK"
+    # the Accessibility surface follows the Mail adapter (#348): also adapter_off
+    off = [s for s in report["surfaces"] if s["status"] == "adapter_off"]
+    assert {s["surface"] for s in off} == {"mail", "accessibility"}
+    assert report["summary"] == f"all {len(names) - len(off)} surfaces OK"
 
 
 def test_request_access_each_skips_an_off_entity(monkeypatch):

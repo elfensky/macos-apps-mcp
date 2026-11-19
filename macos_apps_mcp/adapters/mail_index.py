@@ -17,8 +17,9 @@ from urllib.parse import quote
 
 from ..audit import state_dir
 from ..contracts import Pointer
-from ..errors import NativeError, SchemaDrift
+from ..errors import AmbiguousTarget, NativeError, SchemaDrift
 from ..runtime import read_via_sqlite
+from ..text import clean_summary
 from . import mail_ids, mailbox_url
 
 # The Envelope Index tables + the exact columns we read/filter on. A macOS schema move
@@ -141,7 +142,7 @@ def row_to_pointer(row) -> Pointer | None:
 # which beats an All Mail / Archive / Trash / Junk copy. Fixed literals, no user input —
 # every *filter* value is still a bound param. The patterns and their hard-won anchoring
 # rules (final-segment anchoring against 'Junkyard'/'Wallets/Old Mail' false matches,
-# the Junk/Spam '%20' prefix for Exchange's `Junk%20E-mail`) live in mailbox_url (#175),
+# explicit Exchange Junk spellings) live in mailbox_url (#175),
 # the ONE table behind this rank, build_trash_query and dedupe's is_trash — which is
 # what closed the Bin gap: a `Bin`-spelling trash used to rank as a FILED copy and beat
 # an Archive copy for keeper and citation.
@@ -212,18 +213,27 @@ mailbox_membership(message_rowid, mailbox_id) AS (
 )
 """
 
+# Classify the small mailbox table once (#501, D-13), not each message/label row.
+# Materialize only this ranking projection. Materializing the small bare_label
+# set caused a recorded sent-triage regression (#299); keep its definition unchanged.
+_RANKED_MEMBERSHIP_CTE = f"""{_MAILBOX_MEMBERSHIP_CTE},
+ranked_mailboxes AS MATERIALIZED (
+    SELECT mb.ROWID, mb.url, {_MAILBOX_RANK} AS copy_rank FROM mailboxes mb
+)
+"""
+
 # With label membership one stored row appears once per label (#251), so m.ROWID ties
 # across equal-rank labels; mb.ROWID makes the cited folder independent of the plan.
-_BASE_SQL = f"""{_MAILBOX_MEMBERSHIP_CTE}
+_BASE_SQL = f"""{_RANKED_MEMBERSHIP_CTE}
 SELECT {_DEDUP_SELECT_COLS},
        ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                          ORDER BY {_MAILBOX_RANK},
+                          ORDER BY mb.copy_rank,
                                    m.date_received DESC, m.ROWID, mb.ROWID) AS rn
 FROM messages m
 JOIN subjects s ON s.ROWID = m.subject
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
 JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0
   AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -370,18 +380,18 @@ def build_thread_query(message_id: str, limit: int):
     front of an oldest-first transcript and would be the first message dropped under
     truncation.
     """
-    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}
+    sql = f"""{_RANKED_MEMBERSHIP_CTE}
 SELECT message_id_header, subject, mailbox_url, date_received FROM (
   SELECT message_id_header, subject, mailbox_url, date_received, sort_date FROM (
     SELECT {_DEDUP_SELECT_COLS},
            COALESCE(NULLIF(m.date_sent, 0), m.date_received) AS sort_date,
            ROW_NUMBER() OVER (PARTITION BY gd.message_id_header
-                              ORDER BY {_MAILBOX_RANK},
+                              ORDER BY mb.copy_rank,
                                        m.date_received DESC, m.ROWID, mb.ROWID) AS rn
     FROM messages m
     JOIN subjects s ON s.ROWID = m.subject
     JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-    JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+    JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
     JOIN message_global_data gd ON gd.ROWID = m.global_message_id
     WHERE m.deleted = 0
       AND gd.message_id_header IS NOT NULL AND gd.message_id_header <> ''
@@ -620,17 +630,31 @@ def build_trash_query(account: str):
     accessor is not a substitute: a `move` OUT of it moved the messages and then crashed
     Mail (facts doc §5c), so `trash_mail`'s undo has to name the account's own Trash.
 
-    Ordered so the shortest url wins — a nested user folder like `Trash/2019` would
-    match `%/Trash`'s sibling patterns on some stores, and the account's real Trash is
-    always the shallowest of them.
+    Return every candidate: names do not establish a mailbox's role (#556).
+    The existing order only chooses a stable original URL among exact decoded
+    aliases. Distinct decoded paths must be refused by ``query_trash_url``.
     """
     clauses = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in _TRASH_SUFFIXES)
+    root = f"%://{like_escape(account)}/"
+    google_roots = [f"{root}{like_escape(name)}/%" for name in mailbox_url.GOOGLE_ROOTS]
+    google = " OR ".join("url LIKE ? ESCAPE '\\'" for _ in google_roots)
+    english = " OR ".join(
+        "url LIKE ? ESCAPE '\\'" for _ in mailbox_url.ENGLISH_TRASH_SUFFIXES
+    )
     sql = f"""
 SELECT url FROM mailboxes
 WHERE url LIKE ? ESCAPE '\\' AND ({clauses})
-ORDER BY length(url) ASC LIMIT 1
+ORDER BY length(url) - length(replace(url, '/', '')) - 2
+           - CASE WHEN {google} THEN 1 ELSE 0 END,
+         CASE WHEN {english} THEN 0 ELSE 1 END,
+         length(url), url COLLATE BINARY
 """
-    return sql, [f"%://{like_escape(account)}/%", *_TRASH_SUFFIXES]
+    return sql, [
+        f"{root}%",
+        *_TRASH_SUFFIXES,
+        *google_roots,
+        *mailbox_url.ENGLISH_TRASH_SUFFIXES,
+    ]
 
 
 # Sent-role spellings, one per account type — same one-table sourcing as
@@ -658,7 +682,10 @@ def build_sent_triage_query(limit: int):
     stripped subject and the "Re: "/"Fwd: " lives in subject_prefix — concatenated so
     the record reads like AppleScript's ``subject of m`` did."""
     clauses = " OR ".join("mb.url LIKE ? ESCAPE '\\'" for _ in _SENT_SUFFIXES)
-    sql = f"""{_MAILBOX_MEMBERSHIP_CTE}, sent AS (
+    sql = f"""{_MAILBOX_MEMBERSHIP_CTE},
+sent_mailboxes AS (
+  SELECT mb.ROWID FROM mailboxes mb WHERE {clauses}
+), sent AS (
   SELECT m.message_id AS mid_int,
          MIN(m.ROWID) AS rowid,
          MIN(g.message_id_header) AS mid,
@@ -666,10 +693,10 @@ def build_sent_triage_query(limit: int):
          MAX(m.date_sent) AS date_sent
   FROM messages m
   JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-  JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+  JOIN sent_mailboxes mb ON mb.ROWID = mm.mailbox_id
   JOIN subjects s ON s.ROWID = m.subject
   LEFT JOIN message_global_data g ON g.message_id = m.message_id
-  WHERE m.deleted = 0 AND m.message_id != 0 AND ({clauses})
+  WHERE m.deleted = 0 AND m.message_id != 0
   GROUP BY m.message_id
   ORDER BY date_sent DESC LIMIT ?
 )
@@ -757,11 +784,11 @@ SELECT lower(COALESCE(a.address, ''))            AS sender,
        m.date_received                           AS date_received,
        ROW_NUMBER() OVER (PARTITION BY {key}
                           ORDER BY m.date_received DESC, m.ROWID,
-                                   {_MAILBOX_RANK}, mb.ROWID) AS rn
+                                   mb.copy_rank, mb.ROWID) AS rn
 FROM messages m
 LEFT JOIN addresses a ON a.ROWID = m.sender
 JOIN mailbox_membership mm ON mm.message_rowid = m.ROWID
-JOIN mailboxes mb ON mb.ROWID = mm.mailbox_id
+JOIN ranked_mailboxes mb ON mb.ROWID = mm.mailbox_id
 LEFT JOIN message_global_data gd ON gd.ROWID = m.global_message_id
 WHERE m.deleted = 0 AND m.date_received >= ?
 """
@@ -772,7 +799,7 @@ WHERE m.deleted = 0 AND m.date_received >= ?
         inner += r" AND mb.url || '/' LIKE '%://' || ? || '/%' ESCAPE '\'"
         params.append(like_escape(account))
     sql = (
-        f"{_MAILBOX_MEMBERSHIP_CTE}"
+        f"{_RANKED_MEMBERSHIP_CTE}"
         "SELECT sender, mailbox_url, is_read, flagged, has_document, date_received"
         f" FROM ({inner}) WHERE rn = 1"
     )
@@ -1464,11 +1491,26 @@ def body_fingerprints(rowids, *, root: Path | None = None) -> dict[int, str]:
 
 
 def query_trash_url(account: str) -> str | None:
-    """The mailboxes.url of ``account``'s own Trash, or None when the index knows of
-    none (#80). None is a real answer — a freshly added account may have no Trash row
-    yet — and the caller must say so rather than falling back to the unified accessor,
-    which crashes Mail on a move out of it (facts doc §5c)."""
+    """Return an original URL for one distinct decoded Trash path, or None (#80).
+
+    Multiple distinct paths raise AmbiguousTarget (#556). Only exact decoded
+    aliases count once: case and Unicode normalization differences stay distinct.
+    None is a real answer; never substitute the unified accessor, which crashes
+    Mail on a move out of it (facts doc §5c). Index failures propagate unchanged.
+    """
     rows = _dict_rows(*build_trash_query(account))
+    paths = {mailbox_url.path(row["url"]) for row in rows}
+    if len(paths) > 1:
+        shown = ", ".join(repr(clean_summary(p)) for p in sorted(paths)[:5])
+        if len(paths) > 5:
+            shown += f" (and {len(paths) - 5} more)"
+        raise AmbiguousTarget(
+            f"Trash selection is ambiguous for account {clean_summary(account)!r}: "
+            f"{len(paths)} distinct mailbox paths match. Candidates: {shown}. "
+            "Mail's index records no mailbox role. Nothing was changed by this "
+            "call. Confirm the account's Trash in Mail and resolve the extra "
+            "matching folder names. Do not retry unchanged."
+        )
     return rows[0]["url"] if rows else None
 
 

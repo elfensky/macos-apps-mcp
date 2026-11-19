@@ -27,6 +27,14 @@ def test_shim_role(monkeypatch):
     assert called == ["shim"]
 
 
+def test_launch_role(monkeypatch):
+    called = []
+    monkeypatch.setattr("macos_apps_mcp.deploy.launch", lambda: called.append("launch"))
+    monkeypatch.setattr("sys.argv", ["macos-apps-mcp", "launch"])
+    cli.main()
+    assert called == ["launch"]
+
+
 def test_unknown_role_exits_nonzero(monkeypatch):
     monkeypatch.setattr("sys.argv", ["macos-apps-mcp", "bogus"])
     with pytest.raises(SystemExit) as e:

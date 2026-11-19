@@ -1,0 +1,105 @@
+{
+  "at": "2026-10-25T21:57:28.557Z",
+  "secure": true,
+  "key_present": true,
+  "perm_before": {
+    "loopback": "prompt",
+    "local": "prompt"
+  },
+  "steps": [
+    {
+      "id": "011-live-nocors",
+      "ok": true,
+      "status": 0,
+      "type": "opaque",
+      "error": null,
+      "message": null,
+      "ms": 3259
+    },
+    {
+      "id": "011-live-cors",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "NetworkError when attempting to fetch resource.",
+      "ms": 18
+    },
+    {
+      "id": "009-paired-get",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 55
+    },
+    {
+      "id": "009-paired-nokey",
+      "ok": true,
+      "status": 401,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 14
+    },
+    {
+      "id": "009-paired-post",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 7
+    },
+    {
+      "id": "009-paired-tas",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 9
+    },
+    {
+      "id": "009-unpaired-get",
+      "ok": true,
+      "status": null,
+      "type": null,
+      "error": "TypeError",
+      "message": "NetworkError when attempting to fetch resource.",
+      "ms": 6
+    },
+    {
+      "id": "010-localhost-get",
+      "ok": true,
+      "status": 200,
+      "type": "cors",
+      "error": null,
+      "message": null,
+      "ms": 14
+    },
+    {
+      "id": "010-img-127",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "ImgError",
+      "message": "image did not load",
+      "ms": 1
+    },
+    {
+      "id": "010-img-localhost",
+      "ok": false,
+      "status": null,
+      "type": null,
+      "error": "ImgError",
+      "message": "image did not load",
+      "ms": 1
+    }
+  ],
+  "perm_after": {
+    "loopback": "granted",
+    "local": "prompt"
+  }
+}

@@ -285,6 +285,14 @@ def sanitize_block(text: object) -> str:
     return _CTRL.sub("", folded)
 
 
+def squash_text(text: object) -> str:
+    """``text`` as ONE comparison line: NFC, every line break (CR, CRLF, U+2028, U+2029
+    …) and every whitespace run folded to a single space, trimmed. For comparing text
+    read back from another app's UI, which drops empty lines and may decompose accents
+    (facts §4e `Confirm`). ``None`` → ``""``."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", str(text or ""))).strip()
+
+
 def clean_summary(text: object) -> str:
     """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
     return _truncate(sanitize_line(text), SUMMARY_MAX)

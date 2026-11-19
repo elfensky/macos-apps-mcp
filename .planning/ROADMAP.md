@@ -19,8 +19,68 @@ tracked in REQUIREMENTS.md but are out of this milestone. The milestone closes b
 people run it safely: per-adapter toggles and a loopback dashboard, then distribution via `uvx`,
 `.mcpb`, a Homebrew cask and a companion plugin.
 
+**Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
+The migration is complete (Phase 05.4, 2026-11-06), and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
+Remaining bugs use the migrated server. Installed-device acceptance and release remain separate from implementation.
+Phase 05.2 device acceptance passed on 2026-11-19 (#348 closed; #516 and #589 closed on 2026-11-18).
+Release 0.16.0 ships the migration after the Phase 05.2 reply acceptance (owner, 2026-11-06).
+
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
 by default, its own audit verb, and verification by running it on device and inspecting the result.
+
+## Releases
+
+One line per minor release. The roadmap page reads this section. Bug-fix phases ship in the release in work or as its patch releases. A release stays 🚧 until its last phase is done, and a bug-fix phase that comes after that stands in the next release. A shipped date is the date of the X.Y.0 heading in CHANGELOG.md. For 0.10, which has no heading there, it is the date of tag v0.10.0.
+
+- ✅ **0.1 Reads nine Mac apps and writes Calendar and Reminders** — The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules. (shipped 2026-06-27)
+- ✅ **0.2 New name: mac-mcp** — The project and its package take the name mac-mcp, with an MIT licence. (shipped 2026-06-29)
+- ✅ **0.3 Errors that explain themselves** — A native failure is a typed error, doctor checks the permissions, and each create or update is read back. (shipped 2026-07-09)
+- ✅ **0.4 Previews and limits before a delete** — Event and note deletes preview first, batches have caps, and text from the apps is marked as untrusted. (shipped 2026-07-10)
+- ✅ **0.5 Reads from the apps' own databases** — Messages and Notes are read from their own databases, which is faster and more complete than AppleScript. (shipped 2026-07-12)
+- ✅ **0.6 New name: macos-apps-mcp** — The package, the repository and the module take the name macos-apps-mcp. (shipped 2026-07-15)
+- ✅ **0.7 Free time, Notes writes and a write log** — Free and busy times, Notes create and update, a log of every write, and a list of mail that needs a reply. (shipped 2026-07-22)
+- ✅ **0.8 One signed app holds the permissions** — A signed background app asks for each Mac permission once, and every client connects through it. (shipped 2026-07-25)
+- ✅ **0.9 Sending mail, behind a switch** — Mail can send, reply and forward, but only after the owner turns sending on outside the assistant's reach. (shipped 2026-07-27)
+- ✅ **0.10 Mail complete, with undo** — Mail gets search, threads, folders, trash and attachments, and a backup before each move or delete makes undo possible. (shipped 2026-08-20)
+- ✅ **0.11 Mail search and undo on macOS 15** — Mail reads its own database on macOS 15 too, so search and undo work there. (shipped 2026-09-25)
+- ✅ **0.12 A rebuilt base, proven by tests** — One safe path to the apps, settled modules, and a test suite that cannot reach a real app. (shipped 2026-09-30)
+- ✅ **0.13 Large Mail moves finish, and drafts use the right account** — A move of 25 messages finishes in time and leaves a receipt, and a draft starts from the account the caller names. (shipped 2026-10-03)
+- ✅ **0.14 Calendar alarms, Reminders depth, Intel Macs** — Events get alarms and more repeat rules, Reminders can be deleted and show their tags, and the app runs on Intel Macs. (shipped 2026-10-07)
+- ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
+- 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
+  - Phases: 05.4, 05.2, 05.6, 05.12
+  - Next: release 0.16.1 with the fix for the reply paste check (PR 608), then the Notes and Drafts probe at the Mac (Phase 05.6). 0.16.0 was cut on 2026-11-19.
+  - Waits for: the remaining bugs of Phases 05.6 and 05.12, which ship as patch releases.
+- 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
+  - Phases: 05.10
+- 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
+  - Phases: 05.3
+- 📋 **0.19 Long reads continue page by page** — A capped read continues with a cursor that belongs to its query, and a cursor from another query is refused.
+  - Phases: 05.11
+- 📋 **0.20 Tools from the command line** — Any tool runs from the shell through the signed background app.
+  - Phases: 05.9
+- 📋 **0.21 Notes in Markdown, with attachments** — Notes take Markdown and show their attachments.
+  - Phases: 05.8
+- 📋 **0.22 Guidance for assistants** — The server tells an assistant how to use it, with one short guide per app.
+  - Phases: 05.7
+- 📋 **1.0 Public launch, one-step install** — After the testers, it is listed for everyone and installs in one step.
+  - Phases: 6, 05.5
+
+### Eras
+
+- **0.1–0.7 (June–July 2026): a server each client starts.** Calendar and Reminders first, then trust, safety rails and fast reads. Each client started its own copy and asked for its own permissions.
+- **0.8–0.10 (July–August): one signed app.** A signed background app holds the permissions once. Mail grows to full depth, with undo, and sending waits behind a switch.
+- **0.11–0.15 (September–October): the planned rebuild.** After the review of 2026-08-28, a written plan rebuilds the base, fixes Mail, deepens Calendar, Reminders, Notes and Photos, and adds the owner's dashboard.
+- **0.16–1.0 (from November): road to launch.** A new MCP core, the open bugs, the final tool names, problem reports, then the testers and the public launch.
+- **After 1.0:** deeper Contacts and Messages, Safari, Maps and a menu-bar app.
+
+### Why this order
+
+- Contacts and Messages depth waits for v2 (owner, 2026-08-28).
+- Email work comes before every new feature (owner, 2026-09-24).
+- Bugs come before features (owner, 2026-10-11).
+- One release at every phase close that changes the app. 0.17 is the breaking release, and 1.0 follows the testers (owner, 2026-11-01).
+- The MCP 2 migration comes first (owner, 2026-11-03).
 
 ## Phases
 
@@ -29,7 +89,7 @@ by default, its own audit verb, and verification by running it on device and ins
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-Decimal phases appear between their surrounding integers in numeric order.
+Execution follows the dependency order below, rather than numeric phase identifiers.
 
 - [x] **Phase 1: Gate — Land the Spiked Architecture Cuts** - Native seam fail-closed, module boundaries settled, one registration record, Mail's fixture and recoverable preflight fixed (completed 2026-09-26)
 - [x] **Phase 2: Gate Close — Fail-Closed Suite and Device Sweep** - The read-only suite goes green, doctor stops touching the dev machine, the device integration sweep passes (completed 2026-10-01)
@@ -40,9 +100,17 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 04.1: Bug Fixes — Phase 4 Follow-ups Before Any Feature** (INSERTED) - The four low bugs the Phase 4 reviews left open (#373, #383, #384, #387) are fixed before Phase 5 (completed 2026-10-21)
 - [x] **Phase 5: Operator Control Plane — Adapter Toggles and the Localhost Dashboard** - An operator picks which apps are exposed and can see grants, usage, audit and backups (completed 2026-10-22)
 - [x] **Phase 05.1: Bug fixes — dashboard follow-ups (#427, #428, #430)** (INSERTED) - The three bugs the Phase 5 reviews left open (#427, #428, #430) are fixed before Phase 6 (completed 2026-10-25)
-- [ ] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464) are fixed before Phase 6
+- [x] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers (completed 2026-11-06)
+- [x] **Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348)** (INSERTED) - The open bugs (#455, #399, #348, #464, #516) are fixed before Phase 6 (completed 2026-11-19)
+- [ ] **Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)** (INSERTED) - A Notes write keeps the note's content or refuses first; system folders are found in any language; the Adapters page shows live grants on macOS 27; the `.app` carries every bundled licence notice; `delete_draft` acts on one mailbox by id; the state folder is private to its account
+- [ ] **Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581)** (INSERTED) - Opening the app after an upgrade starts the new daemon; the private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed; the ten defects of the 2026-11-06 codebase review are fixed
+- [ ] **Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)** (INSERTED) - Every tool explains its parameters and names its alternative; names follow `verb_noun`; duplicates merge inside one tier; every error starts with its kind; release 0.17.0
 - [ ] **Phase 05.3: Feedback — problem reports and improvement suggestions (#465)** (INSERTED) - A failing server leads the person to one redacted report, sent with their own click
-- [ ] **Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470)** (INSERTED) - The server runs on mcp 2 and fastmcp 4, and a dead stream still answers
+- [ ] **Phase 05.11: Paged reads — a cursor bound to the query (#508)** (INSERTED) - A capped read continues with a stateless cursor; a cursor from another query is refused
+- [ ] **Phase 05.9: CLI — tools from the shell (#507)** (INSERTED) - Any tool runs from the shell through the daemon
+- [ ] **Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506)** (INSERTED) - Notes take Markdown and expose their attachments
+- [ ] **Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504)** (INSERTED) - Agents get server instructions and per-app skills from the server, written once after the last tool lands
+- [ ] **Phase 05.5: Dashboard at a domain — the loader page (#483)** (INSERTED) - The dashboard opens at a domain through a static loader page, local only; Safari gets a link to the local page — optional, nothing depends on it
 - [ ] **Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin** - Someone who is not the author can install and use it in one step
 
 ## Phase Details
@@ -407,76 +475,251 @@ Plans:
 **Cross-cutting constraints:**
 - The change is on origin/develop: the PR rebase-merged with the required `check` job green, and its body says `Part of #430` with no closing keyword
 
+### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
+
+**Goal**: The server runs on MCP 2 and FastMCP 4 (#470). MCP reports a dead stream; application middleware warns that an interrupted tool may have completed. The UDS transport has no read deadline and uses httpx2. Caller identity, protocol eras, audit and notices retain their behavior.
+
+Both bundle slices pass the stream smoke. MCP 2 requires bundled cryptography; the Intel compatibility exception and open advisories remain documented. Migration precedes remaining bug work, by the owner's 2026-11-03 instruction.
+**Requirements**: MIG-01
+**Depends on:** Phase 05.1; the existing 05.2 implementation is merged. Migration precedes remaining bug work (owner, 2026-11-03).
+**Context:** [05.4-CONTEXT.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-CONTEXT.md)
+**Plans:** 2 implementation plans merged in [PR #550](https://github.com/elfensky/macos-apps-mcp/pull/550) and [PR #561](https://github.com/elfensky/macos-apps-mcp/pull/561). Signed arm64 installation, Mail recovery, and bounded reads passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) also passed with both protocol eras and bounded native reads. On build `3dd93b2`, the read-only device suite passed, and a real frontend survived a daemon restart and an outage ([UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)). [Verification](phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md): passed, 2026-11-06.
+The public release is not a criterion of this phase. Release 0.16.0 follows the Phase 05.2 reply acceptance (owner, 2026-11-06).
+
+Plans:
+- [x] [05.4-01-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-01-PLAN.md) — supported SDK migration, transport regression coverage and architecture updates; merged 2026-11-03
+- [x] [05.4-02-PLAN.md](phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-PLAN.md) — public proxy policy preserves discovery errors and explicit recovery; merged 2026-11-04
+
+Failed discovery returns connection errors instead of false missing-tool answers or successful empty lists.
+Synthetic tests cover both protocol eras and exactly one execution after an explicit new call.
+A real frontend gets a connection error during a daemon outage, and the next call after the restart answers normally. The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 in Phase 05.2.
+
 ### Phase 05.2: Bug fixes — every open bug before Phase 6 (#455, #399, #348) (INSERTED)
 
-**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464). Bugs and errors come before any feature (owner, 2026-10-11).
-**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17
+**Goal**: Every open bug is fixed before the next feature phase: on macOS 27 no readable TCC database holds the AppleEvents grants, so the Health page shows every Automation adapter as "Could not be read" and `doctor(request=False)` reports Automation as unprobed, while System Settings shows the grants ON (#455); `export_mail` refuses a later id whose file already exists, and the result hides the files already written for the earlier ids, so a retry writes duplicates (#399); `mail_reply` and `reply_all` drafts overwrite Mail's native quote with a plain-text one — `> ` prefixes, a long attribution date, lost formatting and inline images, a truncated original (#348); the doctor size test fails when the test process has 5-digit PIDs, because it does not pin `responsible_process` (#464); `reply_all`'s dry-run preview lists the original's header, not the reply's recipients (#516, found at the 05.2-07 device sitting). Bugs and errors come before any feature (owner, 2026-10-11).
+**Requirements**: FIX-14, FIX-15, FIX-16, FIX-17, FIX-18, FIX-26
 **Depends on:** Phase 05.1
 **Success Criteria** (what must be TRUE):
 
   1. On macOS 27, where no readable TCC database holds AppleEvents rows, the Health page and `doctor(request=False)` give each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs; the check sends no Apple Event, shows no prompt (D-14) and runs through `runtime.run_native()`; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam; a device check from the installed daemon shows the bundle's own grants on the Health page (#455).
   2. `export_mail` never hides a written file: a collision on a later id either refuses the whole batch before the first write, or every id reports its own status (`written` / `exists` / `absent`) and the call returns the files it wrote, so a retry writes no duplicate; a unit test covers the later-id collision (#399).
-  3. A `mail_reply` or `reply_all` draft keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, settled by a device probe recorded in `docs/mail-applescript-facts.md`; if that is impossible without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the docstrings say the quote is plain text; the resulting draft is inspected on device (#348).
+  3. A `mail_reply` or `reply_all` reply keeps Mail's native quote (quote bar, Mail's attribution line, formatting, inline images, the whole original) with the reply text ahead of it, on a route settled by a device probe recorded in `docs/mail-applescript-facts.md` — (a) the reply text pasted on top of Mail's untouched native reply through the Accessibility API, tested first; (b) a self-built styled HTML quote only if (a) fails. The plain-text `> ` quote is removed (owner verdict, 2026-10-27). When the route cannot run, the tool refuses, leaves no draft and sends nothing, and names the setting; `doctor()` and the Health page report the route's permission. The resulting draft and one delivered `reply_all` are inspected on device (#348).
   4. `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and the worst-case report stays under the budget (shortened report, or a restated budget with its reason), so the test passes whatever PIDs the test process has (#464).
+  5. `reply_all(dry_run=True)` previews the reply's own recipients — `to` the original's sender (Reply-To when present), `cc` the original's to + cc minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15) — so a wrong recipient is visible before anything leaves; the dry run builds no outgoing message; a unit test pins an original addressed to the account itself (#516).
+  6. When the paste check of `mail_reply` or `reply_all` fails because the clipboard changed during the call, the refusal says so and asks the user not to copy while a reply runs; nothing is sent and no draft stays (#589, moved from #543 by the owner, 2026-11-06).
 
-**Plans:** 0/7 plans complete
+Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
+
+**Plans:** 20/20 plans complete; the 05.2-20 device acceptance passed on build `13417ee` (2026-11-19); #348, #516 and #589 are closed; the window-check refusal seen at the sitting is #607
 
 Plans:
 **Wave 1**
-- [ ] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
+- [x] 05.2-01-PLAN.md — `test_report_stays_under_token_budget` pins `responsible_process` to two 5-digit PIDs and restates the budget to `< 7500` with its reason (FIX-17, closes #464)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 05.2-02-PLAN.md — `export_mail` checks every target path before the first write, refuses the batch on any collision with nothing written, creates files exclusively and names the files already written on a late failure (FIX-15, closes #399)
-- [ ] 05.2-03-PLAN.md — `runtime.automation_permission` wraps `AEDeterminePermissionToAutomateTarget` through `run_native`; `doctor(request=False)` reports each Automation adapter as granted, denied, not asked, not running or probe error; the seam is locked in conftest with a shared fake (FIX-14 part 1, #455)
-- [ ] 05.2-05-PLAN.md — owner sitting: the draft-only reply-quote probe decides the FIX-16 route and the facts entry; the FIX-14 revoke pre-check settles the `-1743`/`-1744` wording (FIX-16, FIX-14; #348, #455)
+- [x] 05.2-02-PLAN.md — `export_mail` checks every target path before the first write, refuses the batch on any collision with nothing written, creates files exclusively and names the files already written on a late failure (FIX-15, closes #399)
+- [x] 05.2-03-PLAN.md — `runtime.automation_permission` wraps `AEDeterminePermissionToAutomateTarget` through `run_native`; `doctor(request=False)` reports each Automation adapter as granted, denied, not asked, not running or probe error; the seam is locked in conftest with a shared fake (FIX-14 part 1, #455)
+- [x] 05.2-05-PLAN.md — owner sitting: the draft-only reply-quote probe decides the FIX-16 route and the facts entry; the FIX-14 revoke pre-check settles the `-1743`/`-1744` wording (FIX-16, FIX-14; #348, #455)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 05.2-04-PLAN.md — the Health page shows the live Automation grants first, a grey "cannot be told until the app runs" row with no Settings button, the docs in `DAEMON.md`, and the O12 follow-up issue (FIX-14 part 2, #455)
-- [ ] 05.2-06-PLAN.md — reply drafts stop overwriting Mail's native quote on the proven route, or the hand-built quote takes Mail's attribution line with the whole original and honest docstrings (FIX-16, #348)
+- [x] 05.2-04-PLAN.md — the Health page shows the live Automation grants first, a grey "cannot be told until the app runs" row with no Settings button, the docs in `DAEMON.md`, and the O12 follow-up issue (FIX-14 part 2, #455)
+- [x] 05.2-06-PLAN.md — reply drafts stop overwriting Mail's native quote on the proven route, or the hand-built quote takes Mail's attribution line with the whole original and honest docstrings (FIX-16, #348)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
+- [x] 05.2-07-PLAN.md — device acceptance on the rebuilt, reinstalled `.app`: Health and `doctor()` agree from the daemon's identity, the revoke test, the FIX-16 tools on real drafts; closes #455 and #348 with evidence or records the gaps (FIX-14, FIX-16)
+
+**Gap closure** (from the 05.2-07 device sitting: the owner rejected the plain-text quote; #516)
+
+**Gap Wave 1**
+- [x] 05.2-08-PLAN.md — `reply_all(dry_run=True)` lists the reply's own `to`/`cc` (Reply-To or sender; the original's to + cc minus the account's addresses) and labels it as the computed reply set; the denied-Automation text stops asking for a restart (FIX-18, FIX-14; #516)
+- [x] 05.2-09-PLAN.md — owner sitting, run as the installed bundle: route (a) first — an AX write at the caret (M1), then Cmd-V to Mail's process only from a borrowed, restored clipboard (M2), then System Events (M3) only with the owner's OK; route (b) only if all fail; the finding lands as facts §4e and four handoff lines (FIX-16, #348)
+
+**Gap Wave 2** *(blocked on Gap Wave 1 completion)*
+- [x] 05.2-10-PLAN.md — `runtime.accessibility_trusted()` and `runtime.compose_insert()` seams; `mail_reply` keeps Mail's native quote on the proven route, or refuses and discards the reply, leaving nothing (FIX-16, #348)
+
+**Gap Wave 3** *(blocked on Gap Wave 2 completion)*
+- [x] 05.2-11-PLAN.md — `reply_all` sends Mail's native reply-all only after the inserted text is confirmed, or refuses and sends nothing; the plain-text quote code and its tests are deleted (FIX-16, #348)
+- [x] 05.2-12-PLAN.md — `doctor()` reports the Accessibility grant without a prompt; the Health page shows it in one row; DAEMON.md and the README say how to grant it (FIX-16, #348)
+
+**Gap Wave 4** *(blocked on Gap Wave 3 completion)*
+- [x] 05.2-13-PLAN.md — device acceptance on the rebuilt `.app`: an inspected `mail_reply` draft, one delivered `reply_all`, the refusals, the preview and the wording; closes #348 and #516 with evidence or records the gaps (FIX-16, FIX-18, FIX-14)
+
+**Gap closure, round 2** (from the 05.2-13 device sitting, 2026-11-01: gaps G1-G4 and doctor's restart note; the two other observations are #543)
+
+**Round 2 · Gap Wave 1**
+- [x] 05.2-14-PLAN.md — the Accessibility grant is read live in a fresh child process on every call, Mail's pid comes from the kernel process table (libproc), and doctor's note says which permissions may need a restart (FIX-16, FIX-14; #348)
+- [x] 05.2-15-PLAN.md — the reply-all preview reads the account's own addresses into a variable first, and the Drafts sweep accepts the reply's own signature between the text and the quote (FIX-18, FIX-16; #516, #348)
+
+**Round 2 · Gap Wave 2** *(blocked on Round 2 · Gap Wave 1 completion)*
+- [x] 05.2-16-PLAN.md — owner re-sitting on the rebuilt `.app`: the preview, the live Accessibility switch with one daemon pid, the false "Mail is not running" count, a signature account, the activation checks; closes #348 and #516 on evidence only (FIX-16, FIX-18, FIX-14)
+
+**Gap closure, round 3** (from the failed 05.2-16 device acceptance, 2026-11-03: gaps G-05.2-2 to G-05.2-6, diagnosed 2026-11-14; and FIX-26, #589)
+
+**Round 3 · Gap Wave 1**
+- [x] 05.2-17-PLAN.md — the after-send sweep sets aside the delivered copy of the sent reply and names every `unproven` branch with a reason code; the clipboard-changed refusal text (FIX-26); the device probe compares the signature by its text and the clipboard by its `changeCount` change; the facts `Layout` row is corrected (FIX-16, FIX-26; #348, #589)
+
+**Round 3 · Gap Wave 2** *(blocked on Round 3 · Gap Wave 1 completion)*
+- [x] 05.2-18-PLAN.md — owner sitting on the rebuilt `.app`: one delivered `reply_all` with the corrected timing, the signature check by text, the clipboard checks, the two-display state, a FIX-26 refusal, and refusal-after-autosave when it occurs; the gaps close on device evidence or the owner's explicit answer (FIX-16, FIX-18, FIX-26; #348, #516, #589)
+
+**Gap closure, round 4** (from the failed 05.2-18 device acceptance, 2026-11-18: G-05.2-2 with its cause located, G-05.2-5, G-05.2-6)
+
+**Round 4 · Gap Wave 1**
+- [x] 05.2-19-PLAN.md — the reply sweep ignores Mail's own inline-image marker in the quote (two forms, each a `span` with an id that starts with `cid:`), and an INBOX row counts as the delivered copy only with a `Received` header; the facts and the CHANGELOG state both rules (FIX-16; #348)
+
+**Round 4 · Gap Wave 2** *(blocked on Round 4 · Gap Wave 1 completion)*
+- [x] 05.2-20-PLAN.md — short owner sitting on the rebuilt `.app`: one delivered `reply_all` on the original that ends with an inline image, one refused `mail_reply`, the two-display state or the owner's answer; #348 closes on device evidence or the owner's explicit answer (FIX-16; #348)
+
+### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
+
+**Goal**: Notes writes preserve content or refuse before changing it. System-folder reads recognize supported languages, and the dashboard uses observed grants. Storage and bundled licence material satisfy the recorded acceptance checks.
+
+- Notes updates and deletes refuse locked or shared notes. Updates refuse non-text content unless a device probe proves a complete backup route. The full HTML body is backed up before replacement. Backup failure stops the update; the result and audit name the backup path (#500).
+- Notes reads exclude Recently Deleted through `ZFOLDERTYPE`, with translated names as the AppleScript fallback. Mail recognizes reviewed Trash, Junk, Sent and Archive names while preserving mailbox URLs (#501).
+- Adapters shows the last completed Health report's grants and time. Before a report exists, TCC-only chips and a Health link remain. Explicit Full Disk Access and EventKit refusals override stale TCC rows. Rendering makes no native call and adds no wait state (#497, D-15).
+- Both architecture site-packages trees and the final site-packages tree contain licence material or verified fallbacks. Missing material stops the build; signed-bundle inspection remains required (#471).
+- After device proof, `delete_draft` uses a scoped path only for exactly one live index row or one Drafts row. Otherwise, the unified walk remains. Preview and audit share the lookup and exactly-one-match checks (#521).
+- State and backup directories use owner-only POSIX permissions. New Mail backups use `0600`; existing files remain under their private parent without a mode sweep. Doctor reports unsafe storage and repairs (#540, D-22). New Notes backups remain part of the pending Notes implementation.
+- Ambiguous Trash candidates need a distinct outcome before callers rely on a guessed destination (#556).
+
+Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptance; independent implementation can proceed after migration.
+**Requirements**: FIX-19, FIX-20, FIX-21, FIX-22, FIX-23, FIX-24, FIX-25
+**Depends on:** Phase 05.2 acceptance before phase close. Probe-independent implementations proceed after the MCP migration.
+**Plans:** 4 implementation plans; device acceptance and remaining bugs stay open.
+
+Plans:
+- [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket and fresh Mail backup modes passed on arm64.
+- [x] [05.6-02-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-02-PLAN.md) — localized system-folder reads (#501), merged in #554; non-English device checks and real-index timing remain open.
+- [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed installed notice inspection passed on arm64 (133 distributions, 15 fallback users).
+
+- [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; dated Health/Adapters snapshot checks passed on macOS 27; forced-refusal and in-flight device cases remain open.
+
+[Installed build evidence](overnight/2026-11-04-installed-acceptance.md) records the signed deployment and each acceptance limit.
+[Mail recovery evidence](overnight/2026-11-04-mail-recovery-acceptance.md) records one successful self-addressed send, Trash move, and undo, including fresh backup modes and a 6.087-second call.
+The English Trash route passed. Localized behavior and Gmail Trash persistence remain untested.
+
+Remaining bug work precedes Phase 05.10: Notes write safety (#500), scoped draft deletion (#521), and ambiguous Trash candidates (#556).
+#556 is implemented in draft [PR #559](https://github.com/elfensky/macos-apps-mcp/pull/559), branch fix/556-ambiguous-trash-selection. Independent review found no blocking code defect; parent corrections passed 3607 tests and CI at 872577e. The read-only arm64 inventory found no ambiguous candidate paths; all remote account roots had one candidate. The physical Intel inventory found three remote roots with one candidate each, one remote root without a candidate, and no ambiguity. Localized scratch trash/undo acceptance and applicable Gmail timing checks remain open. The plan is not counted as merged.
+Device-dependent Notes and draft changes retain their recorded probe prerequisites. These implementation checkboxes do not complete the phase.
+
+### Phase 05.12: Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581) (INSERTED)
+
+**Goal**: Opening the app after an upgrade starts the new daemon, and the private security advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. The ten defects that the 2026-11-06 codebase review confirmed are fixed (#572, #573, #574, #575, #576, #577, #578, #579, #580, #581).
+
+- When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
+- The private advisories GHSA-7772-4pjg-72m4 and GHSA-xjgg-xphw-h6fp are fixed. Their details stay in the advisories until each fix is released.
+- `doctor()` reports the version and the build that the daemon captured at its start, so the #568 comparison and the release proof read the running process (#574).
+- An `update_event` or `update_reminder` call that omits `calendar` or `list_name` keeps the item where it is. The rule for the other omitted fields moves to Phase 05.10, and #572 stays open until then (owner, 2026-11-06). `update_event(recurrence='none')` on a repeating event is refused and names `delete_event(span='future-events')`; on a single event it stays a no-op (#572, #579; owner, 2026-11-06).
+- A send that times out says that Mail may have sent the message, on every dispatch whose script holds a `send` (#573).
+- `mail_undo` finds a receipt after the audit log rotates, a failed plan write stops the move, and a target that moved in part is replayed (#575, #578).
+- `dedupe-mail --execute` runs its keeper check after a batch timeout (#577).
+- `messages_search` finds a message whose text is only in `attributedBody` (#576).
+- `doctor()` reads the process state in a comma-decimal locale (#580).
+- The script guards cover every script in the package, the real send needs its opt-in, the default suite creates no real `EKEventStore`, and the tool layer has a dispatch test over `registry.TOOLS` (#581).
+- Each AppleScript Mail tool works while Mail.app is closed, or refuses with a directive that names Mail. The scripts address Mail by its bundle id, so the name cannot resolve to Mail's Quick Look extension (#585).
+- A reply is not refused only because another app took the focus during the window check, or the refusal names the check that failed and tells the person what to do (#607).
+- The quote check of a reply does not take the account signature for Mail's quote (#609). A key that Mail runs late, after a paste that did not settle, pastes nothing into another compose window, and the settle bound is measured on a device (#610). The reply sweep strips HTML in linear time (#611).
+
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule. The phase-close code review of Phase 05.2 (2026-11-19) found #609, #610 and #611, which join the phase under the same rule.
+**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #572, #573, #574, #575, #576, #577, #578, #579, #580, #581, #585, #607, #609, #610 and #611)
+**Depends on:** Phase 05.6
+**Plans:** 0 plans. The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.12 to break down)
+
+### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
+
+**Goal**: The tool surface meets Glama's rubric (TDQS 1.3) without giving up a safety gate (#514). Every parameter carries a schema description; every tool that borders a sibling says when to use the sibling; no description names a tool the current gates leave unregistered; the two index builders stay in the read tier (#161a) and stop reading as an annotation contradiction. Tool names follow one `verb_noun` pattern in one breaking release with a CHANGELOG rename table and no aliases; duplicates merge inside one tier (`mail` into `mail_search`, `mail_body` with `mail_bodies`, `notes` with `notes_all`, the two index builders, `messages_with` with `messages_search`, the four Music setters); the reply tools say whether they draft or send. Contacts `update_contact` and `delete_contact` stay in v2 (#94; owner, 2026-08-28 review). In the same breaking release every tool error starts with its `kind` (`access_denied:`, `write_refused:`, `invalid_argument:` …), documented and pinned by a test (#502). The paged reads (#508) are additive and are Phase 05.11. One tool per action stays: Glama's tool-count score is accepted. Glama's build spec sets `MACOS_APPS_ALLOW_SEND=mail`. CI gets an in-repo test (descriptions, names, unregistered references, read-only claims) and a pinned `tdqs lint` in `linux-tools-list`. Target after the next Glama build: overall ≥ 4.3, coherence ≥ 3.5. The breaking release is 0.17.0; 1.0.0 is the launch release after the testers (owner, 2026-11-01). Placed after the migration (05.4) and before every phase that adds tools or writes the skills (05.3, 05.11, 05.9, 05.8, 05.7): one breaking release, before the testers (owner, 2026-10-26; slot 2026-10-31). The same release sets the rule for an omitted field in `update_event` and `update_reminder`: an omitted field keeps its value (#572; owner, 2026-11-06). Its open design points are the `all_day` default, an empty `due`, the after-write verification of kept fields, the refusal for an omitted `recurrence` on a repeating reminder, and a read that returns the fields a caller must send back.
+**Requirements**: TBD (planned from #514, #502, #572)
+**Depends on:** Phase 05.12, after the completed MCP migration
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.10 to break down)
 
 ### Phase 05.3: Feedback — problem reports and improvement suggestions (#465) (INSERTED)
 
-**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Placed before Phase 6 so the first outside users can report problems (owner, 2026-10-25).
+**Goal**: A person whose server fails sends the maintainer one redacted report without writing it, and agents feed improvement ideas into the same tracker (#465). Failures are recorded on the Mac without agent help (middleware, shim, daemon and stdio start-up); `macos-apps-mcp report` works with the daemon down, builds the redacted report and opens `gh issue create --web` or `mailto:feedback@lav.ren`; the person clicks the final Submit or Send. Agents add lines through `report_problem` and `suggest_improvement`, and a best-effort nudge in error results points them to the command. Design: `docs/superpowers/specs/2026-10-25-feedback-reports-design.md`. Cut 1 (recording, the lazy package import, the `report` command) ships as release 0.18.0 and the testers get the brief then; cut 2 (the two tools, the nudge) follows in the same phase. Cut 2 adds the registry-driven `instructions` builder with its three lines — when to call the two tools, the general-terms rule, the report command — and Phase 05.7 adds the house rules to the same builder, so no text is written twice (owner, 2026-11-01). Placed right after Phase 05.10, so `report_problem` and `suggest_improvement` follow the `verb_noun` names and the error codes, and the first outside users can report problems (owner, 2026-10-25; slot 2026-11-01).
 **Requirements**: TBD (planned from #465)
-**Depends on:** Phase 05.2
+**Depends on:** Phase 05.10
 **Plans:** 0 plans
 
 Plans:
 - [ ] TBD (run /gsd-plan-phase 05.3 to break down)
 
-### Phase 05.4: Migration — mcp 2 and fastmcp 4 (#470) (INSERTED)
+### Phase 05.11: Paged reads — a cursor bound to the query (#508) (INSERTED)
 
-**Goal**: The server runs on the supported MCP line: mcp 2 and fastmcp 4 replace mcp 1.x (maintenance mode, security fixes only) and fastmcp 3, and the two caps of #286 lift together (#470). A dead stream still answers on mcp 2's client (`fail_loud_on_dead_stream`, #170); the shim↔daemon UDS transport keeps no read deadline on fastmcp 4's httpx2 stack; the proxy, `AuditMiddleware` and the notices middleware behave as before; the streamed-call smoke passes on both `.app` slices. cryptography stays as `docs/DAEMON.md` records (mcp 2 still requires `pyjwt[crypto]`). Placed after Phase 05.3 and before Phase 6 (owner, 2026-10-25).
-**Requirements**: TBD (planned from #470)
+**Goal**: A capped read can continue. A truncated bounded read returns a stateless `next_cursor` — base64 JSON of a keyset position (the sort key of the last result, for example date plus id) and a signature of the query arguments — emitted only with `truncated`; a cursor whose signature does not match the arguments answers `invalid_argument`; the first users are the reads that hit their cap in practice (`mail_search`, `messages_search`, `notes`, and the merged `mail` read); others follow only when needed (#508). Additive, not breaking: split out of Phase 05.10 at the 2026-11-01 grill session so the breaking release reaches the testers sooner. Placed after Phase 05.3 and before Phase 05.9, so the CLI prints the cursor (owner, 2026-11-01).
+**Requirements**: TBD (planned from #508)
 **Depends on:** Phase 05.3
 **Plans:** 0 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.4 to break down)
+- [ ] TBD (run /gsd-plan-phase 05.11 to break down)
+
+### Phase 05.9: CLI — tools from the shell (#507) (INSERTED)
+
+**Goal**: Any tool can be called from the shell. `macos-apps-mcp call <tool>` reaches the daemon through the shim's unix-socket transport, so tiers, permissions and audit stay the daemon's (#507). The paged reads (#508) are Phase 05.11. Placed after Phase 05.11, so the command speaks the renamed surface and prints the cursor, and before Phase 05.8 (owner, 2026-10-26; slot 2026-11-01).
+**Requirements**: TBD (planned from #507)
+**Depends on:** Phase 05.11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.9 to break down)
+
+### Phase 05.8: Notes depth — Markdown input and note attachments (#505, #506) (INSERTED)
+
+**Goal**: Notes take Markdown and expose their attachments. `create_note` and `update_note` accept `format: "markdown"`, rendered by `markdown-it-py` with raw HTML off and a link-scheme allowlist (#505). `note_attachments`, `save_note_attachment` and `add_note_attachment` list, save and add files through `files.py`, and refuse locked and shared notes (#506). Builds on the Phase 05.6 Notes guards. Placed after Phase 05.9 and before the feedback and guidance phases, so its tools exist before the skills are written (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #505, #506)
+**Depends on:** Phase 05.9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.8 to break down)
+
+### Phase 05.7: Agent guidance — server instructions and per-app skills (#503, #504) (INSERTED)
+
+**Goal**: Agents get the house rules from the server itself. The error codes (#502) moved to Phase 05.10 with the other surface changes. The server's `instructions` text — its registry-driven builder and first three lines come from Phase 05.3 cut 2 — gains the house rules and a tested size budget (#503; one builder, two contributors: owner, 2026-11-01). Each app family has a skill with decision rules and failure modes, held to `registry.TOOLS` by a parity test; Phase 6 packages them (#504, #106). Placed last among the feature phases, after every tool exists, so the parity test and the instructions text are written once; Phase 6 packages the skills (owner, 2026-10-26; slot 2026-10-31).
+**Requirements**: TBD (planned from #503, #504)
+**Depends on:** Phase 05.8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.7 to break down)
+
+### Phase 05.5: Dashboard at a domain — the loader page (#483) (INSERTED)
+
+**Goal**: The operator dashboard opens at a domain: a static loader page on a public https origin fetches the daemon's pages from `127.0.0.1:47632` and shows them, local only, with the adapter switches and the restart (#483). The daemon answers CORS only for a paired origin and accepts the page key in `Authorization: Bearer`; Chrome and Firefox ask once for `loopback-network`, and Safari gets a "Safari is not supported" note with a link to the local page (spikes 009-011, design `docs/superpowers/specs/2026-10-25-dashboard-loader-design.md`). Optional: nothing depends on it; it may be skipped or moved to v2 (owner, 2026-10-31).
+**Requirements**: TBD (planned from #483)
+**Depends on:** Phase 05.7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 05.5 to break down)
 
 ### Phase 6: Distribution — uvx, Bundles, Cask, and the Companion Plugin
 
 **Goal**: Someone who is not the author installs the server, the daemon and the companion skill without cloning the repo.
-**Depends on**: Phase 5
+**Depends on**: Phase 05.7 (Phase 05.5 is optional)
 **Requirements**: DIST-01, DIST-02, DIST-03, DIST-04, DIST-05, DIST-06
 **Success Criteria** (what must be TRUE):
 
-  1. A machine that has never seen the repo runs the server by following the README's first code block (`uvx macos-apps-mcp`); clone-and-venv is documented as the contributor path, not the user path.
-  2. The PyPI project page links to repo, issues and changelog from `[project.urls]`.
+  1. A machine that has never seen the repo runs the server by following the README's first code block (`uvx macos-apps-mcp`); clone-and-venv is documented as the contributor path, not the user path. — Landed: quick task 261009-l1d, PR #315; #113 closed (2026-10-09).
+  2. The PyPI project page links to repo, issues and changelog from `[project.urls]`. — Landed: quick task 261009-l1b, PR #314; #111 closed (2026-10-09).
   3. A release publishes a `.mcpb` bundle that installs into Claude Desktop in one click, and the notarized `.app` installs via `brew install --cask …` with the staple-then-zip order preserved.
-  4. `claude plugin install` wires the companion skill and the MCP server config in one step from the in-repo `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` and `.mcp.json`; the same `skills/` layout installs into another agent via `npx skills add elfensky/macos-apps-mcp`.
+  4. `claude plugin install` wires the companion skill and the MCP server config in one step from the in-repo `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` and `.mcp.json`; the same `skills/` layout installs into another agent via `npx skills add elfensky/macos-apps-mcp`. — Partly landed: the in-repo plugin and marketplace (quick task 261025-h09); the skill content comes from Phase 05.7.
   5. The companion skill teaches the cockpit workflows — triage reads, pointer citation, draft-review — and a session using it cites a Mail pointer by id + folder + account instead of pasting a body.
-  6. `scripts/build_app.sh` builds the bundle on an x86_64 Mac — `cryptography<49` (48.0.1, the last universal2 wheel) constrains the install on x86_64 only, arm64 keeps current cryptography — and the Intel bundle passes its env-free import smoke (#205). DIST-06 has no dependency on Phases 1–5 and may land early as a `/gsd-quick` task.
+  6. `scripts/build_app.sh` builds the bundle on an x86_64 Mac — `cryptography<49` (48.0.1, the last universal2 wheel) constrains the install on x86_64 only, arm64 keeps current cryptography — and the Intel bundle passes its env-free import smoke (#205). DIST-06 has no dependency on Phases 1–5 and may land early as a `/gsd-quick` task. — Landed: quick tasks 261007-tu3 (PR #308), 261011-4iv (PR #323), 261011-p90 (PR #330); #205 closed (2026-10-11).
 
 **Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.2 → 05.3 → 05.4 → 6
+Phases execute in roadmap order — a decimal insertion sits where its dependencies put it, not in numeric order (owner, 2026-11-03): 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 → 5 → 05.1 → 05.4 → 05.2 → 05.6 → 05.10 → 05.3 → 05.11 → 05.9 → 05.8 → 05.7 → 05.5 → 6
+
+The nine completed phases below are historical closures. Their verification fingerprints are stale against current source.
+Plan summaries record implemented work; they do not prove current-build acceptance. No percentage is inferred from these counts.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -489,7 +732,15 @@ Phases execute in numeric order: 1 → 2 → 02.1 → 3 → 03.1 → 4 → 04.1 
 | 04.1. Bug Fixes (INSERTED) | 5/5 | Complete    | 2026-10-21 |
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 0/7 | Planned | - |
+| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 20/20 | Complete    | 2026-11-19 |
+| 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
+| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/TBD; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
+| 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
-| 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 0/TBD | Not started | - |
+| 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |
+| 05.9. CLI — tools from the shell (INSERTED) | 0/TBD | Not started | - |
+| 05.8. Notes depth — Markdown, attachments (INSERTED) | 0/TBD | Not started | - |
+| 05.7. Agent guidance — instructions, skills (INSERTED) | 0/TBD | Not started | - |
+| 05.5. Dashboard at a domain — optional (INSERTED) | 0/TBD | Not started | - |
 | 6. Distribution | 0/TBD | Not started | - |

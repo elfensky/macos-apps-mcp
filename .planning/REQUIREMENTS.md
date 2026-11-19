@@ -1,7 +1,7 @@
 # Requirements: macos-apps-mcp
 
 **Defined:** 2026-08-28
-**Core Value:** Safe writes — every write is gated by tier, addressed by id, dry-runnable, audited, and recoverable; the model can never lose, destroy, or send something by accident.
+**Core Value:** Safe writes are the goal. [PROJECT.md](PROJECT.md) and the [architecture](architecture/macos-apps-mcp-architecture.md) distinguish that goal from current guarantees.
 
 ## v1 Requirements
 
@@ -47,10 +47,33 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 - [x] **FIX-11**: On the dashboard's write detail and recovery pages, a Mail mailbox renders as the account's name or address plus the decoded folder name (`Personal › INBOX`) — in the batch title, the `from` sources, the destination, the target rows and the undone banner — while the `imap://` URL stays internal; the name comes from the Mail adapter's process-local account cache through the existing seam, never a native call from a page load — the cache fills on the first Mail tool call after a daemon start, so until then the raw URL shows; every value is escaped (D-09) and an unknown account falls back to the raw URL (#427)
 - [x] **FIX-12**: The dashboard passes the Phase 5 UI review's actionable findings: the `:focus-visible` ring is a solid `--color-primary` outline; the faint, success, outbound and orange text tokens measure at least 4.5:1 for text and 3:1 for UI glyphs in light mode; a refused toggle (409, 400) renders inside the page frame with a `banner warn`, a way back and the same status code, and the Restart form locks with the switches when the adapters file is unreadable; banner glyphs are `aria-hidden`, the switch `aria-label` names the adapter and its state, the sidebar links sit in a `<nav>` landmark behind a skip link, raw font sizes map to the type tokens, switch and sidebar rows reach 44px targets on phone and the System pages stay reachable in the phone strip — all inside the CSP (D-08), the sketch copy (D-11) and escaping (D-09) (#428)
 - [x] **FIX-13**: The Phase 5 close review's deferred findings are closed: the test session patches `deploy._TCC_DB` and `deploy._TCC_SYSTEM_DB` to absent paths so no unit test opens the developer's TCC databases (WR-01); a `tool: "dashboard"` toggle or restart record renders on the write pages as an operator action with no `dry_run` row and no model chip (WR-03); a dashboard build or import failure in `daemon.serve()` is logged, sets `dashboard_state = "not built: …"` and MCP serves alone, with a test (WR-05); a toggle or restart whose audit record could not be written says so on the next page instead of a silent 303 (WR-06); and the adapter-name set and `_version` have one home, `dashboard/` modules import no underscore names across modules, `doctor` reports the dashboard URL only when a page can answer, and the deny-list is read once at import (IN-02..IN-05) (#430)
-- [ ] **FIX-14**: On a Mac where no readable TCC database holds AppleEvents rows (macOS 27), the dashboard Health page and `doctor(request=False)` report each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs, never a remediation to a setting that may already be on; the check sends no Apple Event and shows no prompt (D-14) and runs through `runtime.run_native()` on the single worker, so the Health page's `_WAIT` busy state still covers a worker held by a long Mail pass; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam with no real call; a device check from the installed daemon shows the bundle's own grants on the Health page (#455)
-- [ ] **FIX-15**: `export_mail` never hides a written file: either every target path is checked before the first write and a collision refuses the whole batch with nothing written, or each id reports its own status (`written` / `exists`, as `absent` does today) and the call returns the files it wrote — so a retry after a refusal writes no duplicate; a unit test covers a batch whose later id meets an existing file (#399)
-- [ ] **FIX-16**: A `mail_reply` or `reply_all` draft keeps Mail's native quote — quote bar, Mail's `On <date>, at <time>, <Name> <<addr>> wrote:` attribution, formatting and inline images, the whole original — with the reply text ahead of it, settled by a device probe whose finding lands in `docs/mail-applescript-facts.md`; if text cannot go ahead of the native quote without a read-and-rewrite of the body, the hand-built quote uses Mail's attribution format, is not truncated, and the tool docstrings say the quote is plain text; verified on device by inspecting the resulting draft, with the Mail watchdog running (#348)
-- [ ] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
+- [x] **FIX-14**: On a Mac where no readable TCC database holds AppleEvents rows (macOS 27), the dashboard Health page and `doctor(request=False)` report each Automation adapter's grant from a live, non-prompting check — granted, denied, or not asked yet — and both give the same answer; a target app that is not running shows that its state cannot be told until the app runs, never a remediation to a setting that may already be on; the check sends no Apple Event and shows no prompt (D-14) and runs through `runtime.run_native()` on the single worker, so the Health page's `_WAIT` busy state still covers a worker held by a long Mail pass; unit tests pin `0`, `-1743`, `-1744`, `-600` and an unexpected return at the native seam with no real call; a device check from the installed daemon shows the bundle's own grants on the Health page (#455)
+- [x] **FIX-15**: `export_mail` never hides a written file: either every target path is checked before the first write and a collision refuses the whole batch with nothing written, or each id reports its own status (`written` / `exists`, as `absent` does today) and the call returns the files it wrote — so a retry after a refusal writes no duplicate; a unit test covers a batch whose later id meets an existing file (#399)
+- [x] **FIX-16**: A `mail_reply` or `reply_all` reply keeps Mail's native quote — quote bar, Mail's own attribution line, formatting and inline images, the whole original — with the reply text ahead of it. The plain-text `> ` quote failed the owner's look test on device (2026-10-27) and is removed. A device probe settles the route, and its finding lands in `docs/mail-applescript-facts.md`: (a) first, Mail's untouched native reply with the reply text pasted on top through the Accessibility API, never a write to the reply's `content` (every such write destroys the native quote, facts §4d); (b) only if (a) fails, a self-built styled HTML quote opened as the draft. When the proven route cannot run — its permission is off, the compose window is not the one the tool opened, or the reply text cannot be confirmed in place — the tool refuses, leaves no draft and sends nothing, and the error names the setting to change (owner, 2026-10-27). `doctor()` and the Health page report any new permission the route needs. Verified on device by inspecting the resulting draft and one delivered `reply_all`, with the Mail watchdog running (#348)
+- [x] **FIX-17**: `tests/test_doctor.py::test_report_stays_under_token_budget` pins `responsible_process` to its worst case (two 5-digit PIDs) as #183 and #318 pinned `app_process_info` and the TCC grant map, and the worst-case report stays under the budget — the report is shortened or the budget is restated with its reason in the test's comment — so the test passes whatever PIDs the test process has (#464)
+- [x] **FIX-18**: `reply_all(dry_run=True)` previews the reply's own recipients, not the original's header: `to` is the original's sender (its Reply-To when present), `cc` is the original's to + cc, minus every address of the sending account (read as the account that holds the original: the dry run builds no reply, so Mail's own pick of the sending account cannot be read; an original in one account addressed to another account's alias can preview that alias in cc — 2026-11-01, 05.2-15), without duplicates — the set Mail's reply-all addresses; the original's header, if still returned, sits under a separate key; the dry run still builds no outgoing message; a unit test with an original addressed to the account itself pins it (#516)
+- [x] **FIX-26**: When the paste check of `mail_reply` or `reply_all` fails because the clipboard changed during the call, the refusal says that the clipboard changed and asks the user not to copy while a reply runs. Nothing is sent and no draft stays. Verified on device with the reply route of FIX-16 (#589)
+
+### Remaining bugs — Phase 05.6
+
+FIX-19–24 come from D-28 in the phase context.
+FIX-25 (#556) and MIG-01 (#470) are proposed in this reconciliation (2026-11-04).
+A merged implementation does not complete a requirement that still needs its recorded device or release checks.
+
+- [ ] **FIX-19**: Notes updates and deletes refuse locked or shared notes before changing them. Updates refuse non-text content unless a device probe proves a complete backup route. A failed guard read refuses the action. Preview uses the same guards (#500; D-01–D-05).
+  Before `set body`, the full HTML body goes to a `0600` backup file in a `0700` folder.
+  A failed backup stops the update. The result and audit `after` field name the backup path; `notes.snapshot` stays title-only (D-06–D-08).
+  Backups remain outside the Mail backup manager in this phase; restoration is manual (D-09).
+- [ ] **FIX-20**: Notes reads exclude Recently Deleted through its schema role, with a translated-name fallback. Mail reads recognize the reviewed localized system-folder names while preserving mailbox URLs. Non-English device checks and real-index timings confirm the change (#501; D-10–D-14).
+- [ ] **FIX-21**: The Adapters page uses the last completed Health report and the existing live/TCC merge for Automation chips. It displays that report's time. Before any report, TCC-only chips and a Health link remain available. Explicit Full Disk Access and EventKit probe refusals override stale TCC rows. Rendering makes no native call and adds no wait state (#497; D-15 and the #557 review correction).
+- [x] **FIX-22**: Bundled distributions carry nonempty licence material, or verified fallback notices. The build checks both architecture site-packages trees and the final site-packages tree before signing. Missing material, unsupported metadata and fallback drift stop the build. Signed-bundle inspection confirms the notices remain present (#471; D-16–D-17).
+- [ ] **FIX-23**: After per-account device proof, `delete_draft` uses the index to locate a candidate and reuses `_SWEEP_DELETE` unchanged. The scoped fast path requires exactly one live row, or exactly one Drafts row. Otherwise, the existing unified walk remains. Preview and audit use the same lookup and count without deleting. Exactly-one-match checks and explicit sweep outcomes remain (#521; D-18–D-21).
+- [x] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
+- [ ] **FIX-25**: Ambiguous account Trash candidates produce a distinct outcome before an action relies on a guessed destination. Trash, dedupe and recovery callers handle it explicitly. Synthetic tests cover translated root folders and user-created Google-shaped namespaces; device acceptance remains required for affected Mail writes (#556).
+
+### MCP migration — Phase 05.4
+
+- [x] **MIG-01**: MCP 2 and FastMCP 4 use public transport APIs while preserving capability gates, audit identity, protocol eras, notices and streamed notifications. Interrupted tools receive an uncertain-outcome warning without replay. The local hop has no read deadline. Transport regressions and both bundle slices pass. Installed-daemon, native, physical Intel and signed, notarized build checks complete the migration (#470). The public release follows the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 ### Calendar
 
@@ -86,12 +109,12 @@ Requirements for this project. Each maps to roadmap phases. Order of areas = pha
 
 ### Distribution
 
-- [ ] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path (#113)
-- [ ] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog (#111)
+- [x] **DIST-01**: README leads with the published PyPI package (`uvx macos-apps-mcp`); clone-and-venv becomes the contributor path (#113)
+- [x] **DIST-02**: `pyproject.toml` has `[project.urls]` so the PyPI page links to repo, issues, changelog (#111)
 - [ ] **DIST-03**: Each release publishes a `.mcpb` bundle for one-click Claude Desktop install (#107)
 - [ ] **DIST-04**: The notarized `.app` installs via a Homebrew cask (`brew install --cask …`), with the staple-then-zip order preserved (#107)
 - [ ] **DIST-05**: A companion skill + Claude Code plugin live in-repo (`.claude-plugin/plugin.json`, `skills/<name>/SKILL.md`, `.mcp.json`) so `claude plugin install` wires skill + MCP server config in one step; the same `skills/` layout installs into other agents via `npx skills add elfensky/macos-apps-mcp`; the skill teaches the cockpit workflows (triage reads, pointer citation, draft-review) (#106)
-- [ ] **DIST-06**: `scripts/build_app.sh` builds the bundle on x86_64 (Intel) Macs — on x86_64 only, `cryptography<49` constrains the install (48.0.1, the last universal2 wheel); arm64 keeps current cryptography; the Intel bundle passes its env-free import smoke. Transitive and unused at runtime (`mcp → pyjwt[crypto] → cryptography`). Full Intel daemon deployment still needs a Developer-ID-signed build (#205)
+- [x] **DIST-06**: `scripts/build_app.sh` builds the bundle on x86_64 (Intel) Macs — on x86_64 only, `cryptography<49` constrains the install (48.0.1, the last universal2 wheel); arm64 keeps current cryptography; the Intel bundle passes its env-free import smoke. Transitive and unused at runtime (`mcp → pyjwt[crypto] → cryptography`). Full Intel daemon deployment still needs a Developer-ID-signed build (#205)
 
 ## v2 Requirements
 
@@ -210,27 +233,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-11 | Phase 05.1 | Complete |
 | FIX-12 | Phase 05.1 | Complete |
 | FIX-13 | Phase 05.1 | Complete |
-| FIX-14 | Phase 05.2 | Pending |
-| FIX-15 | Phase 05.2 | Pending |
-| FIX-16 | Phase 05.2 | Pending |
-| FIX-17 | Phase 05.2 | Pending |
-| DIST-01 | Phase 6 | Pending |
-| DIST-02 | Phase 6 | Pending |
+| FIX-14 | Phase 05.2 | Complete |
+| FIX-15 | Phase 05.2 | Complete |
+| FIX-16 | Phase 05.2 | Complete |
+| FIX-17 | Phase 05.2 | Complete |
+| FIX-18 | Phase 05.2 | Complete |
+| FIX-26 | Phase 05.2 | Complete |
+| FIX-19 | Phase 05.6 | Pending device probe, then implementation |
+| FIX-20 | Phase 05.6 | Implementation merged (#554); device acceptance and timing pending |
+| FIX-21 | Phase 05.6 | Implemented (#557); dated snapshot passed on macOS 27; denial/in-flight device cases pending |
+| FIX-22 | Phase 05.6 | Implemented (#553); signed installed notice inspection passed on arm64 |
+| FIX-23 | Phase 05.6 | Pending device probe, then implementation |
+| FIX-24 | Phase 05.6 | Implemented (#552); installed arm64 state/socket and fresh Mail backup modes passed |
+| FIX-25 | Phase 05.6 | Reviewed draft #559; both physical inventories complete; localized write acceptance pending before merge |
+| MIG-01 | Phase 05.4 | Complete (2026-11-06): #550, #561; signed and notarized builds on arm64 and physical Intel; installed device suite and real-frontend restart and outage passed |
+| DIST-01 | Phase 6 | Complete |
+| DIST-02 | Phase 6 | Complete |
 | DIST-03 | Phase 6 | Pending |
 | DIST-04 | Phase 6 | Pending |
 | DIST-05 | Phase 6 | Pending |
-| DIST-06 | Phase 6 | Pending |
+| DIST-06 | Phase 6 | Complete |
 
 **Coverage:**
 
-- v1 requirements: 59 total
-- Mapped to phases: 59
+- v1 requirements: 69 total
+- Mapped to phases: 69
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.2: 4 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
 ---
 *Requirements defined: 2026-08-28*
-*Last updated: 2026-10-25 — #455/#399/#348/#464 added as FIX-14..17 (Phase 05.2); 59/59 mapped*
+*Last updated: 2026-11-04 — FIX-19–25 and MIG-01 mapped; implementation status remains separate from pending acceptance; 68/68 mapped.*

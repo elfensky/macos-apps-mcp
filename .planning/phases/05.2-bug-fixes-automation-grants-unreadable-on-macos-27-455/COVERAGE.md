@@ -1,1 +1,1 @@
-No external API integration: the phase fixes a TCC/AppleEvents grant probe (a local framework call), the Mail export result shape, Mail reply quoting and a test pin (#455, #399, #348, #464); it adds no call to any external service.
+No external API integration: every call is local, on this Mac (TCC/AppleEvents probe, Accessibility, CoreGraphics key events, pasteboard, Mail) (#455, #399, #348, #464, #516).

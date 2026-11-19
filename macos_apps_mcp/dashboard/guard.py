@@ -11,7 +11,8 @@ page read loopback responses. So every request passes this pure-ASGI wrapper fir
   ``macos_apps_mcp_key`` cookie (PM-12, D-19): other macOS accounts and sandboxed apps
   reach 127.0.0.1 too. Cookies do not isolate by port (RFC 6265 section 8.5), so ANY
   cookie of that name that equals the key passes; a planted duplicate cannot shadow
-  the real one. ``/key?k=<key>`` sets the cookie and redirects to ``/``.
+  the real one. ``/key?k=<key>`` sets the cookie and redirects to ``/``, or to the
+  page ``&to=/<page>`` names: one lowercase segment, so it cannot leave the site.
 * A POST (any method but GET and HEAD, so a later PUT or DELETE route is born
   guarded) needs ``Origin`` equal to one of those origins; with no ``Origin`` it needs
   ``Sec-Fetch-Site: same-origin``. ``Origin: null`` is foreign (RESEARCH C1: Chrome
@@ -27,6 +28,7 @@ The body is read here and replayed to the app, so a handler still sees it.
 from __future__ import annotations
 
 import hmac
+import re
 from urllib.parse import parse_qs
 
 from starlette.responses import PlainTextResponse, RedirectResponse, Response
@@ -45,6 +47,8 @@ HEADERS = [
 MAX_BODY = 8 * 1024
 KEY_COOKIE = "macos_apps_mcp_key"
 KEY_PATH = "/key"
+# Where the /key link may redirect: one lowercase segment, never "//host" or "https:".
+_PAGE_RE = re.compile(r"/[a-z]+")
 KEY_MAX_AGE = 400 * 24 * 3600  # the link sets it once; 400 days is Chrome's cap
 KEY_UNUSABLE = (
     "The dashboard key file ~/.local/state/macos-apps-mcp/daemon/dashboard_key cannot "
@@ -53,7 +57,7 @@ KEY_UNUSABLE = (
 )
 NEEDS_KEY = (
     "This dashboard needs its page key. "
-    "Open it with `macos-apps-mcp dashboard` in Terminal."
+    "Open the app, or run `macos-apps-mcp dashboard` in Terminal."
 )
 
 
@@ -113,11 +117,13 @@ class Guard:
         return await self.app(scope, receive, send_h)
 
     def _link(self, scope: Scope) -> Response:
-        """``/key?k=<key>``: the right key sets the cookie and redirects to ``/``."""
+        """``/key?k=<key>``: the right key sets the cookie and redirects to ``/``, or
+        to ``to`` when ``_PAGE_RE`` allows it."""
         got = parse_qs(scope.get("query_string", b"").decode("utf-8", "replace"))
         if not hmac.compare_digest(got.get("k", [""])[0].encode(), self.key):
             return PlainTextResponse(NEEDS_KEY, 403)
-        r = RedirectResponse("/", 303)
+        to = got.get("to", [""])[0]
+        r = RedirectResponse(to if _PAGE_RE.fullmatch(to) else "/", 303)
         r.set_cookie(
             KEY_COOKIE,
             self.key.decode(),

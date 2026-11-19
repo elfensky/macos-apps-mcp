@@ -53,9 +53,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import count
 from pathlib import Path
+from typing import NamedTuple
 
-from ..audit import audit_read, audit_write, state_dir
-from ..errors import BatchTooLarge, NativeError, NativeTimeout
+from ..audit import (
+    audit_write,
+    private_directory,
+    read_all,
+    state_dir,
+    state_path,
+)
+from ..errors import BatchTooLarge, NativeError, NativeTimeout, WriteRefused
 from . import mail_addressing, mail_index
 
 # Hard cap on one destructive batch, rejected BEFORE any native call. Inbox-zero needs
@@ -90,6 +97,25 @@ PERMANENT_OPS = frozenset()
 # would be a confidently wrong answer of exactly the kind this project refuses. Only
 # `locate` may stamp the other three.
 _FULL, _PARTIAL, _ABSENT, _UNKNOWN = "full", "partial", "absent", "unknown"
+
+# Did a target leave its source mailbox (#578)? The third answer is `_UNKNOWN`. This is
+# the fact undo reads, recorded as the done record's `left_source`; `status` stays
+# display text, which an ERROR with some copies moved cannot express.
+LEFT, STAYED = "left", "stayed"
+
+
+class Outcome(NamedTuple):
+    """An act's answer for one id whose status text does not say whether it left its
+    source: an ``ERROR … (1 of 2 copies moved)`` did. A plain status string reads as
+    ``ok`` -> left, ``unknown`` -> unknown, anything else -> stayed."""
+
+    status: str
+    left_source: str
+
+
+def _plain_left_source(status: str) -> str:
+    """The pre-#578 replay rule, as a ``left_source`` value for a plain status."""
+    return {"ok": LEFT, _UNKNOWN: _UNKNOWN}.get(status, STAYED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,10 +309,9 @@ def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
     and by anything else — ``emlx_payload`` drops Mail's byte-count line and trailing
     plist, which are the two things that make an ``.emlx`` un-openable elsewhere.
 
-    A per-file failure downgrades that target to ``absent`` rather than aborting: the
-    op's own safety does not depend on the copy (a move leaves the message intact), and
-    a batch that refuses to run because one file was expunged mid-flight is worse than
-    one that runs and says which target it could not preserve.
+    An unreadable source downgrades that target to ``absent`` (Mail can expunge it
+    mid-flight). A destination failure aborts before acting: private storage must
+    succeed before a backup can be claimed.
 
     Uses the ``path`` ``locate`` stamped (#177): the store used to be rglob'd a second
     time here to re-find the very files ``locate`` had just found — ~2 s of duplicate
@@ -302,13 +327,21 @@ def _backup(op: str, receipt_id: str, targets: list[Target]) -> list[Target]:
             if not payload:
                 out.append(replace(t, fidelity=_ABSENT))
                 continue
-            dest = _backup_dir(receipt_id) / f"{t.rowid}.eml"
-            dest.write_bytes(payload)
         except OSError:
             # Mail can expunge/rename a file between the rglob and the read — same
             # race build_body_index documents. Record the miss, keep going.
             out.append(replace(t, fidelity=_ABSENT))
             continue
+        dest = _backup_dir(receipt_id) / f"{t.rowid}.eml"
+        # Exclusive creation refuses existing files and symlinks. Set the mode at
+        # creation, before any private bytes; umask can only remove permissions.
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(payload)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
         out.append(replace(t, backup=str(dest)))
     return out
 
@@ -317,8 +350,14 @@ def _backup_dir(receipt_id: str) -> Path:
     """``state_dir()/backup/mail/<receipt-id>/`` — the existing convention
     (``audit.jsonl``, ``allow_send`` and the FTS sidecar already live under
     ``state_dir()``), never a new dot-dir."""
-    d = state_dir() / "backup" / "mail" / receipt_id
-    d.mkdir(parents=True, exist_ok=True)
+    if not receipt_id or receipt_id in (".", "..") or "/" in receipt_id:
+        raise ValueError("receipt id must be one directory name")
+    d = state_dir()
+    # mkdir(parents=True, mode=0700) applies its mode only to the last directory.
+    # Check each owned component, including existing directories and symlinks.
+    for name in ("backup", "mail", receipt_id):
+        d /= name
+        private_directory(d)
     return d
 
 
@@ -476,6 +515,7 @@ def recoverable(
     receipt_id = _receipt_id(op)
     if backup:
         located = _backup(op, receipt_id, located)
+    backup_directory = str(_backup_dir(receipt_id)) if backup else None
     plan = {
         "ts": datetime.now().isoformat(timespec="seconds"),
         "tool": "mail_recover",
@@ -483,12 +523,19 @@ def recoverable(
         "phase": "plan",
         "receipt": receipt_id,
         "destination": destination,
-        "backup_dir": str(_backup_dir(receipt_id)) if backup else None,
+        "backup_dir": backup_directory,
         "targets": [t.as_dict() for t in located],
     }
     # Logged BEFORE acting, deliberately: if the process dies mid-act, the log still
     # holds every source mailbox undo needs. The outcome record below completes it.
-    audit_write(plan)
+    if not audit_write(plan):
+        # The receipt is the only automated undo: never act on a batch it does not hold.
+        raise WriteRefused(
+            f"the recovery record for this {op} could not be written to the audit "
+            "log, so nothing was moved: without it mail_undo cannot replay the batch. "
+            "Check that the macos-apps-mcp state folder is writable and the disk is "
+            "not full, then run the same batch again."
+        )
     # D-06: osascript can be killed mid-batch (host-side NativeTimeout). Only that
     # class is caught here — AutomationDenied/AppNotRunning act on nothing, so the
     # plan-only record above is already the honest state, and they propagate
@@ -504,7 +551,11 @@ def recoverable(
     except NativeTimeout as e:
         timeout_error = e
         statuses = {}
-    done = [replace(t, status=statuses.get(t.id, "unknown")) for t in located]
+    answers = {t.id: statuses.get(t.id, _UNKNOWN) for t in located}
+    for mid, a in answers.items():
+        if not isinstance(a, Outcome):
+            answers[mid] = Outcome(a, _plain_left_source(a))
+    done = [replace(t, status=answers[t.id].status) for t in located]
     audit_write(
         {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -513,6 +564,7 @@ def recoverable(
             "phase": "done",
             "receipt": receipt_id,
             "results": {t.id: t.status for t in done},
+            "left_source": {mid: a.left_source for mid, a in answers.items()},
         }
     )
     if timeout_error is not None:
@@ -537,7 +589,7 @@ def recoverable(
     if destination is not None:
         out["destination"] = destination
     if backup:
-        out["backup_dir"] = str(_backup_dir(receipt_id))
+        out["backup_dir"] = backup_directory
     lossy = [t.id for t in done if t.fidelity != _FULL]
     if lossy:
         out["partial_backups"] = lossy
@@ -550,13 +602,6 @@ def recoverable(
     if destination is not None:
         out["undo"] = f'mail_undo("{receipt_id}")'
     return out
-
-
-# How many audit lines back ``find_receipt`` looks. A receipt is undone within minutes
-# of being minted in every workflow this serves, and the log is append-only with two
-# lines per destructive op — 2000 covers far more history than that while keeping the
-# read bounded.
-_RECEIPT_SCAN = 2000
 
 
 def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
@@ -572,13 +617,16 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
     writes an explicit done record with every target ``unknown`` before re-raising, so
     that case is never silent — ``outcomes`` comes back populated, not ``{}``.
 
-    Raises when the plan is not in the recent log, naming the reason rather than
+    Both retained audit files are read (#575): a rotation between the plan and the
+    done record, or before the undo, must not lose the receipt.
+
+    Raises when the plan is not in the log, naming the reason rather than
     answering an empty batch: an unresolvable receipt is exactly the thing a caller must
     be told about."""
     rid = receipt_id.strip()
     plan = None
     outcomes: dict[str, str] = {}
-    for rec in audit_read(limit=_RECEIPT_SCAN):
+    for rec in reversed(read_all()):  # newest first
         if rec.get("receipt") != rid:
             continue
         if rec.get("phase") == "plan" and plan is None:
@@ -587,11 +635,23 @@ def find_receipt(receipt_id: str) -> tuple[dict, dict[str, str]]:
             outcomes = rec.get("results") or {}
     if plan is None:
         raise NativeError(
-            f"no recoverable-mail receipt {rid!r} in the recent audit log — check the "
+            f"no recoverable-mail receipt {rid!r} in the audit log — check the "
             "receipt id from the operation's result, or read `audit` to list them. Do "
             "not retry with a guessed id."
         )
     return plan, outcomes
+
+
+def _left_sources(receipt_id: str) -> dict[str, str] | None:
+    """The done record's ``left_source`` map (#578), or None for a receipt written
+    before it existed (or with no done record): the caller then keeps the old rule.
+    Reads both retained audit files, like ``find_receipt``, which returns ``results``
+    only."""
+    rid = receipt_id.strip()
+    for rec in reversed(read_all()):  # newest first
+        if rec.get("receipt") == rid and rec.get("phase") == "done":
+            return rec.get("left_source")
+    return None
 
 
 def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
@@ -601,6 +661,7 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
     replayed, and the honest answer points at the preserved bytes instead of pretending
     otherwise."""
     rec, outcomes = find_receipt(receipt_id)
+    left = _left_sources(receipt_id)
     destination = rec.get("destination")
     if not destination:
         where = rec.get("backup_dir") or "(no backup was taken)"
@@ -625,8 +686,13 @@ def undo_plan(receipt_id: str) -> tuple[dict, list[Target]]:
         # back would report a fake success. A missing key (the process died before any
         # done record existed) and an explicit `unknown` (D-06's timeout record, or an
         # id the act did not answer for) share one reading: "we do not know", and the
-        # conservative reading of "we do not know" is that it moved.
-        if outcomes.get(t["id"], "ok") in ("ok", "unknown")
+        # conservative reading of "we do not know" is that it moved. A receipt with
+        # `left_source` (#578) answers from that instead: a partial move left.
+        if (
+            left.get(t["id"], _UNKNOWN) != STAYED
+            if left is not None
+            else outcomes.get(t["id"], "ok") in ("ok", "unknown")
+        )
     ]
     if not targets:
         raise NativeError(
@@ -667,7 +733,7 @@ def backup_usage() -> dict:
     diagnostic. ``oldest`` is read from the receipt id, which is a sortable timestamp by
     design — no stat call, and it survives a copy that rewrote mtimes.
     """
-    root = state_dir() / "backup" / "mail"
+    root = state_path() / "backup" / "mail"
     out = {"path": str(root), "bytes": 0, "receipts": 0, "oldest": None}
     try:
         receipts = sorted(d.name for d in root.iterdir() if d.is_dir())

@@ -324,7 +324,7 @@ def test_mail_index_ids_tool_registered_read_only():
         async with Client(srv.mcp) as c:
             tools = {t.name: t for t in await c.list_tools()}
             # same tier and pattern as mail_index_bodies — see the tool's comment
-            assert tools["mail_index_ids"].annotations.readOnlyHint is True
+            assert tools["mail_index_ids"].annotations.read_only_hint is True
 
     asyncio.run(go())
 

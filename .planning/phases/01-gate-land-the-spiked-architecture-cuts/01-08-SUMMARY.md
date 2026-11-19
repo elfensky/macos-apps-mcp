@@ -204,8 +204,8 @@ tests/test_integration.py::test_move_then_undo_returns_every_message_to_its_sour
 **Independent read-back** (not the test's own return value — a fresh `MailAdapter()` call against real Mail, after the test run completed):
 
 ```
-scratch mailbox: imap://02B406D0-99D4-4E9A-9A7C-0DB912FD1D93/macos-apps-mcp-test
-inbox folder:    imap://BDA93031-756E-4487-BEDD-F2768006926A/INBOX
+scratch mailbox: imap://<business-account-uuid>/macos-apps-mcp-test
+inbox folder:    imap://<fiction-account-uuid>/INBOX
 
 reconstructed test ids (top-2 of the same deterministic INBOX):
   ['<17b7f489636173f49fed83c9ab699d76@forum.questionablequesting.com>',
@@ -243,7 +243,7 @@ uv run --project .worktrees/gate-card-4-recoverable-preflight python <script>  #
 >  "dedupe_dry_calls": [
 >   {
 >    "args": [
->     "BDA93031-756E-4487-BEDD-F2768006926A",
+>     "<fiction-account-uuid>",
 >     "INBOX",
 >     "17b7f489636173f49fed83c9ab699d76@forum.questionablequesting.com\u001f6ab67a2ced449_1dfbafdc097f6@ao3-app26.mail"
 >    ],
