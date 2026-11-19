@@ -22,7 +22,7 @@ people run it safely: per-adapter toggles and a loopback dashboard, then distrib
 **Current order (owner, 2026-11-03):** migrate to MCP 2 and FastMCP 4 first.
 The migration is complete (Phase 05.4, 2026-11-06), and four bug implementations are merged. Current architecture is [documented in this repository](architecture/macos-apps-mcp-architecture.md).
 Remaining bugs use the migrated server. Installed-device acceptance and release remain separate from implementation.
-Phase 05.2 device acceptance remains incomplete (#348 is open; #516 and #589 closed on 2026-11-18); migration does not establish Mail acceptance.
+Phase 05.2 device acceptance passed on 2026-11-19 (#348 closed; #516 and #589 closed on 2026-11-18).
 Release 0.16.0 ships the migration after the Phase 05.2 reply acceptance (owner, 2026-11-06).
 
 Every phase that adds a write carries the same three criteria the core value demands: `dry_run=True`
@@ -49,8 +49,8 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: the owner's short reply test on a real Mac (plan 05.2-20). The signed build for it is ready.
-  - Waits for: that reply test. The fix for mails that end with a picture is merged (plan 05.2-19).
+  - Next: release 0.16.0. The owner's reply test on a real Mac passed on 2026-11-19 (plan 05.2-20).
+  - Waits for: the release cut. The remaining bugs of Phases 05.6 and 05.12 ship as patch releases.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
 - 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
@@ -510,7 +510,7 @@ A real frontend gets a connection error during a daemon outage, and the next cal
 
 Release 0.16.0 follows this phase's reply acceptance. It also ships the MCP 2 migration of Phase 05.4 (owner, 2026-11-06).
 
-**Plans:** 19/20 plans executed; the code of gap round 4 is merged (05.2-19, PR #604); the owner sitting 05.2-20 remains; #516 and #589 are closed, #348 is open
+**Plans:** 20/20 plans executed; the 05.2-20 device acceptance passed on build `13417ee` (2026-11-19); #348, #516 and #589 are closed; the window-check refusal seen at the sitting is #607
 
 Plans:
 **Wave 1**
@@ -567,7 +567,7 @@ Plans:
 - [x] 05.2-19-PLAN.md — the reply sweep ignores Mail's own inline-image marker in the quote (two forms, each a `span` with an id that starts with `cid:`), and an INBOX row counts as the delivered copy only with a `Received` header; the facts and the CHANGELOG state both rules (FIX-16; #348)
 
 **Round 4 · Gap Wave 2** *(blocked on Round 4 · Gap Wave 1 completion)*
-- [ ] 05.2-20-PLAN.md — short owner sitting on the rebuilt `.app`: one delivered `reply_all` on the original that ends with an inline image, one refused `mail_reply`, the two-display state or the owner's answer; #348 closes on device evidence or the owner's explicit answer (FIX-16; #348)
+- [x] 05.2-20-PLAN.md — short owner sitting on the rebuilt `.app`: one delivered `reply_all` on the original that ends with an inline image, one refused `mail_reply`, the two-display state or the owner's answer; #348 closes on device evidence or the owner's explicit answer (FIX-16; #348)
 
 ### Phase 05.6: Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556) (INSERTED)
 
@@ -616,9 +616,10 @@ Device-dependent Notes and draft changes retain their recorded probe prerequisit
 - `doctor()` reads the process state in a comma-decimal locale (#580).
 - The script guards cover every script in the package, the real send needs its opt-in, the default suite creates no real `EKEventStore`, and the tool layer has a dispatch test over `registry.TOOLS` (#581).
 - Each AppleScript Mail tool works while Mail.app is closed, or refuses with a directive that names Mail. The scripts address Mail by its bundle id, so the name cannot resolve to Mail's Quick Look extension (#585).
+- A reply is not refused only because another app took the focus during the window check, or the refusal names the check that failed and tells the person what to do (#607).
 
-Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule.
-**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #572, #573, #574, #575, #576, #577, #578, #579, #580, #581 and #585)
+Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule.
+**Requirements**: TBD (planned from #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #572, #573, #574, #575, #576, #577, #578, #579, #580, #581, #585 and #607)
 **Depends on:** Phase 05.6
 **Plans:** 0 plans. The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
 
@@ -731,7 +732,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 5. Operator Control Plane | 9/9 | Complete    | 2026-10-22 |
 | 05.1. Dashboard Follow-ups (INSERTED) | 7/7 | Complete    | 2026-10-25 |
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
-| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 19/20 | In Progress | - |
+| 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 20/20 | In Progress | - |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
 | 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/TBD; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |

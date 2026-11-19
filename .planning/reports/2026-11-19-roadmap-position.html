@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadmap position: release 0.16 (2026-11-19)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: var(--font-sans, system-ui, sans-serif); color: var(--foreground, #1c1c1c); line-height: 1.45; font-size: 14px; }
+  h2 { font-size: 17px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+  p { margin: 6px 0; }
+  .muted { color: var(--muted-foreground, #6b6b6b); }
+  .lane { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+  .step { flex: 1 1 130px; background: var(--card, #f4f4f4); border: 1px solid var(--border, #d9d9d9); border-radius: var(--radius, 8px); padding: 10px; min-width: 0; }
+  .step b.t { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+  .done b.t { color: var(--success, #1a7f37); }
+  .you { outline: 2px solid var(--warning, #b8860b); outline-offset: -2px; }
+  .you b.t { color: var(--warning, #9a6700); }
+  .me b.t { color: var(--info, #2f6feb); }
+  .wait b.t { color: var(--muted-foreground, #6b6b6b); }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 13px; }
+  th, td { border: 1px solid var(--border, #d0d0d0); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--secondary, #ececec); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h2>Release 0.16: where the work stands</h2>
+<p class="muted">Evidence date 2026-11-19. Source: <code>.planning/STATE.md</code> and <code>.planning/ROADMAP.md</code> at <code>d17b106</code>.</p>
+
+<h3>Lane 1: reply drafts (Phase 05.2), 19 of 20 plans done</h3>
+<div class="lane">
+  <div class="step done"><b class="t">✓ Done</b>Fix for mails that end with a picture (plan 05.2-19, PR 604).</div>
+  <div class="step done"><b class="t">✓ Done</b>Signed build of <code>13417ee</code>. It is not installed.</div>
+  <div class="step you"><b class="t">● Needs the owner</b>Reply test at the Mac (plan 05.2-20). About 15 minutes of work in a 35-minute window.</div>
+  <div class="step wait"><b class="t">○ After the test</b>Issue #348 closes. Release 0.16.0 goes to TestPyPI and the installed app.</div>
+</div>
+
+<h3>Lane 2: the other bugs of 0.16 (Phases 05.6 and 05.12)</h3>
+<div class="lane">
+  <div class="step done"><b class="t">✓ Done</b>05.6: five plans merged. 05.12: ten review bugs merged (PR 584).</div>
+  <div class="step me"><b class="t">▶ Can run without the owner</b>Plan the rest: Notes write safety (#500), draft delete (#521), the app after an upgrade (#568), Mail closed (#585), two private advisories.</div>
+  <div class="step you"><b class="t">● Needs the owner</b>One Notes and Drafts probe at the Mac (05.6 decision D-23). The owner makes a locked note and a shared note by hand.</div>
+  <div class="step wait"><b class="t">○ After the probe</b>Code for #500 and #521. Patch release 0.16.x.</div>
+</div>
+
+<h3>What the reply test contains</h3>
+<table>
+  <tr><th>Step</th><th>What happens</th><th>Owner's part</th></tr>
+  <tr><td>Install</td><td>The signed build replaces the installed app. The old app is kept for rollback.</td><td>Approve the install.</td></tr>
+  <tr><td>C</td><td>One real <code>reply_all</code> to the owner's own Gmail address, on the test mail that ends with a picture. Drafts is read after 2 and 15 minutes.</td><td>Approve the preview.</td></tr>
+  <tr><td>D′ and H</td><td>One <code>mail_reply</code> that is refused on purpose. The cleanup must leave Drafts clean.</td><td>Watch. Answer "H: close" if no copy appears.</td></tr>
+  <tr><td>F</td><td>The two-display state.</td><td>Connect a second display, or answer "F: close" or "F: keep open".</td></tr>
+</table>
+
+</body>
+</html>
