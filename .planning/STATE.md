@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.2 plan 05.2-20, the owner sitting, passed on build 13417ee (2026-11-19): one delivered reply_all on the original that ends with an inline image returned drafts_copy none, and Drafts was clean at +2 and +15 min; issue 348 is closed on that evidence and on the owner's answers F: close and H: close; the first reply_all was refused safely by the window check and is issue 607. Build 13417ee is installed; the build it replaced is kept in the rollback folder. Next: close Phase 05.2 (verification), then release 0.16.0."
-last_updated: "2026-11-19T12:20:00.000Z"
+stopped_at: "Phase 05.2 is complete (2026-11-19): the 05.2-20 reply test passed on build 13417ee, issue 348 is closed, the phase-close audits are recorded and the verifier passed 6 of 6 criteria. Review finding CR-01 is fixed in PR 608, device-checked on a signed build of its branch (26ba78a, installed), and merges after the 0.16.0 cut for 0.16.1 (owner). Next: release 0.16.0 from develop without PR 608, then merge PR 608 and release 0.16.1; then Phase 05.6 (the Notes and Drafts probe sitting) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories)."
+last_updated: "2026-11-19T13:10:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
-  completed_phases: 10
+  completed_phases: 11
   total_plans: 99
   completed_plans: 99
 last_activity: 2026-11-19
-last_activity_desc: "Phase 05.2 plan 05.2-20 executed with the owner: the reply test passed on build 13417ee, issue 348 closed, issue 607 filed."
+last_activity_desc: "Phase 05.2 closed: reply test passed, issue 348 closed, audits and verification recorded; PR 608 (review finding CR-01) is ready and waits for the 0.16.0 cut."
 ---
 
 # Project State
@@ -30,14 +30,14 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 Phase: 05.6 — probe-independent bug fixes.
 Plans: 05.6-01/02/03/04 are merged after review and green CI. Phase 05.4 is complete (2026-11-06).
 Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is merged (2026-11-06). The 2026-11-06 review fixes (#572 to #581) are merged in PR #584 (Phase 05.12); #572 and #581 stay open for their remaining parts. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
-Phase 05.2: 20 of 20 plans executed. The 05.2-20 sitting (build 13417ee, 2026-11-19) passed: `drafts_copy` `none` on the original that ends with an inline image, Drafts clean at +2 and +15 min; #348, #516 and #589 are closed. G-05.2-5 and G-05.2-6 are closed by the owner's answers, without device evidence (05.2-20-SUMMARY.md). The window-check refusal seen at the sitting is #607.
+Phase 05.2 is complete (2026-11-19, verification passed). 20 of 20 plans executed. The 05.2-20 sitting (build 13417ee, 2026-11-19) passed: `drafts_copy` `none` on the original that ends with an inline image, Drafts clean at +2 and +15 min; #348, #516 and #589 are closed. G-05.2-5 and G-05.2-6 are closed by the owner's answers, without device evidence (05.2-20-SUMMARY.md). The window-check refusal seen at the sitting is #607.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
 Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. On build 3dd93b2, the read-only device suite passed (19 passed, 0 failed), and a real frontend survived a daemon restart and an outage ([05.4 UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)).
 Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
 The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 (FIX-26) in Phase 05.2.
 [Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: 99 of 99 plan files have completion summaries. The roadmap records ten phase closures.
+Progress: 99 of 99 plan files have completion summaries. The roadmap records eleven phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -265,5 +265,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-19
-Stopped at: Phase 05.2 plan 05.2-20, the owner sitting, passed on build 13417ee (2026-11-19): one delivered reply_all on the original that ends with an inline image returned drafts_copy none, and Drafts was clean at +2 and +15 min; issue 348 is closed on that evidence and on the owner's answers F: close and H: close; the first reply_all was refused safely by the window check and is issue 607. Build 13417ee is installed; the build it replaced is kept in the rollback folder. Next: close Phase 05.2 (verification), then release 0.16.0.
+Stopped at: Phase 05.2 is complete (2026-11-19): the 05.2-20 reply test passed on build 13417ee, issue 348 is closed, the phase-close audits are recorded and the verifier passed 6 of 6 criteria. Review finding CR-01 is fixed in PR 608, device-checked on a signed build of its branch (26ba78a, installed), and merges after the 0.16.0 cut for 0.16.1 (owner). Next: release 0.16.0 from develop without PR 608, then merge PR 608 and release 0.16.1; then Phase 05.6 (the Notes and Drafts probe sitting) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories).
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
