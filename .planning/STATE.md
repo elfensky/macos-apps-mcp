@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.2 plan 05.2-19 is merged (PR 604, tip 13417ee): the reply sweep ignores Mail's inline-image marker inside the quote and the INBOX copy needs a Received header. A signed build of 13417ee is ready in the build lane p052-gaps4-build, not installed. Next: the owner sitting 05.2-20 (install, one reply_all, one refused mail_reply, the two-display state or the owner's answer)."
-last_updated: "2026-11-18T23:25:00.000Z"
+stopped_at: "Phase 05.2 plan 05.2-20, the owner sitting, passed on build 13417ee (2026-11-19): one delivered reply_all on the original that ends with an inline image returned drafts_copy none, and Drafts was clean at +2 and +15 min; issue 348 is closed on that evidence and on the owner's answers F: close and H: close; the first reply_all was refused safely by the window check and is issue 607. Build 13417ee is installed; the build it replaced is kept in the rollback folder. Next: close Phase 05.2 (verification), then release 0.16.0."
+last_updated: "2026-11-19T12:20:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 10
   total_plans: 99
-  completed_plans: 98
+  completed_plans: 99
 last_activity: 2026-11-19
-last_activity_desc: "Phase 05.2 plan 05.2-19 executed unattended: PR 604 merged after a probe review and a re-check; signed build of 13417ee ready for the 05.2-20 sitting."
+last_activity_desc: "Phase 05.2 plan 05.2-20 executed with the owner: the reply test passed on build 13417ee, issue 348 closed, issue 607 filed."
 ---
 
 # Project State
@@ -30,14 +30,14 @@ See: [PROJECT.md](PROJECT.md) (updated 2026-11-04)
 Phase: 05.6 — probe-independent bug fixes.
 Plans: 05.6-01/02/03/04 are merged after review and green CI. Phase 05.4 is complete (2026-11-06).
 Status: Discovery-error follow-up #561 is merged. Garage cutover and publication are complete. Trash-safety PR #559 is merged (2026-11-06). The 2026-11-06 review fixes (#572 to #581) are merged in PR #584 (Phase 05.12); #572 and #581 stay open for their remaining parts. Read-only inventories on both physical Macs found no ambiguity; localized write acceptance remains pending. Notes and draft changes need device probes.
-Phase 05.2: 18 of 18 plans executed. After the 05.2-18 sitting (build c60c899, 2026-11-18) the issues #516 and #589 are closed; #348 stays open: the Drafts result after a send is `unproven` (`sent_not_own`) when the original ends with an inline image (G-05.2-2, 05.2-18-SUMMARY.md). G-05.2-5 and G-05.2-6 have no device evidence yet.
+Phase 05.2: 20 of 20 plans executed. The 05.2-20 sitting (build 13417ee, 2026-11-19) passed: `drafts_copy` `none` on the original that ends with an inline image, Drafts clean at +2 and +15 min; #348, #516 and #589 are closed. G-05.2-5 and G-05.2-6 are closed by the owner's answers, without device evidence (05.2-20-SUMMARY.md). The window-check refusal seen at the sitting is #607.
 Migration verification: 3097 tests passed on Python 3.14; 105 integration tests deselected; lint and formatting passed.
 Both signed bundle slices passed import, stream, entitlement, and runtime checks. Signed arm64 installation, bounded reads, one Mail recovery route, and a 6.087-second tool call passed at 7bc8607. [Notarization and physical Intel installation](overnight/2026-11-04-notarization-intel-acceptance.md) passed at the same runtime source. On build 3dd93b2, the read-only device suite passed (19 passed, 0 failed), and a real frontend survived a daemon restart and an outage ([05.4 UAT](phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md)).
 Discovery follow-up: 3475 default tests passed; independent review repeated 64 focused tests and the normal stream smoke.
 The November 1 incident did not occur on MCP 2. The clipboard observation of #543 is #589 (FIX-26) in Phase 05.2.
 [Installed evidence](overnight/2026-11-04-installed-acceptance.md) separates each completed check from remaining acceptance.
 
-Progress: 98 of 99 plan files have completion summaries (05.2-20, the owner sitting, remains). The roadmap records ten phase closures.
+Progress: 99 of 99 plan files have completion summaries. The roadmap records ten phase closures.
 Their verification fingerprints are stale against current source. These counts do not establish current-build acceptance.
 
 ## Performance Metrics
@@ -105,6 +105,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.2]: Orchestrator decisions 2026-11-19 (unattended, owner may veto; 05.2-19-SUMMARY.md): the placeholder rule ends at the last `</blockquote>` (the plan ran it to the end of the HTML; PM-187); a dropped element leaves a space; an empty `Received` field is no postmark. Open for the owner: PM-182 (marks without letters after the quote's tail are not text for `_has_quote`), PM-189 (`include_quote=False` with a quote of placeholders only), PM-193 (two older quadratic patterns).
 - [Phase 05.2]: Orchestrator finding 2026-11-18 (owner may veto): the INBOX rule of PR #601 does not explain the earlier `unproven` results; the cause is the quote-tail check on an original that ends with an inline image. PM-172 (an INBOX is assumed never to hold a draft) is open for the owner.
 - [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.
+- [Phase 05.2]: Owner decisions 2026-11-19 (05.2-20 sitting, question tool): "F: close" and "H: close" — #348 closes without device evidence for the two-display window order (G-05.2-5) and for a refusal after an autosave (G-05.2-6); the window-check refusal of the first `reply_all` is filed as a bug (#607) and does not block #348 or release 0.16.0.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -263,5 +264,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-19
-Stopped at: Phase 05.2 plan 05.2-19 is merged (PR 604, tip 13417ee): the reply sweep ignores Mail's inline-image marker inside the quote and the INBOX copy needs a Received header. A signed build of 13417ee is ready in the build lane p052-gaps4-build, not installed. Next: the owner sitting 05.2-20 (install, one reply_all, one refused mail_reply, the two-display state or the owner's answer). Then release 0.16.0 (pre-approved up to TestPyPI and the installed app). The Dependabot PR #597 waits for the release. PR #559 retains its localized write acceptance checks. Notes and draft changes retain their probe prerequisites.
+Stopped at: Phase 05.2 plan 05.2-20, the owner sitting, passed on build 13417ee (2026-11-19): one delivered reply_all on the original that ends with an inline image returned drafts_copy none, and Drafts was clean at +2 and +15 min; issue 348 is closed on that evidence and on the owner's answers F: close and H: close; the first reply_all was refused safely by the window check and is issue 607. Build 13417ee is installed; the build it replaced is kept in the rollback folder. Next: close Phase 05.2 (verification), then release 0.16.0.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
