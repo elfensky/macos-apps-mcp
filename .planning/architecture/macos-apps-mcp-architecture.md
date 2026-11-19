@@ -75,7 +75,7 @@ The latest published release is `v0.15.1`, checked on 2026-11-09. GSD's `v0.11.0
 [Installed evidence](../overnight/2026-11-04-installed-acceptance.md) verifies signed arm64 build 7bc8607 and bounded native reads.
 [Notarization and physical Intel installation](../overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
 On build `3dd93b2` the read-only device suite passed, and a real frontend survived a daemon restart and an outage.
-Phase 05.4 verification passed on 2026-11-06. Phase 05.2 device acceptance failed on build `926ec99`. The release stays open.
+Phase 05.4 verification passed on 2026-11-06. Phase 05.2 device acceptance last failed on build `c60c899` (plan 05.2-18, 2026-11-18). The fix of plan 05.2-19 is merged, and the owner's test of plan 05.2-20 is open. The release stays open.
 
 The project can be active while a part of it needs repair.
 A finished part, a part tested in its installed position, and a delivered product have different completion records.

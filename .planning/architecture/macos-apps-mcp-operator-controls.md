@@ -3,8 +3,8 @@ kind: component
 title: Operator controls
 component: operator-controls
 status: implemented
-source_revision: 67a668c39484ebc2017c092d008f1dd705ccff73
-source_evidence_date: 2026-11-09
+source_revision: d17b106faa9017bf503ab155aeef2c257b7d2e38
+source_evidence_date: 2026-11-19
 ---
 
 # Operator controls
@@ -81,7 +81,7 @@ The backup and recovery pages are read-only; they neither invoke undo nor purge 
 ## Sources
 
 - [Phase 5 verification](../phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-VERIFICATION.md) and [Phase 05.1 verification](../phases/05.1-bug-fixes-dashboard-follow-ups-427-428-430/05.1-VERIFICATION.md).
-- [Phase 05.2-16 device acceptance](../phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-16-SUMMARY.md): failed on build `926ec99`, so Phase 05.2 stays open.
+- [Phase 05.2-18 device acceptance](../phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-18-SUMMARY.md): failed on build `c60c899` (2026-11-18), so Phase 05.2 stays open.
 - [Grant-chip implementation and review limits](../phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
 - [Installed evidence](../overnight/2026-11-04-installed-acceptance.md): on 2026-11-04 the installed daemon passed the Health and Adapters checks.
 
