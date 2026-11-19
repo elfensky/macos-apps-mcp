@@ -55,6 +55,6 @@ macOS-only imports are platform-guarded. Off macOS, imports and tool listing wor
 ## Sources
 
 - [Phase 1 verification](../phases/01-gate-land-the-spiked-architecture-cuts/01-VERIFICATION.md) and [Phase 3 verification](../phases/03-eventkit-depth-calendar-alarms-recurrence-reminders-crud-sub/03-VERIFICATION.md).
-- [Phase 05.2-16 device acceptance](../phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-16-SUMMARY.md): failed on installed build `926ec99`. #348 and #516 remain open.
+- [Phase 05.2-18 device acceptance](../phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-18-SUMMARY.md): failed on installed build `c60c899` (2026-11-18). #516 and #589 closed there. #348 remains open.
 
 Device evidence applies to its recorded builds, not to the current installed daemon. Phase 05.2 device acceptance remains incomplete.
