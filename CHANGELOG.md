@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-19 — The reply paste check
+
 ### Fixed
 
 - **A quoted reply is confirmed only when the old reply follows the text** (#348). `mail_reply`
