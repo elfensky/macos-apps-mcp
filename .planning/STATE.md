@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Release 0.16.1 is cut and published (2026-11-19): PR 619 merged to main, tag v0.16.1, on PyPI and in the MCP Registry, GitHub release with the notarized app; the app is installed and doctor() reports 0.16.1 at f20b6ab. 0.16.0 was cut the same day and stays on TestPyPI only (owner). Open for the owner: switch off the CodeQL default setup so that draft PR 617 can merge; the three UI-review items of the Health page; the page-key rotation named in 05.2-SECURITY (T-05.2-22). Next: Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521), then Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories); the Dependabot PR 597 may merge now."
-last_updated: "2026-11-19T14:25:00.000Z"
+stopped_at: "Phase 05.6 plan 05.6-06 is planned and checked (one checker pass, one revision): the owner probe sitting of D-23, with its probe script in 05.6-proto. Next: /gsd-execute-phase 05.6 for plan 05.6-06 with the owner at the Mac (a new session asks the owner again before any device run); then plan the code for issues 500 and 521 from its verdicts. Release 0.16.1 is published and installed (2026-11-19). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615."
+last_updated: "2026-11-19T17:10:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 11
-  total_plans: 99
+  total_plans: 100
   completed_plans: 99
 last_activity: 2026-11-19
-last_activity_desc: "Release 0.16.1 cut, published to PyPI and the MCP Registry, and installed (notarized, doctor proof)."
+last_activity_desc: "Phase 05.6 plan 05.6-06 (the owner probe sitting) planned and checked."
 ---
 
 # Project State
@@ -266,5 +266,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-19
-Stopped at: Release 0.16.1 is cut and published (2026-11-19): PR 619 merged to main, tag v0.16.1, on PyPI and in the MCP Registry, GitHub release with the notarized app; the app is installed and doctor() reports 0.16.1 at f20b6ab. 0.16.0 was cut the same day and stays on TestPyPI only (owner). Open for the owner: switch off the CodeQL default setup so that draft PR 617 can merge; the three UI-review items of the Health page; the page-key rotation named in 05.2-SECURITY (T-05.2-22). Next: Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521), then Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories); the Dependabot PR 597 may merge now.
+Stopped at: Phase 05.6 plan 05.6-06 is planned and checked (one checker pass, one revision): the owner probe sitting of D-23, with its probe script in 05.6-proto. Next: /gsd-execute-phase 05.6 for plan 05.6-06 with the owner at the Mac (a new session asks the owner again before any device run); then plan the code for issues 500 and 521 from its verdicts. Release 0.16.1 is published and installed (2026-11-19). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
