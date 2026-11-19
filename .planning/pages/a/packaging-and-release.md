@@ -40,7 +40,7 @@ MCP 2 imports cryptography for request-state encryption even when authentication
 The recorded exception is limited to the reviewed local configuration and AES-GCM/HKDF request-state path.
 It is not a general claim that the retained version is safe.
 
-The [2026-11-03 security assessment](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-SECURITY.md) records affected APIs and the reachability evidence.
+The [2026-11-03 security assessment](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-SECURITY.md) records affected APIs and the reachability evidence.
 Authentication, certificate-chain verification, PKCS#7 processing, or relevant dependency changes require reassessment.
 This source overview does not claim a new advisory review.
 
@@ -48,31 +48,31 @@ This source overview does not claim a new advisory review.
 
 `--notarize` submits a zip made before stapling. Re-create the distribution zip after stapling, so that the zip carries the ticket.
 The GSD `v0.11.0` label describes a planning milestone, not the current software release.
-The [release procedure](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/docs/RELEASING.md) separates integration into `develop`, release cuts into `main`, distribution, and installed-daemon proof.
+The [release procedure](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/docs/RELEASING.md) separates integration into `develop`, release cuts into `main`, distribution, and installed-daemon proof.
 `doctor().version` and `doctor().build` identify what actually serves a deployed request.
 After a deploy, `uv run pytest -m device` tests the installed daemon through its socket. The release checklist requires its reads and writes to pass.
 
 ## Code paths
 
-- [build_app.sh](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/scripts/build_app.sh), [pyproject.toml](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/pyproject.toml), [uv.lock](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/uv.lock), and [Info.plist](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/packaging/Info.plist).
-- [bundle_licenses.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/scripts/bundle_licenses.py), [notice evidence](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/packaging/licenses/README.md), and [licence tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_bundle_licenses.py).
-- [Deployment implementation](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/deploy.py) and [daemon runbook](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/docs/DAEMON.md).
-- [sitecustomize.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/packaging/sitecustomize.py), [cli.sh](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/packaging/cli.sh), and [packaging tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_packaging.py).
+- [build_app.sh](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/scripts/build_app.sh), [pyproject.toml](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/pyproject.toml), [uv.lock](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/uv.lock), and [Info.plist](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/packaging/Info.plist).
+- [bundle_licenses.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/scripts/bundle_licenses.py), [notice evidence](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/packaging/licenses/README.md), and [licence tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_bundle_licenses.py).
+- [Deployment implementation](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/deploy.py) and [daemon runbook](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/docs/DAEMON.md).
+- [sitecustomize.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/packaging/sitecustomize.py), [cli.sh](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/packaging/cli.sh), and [packaging tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_packaging.py).
 
 ## Sources
 
-- [Phase 05.4 decisions](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md) and [Phase 6 distribution scope](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/ROADMAP.md).
+- [Phase 05.4 decisions](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md) and [Phase 6 distribution scope](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/ROADMAP.md).
 
 The latest published release is `v0.15.1`, checked on 2026-11-09.
 Dependabot alerts 2, 17 and 18 for cryptography are dismissed as `not_used` since 2026-10-25. MCP 2 now imports cryptography, so that dismissal reason is out of date.
 
-The [migration implementation record](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) reports an unsigned universal bundle and successful slice tests.
+The [migration implementation record](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) reports an unsigned universal bundle and successful slice tests.
 The x86_64 execution used Rosetta on an Apple-silicon host.
 That evidence is not signing, notarization, installation, physical Intel acceptance, or native application acceptance.
-The [2026-11-04 installed evidence](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/overnight/2026-11-04-installed-acceptance.md) establishes signed arm64 build 7bc8607, version 0.15.1, native reads, and normal restart recovery.
+The [2026-11-04 installed evidence](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-installed-acceptance.md) establishes signed arm64 build 7bc8607, version 0.15.1, native reads, and normal restart recovery.
 Strict signature verification and all 133 distribution notice records passed after installation.
-The [Mail recovery test](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/overnight/2026-11-04-mail-recovery-acceptance.md) also passed on this installed build; strict signature verification still passed afterward.
-[Notarization and physical Intel installation](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
+The [Mail recovery test](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-mail-recovery-acceptance.md) also passed on this installed build; strict signature verification still passed afterward.
+[Notarization and physical Intel installation](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-notarization-intel-acceptance.md) passed for the same build.
 Both protocol eras and bounded native reads passed on Intel; its final signature, staple, and Gatekeeper checks passed.
 On build `3dd93b2`, the read-only device suite passed with 19 tests and 0 failures. A real frontend survived a daemon restart and an outage.
 Phase 05.4 verification passed on 2026-11-06. The release stays open.
