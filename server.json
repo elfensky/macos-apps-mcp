@@ -16,12 +16,12 @@
     "url": "https://github.com/elfensky/macos-apps-mcp",
     "source": "github"
   },
-  "version": "0.15.1",
+  "version": "0.16.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "macos-apps-mcp",
-      "version": "0.15.1",
+      "version": "0.16.0",
       "transport": {
         "type": "stdio"
       }
