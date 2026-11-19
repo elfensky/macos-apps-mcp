@@ -3,7 +3,7 @@
 ## What it does
 
 The daemon serves a Starlette dashboard at literal loopback address `127.0.0.1:47632`.
-Its TCP routes remain separate from the [MCP Unix socket](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/architecture/macos-apps-mcp-transport.md).
+Its TCP routes remain separate from the [MCP Unix socket](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/architecture/macos-apps-mcp-transport.md).
 The dashboard displays audit entries, write diffs, usage, health, adapter settings, and Mail backup receipts.
 It reads registration facts from `registry.py` without importing the server layer.
 
@@ -50,7 +50,7 @@ Dashboard bind or construction failure does not stop MCP service.
 Adapter toggles persist the deny-list. Registration changes after a daemon restart, with pending differences displayed beforehand.
 The switches and the restart lock when `MACOS_APPS_ADAPTERS_OFF` is set, or when the `adapters_off` file cannot be read.
 Restart drops MCP connections and can interrupt a Mail batch. Clients must reconnect.
-Operator action logging remains [best-effort](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/architecture/macos-apps-mcp-audit-and-recovery.md); the dashboard can report a lost record.
+Operator action logging remains [best-effort](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/architecture/macos-apps-mcp-audit-and-recovery.md); the dashboard can report a lost record.
 
 Outbound enablement remains an operator CLI action through `allow-send`, not a dashboard form or MCP tool.
 Direct stdio deployments use their process-start environment settings.
@@ -58,18 +58,18 @@ The backup and recovery pages are read-only; they neither invoke undo nor purge 
 
 ## Code paths
 
-- [Dashboard routes](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/__init__.py), [Guard](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/guard.py), and [adapter controls](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/adapters.py).
-- [Recovery view](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/recovery.py), [Backups](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/backups.py), [Health](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/health.py), and [grants](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/dashboard/grants.py).
-- [doctor.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/doctor.py), and [deploy.py](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/macos_apps_mcp/deploy.py).
-- [Guard tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_dashboard_guard.py), [key tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_dashboard_key.py), and [dispatcher tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_daemon_dispatch.py).
-- [Deploy tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_deploy.py), [serving identity tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_doctor_serving_identity.py), and [permission chip tests](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/tests/test_dashboard_adapter_health.py).
+- [Dashboard routes](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/__init__.py), [Guard](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/guard.py), and [adapter controls](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/adapters.py).
+- [Recovery view](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/recovery.py), [Backups](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/backups.py), [Health](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/health.py), and [grants](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/dashboard/grants.py).
+- [doctor.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/doctor.py), and [deploy.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/deploy.py).
+- [Guard tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_dashboard_guard.py), [key tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_dashboard_key.py), and [dispatcher tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_daemon_dispatch.py).
+- [Deploy tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_deploy.py), [serving identity tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_doctor_serving_identity.py), and [permission chip tests](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_dashboard_adapter_health.py).
 
 ## Sources
 
-- [Phase 5 verification](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-VERIFICATION.md) and [Phase 05.1 verification](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.1-bug-fixes-dashboard-follow-ups-427-428-430/05.1-VERIFICATION.md).
-- [Phase 05.2-16 device acceptance](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-16-SUMMARY.md): failed on build `926ec99`, so Phase 05.2 stays open.
-- [Grant-chip implementation and review limits](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
-- [Installed evidence](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/overnight/2026-11-04-installed-acceptance.md): on 2026-11-04 the installed daemon passed the Health and Adapters checks.
+- [Phase 5 verification](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05-operator-control-plane-adapter-toggles-and-the-localhost-das/05-VERIFICATION.md) and [Phase 05.1 verification](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.1-bug-fixes-dashboard-follow-ups-427-428-430/05.1-VERIFICATION.md).
+- [Phase 05.2-16 device acceptance](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-16-SUMMARY.md): failed on build `926ec99`, so Phase 05.2 stays open.
+- [Grant-chip implementation and review limits](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-SUMMARY.md).
+- [Installed evidence](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-installed-acceptance.md): on 2026-11-04 the installed daemon passed the Health and Adapters checks.
 
 No permission was revoked to force a denial. In-flight report replacement has synthetic tests only. Issue #497 stays open.
-Phase 05.5 of the [roadmap](https://github.com/elfensky/macos-apps-mcp/blob/573b7c58e8b88d96622657c0eb6acf6e23cbd85a/.planning/ROADMAP.md) holds the domain-hosted dashboard loader (#483). The phase is optional and has not started.
+Phase 05.5 of the [roadmap](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/ROADMAP.md) holds the domain-hosted dashboard loader (#483). The phase is optional and has not started.

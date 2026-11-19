@@ -9,12 +9,12 @@
   "description": "Lets an AI assistant use Mail, Calendar, Reminders, Notes, Photos and five more Mac apps. A delete, move or send previews by default.",
   "status": "active",
   "icon": "🍎",
-  "next_action": "0.16: one code fix (plan 05.2-17), then the owner's test of reply drafts on a real Mac.",
-  "commit": "92490303fd4a84b834fac40c90396127bafb1458",
-  "plan_date": "2026-11-17",
-  "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+  "next_action": "0.16: the owner's short reply test on a real Mac (plan 05.2-20). The signed build for it is ready.",
+  "commit": "d17b106faa9017bf503ab155aeef2c257b7d2e38",
+  "plan_date": "2026-11-19",
+  "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
   "eli14": "Think of the project as a restaurant kitchen. The AI assistant is the chef, and the apps on the Mac are the pantry. The house rule is safe cooking: anything that throws food away, moves it or sends it out is shown first by default, and a dish that was moved can come back. Each release adds one dish to the menu. 1.0 is the grand opening.",
-  "prose": "**How we got here.**\n\n- **0.1–0.7 (June–July 2026): a server each client starts.** Calendar and Reminders first, then trust, safety rails and fast reads. Each client started its own copy and asked for its own permissions.\n- **0.8–0.10 (July–August): one signed app.** A signed background app holds the permissions once. Mail grows to full depth, with undo, and sending waits behind a switch.\n- **0.11–0.15 (September–October): the planned rebuild.** After the review of 2026-08-28, a written plan rebuilds the base, fixes Mail, deepens Calendar, Reminders, Notes and Photos, and adds the owner's dashboard.\n- **0.16–1.0 (from November): road to launch.** A new MCP core, the open bugs, the final tool names, problem reports, then the testers and the public launch.\n- **After 1.0:** deeper Contacts and Messages, Safari, Maps and a menu-bar app.\n\n## Blockers\n\n- 0.16 waits for the owner's test of reply drafts on a real Mac (plan 05.2-18), after the code fix of plan 05.2-17.\n\n## Decisions\n\n- Contacts and Messages depth waits for v2 (owner, 2026-08-28).\n- Email work comes before every new feature (owner, 2026-09-24).\n- Bugs come before features (owner, 2026-10-11).\n- One release at every phase close that changes the app. 0.17 is the breaking release, and 1.0 follows the testers (owner, 2026-11-01).\n- The MCP 2 migration comes first (owner, 2026-11-03).\n\n## Sources\n\nSTATE.md and ROADMAP.md at 92490303 (2026-11-17): [STATE.md](https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/STATE.md), [ROADMAP.md](https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md).\n",
+  "prose": "**How we got here.**\n\n- **0.1–0.7 (June–July 2026): a server each client starts.** Calendar and Reminders first, then trust, safety rails and fast reads. Each client started its own copy and asked for its own permissions.\n- **0.8–0.10 (July–August): one signed app.** A signed background app holds the permissions once. Mail grows to full depth, with undo, and sending waits behind a switch.\n- **0.11–0.15 (September–October): the planned rebuild.** After the review of 2026-08-28, a written plan rebuilds the base, fixes Mail, deepens Calendar, Reminders, Notes and Photos, and adds the owner's dashboard.\n- **0.16–1.0 (from November): road to launch.** A new MCP core, the open bugs, the final tool names, problem reports, then the testers and the public launch.\n- **After 1.0:** deeper Contacts and Messages, Safari, Maps and a menu-bar app.\n\n## Blockers\n\n- 0.16 waits for that reply test. The fix for mails that end with a picture is merged (plan 05.2-19).\n\n## Decisions\n\n- Contacts and Messages depth waits for v2 (owner, 2026-08-28).\n- Email work comes before every new feature (owner, 2026-09-24).\n- Bugs come before features (owner, 2026-10-11).\n- One release at every phase close that changes the app. 0.17 is the breaking release, and 1.0 follows the testers (owner, 2026-11-01).\n- The MCP 2 migration comes first (owner, 2026-11-03).\n\n## Sources\n\nSTATE.md and ROADMAP.md at d17b106f (2026-11-19): [STATE.md](https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/STATE.md), [ROADMAP.md](https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md).\n",
   "milestones": [
     {
       "id": "0-1",
@@ -23,7 +23,7 @@
       "summary": "The first release reads nine Mac apps and writes Calendar events and Reminders, with repeat rules.",
       "state": "done",
       "finished": "2026-06-27",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-2",
@@ -32,7 +32,7 @@
       "summary": "The project and its package take the name mac-mcp, with an MIT licence.",
       "state": "done",
       "finished": "2026-06-29",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-3",
@@ -41,7 +41,7 @@
       "summary": "A native failure is a typed error, doctor checks the permissions, and each create or update is read back.",
       "state": "done",
       "finished": "2026-07-09",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-4",
@@ -50,7 +50,7 @@
       "summary": "Event and note deletes preview first, batches have caps, and text from the apps is marked as untrusted.",
       "state": "done",
       "finished": "2026-07-10",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-5",
@@ -59,7 +59,7 @@
       "summary": "Messages and Notes are read from their own databases, which is faster and more complete than AppleScript.",
       "state": "done",
       "finished": "2026-07-12",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-6",
@@ -68,7 +68,7 @@
       "summary": "The package, the repository and the module take the name macos-apps-mcp.",
       "state": "done",
       "finished": "2026-07-15",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-7",
@@ -77,7 +77,7 @@
       "summary": "Free and busy times, Notes create and update, a log of every write, and a list of mail that needs a reply.",
       "state": "done",
       "finished": "2026-07-22",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-8",
@@ -86,7 +86,7 @@
       "summary": "A signed background app asks for each Mac permission once, and every client connects through it.",
       "state": "done",
       "finished": "2026-07-25",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-9",
@@ -95,7 +95,7 @@
       "summary": "Mail can send, reply and forward, but only after the owner turns sending on outside the assistant's reach.",
       "state": "done",
       "finished": "2026-07-27",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-10",
@@ -104,7 +104,7 @@
       "summary": "Mail gets search, threads, folders, trash and attachments, and a backup before each move or delete makes undo possible.",
       "state": "done",
       "finished": "2026-08-20",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-11",
@@ -113,7 +113,7 @@
       "summary": "Mail reads its own database on macOS 15 too, so search and undo work there.",
       "state": "done",
       "finished": "2026-09-25",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-12",
@@ -122,7 +122,7 @@
       "summary": "One safe path to the apps, settled modules, and a test suite that cannot reach a real app.",
       "state": "done",
       "finished": "2026-09-30",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-13",
@@ -131,7 +131,7 @@
       "summary": "A move of 25 messages finishes in time and leaves a receipt, and a draft starts from the account the caller names.",
       "state": "done",
       "finished": "2026-10-03",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-14",
@@ -140,7 +140,7 @@
       "summary": "Events get alarms and more repeat rules, Reminders can be deleted and show their tags, and the app runs on Intel Macs.",
       "state": "done",
       "finished": "2026-10-07",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-15",
@@ -149,7 +149,7 @@
       "summary": "Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups.",
       "state": "done",
       "finished": "2026-10-22",
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md"
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md"
     },
     {
       "id": "0-16",
@@ -158,30 +158,30 @@
       "summary": "The server moves to MCP 2 and the open bugs are fixed.",
       "state": "inprogress",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Migration — mcp 2 and fastmcp 4 (#470)",
           "state": "done",
           "date": "2026-11-06",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.4-mcp-2-fastmcp-4-migration"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.4-mcp-2-fastmcp-4-migration"
         },
         {
           "name": "Bug fixes — every open bug before Phase 6 (#455, #399, #348)",
           "state": "todo",
-          "done": 16,
-          "total": 18,
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455"
+          "done": 19,
+          "total": 20,
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455"
         },
         {
           "name": "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)",
           "state": "inprogress",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu"
         },
         {
           "name": "Bug fixes — the app after an upgrade (#568) and two private advisories, and the 2026-11-06 review defects (#572–#581)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.12-bug-fixes-the-app-after-an-upgrade-568-and-two-private-advis"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.12-bug-fixes-the-app-after-an-upgrade-568-and-two-private-advis"
         }
       ]
     },
@@ -192,12 +192,12 @@
       "summary": "A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.10-tool-surface-parameter-descriptions-verb-noun-names-merged-d"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.10-tool-surface-parameter-descriptions-verb-noun-names-merged-d"
         }
       ]
     },
@@ -208,12 +208,12 @@
       "summary": "A failing server leads the person to one redacted report, sent with their own click, and then the testers start.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Feedback — problem reports and improvement suggestions (#465)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.3-feedback-problem-reports-and-improvement-suggestions-465"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.3-feedback-problem-reports-and-improvement-suggestions-465"
         }
       ]
     },
@@ -224,12 +224,12 @@
       "summary": "A capped read continues with a cursor that belongs to its query, and a cursor from another query is refused.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Paged reads — a cursor bound to the query (#508)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.11-paged-reads-a-cursor-bound-to-the-query-508"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.11-paged-reads-a-cursor-bound-to-the-query-508"
         }
       ]
     },
@@ -240,12 +240,12 @@
       "summary": "Any tool runs from the shell through the signed background app.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "CLI — tools from the shell (#507)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.9-cli-tools-from-the-shell-507"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.9-cli-tools-from-the-shell-507"
         }
       ]
     },
@@ -256,12 +256,12 @@
       "summary": "Notes take Markdown and show their attachments.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Notes depth — Markdown input and note attachments (#505, #506)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.8-notes-depth-markdown-input-and-note-attachments-505-506"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.8-notes-depth-markdown-input-and-note-attachments-505-506"
         }
       ]
     },
@@ -272,12 +272,12 @@
       "summary": "The server tells an assistant how to use it, with one short guide per app.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Agent guidance — server instructions and per-app skills (#503, #504)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.7-agent-guidance-server-instructions-and-per-app-skills-503-50"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.7-agent-guidance-server-instructions-and-per-app-skills-503-50"
         }
       ]
     },
@@ -288,7 +288,7 @@
       "summary": "After the testers, it is listed for everyone and installs in one step.",
       "state": "todo",
       "page": true,
-      "source": "https://github.com/elfensky/macos-apps-mcp/blob/92490303fd4a84b834fac40c90396127bafb1458/.planning/ROADMAP.md",
+      "source": "https://github.com/elfensky/macos-apps-mcp/blob/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/ROADMAP.md",
       "items": [
         {
           "name": "Distribution — uvx, Bundles, Cask, and the Companion Plugin",
@@ -297,7 +297,7 @@
         {
           "name": "Dashboard at a domain — the loader page (#483)",
           "state": "todo",
-          "link": "https://github.com/elfensky/macos-apps-mcp/tree/92490303fd4a84b834fac40c90396127bafb1458/.planning/phases/05.5-dashboard-at-a-domain-the-loader-page-483"
+          "link": "https://github.com/elfensky/macos-apps-mcp/tree/d17b106faa9017bf503ab155aeef2c257b7d2e38/.planning/phases/05.5-dashboard-at-a-domain-the-loader-page-483"
         }
       ]
     }
