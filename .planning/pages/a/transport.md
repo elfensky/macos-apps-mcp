@@ -49,20 +49,20 @@ The frontend receives a tool error with its cause retained. The shim does not re
 Definite connection refusal and HTTP 413 do not receive this warning.
 
 The warning asks for inspection before another destructive attempt.
-Because [audit persistence is best-effort](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/architecture/macos-apps-mcp-audit-and-recovery.md), an absent audit record cannot prove that nothing happened.
+Because [audit persistence is best-effort](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/architecture/macos-apps-mcp-audit-and-recovery.md), an absent audit record cannot prove that nothing happened.
 
 ## Code paths
 
-- [daemon.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/daemon.py): `_uds_client_factory`, `_shim_client_factory`, `build_shim`, `_InterruptedToolWarning`, and `make_dispatcher`.
-- [cli.py](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/macos_apps_mcp/cli.py): role dispatch.
-- [Transport regressions](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/tests/test_mcp_transport.py) and [stream smoke](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/scripts/smoke_stream.py): identity, notifications, long calls, protocol eras, discovery errors, backend replacement, request sizes and interrupted responses, each with execution counts.
+- [daemon.py](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/macos_apps_mcp/daemon.py): `_uds_client_factory`, `_shim_client_factory`, `build_shim`, `_InterruptedToolWarning`, and `make_dispatcher`.
+- [cli.py](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/macos_apps_mcp/cli.py): role dispatch.
+- [Transport regressions](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/tests/test_mcp_transport.py) and [stream smoke](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/scripts/smoke_stream.py): identity, notifications, long calls, protocol eras, discovery errors, backend replacement, request sizes and interrupted responses, each with execution counts.
 
 ## Sources
 
-- [Phase 05.4 implementation](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) and [decisions](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md).
-- [Discovery-error regression](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-SUMMARY.md): both protocol eras, explicit recovery, failed lists, and healthy missing names.
-- [Phase 05.4 verification](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md) and [UAT](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md): a real frontend kept working through a daemon restart and a daemon outage.
+- [Phase 05.4 implementation](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-IMPLEMENTATION.md) and [decisions](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-DECISIONS.md).
+- [Discovery-error regression](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-02-SUMMARY.md): both protocol eras, explicit recovery, failed lists, and healthy missing names.
+- [Phase 05.4 verification](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-VERIFICATION.md) and [UAT](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/phases/05.4-mcp-2-fastmcp-4-migration/05.4-UAT.md): a real frontend kept working through a daemon restart and a daemon outage.
 
-[Installed arm64 evidence](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-installed-acceptance.md) covers both protocol eras, bounded native reads, notices, and normal restart recovery.
-A later [installed Mail test](https://github.com/elfensky/macos-apps-mcp/blob/1e662e44f3d0d4bdfcb377711a7ed2c0d918b0f4/.planning/overnight/2026-11-04-mail-recovery-acceptance.md) completed a real Trash tool call in 6.087 seconds.
+[Installed arm64 evidence](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/overnight/2026-11-04-installed-acceptance.md) covers both protocol eras, bounded native reads, notices, and normal restart recovery.
+A later [installed Mail test](https://github.com/elfensky/macos-apps-mcp/blob/966318da3ce953eade8072b48f5ed19b4f7853f3/.planning/overnight/2026-11-04-mail-recovery-acceptance.md) completed a real Trash tool call in 6.087 seconds.
 Phase 05.4 verification passed on 2026-11-06 on build `3dd93b2`. The November 1 incident of issue #543 did not occur on MCP 2.
