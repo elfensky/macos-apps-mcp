@@ -1092,8 +1092,9 @@ def _prepended(body: str, text: str, before: str) -> bool:
     render, a cut read) passed it with no paste, and reply_all then sends. A read that
     was cut short may hold less of the old body at its end, so either side may be the
     longer one. An empty old body (Mail built the reply without its quote) is followed
-    by nothing: ``_confirm`` then names the missing quote. Without a paste this holds
-    only for a body that is the text repeated to its end."""
+    by nothing: ``_confirm`` then names the missing quote. Residual (not device-seen):
+    a read before the key event that missed a first part whose letters equal the text
+    (a signature line "Thanks," and the text "Thanks") looks like a paste."""
     # a text with no letter or digit (an emoji) is compared with every visible mark
     key = _alnum if _alnum(text) else _dense
     was, want = key(before), key(text)
