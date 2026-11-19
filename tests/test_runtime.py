@@ -930,7 +930,7 @@ _QUOTE = "On 1 Jul 2026, at 14:39, Jane wrote:\n> original words end here"
 
 
 def test_compose_insert_targets_mails_window_only(monkeypatch):
-    events, clip, keys = _compose_rig(monkeypatch, ["", f"{_TEXT}\n{_QUOTE}"])
+    events, clip, keys = _compose_rig(monkeypatch, [_QUOTE, f"{_TEXT}\n{_QUOTE}"])
     _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
     assert runtime._MAIL_EXECUTABLE.endswith(b"/Mail.app/Contents/MacOS/Mail")
     assert keys == [(4242, 9)]  # exactly one Cmd-V, to Mail's pid
@@ -1023,12 +1023,16 @@ def test_compose_insert_confirms_after_nfc_and_line_folding(monkeypatch):
 
     text = "Hi\nSecond line \u2013 caf\u00e9 \u2713"
     readback = unicodedata.normalize("NFD", text).replace("\n", "\r\n")
-    _compose_rig(monkeypatch, ["", f"{readback}\r\nquote text tail words"])
+    _compose_rig(
+        monkeypatch,
+        ["quote text tail words", f"{readback}\r\nquote text tail words"],
+    )
     _REAL_COMPOSE_INSERT(77, text, quote_tail="tail words")
     # the AX walk drops empty lines: no blank line between two paragraphs still passes
     para = "First paragraph.\n\nSecond paragraph."
     _compose_rig(
-        monkeypatch, ["", "First paragraph.\nSecond paragraph.\nquote tail words"]
+        monkeypatch,
+        ["quote tail words", "First paragraph.\nSecond paragraph.\nquote tail words"],
     )
     _REAL_COMPOSE_INSERT(77, para, quote_tail="tail words")
     # the text after the quote is not the text on top
@@ -1072,7 +1076,7 @@ def test_compose_insert_restores_every_pasteboard_item(monkeypatch):
         {"public.utf8-plain-text": b"a", "public.html": b"<b>a</b>"},
         {"com.example.one": b"\x00\x01", "com.example.two": b"b"},
     ]
-    events, clip, _ = _compose_rig(monkeypatch, ["", f"{_TEXT}\ntail"], items=items)
+    events, clip, _ = _compose_rig(monkeypatch, ["tail", f"{_TEXT}\ntail"], items=items)
     _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
     assert clip.items == items
     # and also when the insert raised
@@ -1098,7 +1102,7 @@ def test_compose_insert_undoes_a_clipboard_write_that_failed_midway(monkeypatch)
 
 
 def test_compose_insert_keeps_a_newer_user_copy(monkeypatch):
-    events, clip, _ = _compose_rig(monkeypatch, ["", f"{_TEXT}\ntail"])
+    events, clip, _ = _compose_rig(monkeypatch, ["tail", f"{_TEXT}\ntail"])
     real_read = runtime._read_body
 
     def read(el):
@@ -1195,7 +1199,7 @@ def test_compose_insert_checks_the_clipboard_last_before_the_write(monkeypatch):
 def test_compose_insert_restores_only_after_the_paste_settles(monkeypatch):
     # the text shows on the third read: the restore comes after that read
     events, _, _ = _compose_rig(
-        monkeypatch, ["old", "old", "old", f"{_TEXT}\ntail", f"{_TEXT}\ntail"]
+        monkeypatch, ["tail", "tail", "tail", f"{_TEXT}\ntail", f"{_TEXT}\ntail"]
     )
     _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
     assert events.count("read") >= 4
@@ -1213,6 +1217,64 @@ def test_compose_insert_does_not_settle_on_an_unchanged_body(monkeypatch):
     events, _, _ = _compose_rig(monkeypatch, [f"{_TEXT}\ntail"])
     with pytest.raises(runtime.ComposeRefused, match="confirmation"):
         _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+
+
+_SIG = f"{_TEXT}, and regards\nOn Monday X wrote:\ntail"
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        (_SIG, f"{_SIG} more"),  # the body changed for another reason
+        ("", _SIG),  # a late render: the read before the key event was empty
+        ("\ufffc", _SIG),  # ... or held only an object mark
+        ("On Monday X wrote:\ntail", _SIG),  # ... or missed its first part
+        (f"\u200b{_SIG}", _SIG),  # a zero-width mark that went away
+    ],
+)
+@pytest.mark.parametrize("complete", [True, False])
+def test_compose_insert_does_not_settle_when_the_old_body_does_not_follow_the_text(
+    monkeypatch, before, after, complete
+):
+    # phase-close review CR-01: the reply already starts with the text (a signature
+    # with the same first words). "Starts with the text and changed" then held with no
+    # paste, the clipboard was restored, and reply_all would send
+    events, _, _ = _compose_rig(monkeypatch, [before, after], complete=complete)
+    with pytest.raises(runtime.ComposeRefused, match="did not appear"):
+        _REAL_COMPOSE_INSERT(
+            77, _TEXT, quote_tail="tail", rollback=lambda: events.append("rollback")
+        )
+    assert events.index("rollback") < events.index("restore")
+
+
+def test_compose_insert_settles_on_a_signature_that_starts_with_the_text(monkeypatch):
+    # a real paste on that same reply: the text, then the whole old body
+    _compose_rig(monkeypatch, [_SIG, f"{_TEXT}\n{_SIG}"])
+    _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="tail")
+
+
+def test_prepended_takes_a_cut_read_on_either_side_and_an_absent_quote():
+    old = "Regards\nOn Monday X wrote:\nline one\nline two tail"
+    assert runtime._prepended(f"{_TEXT}\n{old}", _TEXT, old)
+    # the read after the paste lost the end of the old body (the node budget)
+    assert runtime._prepended(f"{_TEXT}\n{old[:-9]}", _TEXT, old)
+    # the read before the paste was the shorter one
+    assert runtime._prepended(f"{_TEXT}\n{old}", _TEXT, old[:-9])
+    # Mail built the reply without its quote: nothing was there, nothing follows
+    assert runtime._prepended(_TEXT, _TEXT, "")
+    assert not runtime._prepended(f"{_TEXT}\n{old}", _TEXT, "")
+    assert not runtime._prepended(_TEXT, _TEXT, old)
+    assert not runtime._prepended(f"{old}\n{_TEXT}", _TEXT, old)
+
+
+def test_prepended_compares_every_mark_for_a_text_without_letters_or_digits():
+    old = "\U0001f44d Regards\nOn Monday X wrote:\ntail"
+    thumb = "\U0001f44d"
+    assert runtime._prepended(f"{thumb}\n{old}", thumb, old)  # a real paste
+    # no paste: the signature starts with the same mark, and only spacing changed
+    assert not runtime._prepended(old.replace(" ", "  "), thumb, old)
+    assert not runtime._prepended(old, thumb, old[:-4])
+    assert not runtime._prepended("tail", "   ", "tail")  # nothing to look for
 
 
 def test_snapshot_incomplete_refuses_and_an_empty_pasteboard_is_complete():
@@ -1498,7 +1560,7 @@ def test_confirm_names_a_cut_short_read_instead_of_blaming_mails_setting(monkeyp
     assert "Quote the text of the original message" not in str(exc.value)
     assert "include_quote=False" in str(exc.value)
     # a tail that was seen needs no complete walk
-    _compose_rig(monkeypatch, ["", f"{_TEXT}\n{_QUOTE}"], complete=False)
+    _compose_rig(monkeypatch, [_QUOTE, f"{_TEXT}\n{_QUOTE}"], complete=False)
     _REAL_COMPOSE_INSERT(77, _TEXT, quote_tail="original words end here")
 
 

@@ -1076,19 +1076,52 @@ def _alnum(text: str) -> str:
     return "".join(c for c in squash_text(text) if c.isalnum())
 
 
+def _dense(text: str) -> str:
+    """``text`` without white space and without the object marks of the AX walk."""
+    return "".join(squash_text(text).replace("\ufffc", "").split())
+
+
 def _starts_with(body: str, text: str) -> bool:
     return _body_text(body).startswith(squash_text(text))
 
 
-def _wait_settled(el, text: str, before: str) -> bool:
+def _prepended(body: str, text: str, before: str) -> bool:
+    """The body is the text followed by the body as it was just before the key event,
+    by letters and digits. "Starts with the text and changed" is not enough for a
+    quoted reply: a signature with the same first words plus any other change (a late
+    render, a cut read) passed it with no paste, and reply_all then sends. A read that
+    was cut short may hold less of the old body at its end, so either side may be the
+    longer one. An empty old body (Mail built the reply without its quote) is followed
+    by nothing: ``_confirm`` then names the missing quote. Residual (not device-seen):
+    a read before the key event that missed a first part whose letters equal the text
+    (a signature line "Thanks," and the text "Thanks") looks like a paste."""
+    # a text with no letter or digit (an emoji) is compared with every visible mark
+    key = _alnum if _alnum(text) else _dense
+    was, want = key(before), key(text)
+    now = key(_body_text(body))
+    if not want or not now.startswith(want):
+        return False
+    rest = now[len(want) :]
+    if not was or not rest:
+        return was == rest
+    return rest.startswith(was) or was.startswith(rest)
+
+
+def _wait_settled(el, text: str, before: str, replace_all: bool = False) -> bool:
     """Settled = the body starts with the text AND changed since just before the key
     event (facts 4e: a body that already started with the text once read as settled at
     4 ms, the clipboard was restored, and Mail's late Cmd-V pasted the user's own
-    clipboard). Reads AX only, for at most ``_PASTE_SETTLE_S``."""
+    clipboard) AND, in a quoted reply, the old body follows the text (``_prepended``).
+    A whole-body replace has no old body to follow; ``_confirm`` proves it by "nothing
+    follows". Reads AX only, for at most ``_PASTE_SETTLE_S``."""
     t0 = time.monotonic()
     while True:
         body = _read_body(el)[0]
-        if _starts_with(body, text) and squash_text(body) != before:
+        if (
+            _starts_with(body, text)
+            and squash_text(body) != before
+            and (replace_all or _prepended(body, text, before))
+        ):
             return True
         if time.monotonic() - t0 >= _PASTE_SETTLE_S:
             return False
@@ -1204,7 +1237,7 @@ def compose_insert(
             clip.write_text(text)
             mine = clip.change_count()
             _post_cmd_key(pid, _KEY_V)
-            settled = _wait_settled(el, text, before)
+            settled = _wait_settled(el, text, before, replace_all)
             if not settled and rollback is not None:
                 rollback()  # BEFORE the restore (facts 4e `Pasteboard`)
         except Exception:

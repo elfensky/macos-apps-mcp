@@ -1487,6 +1487,11 @@ def _send_reply(outgoing_id: int) -> None:
         runtime.run_osascript(
             _SEND_OUTGOING, str(outgoing_id), timeout=ORIGINAL_TIMEOUT
         )
+    except NativeTimeout as exc:
+        # the generic timeout text says "retry": a retry here could send twice (#573)
+        raise NativeTimeout(
+            f"Mail did not confirm the send in time.{_SEND_UNSURE}"
+        ) from exc
     except NativeError as exc:
         raise type(exc)(f"{exc}{_SEND_UNSURE}") from exc
     except Exception as exc:  # never echo a foreign text: it could carry the reply

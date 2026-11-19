@@ -6,6 +6,21 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-19 — The reply paste check
+
+### Fixed
+
+- **A quoted reply is confirmed only when the old reply follows the text** (#348). `mail_reply`
+  and `reply_all` confirmed the pasted text by "the reply starts with the text, and the reply
+  changed". When the fresh reply already started with the same words (for example a signature
+  that starts with the reply text), that check could pass with no paste, and `reply_all` could
+  then send without the text. The check now also needs the reply as it was before the paste to
+  follow the text. When it does not, the call refuses and discards the reply, as for a paste
+  that did not land.
+- **A reply send that times out no longer says "retry"** (#573). The error of `reply_all` now
+  starts with "Mail did not confirm the send in time." and keeps the warning that the reply
+  may have been sent, as `send_mail` and `forward_mail` already did.
+
 ## [0.16.0] - 2026-11-19 — Runs on MCP 2, and replies keep Mail's quote
 
 ### Changed

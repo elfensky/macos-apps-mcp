@@ -3346,6 +3346,10 @@ def test_a_send_that_fails_is_reported_as_possibly_sent_and_never_rolled_back(
     msg = str(exc.value)
     assert "Outbox" in msg and "Sent" in msg and "before retrying" in msg
     assert "may have been sent" in msg
+    # review WR-03: the generic timeout advice ("retry once", "narrower query") would
+    # send the reply twice, so the reply send replaces it as #573 did for send_mail
+    assert msg.startswith("Mail did not confirm the send in time.")
+    assert "slow" not in msg and "retry once" not in msg and "narrower" not in msg
     # rv534: the send may have gone, and Mail's autosave copy may be in Drafts: the
     # error says so (nothing was swept, because the send's outcome is unknown)
     assert "Drafts copy" in msg and "may also be left" in msg
