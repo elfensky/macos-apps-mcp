@@ -6,6 +6,8 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19 — Runs on MCP 2, and replies keep Mail's quote
+
 ### Changed
 
 - **MCP 2 and FastMCP 4** (#470): the local shim uses httpx2, preserves unlimited read duration,

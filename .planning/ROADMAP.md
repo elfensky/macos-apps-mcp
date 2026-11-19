@@ -49,8 +49,8 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: release 0.16.0. The owner's reply test on a real Mac passed on 2026-11-19 (plan 05.2-20).
-  - Waits for: the release cut. The remaining bugs of Phases 05.6 and 05.12 ship as patch releases.
+  - Next: release 0.16.1 with the fix for the reply paste check (PR 608), then the Notes and Drafts probe at the Mac (Phase 05.6). 0.16.0 was cut on 2026-11-19.
+  - Waits for: the remaining bugs of Phases 05.6 and 05.12, which ship as patch releases.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
 - 📋 **0.18 Problem reports, then the testers** — A failing server leads the person to one redacted report, sent with their own click, and then the testers start.
