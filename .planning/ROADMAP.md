@@ -49,7 +49,7 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: the Notes and Drafts probe at the Mac (Phase 05.6). 0.16.0 and 0.16.1 (the fix for the reply paste check, PR 608) were cut on 2026-11-19; 0.16.1 is the published one.
+  - Next: the Notes and Drafts probe at the Mac (plan 05.6-06, about 30 minutes of the owner's time). 0.16.0 and 0.16.1 (the fix for the reply paste check, PR 608) were cut on 2026-11-19; 0.16.1 is the published one.
   - Waits for: the remaining bugs of Phases 05.6 and 05.12, which ship as patch releases.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
@@ -584,7 +584,7 @@ Plans:
 Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptance; independent implementation can proceed after migration.
 **Requirements**: FIX-19, FIX-20, FIX-21, FIX-22, FIX-23, FIX-24, FIX-25
 **Depends on:** Phase 05.2 acceptance before phase close. Probe-independent implementations proceed after the MCP migration.
-**Plans:** 4 implementation plans; device acceptance and remaining bugs stay open.
+**Plans:** 5 implementation plans executed; the owner probe sitting (05.6-06) is planned; the code plans for #500 and #521 follow its verdicts; device acceptance stays open.
 
 Plans:
 - [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket and fresh Mail backup modes passed on arm64.
@@ -592,6 +592,7 @@ Plans:
 - [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed installed notice inspection passed on arm64 (133 distributions, 15 fallback users).
 
 - [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; dated Health/Adapters snapshot checks passed on macOS 27; forced-refusal and in-flight device cases remain open.
+- [ ] [05.6-06-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-06-PLAN.md) — owner probe sitting (D-23): Notes write safety on scratch notes, system folders in another language, the scoped Drafts query; the code plans for #500 and #521 follow its verdicts (D-24).
 
 [Installed build evidence](overnight/2026-11-04-installed-acceptance.md) records the signed deployment and each acceptance limit.
 [Mail recovery evidence](overnight/2026-11-04-mail-recovery-acceptance.md) records one successful self-addressed send, Trash move, and undo, including fresh backup modes and a 6.087-second call.
