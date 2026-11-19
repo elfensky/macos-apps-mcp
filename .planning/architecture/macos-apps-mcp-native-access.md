@@ -3,8 +3,8 @@ kind: component
 title: Native access
 component: native-access
 status: implemented
-source_revision: 67a668c39484ebc2017c092d008f1dd705ccff73
-source_evidence_date: 2026-11-09
+source_revision: d17b106faa9017bf503ab155aeef2c257b7d2e38
+source_evidence_date: 2026-11-19
 ---
 
 # Native access
