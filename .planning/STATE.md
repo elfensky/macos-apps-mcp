@@ -4,8 +4,8 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Release 0.16.0 is cut (2026-11-19): PR 614 merged to main, tag v0.16.0, on TestPyPI; the signed and notarized app is installed and doctor() reports 0.16.0 at c994565. PyPI, the MCP Registry and the GitHub release wait for the owner's word. PR 608 (review finding CR-01, device-checked) is merged to develop for 0.16.1. Next: release 0.16.1 on the owner's word; then Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories)."
-last_updated: "2026-11-19T14:05:00.000Z"
+stopped_at: "Release 0.16.1 is cut and published (2026-11-19): PR 619 merged to main, tag v0.16.1, on PyPI and in the MCP Registry, GitHub release with the notarized app; the app is installed and doctor() reports 0.16.1 at f20b6ab. 0.16.0 was cut the same day and stays on TestPyPI only (owner). Open for the owner: switch off the CodeQL default setup so that draft PR 617 can merge; the three UI-review items of the Health page; the page-key rotation named in 05.2-SECURITY (T-05.2-22). Next: Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521), then Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories); the Dependabot PR 597 may merge now."
+last_updated: "2026-11-19T14:25:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
@@ -13,7 +13,7 @@ progress:
   total_plans: 99
   completed_plans: 99
 last_activity: 2026-11-19
-last_activity_desc: "Release 0.16.0 cut and installed (notarized, doctor proof); PR 608 merged for 0.16.1."
+last_activity_desc: "Release 0.16.1 cut, published to PyPI and the MCP Registry, and installed (notarized, doctor proof)."
 ---
 
 # Project State
@@ -107,6 +107,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.4]: Owner decisions 2026-11-06: Phase 05.4 closes on the signed and notarized builds; MIG-01 needs no public release. Release 0.16.0 ships after a Phase 05.2 reply re-test with the owner (the 45-second Drafts check and the clipboard check), because the 05.2-16 gaps stand. The #543 clipboard item becomes #589 in Phase 05.2. The daemon outage test ran on a real frontend before #543 item 1 closed.
 - [Phase 05.2]: Owner decisions 2026-11-19 (05.2-20 sitting, question tool): "F: close" and "H: close" — #348 closes without device evidence for the two-display window order (G-05.2-5) and for a refusal after an autosave (G-05.2-6); the window-check refusal of the first `reply_all` is filed as a bug (#607) and does not block #348 or release 0.16.0.
 - [Phase 05.2]: Owner decision 2026-11-19 (question tool, after the page on the phase-close review): release 0.16.0 ships now from the code tested at the 05.2-20 sitting; the fix for review finding CR-01 (PR #608: a quoted reply is confirmed only when the old reply follows the text) ships in 0.16.1 and merges after the 0.16.0 cut. The device check of PR #608 ran on a signed build of its branch (two `mail_reply` calls, nothing sent) and passed. Review findings WR-01, WR-02 and WR-04 are #609, #610 and #611 in Phase 05.12.
+- [Roadmap]: Owner decisions 2026-11-19 (question tool, after the 0.16.0 cut): 0.16.0 is not published; 0.16.1 is cut the same day and goes to PyPI, the MCP Registry and a GitHub release; CodeQL leaves `.planning/` out of the scan (draft PR 617; the owner switches off the default setup first, a session may not change that setting).
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -157,7 +158,7 @@ Recent decisions affecting current work:
 
 - Spike-first items must open their phase, not follow it: REM-04 (Reminders tags — public write route may not exist), PHO-01 (`uv add osxphotos` resolution — pyproject conflict note likely stale), NOTE-01 (semantic search decision before any indexing code).
 - [Phase 1] Code review WR-01 is open: `update_note(dry_run=True)` reports `body_chars: 0` when the current body fails to hydrate (`adapters/notes.py` `_update_preview`). IN-01 (the `delete` audit-verb prefix is looser than the GATE-05 `delete_` class) cannot fire today. See `01-REVIEW.md`.
-- The installed daemon since 2026-11-19 is release 0.16.0 at c994565 (signed, notarized, stapled; `doctor()` reports version 0.16.0). The builds it replaced are kept in `~/p052-gaps-rollback/` (3dd93b2, 873b553, c60c899, 13417ee, 26ba78a) until the owner removes them. Before that, since 2026-11-18: a develop build, 0.15.1 at c60c899 (signed, not notarized). Earlier record: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
+- The installed daemon since 2026-11-19 is release 0.16.1 at f20b6ab (signed, notarized, stapled; `doctor()` reports version 0.16.1); it replaced release 0.16.0 at c994565 the same day. The builds it replaced are kept in `~/p052-gaps-rollback/` (3dd93b2, 873b553, c60c899, 13417ee, 26ba78a, c994565-0.16.0) until the owner removes them. Before that, since 2026-11-18: a develop build, 0.15.1 at c60c899 (signed, not notarized). Earlier record: 0.15.0 at 6e4aee5 (2026-10-24, signed, not notarized), installed with `ditto` after moving the 0.15.0 release bundle (7b26e22) to `~/Library/Caches/macos-apps-mcp-build/previous-0.15.0-7b26e22/`; `doctor().build` proves it. A release cut (version bump, notarization, PyPI) has not been made for the 05.1 work.
 - [Phase 02.1] #229 (`rollback()` cannot verify a windowless delete) and #230 (reply quote content read exceeds 30 s on some messages, intermittent) were settled in 0.13.1, ahead of Phase 3 (MAIL-05/06 complete): #230 by a 120 s cap on every script that acts on the original (5 of 5 device runs, xfail removed); #229 by deciding that the loud leftover warning is the caller contract (xfail stays as the detector). The skip `test_mail_reads_return_id_triple_real_inbox` names a data property of this Mac (large inbox) rather than absent data — flagged in 02-VERIFICATION.md, unchanged.
 - [Phase 2] Release install step: read the daemon probe's exit directly (`$?`), never `${PIPESTATUS[0]}` — under zsh it is empty and the 0.12.0 install was rolled back once by mistake before being redone.
 - [Phase 02.1] Fixed in 0.13.1 (#261): macOS 27 has no per-user TCC.db; `doctor()`'s FDA probe now falls back to the system db, and an absent user db is not a partial grant read.
@@ -265,5 +266,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-19
-Stopped at: Release 0.16.0 is cut (2026-11-19): PR 614 merged to main, tag v0.16.0, on TestPyPI; the signed and notarized app is installed and doctor() reports 0.16.0 at c994565. PyPI, the MCP Registry and the GitHub release wait for the owner's word. PR 608 (review finding CR-01, device-checked) is merged to develop for 0.16.1. Next: release 0.16.1 on the owner's word; then Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521) and Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories).
+Stopped at: Release 0.16.1 is cut and published (2026-11-19): PR 619 merged to main, tag v0.16.1, on PyPI and in the MCP Registry, GitHub release with the notarized app; the app is installed and doctor() reports 0.16.1 at f20b6ab. 0.16.0 was cut the same day and stays on TestPyPI only (owner). Open for the owner: switch off the CodeQL default setup so that draft PR 617 can merge; the three UI-review items of the Health page; the page-key rotation named in 05.2-SECURITY (T-05.2-22). Next: Phase 05.6 (the Notes and Drafts probe sitting, plans for issues 500 and 521), then Phase 05.12 (issues 568, 585, 607, 609, 610, 611 and two advisories); the Dependabot PR 597 may merge now.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
