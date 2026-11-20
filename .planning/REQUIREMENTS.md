@@ -71,6 +71,19 @@ A merged implementation does not complete a requirement that still needs its rec
 - [x] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
 - [ ] **FIX-25**: Ambiguous account Trash candidates produce a distinct outcome before an action relies on a guessed destination. Trash, dedupe and recovery callers handle it explicitly. Synthetic tests cover translated root folders and user-created Google-shaped namespaces; device acceptance remains required for affected Mail writes (#556).
 
+FIX-27 to FIX-35 are the bugs of Phase 05.12 that were open at its planning (2026-11-20).
+The ten review bugs #572 to #581 were implemented before it in PR #584, without requirement ids; the open parts of #581 are FIX-35, and the open part of #572 moves to Phase 05.10.
+
+- [ ] **FIX-27**: When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
+- [ ] **FIX-28**: The private advisory GHSA-7772-4pjg-72m4 is fixed. Its details stay in the advisory until the fix is released.
+- [ ] **FIX-29**: The private advisory GHSA-xjgg-xphw-h6fp is fixed. Its details stay in the advisory until the fix is released.
+- [ ] **FIX-30**: Each AppleScript Mail tool works while Mail.app is closed, or refuses with a directive that names Mail. The scripts address Mail by its bundle id, so the name cannot resolve to Mail's Quick Look extension (#585).
+- [ ] **FIX-31**: A reply is not refused only because another app took the focus during the window check, or the refusal names the check that failed (Mail not active, or the reply window not in front) and tells the person what to do. The cause is found on a device first (#607).
+- [ ] **FIX-32**: The quote check of a reply does not take the account signature for Mail's quote: with Mail's quote absent, `include_quote=True` refuses also when the signature holds the original's last words (#609).
+- [ ] **FIX-33**: After a paste that did not settle, a key that Mail runs late pastes nothing into another compose window. The settle bound and the drain wait follow from a device measurement (#610).
+- [ ] **FIX-34**: The reply sweep strips HTML in linear time, with a size cap as the second bound and a timed test for the 256 KB case; the verdict of the sweep does not change for mail that Mail itself wrote (#611).
+- [ ] **FIX-35**: The open guard gaps of #581 are closed: the script compile check and the timeout tripwires cover every script in the package, no test asserts a dead constant, a real send in the integration suite needs its opt-in, the default suite creates no real `EKEventStore`, and the tool layer has a dispatch test over `registry.TOOLS`. Parts that PR #584 already closed are confirmed, not redone.
+
 ### MCP migration — Phase 05.4
 
 - [x] **MIG-01**: MCP 2 and FastMCP 4 use public transport APIs while preserving capability gates, audit identity, protocol eras, notices and streamed notifications. Interrupted tools receive an uncertain-outcome warning without replay. The local hop has no read deadline. Transport regressions and both bundle slices pass. Installed-daemon, native, physical Intel and signed, notarized build checks complete the migration (#470). The public release follows the Phase 05.2 reply acceptance (owner, 2026-11-06).
@@ -246,6 +259,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-23 | Phase 05.6 | Pending device probe, then implementation |
 | FIX-24 | Phase 05.6 | Implemented (#552); installed arm64 state/socket and fresh Mail backup modes passed |
 | FIX-25 | Phase 05.6 | Reviewed draft #559; both physical inventories complete; localized write acceptance pending before merge |
+| FIX-27 | Phase 05.12 | Pending |
+| FIX-28 | Phase 05.12 | Pending |
+| FIX-29 | Phase 05.12 | Pending |
+| FIX-30 | Phase 05.12 | Pending |
+| FIX-31 | Phase 05.12 | Pending |
+| FIX-32 | Phase 05.12 | Pending |
+| FIX-33 | Phase 05.12 | Pending |
+| FIX-34 | Phase 05.12 | Pending |
+| FIX-35 | Phase 05.12 | Pending |
 | MIG-01 | Phase 05.4 | Complete (2026-11-06): #550, #561; signed and notarized builds on arm64 and physical Intel; installed device suite and real-frontend restart and outage passed |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
@@ -256,11 +278,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 69 total
-- Mapped to phases: 69
+- v1 requirements: 78 total
+- Mapped to phases: 78
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 05.12: 9 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
