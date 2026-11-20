@@ -54,10 +54,14 @@ def test_set_volume_restores(adapter):
     before = adapter.now_playing()
     from macos_apps_mcp.runtime import run_osascript
 
-    prior = int(run_osascript('tell application "Music" to get sound volume'))
+    prior = int(
+        run_osascript('tell application id "com.apple.Music" to get sound volume')
+    )
     try:
         adapter.set_volume(40)
-        after = int(run_osascript('tell application "Music" to get sound volume'))
+        after = int(
+            run_osascript('tell application id "com.apple.Music" to get sound volume')
+        )
         assert after == 40
     finally:
         adapter.set_volume(prior)
@@ -67,10 +71,14 @@ def test_set_volume_restores(adapter):
 def test_set_mode_shuffle_toggles(adapter):
     from macos_apps_mcp.runtime import run_osascript
 
-    prior = run_osascript('tell application "Music" to get shuffle enabled')
+    prior = run_osascript(
+        'tell application id "com.apple.Music" to get shuffle enabled'
+    )
     try:
         adapter.set_mode("shuffle", True)
-        on = run_osascript('tell application "Music" to get shuffle enabled')
+        on = run_osascript(
+            'tell application id "com.apple.Music" to get shuffle enabled'
+        )
         assert on == "true"
     finally:
         adapter.set_mode("shuffle", prior == "true")

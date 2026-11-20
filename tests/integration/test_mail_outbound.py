@@ -129,11 +129,11 @@ def test_rollback_verifies_a_real_delete():
         + """
 
 on run argv
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set m to make new outgoing message with properties {visible:false}
   end tell
   set verdict to my rollback(m)
-  tell application "Mail"
+  tell application id "com.apple.mail"
     return (verdict as text) & " " & ((count of outgoing messages) as text)
   end tell
 end run"""

@@ -468,7 +468,7 @@ def test_contacts_create_find_delete():
     finally:
         run_osascript(
             "on run argv\n"
-            '  tell application "Contacts"\n'
+            '  tell application id "com.apple.AddressBook"\n'
             "    delete (first person whose id is (item 1 of argv))\n"
             "    save\n"
             "  end tell\n"
@@ -508,7 +508,7 @@ def test_notes_search_finds_created(tmp_path, monkeypatch):
     marker = "macos-apps-mcp-test-zznote"
     run_osascript(
         "on run argv\n"
-        '  tell application "Notes"\n'
+        '  tell application id "com.apple.Notes"\n'
         '    make new note with properties {name:(item 1 of argv), body:"x"}\n'
         "  end tell\n"
         "end run",
@@ -520,7 +520,7 @@ def test_notes_search_finds_created(tmp_path, monkeypatch):
     finally:
         run_osascript(
             "on run argv\n"
-            '  tell application "Notes"\n'
+            '  tell application id "com.apple.Notes"\n'
             "    delete (every note whose name is (item 1 of argv))\n"
             "  end tell\n"
             "end run",
@@ -550,7 +550,7 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
     title = "macos-apps-mcp-itest-fold Café’s résumé"
     run_osascript(
         "on run argv\n"
-        '  tell application "Notes"\n'
+        '  tell application id "com.apple.Notes"\n'
         '    make new note with properties {name:(item 1 of argv), body:"x"}\n'
         "  end tell\n"
         "end run",
@@ -567,7 +567,7 @@ def test_notes_search_folds_diacritics_and_smart_punctuation(tmp_path, monkeypat
     finally:
         run_osascript(
             "on run argv\n"
-            '  tell application "Notes"\n'
+            '  tell application id "com.apple.Notes"\n'
             "    delete (every note whose name is (item 1 of argv))\n"
             "  end tell\n"
             "end run",
@@ -628,7 +628,7 @@ def test_safari_open_creates_tab():
     finally:
         run_osascript(
             "on run argv\n"
-            '  tell application "Safari"\n'
+            '  tell application id "com.apple.Safari"\n'
             "    repeat with w in windows\n"
             "      repeat with t in (tabs of w whose URL contains (item 1 of argv))\n"
             "        close t\n"
@@ -766,7 +766,7 @@ def test_notes_all_and_bodies_and_delete_roundtrip(tmp_path, monkeypatch):
     # create a note via osascript (test-only helper; not part of the shipped surface)
     create = (
         "on run argv\n"
-        '  tell application "Notes"\n'
+        '  tell application id "com.apple.Notes"\n'
         '    make new note at folder "Notes" of account 1 '
         "with properties {name:(item 1 of argv), body:(item 2 of argv)}\n"
         "  end tell\n"
@@ -1120,7 +1120,7 @@ _RECENTLY_DELETED_IDS = """on run argv
   set trashNames to argv
   set theIds to {}
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     repeat with acc in accounts
       repeat with f in folders of acc
         if name of f is in trashNames then
@@ -1295,7 +1295,7 @@ def test_mail_create_draft_opens_and_never_sends():
     # iterating by index (that raises "can't get item N" as the set shrinks). An
     # outgoing message is unsent by definition (a sent one leaves the collection).
     count = (
-        'on run argv\n  tell application "Mail"\n'
+        'on run argv\n  tell application id "com.apple.mail"\n'
         "    return (count of (outgoing messages whose subject is (item 1 of argv)))"
         " as text\n  end tell\nend run"
     )
@@ -1306,7 +1306,7 @@ def test_mail_create_draft_opens_and_never_sends():
         # message (no product delete-draft exists by design); leftover test drafts are
         # empty + unsendable. Bulk whose-delete, tolerant of Mail refusing.
         run_osascript(
-            'on run argv\n  tell application "Mail"\n    try\n'
+            'on run argv\n  tell application id "com.apple.mail"\n    try\n'
             "      delete (outgoing messages whose subject is (item 1 of argv))\n"
             "    end try\n  end tell\nend run",
             subj,
@@ -1323,7 +1323,7 @@ def test_list_attachments_finds_draft_attachment(created):
     # create a draft with an attachment via osascript (test-only helper)
     make = (
         "on run argv\n"
-        '  tell application "Mail"\n'
+        '  tell application id "com.apple.mail"\n'
         "    set d to make new outgoing message with properties "
         "{subject:(item 1 of argv), visible:false}\n"
         "    tell content of d to make new attachment with properties "
@@ -1353,7 +1353,7 @@ def test_list_attachments_finds_draft_attachment(created):
         # collection; both try-wrapped since Mail may refuse to delete a compose-state
         # message. Leftover test drafts are empty + unsendable.
         run_osascript(
-            'on run argv\n  tell application "Mail"\n'
+            'on run argv\n  tell application id "com.apple.mail"\n'
             "    try\n      delete (messages of drafts mailbox whose subject is "
             "(item 1 of argv))\n    end try\n"
             "    try\n      delete (outgoing messages whose subject is "
@@ -1408,7 +1408,7 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
 
     # newest inbox message id
     mid = run_osascript(
-        'tell application "Mail" to return message id of '
+        'tell application id "com.apple.mail" to return message id of '
         "(item 1 of (messages of inbox))"
     ).strip()
     if not mid:
@@ -1424,7 +1424,7 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     # by our marker in the body, not a fragile count delta over a mailbox that may hold
     # other drafts). A sent message would have left the outgoing collection.
     find = (
-        'on run argv\n  tell application "Mail"\n'
+        'on run argv\n  tell application id "com.apple.mail"\n'
         "    return (count of (outgoing messages whose content contains "
         "(item 1 of argv))) as text\n  end tell\nend run"
     )
@@ -1433,7 +1433,7 @@ def test_mail_reply_opens_threaded_draft_and_never_sends():
     finally:
         # best-effort cleanup (Mail may refuse to delete a compose-state message)
         run_osascript(
-            'on run argv\n  tell application "Mail"\n    try\n'
+            'on run argv\n  tell application id "com.apple.mail"\n    try\n'
             "      delete (outgoing messages whose content contains (item 1 of argv))\n"
             "    end try\n  end tell\nend run",
             marker,

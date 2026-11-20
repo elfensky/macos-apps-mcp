@@ -43,7 +43,7 @@ on run argv
     set albumName to item 2 of argv
     set theList to {POSIX file theFile}
     with timeout of 120 seconds
-        tell application "Photos"
+        tell application id "com.apple.Photos"
             set theAlbum to missing value
             try
                 set theAlbum to album albumName
