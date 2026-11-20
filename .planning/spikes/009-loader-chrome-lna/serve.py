@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hmac
 import json
+import os
 import re
 import threading
 from datetime import UTC, datetime
@@ -46,7 +47,7 @@ def _browser(ua: str) -> str:
     for name in ("Edg", "Chrome", "Firefox"):
         if m := re.search(rf"{name}/(\d+)", ua):
             return f"{name.lower()}-{m.group(1)}"
-    if m := re.search(r"Version/(\d+)[\d.]* .*Safari/", ua):
+    if "Safari/" in ua and (m := re.search(r"Version/(\d+)", ua)):
         return f"safari-{m.group(1)}"
     return "unknown"
 
@@ -216,7 +217,11 @@ class Page(BaseHTTPRequestHandler):
         report = json.loads(self.rfile.read(length))
         browser = _browser(self.headers.get("User-Agent", ""))
         text = _mask(json.dumps(report, indent=2), self.tunnel)
-        (HERE / f"results-{browser}.json").write_text(text + "\n")
+        # the name comes from a request header: keep the file inside this folder
+        target = os.path.normpath(os.path.join(HERE, f"results-{browser}.json"))
+        if not target.startswith(str(HERE) + os.sep):
+            return self._reply(404, b"not found")
+        Path(target).write_text(text + "\n")
         print(f"report from {browser}: {sum(s['ok'] for s in report['steps'])} ok")
         self._reply(204)
 

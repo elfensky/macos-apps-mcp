@@ -127,7 +127,7 @@ def _key_to_pid(pid: int, keycode: int) -> None:
         lib.CFRelease(ev)
 
 
-def _trusted() -> bool:
+def _ax_granted() -> bool:
     return bool(_bind()["AXIsProcessTrusted"]())
 
 
@@ -1081,12 +1081,12 @@ def cmd_selftest(_a) -> int:
     finally:
         pb.releaseGlobally()
     say(f"info: ax_getwindow_spi={'_AXUIElementGetWindow' in b}")
-    say(f"selftest ok trusted={_trusted()}")
+    say(f"selftest ok trusted={_ax_granted()}")
     return 0
 
 
 def cmd_trusted(_a) -> int:
-    say(str(_trusted()))
+    say(str(_ax_granted()))
     return 0
 
 
@@ -1289,7 +1289,7 @@ def _wait_marker(
 def cmd_insert(a) -> int:
     import AppKit
 
-    if not _trusted():
+    if not _ax_granted():
         raise Refuse("Accessibility is off for this process")
     marker = Path(a.marker_file).read_text("utf-8").rstrip("\n")
     roles = tuple(a.body_roles.split(","))
