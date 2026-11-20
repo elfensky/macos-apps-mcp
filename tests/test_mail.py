@@ -3455,6 +3455,27 @@ def test_send_then_sweep_linear_strip_on_a_crafted_twin(monkeypatch):
     assert "_SWEEP_DELETE" not in rig.names()
 
 
+def test_send_then_sweep_reports_body_too_large(monkeypatch):
+    # the call's own Drafts copy, over the size cap (D9): it is not parsed, so it is
+    # reported with its own code and never deleted. Under the cap it would be removed.
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    body = "<div>Hi</div>" + " " * 1_000 + _QUOTE_HTML
+    rig, out = _sent_reply(monkeypatch, (_OWN_COPY[0], body, "html"))
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "body_too_large"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
+def test_send_then_sweep_huge_reference_reads_read_failed(monkeypatch):
+    # a decimal character reference of 5,000 digits: `html.unescape` raises, and the
+    # flow reports it as before (#611 changes nothing here)
+    body = "<div>Hi &#" + "9" * 5_000 + ";</div>" + _QUOTE_HTML
+    rig, out = _sent_reply(monkeypatch, (_SENT_URL, body, "html"))
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "read_failed"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
 # Mail's quote writes each inline image of the original as one span whose text is
 # `<file name>`: the id-only form in a Sent copy, the compose-time form in a draft
 # (facts 4e `Layout`). 05.2-18 read `unproven` because of it.
@@ -3626,7 +3647,7 @@ def test_send_then_sweep_counts_45_s_from_when_the_open_returned(monkeypatch):
 # --- the delivered copy and the reason of every unproven sweep (05.2-17, #348) ---
 
 _INBOX_URL = f"imap://{_GMAIL_UUID}/INBOX"
-_FIFTEEN = {
+_SWEEP_CODES = {
     "too_many_rows",
     "unreadable_row",
     "drafts_late",
@@ -3635,6 +3656,7 @@ _FIFTEEN = {
     "inbox_row",
     "other_mailbox",
     "several_rows",
+    "body_too_large",
     "claim_refused",
     "read_failed",
     "delete_alive",
@@ -3753,19 +3775,19 @@ def test_a_reason_that_reaches_the_result_does_not_carry_the_rows_data(monkeypat
 
 
 def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
-    # the seven codes of the flow, as the result carries them; the eight of the selector
-    # are pinned in test_mail_reply_cleanup.py. Together they are the fifteen.
+    # the seven codes of the flow, as the result carries them; the nine of the selector
+    # are pinned in test_mail_reply_cleanup.py. Together they are the sixteen.
     produced = set()
     for _, kw, patch in _FLOW_REASON_CASES:
         with monkeypatch.context() as case:  # a patch of one case must not leak
             _, out = _flow_result(case, kw, patch)
         produced.add(out["drafts_copy_reason"])
     flow = {"claim_refused", "read_failed", "sweep_failed"} | {
-        c for c in _FIFTEEN if c.startswith("delete_")
+        c for c in _SWEEP_CODES if c.startswith("delete_")
     }
     assert produced == flow | {"drafts_not_own"}
-    assert produced <= _FIFTEEN and len(_FIFTEEN) == 15
-    assert all(re.fullmatch(r"[a-z_]+", code) for code in _FIFTEEN)
+    assert produced <= _SWEEP_CODES and len(_SWEEP_CODES) == 16
+    assert all(re.fullmatch(r"[a-z_]+", code) for code in _SWEEP_CODES)
 
 
 @pytest.mark.parametrize(

@@ -969,6 +969,16 @@ def test_find_own_draft_never_sets_aside_an_inbox_row_by_the_drafts_copys_messag
     assert got.kind == "unproven" and got.reason == "inbox_row"
 
 
+def _sized(size: int, kind: str = "html") -> str:
+    """The call's own copy (``_OWN``, or its plain-text form) padded with spaces to
+    exactly ``size`` characters. Under the size cap it reads as the call's own."""
+    if kind == "plain":
+        head, quoted = "Hi there\n", f"\n{_ATTRIBUTION}\n> quoted words"
+    else:
+        head, quoted = "<div>Hi there</div>", _QUOTE_HTML
+    return head + " " * (size - len(head) - len(quoted)) + quoted
+
+
 # (stored rows, find kwargs, reason): one per code. A body of None leaves the file out.
 _BRANCH_CASES = [
     ("too_many_rows", [(20 + n, _URL, f"m{n}@x", _OTHER_BODY) for n in range(3)], {}),
@@ -1002,6 +1012,8 @@ _BRANCH_CASES = [
         [(19, f"imap://{_ACCT}/Archive", "s@x", _OWN), (20, _URL, "d@x", _OWN)],
         {},
     ),
+    # over the size cap, which the two tests below set to 1,000 characters
+    ("body_too_large", [(20, _URL, "d@x", _sized(1_001))], {}),
 ]
 
 
@@ -1011,12 +1023,13 @@ def test_find_own_draft_names_each_unproven_branch(
 ):
     if reason == "too_many_rows":
         monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2)
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     got = _stored(mailroot, monkeypatch, rows, **kw)
     assert got.kind == "unproven" and got.reason == reason
 
 
 def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
-    eight = {
+    codes = {
         "too_many_rows",
         "unreadable_row",
         "drafts_late",
@@ -1025,7 +1038,9 @@ def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
         "inbox_row",
         "other_mailbox",
         "several_rows",
+        "body_too_large",
     }
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     produced = set()
     for n, (_, rows, kw) in enumerate(_BRANCH_CASES):
         monkeypatch.setattr(mail_reply_cleanup, "MAX_NEW_ROWS", 2 if n == 0 else 300)
@@ -1038,7 +1053,7 @@ def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
             **{"landed_by": 10**6, **kw},
         )
         produced.add(got.reason)
-    assert produced == eight
+    assert produced == codes and len(codes) == 9
     assert all(re.fullmatch(r"[a-z_]+", code) for code in produced)
 
 
@@ -1462,3 +1477,51 @@ def test_linear_strip_equals_the_old_patterns_on_crafted_text():
             or _strip(text) != _old_strip(text)
         )
     assert differs == 0
+
+
+# --- the size cap, the second bound (FIX-34, #611, D9) -------------------------------
+
+
+def test_max_body_chars_is_two_million():
+    assert mail_reply_cleanup.MAX_BODY_CHARS == 2_000_000
+
+
+@pytest.mark.parametrize(
+    "url, kind, kw",
+    [
+        (_URL, "html", {}),  # the own Drafts copy alone, after a refusal
+        (_SENT, "html", {"sent_twins": True}),  # the Sent copy alone, after a send
+        (_URL, "plain", {}),
+    ],
+)
+def test_find_own_draft_keeps_a_body_too_large_unproven(
+    mailroot, monkeypatch, url, kind, kw
+):
+    # one character over the cap: the body is not parsed, so nothing is claimed and
+    # nothing is set aside. Under the cap the same copy reads as the call's own.
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    mailroot(20, _ORIGINAL, "d@x", _sized(1_001, kind), url=url, kind=kind)
+    got = _find(monkeypatch, [(20, url)], **kw)
+    assert got == mail_reply_cleanup.Draft("unproven", url, "<d@x>", "body_too_large")
+
+
+def test_find_own_draft_reads_a_body_at_the_cap_not_too_large(mailroot, monkeypatch):
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    mailroot(20, _ORIGINAL, "d@x", _sized(1_000))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def test_find_own_draft_does_not_cap_an_unthreaded_row_too_large(mailroot, monkeypatch):
+    # the cap is for the body of a threaded candidate. A row of another thread is
+    # skipped by its headers, whatever its size.
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    mailroot(20, "another-thread@x", "d@x", _sized(50_000))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("none")
+
+
+def test_split_quote_huge_reference_raises_as_before():
+    # `html.unescape` refuses a decimal character reference of more than 4,300 digits.
+    # Nothing changed here: the flow reports `read_failed` (tests/test_mail.py).
+    msg = _html_message("<div>Hi there &#" + "9" * 5_000 + ";</div>")
+    with pytest.raises(ValueError):
+        mail_reply_cleanup._split_quote(msg)
