@@ -21,6 +21,13 @@ surface may still shift between minor versions.
   `unproven` with the new `drafts_copy_reason` `body_too_large`, and nothing is deleted for
   it. Other parse steps of the sweep are not bounded by this change;
   they are tracked in #626.
+- **Mail scripts address Mail by its bundle id** (#585). With Mail closed, the name "Mail" could
+  resolve to a helper bundle of the same name, and every Mail script then failed to compile.
+  Each Mail script and the `doctor` probe now address the app by its bundle id
+  (`com.apple.mail` for Mail). The id form is Apple's documented way to address an app that
+  may not be running. The device check with Mail closed is still open. An "app not running"
+  error now names the app when the script names its app; the `doctor` probe has a variable
+  target and keeps the generic text.
 
 ## [0.16.1] - 2026-11-19 — The reply paste check
 
