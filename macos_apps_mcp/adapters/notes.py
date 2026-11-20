@@ -167,7 +167,7 @@ on run argv
   set rs to character id 30
   set theLines to {}
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     repeat with acc in accounts
       set accName to name of acc
       repeat with f in folders of acc
@@ -203,7 +203,7 @@ _BODIES = """on run argv
   set rs to character id 30
   set out to ""
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     repeat with theId in argv
       try
         set noteBody to plaintext of note id theId
@@ -221,7 +221,7 @@ end run"""
 # script errors before deleting if the live title doesn't match.
 _DELETE = """on run argv
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     set n to note id (item 1 of argv)
     if (count of argv) > 1 then
       if (name of n) is not (item 2 of argv) then
@@ -239,7 +239,7 @@ end run"""
 # the sqlite path returns None for the same miss.
 _TITLE_BY_ID = """on run argv
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     try
       set n to note id (item 1 of argv)
     on error
@@ -258,7 +258,7 @@ end run"""
 # does (#54 review). Errors on an unknown id or a title mismatch, exactly as _DELETE.
 _PREVIEW_DELETE = """on run argv
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     set n to note id (item 1 of argv)
     if (count of argv) > 1 then
       if (name of n) is not (item 2 of argv) then
@@ -279,7 +279,7 @@ _CREATE_NOTE = """on run argv
   set folderName to item 1 of argv
   set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     if folderName is "" then
       set newNote to make new note with properties {body:bodyText}
     else
@@ -307,7 +307,7 @@ _UPDATE_NOTE = """on run argv
   set noteId to item 1 of argv
   set bodyText to (read (POSIX file (item 2 of argv)) as «class utf8»)
   with timeout of 120 seconds
-  tell application "Notes"
+  tell application id "com.apple.Notes"
     set n to note id noteId
     set body of n to bodyText
     return id of n

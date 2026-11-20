@@ -273,7 +273,7 @@ _CHATS = (
     + """
 
 with timeout of 120 seconds
-tell application "Messages"
+tell application id "com.apple.MobileSMS"
   set us to character id 31
   set rs to character id 30
   set out to ""

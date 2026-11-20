@@ -40,7 +40,7 @@ set us to character id 31
 set rs to character id 30
 set out to ""
 with timeout of 120 seconds
-tell application "Music"
+tell application id "com.apple.Music"
   set lib to library playlist 1
   -- playlists first: they are typically few, so emitting them before the (often
   -- much larger) track list means they survive the combined MAX_MUSIC_RESULTS cap
@@ -78,7 +78,7 @@ _NOW_PLAYING = (
 set us to character id 31
 set out to ""
 with timeout of 120 seconds
-tell application "Music"
+tell application id "com.apple.Music"
   set pstate to (player state as text)
   set out to pstate
   if pstate is not "stopped" then
@@ -96,7 +96,7 @@ return out"""
 _CONTROL = """on run argv
   set act to item 1 of argv
   with timeout of 120 seconds
-  tell application "Music"
+  tell application id "com.apple.Music"
     if act is "play" then
       play
     else if act is "pause" then
@@ -115,7 +115,7 @@ end run"""
 _PLAY_PLAYLIST = """on run argv
   set pid to item 1 of argv
   with timeout of 120 seconds
-  tell application "Music"
+  tell application id "com.apple.Music"
     try
       set p to (first playlist whose persistent ID is pid)
     on error
@@ -129,7 +129,7 @@ end run"""
 _SET_VOLUME = """on run argv
   set lvl to (item 1 of argv) as integer
   with timeout of 120 seconds
-  tell application "Music"
+  tell application id "com.apple.Music"
     set sound volume to lvl
   end tell
   end timeout
@@ -139,7 +139,7 @@ _SET_MODE = """on run argv
   set md to item 1 of argv
   set onFlag to (item 2 of argv) is "1"
   with timeout of 120 seconds
-  tell application "Music"
+  tell application id "com.apple.Music"
     if md is "shuffle" then
       set shuffle enabled to onFlag
     else if md is "repeat" then
