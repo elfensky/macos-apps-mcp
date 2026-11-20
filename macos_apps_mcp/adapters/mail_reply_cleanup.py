@@ -132,8 +132,10 @@ MAX_MESSAGE_BYTES = 50_000_000
 # message with one base64 attachment has 320,526; 4,000,000 one-byte lines took 0.6 s.
 MAX_MESSAGE_LINES = 1_000_000
 # ... and at most this many part-delimiter lines (lines that start with two hyphens).
-# A generated message with 100 attachments has 106; 25,001 small parts took 3.4 s, and
-# the most parts that pass took 0.13 to 0.27 s.
+# A generated message with 100 attachments has 106; 25,001 small parts took 3.4 s with
+# the default policy, and the most parts that pass took 0.13 to 0.27 s. The budget of
+# field values stops a parse of many parts too (the parser reads the Content-Type of
+# the container for each part); this count refuses such a message before the parse.
 MAX_MESSAGE_PARTS = 1_000
 # At most this many candidate rows are parsed in one sweep. A send makes two or three
 # (the Drafts copy, the Sent copy, on Gmail an All Mail twin); a candidate row built
@@ -455,7 +457,8 @@ def _read_draft(url: str, rowid: int):
     """``(in_reply_to, more)`` of one stored message, or None when its file is absent
     or unreadable. ``in_reply_to`` is parsed here. ``more()`` returns
     ``(message_id, body, received)`` and is for a row in the thread only: a row of
-    another thread costs one bounded read, one field split and one value parse.
+    another thread costs one bounded read, one field split and at most two value
+    parses (``In-Reply-To``, and the top-level ``Content-Type``, see below).
     ``received``: the headers carry a ``Received`` field with a value. A mail server
     adds one to a delivered message; a draft and a Sent copy carry none. ``body()``
     parses the whole message and is for a candidate row only.
