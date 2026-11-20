@@ -4,19 +4,27 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 
 from __future__ import annotations
 
+import base64
 import builtins
+import codecs
+import contextlib
 import email
 import email.message
 import email.parser
 import email.policy
+import encodings
 import html
 import io
 import itertools
+import pkgutil
 import random
 import re
 import shutil
 import sqlite3
 import time
+import types
+import warnings
+import zlib
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -2104,7 +2112,8 @@ def test_read_bound_header_read_takes_only_the_first_bytes(mailroot, monkeypatch
     mid, body, received = more()
     assert (in_reply_to, mid, received) == (f"<{_ORIGINAL}>", "<d@x>", False)
     assert callable(body)
-    assert 0 < counter[0] <= mail_reply_cleanup.HEADER_READ_BYTES
+    # one read; its last byte only tells that the file does not end there
+    assert counter[0] == mail_reply_cleanup.HEADER_READ_BYTES + 1
     # the counter does see a full read: the body of this row is the whole file
     body()
     assert counter[0] > 5_000_000
@@ -2243,14 +2252,20 @@ _CRAFTED_FIELDS = {
         _URL,
         ("unproven", _URL, "", "header_too_large"),
     ),
-    # the parser reads the top-level Content-Type of every row when the header read
-    # ends, so that field is bounded for a row of another thread too
+    # the header read does not parse the top-level Content-Type: a row of another
+    # thread is skipped, whatever that field holds (3.6 s with the default policy)
     "Content-Type of 80,000 bytes outside the thread": (
         b"In-Reply-To: <other@x>\r\nContent-Type: text/html;"
         + b" ; " * 26_666
         + b"\r\n\r\nx",
         _URL,
-        ("unproven", _URL, "", "header_too_large"),
+        ("none",),
+    ),
+    # the same field on a candidate row: the body parse keeps the field bound
+    "Content-Type of 80,000 bytes on a candidate row": (
+        _HEAD + b"Content-Type: text/html;" + b" ; " * 26_666 + b"\r\n\r\nx",
+        _URL,
+        ("unproven", _URL, "<d@x>", "header_too_large"),
     ),
 }
 
@@ -2289,10 +2304,10 @@ _MARKED = {
         b"Message-ID: <d@x>\r\nIn-Reply-To: <BOOM@x>\r\n" + _HTML + _OWN.encode(),
         "",
     ),
-    # the parser reads the top-level Content-Type when the header read ends
-    "the header read, at Content-Type": (
+    # the header read does not parse the top-level Content-Type; the body parse does
+    "the body parse, at the top-level Content-Type": (
         _HEAD + b"Content-Type: text/html; x=BOOM\r\n\r\n" + _OWN.encode(),
-        "",
+        "<d@x>",
     ),
     "more()": (
         b"Message-ID: <BOOM@x>\r\n" + _IRT + b"\r\n" + _HTML + _OWN.encode(),
@@ -2367,12 +2382,21 @@ def test_read_bound_message_over_the_byte_bound_is_not_read(mailroot, monkeypatc
     # at the bound the row is read whole and is the call's own
     monkeypatch.setattr(mail_reply_cleanup, "MAX_MESSAGE_BYTES", 2_000)
     assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
-    assert counter[0] == 256 + 2_000
+    assert counter[0] == 257 + 2_000  # the header read (256 and one more), the file
     # over the bound the header read is the only read: the size comes from `stat`
     counter[0] = 0
     monkeypatch.setattr(mail_reply_cleanup, "MAX_MESSAGE_BYTES", 1_999)
     assert _find(monkeypatch) == _unproven(_URL, "message_too_large")
-    assert 0 < counter[0] <= 256
+    assert counter[0] == 257
+
+
+def _lined(line_ends: int, eol: bytes = b"\n") -> bytes:
+    """The call's own copy as a message with exactly ``line_ends`` line ends."""
+    head = [b"Message-ID: <d@x>", _IRT, _HTML.rstrip(), b""]
+    gap = [b""] * (line_ends - len(head) - 1)
+    lines = [*head, b"<div>Hi there</div>", *gap, _QUOTE_HTML.encode()]
+    assert len(lines) - 1 == line_ends
+    return eol.join(lines)
 
 
 @pytest.mark.parametrize("eol", [b"\n", b"\r\n", b"\r"], ids=["LF", "CRLF", "CR"])
@@ -2380,18 +2404,10 @@ def test_read_bound_message_over_the_line_bound_is_not_parsed(
     mailroot, monkeypatch, eol
 ):
     monkeypatch.setattr(mail_reply_cleanup, "MAX_MESSAGE_LINES", 100)
-    head = [b"Message-ID: <d@x>", _IRT, _HTML.rstrip(), b""]
-
-    def message(line_ends: int) -> bytes:
-        gap = [b""] * (line_ends - len(head) - 1)
-        lines = [*head, b"<div>Hi there</div>", *gap, _QUOTE_HTML.encode()]
-        assert len(lines) - 1 == line_ends
-        return eol.join(lines)
-
     # 100 line ends are parsed: a CRLF is one line end, not two
-    _put_raw(mailroot, 20, message(100))
+    _put_raw(mailroot, 20, _lined(100, eol))
     assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
-    _put_raw(mailroot, 20, message(101))
+    _put_raw(mailroot, 20, _lined(101, eol))
     monkeypatch.setattr(
         mail_reply_cleanup.email,
         "message_from_bytes",
@@ -2581,3 +2597,425 @@ def test_read_bound_a_normal_5_mb_message_is_judged_as_before(mailroot, monkeypa
     path = _put_raw(mailroot, 20, _big_row())
     assert path.stat().st_size > 5_000_000
     assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+# --- the fix round after the review of the PR (FIX-36, #626) -------------------------
+# F1: a declared charset whose decode is not linear. F5: a text part that cannot be
+# decoded is never skipped. F2: the size from `stat` does not say that a file was read
+# whole. F3: the header read does not parse the top-level Content-Type. F4: each bound
+# at its value and one over.
+
+
+def _charset_row(charset: str, body: bytes, kind: str = "html") -> bytes:
+    """A message of the thread with one text part in ``charset``, as base64."""
+    field = f"Content-Type: text/{kind}; charset={charset}\r\n".encode()
+    encoded = b"Content-Transfer-Encoding: base64\r\n\r\n" + base64.encodebytes(body)
+    return _HEAD + field + encoded
+
+
+def test_read_bound_find_own_draft_is_fast_on_a_punycode_charset(mailroot, monkeypatch):
+    # the decode of `punycode` is quadratic, and it ran before the size cap of the
+    # body: 9.4 s for 200,000 bytes, about 37 s for these 400,000
+    payload = _charset_row("punycode", b"a-" + b"9" * 400_000)
+    _put_raw(mailroot, 21, payload, url=_SENT)
+    started = time.perf_counter()
+    got = _find(monkeypatch, [(21, _SENT)], sent_twins=True)
+    assert time.perf_counter() - started < _TIME_BOUND_S
+    assert got == _unproven(_SENT, "read_failed")
+
+
+@pytest.mark.parametrize(
+    "charset", ["punycode", "PunyCode", '"punycode"', "idna", "IDNA", "puny code"]
+)
+def test_read_bound_a_charset_that_is_no_character_set_is_not_decoded(
+    mailroot, monkeypatch, charset
+):
+    # the call's own copy in content, but it declares a domain-name encoding: the part
+    # is not decoded (`get_content` is not called for it), and the row is not judged
+    monkeypatch.setattr(
+        email.message.MIMEPart,
+        "get_content",
+        lambda *args, **kw: pytest.fail("a part with a refused charset was decoded"),
+    )
+    _put_raw(mailroot, 20, _charset_row(charset, _OWN.encode()))
+    assert _find(monkeypatch) == _unproven(_URL, "read_failed")
+    msg = email.message_from_bytes(
+        _charset_row(charset, _OWN.encode()), policy=email.policy.default
+    )
+    with pytest.raises(LookupError):
+        mail_reply_cleanup._split_quote(msg)
+
+
+_NOT_TEXT_CODECS = [
+    "base64_codec",
+    "zlib_codec",
+    "bz2_codec",
+    "hex_codec",
+    "rot_13",
+    "uu_codec",
+    "quopri_codec",
+]
+
+
+@pytest.mark.parametrize("charset", _NOT_TEXT_CODECS)
+def test_read_bound_a_codec_that_is_no_text_encoding_never_runs(
+    mailroot, monkeypatch, charset
+):
+    # `bytes.decode` refuses such a codec before it runs (LookupError), so a
+    # decompression bomb is not inflated: 20,000,000 bytes stay about 20,000
+    assert not codecs.lookup(charset)._is_text_encoding
+    bomb = zlib.compress(b"\x00" * 20_000_000, 9)
+    assert len(bomb) < 30_000
+    _put_raw(mailroot, 20, _charset_row(charset, bomb))
+    started = time.perf_counter()
+    got = _find(monkeypatch)
+    assert time.perf_counter() - started < 1.0
+    assert got == _unproven(_URL, "read_failed")
+
+
+# (charset, a character that only this charset's decode gives back)
+_ORDINARY_CHARSETS = [
+    ("utf-8", 0x65E5),
+    ("iso-8859-1", 0xE9),
+    ("windows-1252", 0x20AC),
+    ("iso-2022-jp", 0x65E5),
+    ("gb18030", 0x4E2D),
+    ("utf-16", 0x65E5),
+    ("koi8-r", 0x41F),
+    ("us-ascii", 0x7E),
+]
+
+
+@pytest.mark.parametrize("charset, point", _ORDINARY_CHARSETS)
+@pytest.mark.parametrize("kind", ["html", "plain"])
+def test_read_bound_an_ordinary_charset_is_decoded_as_before(
+    mailroot, monkeypatch, charset, point, kind
+):
+    # the call's own copy with one character of the charset in its quote
+    body = _marked_own(0, kind).replace("quoted", f"{chr(point)} quoted")
+    payload = _charset_row(charset, body.encode(charset), kind)
+    msg = email.message_from_bytes(payload, policy=email.policy.default)
+    got = mail_reply_cleanup._split_quote(msg)
+    assert got == _old_split_quote(msg) and chr(point) in got[1]
+    _put_raw(mailroot, 20, payload)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def _text_encodings() -> list[str]:
+    """The name of every text encoding of the running Python."""
+    names = {module.name for module in pkgutil.iter_modules(encodings.__path__)}
+    names |= set(encodings.aliases.aliases.values())
+    found = set()
+    for name in names:
+        try:
+            info = codecs.lookup(name)
+        except LookupError:
+            continue
+        if info._is_text_encoding:
+            found.add(info.name)
+    return sorted(found)
+
+
+def test_read_bound_every_other_text_encoding_decodes_in_linear_time():
+    # the refused set is a list of two names. This pass over every text encoding of
+    # the running Python fails when another one decodes crafted input slowly: a
+    # quadratic decode takes 2.3 s for these 100,000 bytes (`punycode`), a linear one
+    # at most 0.012 s.
+    refused = mail_reply_cleanup._REFUSED_CHARSETS
+    names = _text_encodings()
+    assert refused == {"punycode", "idna"} and refused <= set(names)
+    assert len(names) >= 100
+    size = 100_000
+    shapes = [
+        b"a-" + b"9" * size,
+        b"\xff" * size,
+        b"\x1b$B" * (size // 3),
+        b"+" + b"A" * size,
+        b"\\N{" * (size // 3),
+        b"~{" * (size // 2),
+        random.Random(626).randbytes(size),
+    ]
+    slow = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # `unicode_escape` warns about a bad escape
+        for name in names:
+            if name in refused:
+                continue
+            for data in shapes:
+                started = time.perf_counter()
+                # a codec that refuses the input costs nothing
+                with contextlib.suppress(LookupError, ValueError):
+                    data.decode(name, "replace")
+                if time.perf_counter() - started > 0.5:
+                    slow.append(name)
+    assert slow == []
+
+
+def _three_parts(typed: bytes) -> bytes:
+    """A hand draft in three parts: the call's text, ``typed`` (one whole part with its
+    own fields), and the quote."""
+    return (
+        _HEAD
+        + _MIXED
+        + b"--b\r\n"
+        + _HTML
+        + b"<div>Hi there</div>\r\n--b\r\n"
+        + typed
+        + b"\r\n--b\r\n"
+        + _HTML
+        + _QUOTE_HTML.encode()
+        + b"\r\n--b--\r\n"
+    )
+
+
+_TYPED = b"<div>and a paragraph that the owner typed</div>"
+_UNDECODABLE = {
+    "text/html, an unknown charset": b"Content-Type: text/html; charset=x-nope\r\n\r\n",
+    "text/plain, an unknown charset": (
+        b"Content-Type: text/plain; charset=x-nope\r\n\r\n"
+    ),
+    "text/html, a codec that is no text encoding": (
+        b"Content-Type: text/html; charset=rot_13\r\n\r\n"
+    ),
+    # `idna` cannot decode with the error handler that `get_content` uses
+    "text/html, idna": b"Content-Type: text/html; charset=idna\r\n\r\n",
+}
+
+
+@pytest.mark.parametrize("fields", _UNDECODABLE.values(), ids=_UNDECODABLE.keys())
+def test_read_bound_a_text_part_that_cannot_be_decoded_is_never_skipped(
+    mailroot, monkeypatch, fields
+):
+    # before: the part was skipped, the typed paragraph was not seen, and the draft
+    # read as the call's own copy (the flow then deletes it)
+    payload = _three_parts(fields + _TYPED)
+    msg = email.message_from_bytes(payload, policy=email.policy.default)
+    assert "typed" not in "".join(_old_split_quote(msg))
+    assert _old_split_quote(msg)[0] == "Hi there"
+    _put_raw(mailroot, 20, payload)
+    assert _find(monkeypatch) == _unproven(_URL, "read_failed")
+    # with a charset that decodes, the paragraph is seen and the draft is not own
+    seen = _three_parts(_HTML + _TYPED)
+    _put_raw(mailroot, 20, seen)
+    assert _find(monkeypatch) == _unproven(_URL, "drafts_not_own")
+
+
+def test_read_bound_a_part_of_another_text_type_is_not_read(mailroot, monkeypatch):
+    # a text attachment (a .csv, a .txt as text/x-log) is normal mail and is not text
+    # of the reply: the rule is for text/html and text/plain only. Known limit: text
+    # that sits in a part of another text type is not seen by the proof.
+    attachment = b"Content-Type: text/csv; charset=x-nope\r\n\r\na;b\r\n1;2"
+    _put_raw(mailroot, 20, _three_parts(attachment))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+class _LyingPath:
+    """A stored file whose ``stat`` reports ``size``, whatever the file holds: the file
+    grew after the ``stat`` call, or the size is one that no test should write."""
+
+    def __init__(self, path: Path, size: int):
+        self._path, self._size = path, size
+
+    def stat(self):
+        return types.SimpleNamespace(st_size=self._size)
+
+    def open(self, *args, **kw):
+        return self._path.open(*args, **kw)
+
+    def read_bytes(self):
+        return self._path.read_bytes()
+
+
+def _lie(monkeypatch, path: Path, size: int) -> None:
+    lying = _LyingPath(path, size)
+    monkeypatch.setattr(mail_reply_cleanup, "_emlx_path", lambda url, rowid: lying)
+
+
+def test_read_bound_a_file_that_grew_after_stat_is_not_read_as_whole(
+    mailroot, monkeypatch
+):
+    limit = mail_reply_cleanup.HEADER_READ_BYTES
+    # a hand draft: the call's text, the quote, and far below it a line the owner wrote
+    below = " " * (limit + 1_000) + "<div>PS: a line that the owner wrote</div>"
+    path = _put_raw(mailroot, 20, _HEAD + _HTML + (_OWN + below).encode())
+    cut = mail_index.emlx_payload(path.read_bytes()[:limit])
+    assert b"PS:" not in cut and cut.rstrip().endswith(b"</blockquote>")
+    assert _find(monkeypatch) == _unproven(_URL, "drafts_not_own")
+    # `stat` saw a small file: the bytes of the header read are not the whole message
+    _lie(monkeypatch, path, 1_000)
+    assert _find(monkeypatch) == _unproven(_URL, "drafts_not_own")
+
+
+def test_read_bound_a_file_that_grew_after_stat_is_not_skipped_as_another_thread(
+    mailroot, monkeypatch
+):
+    limit = mail_reply_cleanup.HEADER_READ_BYTES
+    # a row of the thread whose In-Reply-To lies past the header read
+    pads = _PAD * (limit // len(_PAD) + 10)
+    path = _put_raw(mailroot, 20, pads + _HEAD + _HTML + _OWN.encode())
+    assert b"In-Reply-To" not in path.read_bytes()[: limit + 1]
+    assert _find(monkeypatch) == _unproven(_URL, "header_too_large", "")
+    _lie(monkeypatch, path, 1_000)
+    assert _find(monkeypatch) == _unproven(_URL, "header_too_large", "")
+
+
+_LONG_TYPE = b"Content-Type: text/html; x=" + b"y" * 1_180 + b"\r\n"
+
+
+def test_read_bound_a_long_content_type_outside_the_thread_is_skipped(
+    mailroot, monkeypatch
+):
+    # a new mail that is no reply, and one of another thread, each with a top-level
+    # Content-Type value of 1,192 characters (a long file name): not needed, not
+    # parsed, and the own copy beside them is still proven
+    assert len(_LONG_TYPE) - len(b"Content-Type: \r\n") > 998
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    _put_raw(mailroot, 21, b"Message-ID: <n@x>\r\n" + _LONG_TYPE + b"\r\nx", url=_INBOX)
+    other = b"In-Reply-To: <other@x>\r\n" + _LONG_TYPE + b"\r\nx"
+    _put_raw(mailroot, 22, other, url=_INBOX)
+    got = _find(monkeypatch, [(20, _URL), (21, _INBOX), (22, _INBOX)])
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # the same field on a candidate row: the body parse refuses it
+    _put_raw(mailroot, 23, _HEAD + _LONG_TYPE + b"\r\n" + _OWN.encode())
+    assert _find(monkeypatch, [(23, _URL)]) == _unproven(_URL, "header_too_large")
+    # and with the short field that row is the call's own
+    _put_raw(mailroot, 23, _HEAD + _HTML + _OWN.encode())
+    got = _find(monkeypatch, [(23, _URL)])
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def test_read_bound_the_header_read_skips_only_the_content_type(monkeypatch):
+    header_read = mail_reply_cleanup._bounded_policy().clone(skip_content_type=True)
+    long = "<" + "a" * 1_000 + "@x>"
+    assert header_read.header_fetch_parse("Content-Type", "text/html; x=" + long) == ""
+    assert header_read.header_fetch_parse("CONTENT-TYPE", "text/html") == ""
+    # every other name keeps the bound, the thread field first of all
+    for name in ("In-Reply-To", "Message-ID", "Received", "Content-Type-X"):
+        with pytest.raises(mail_reply_cleanup._HeaderTooLarge):
+            header_read.header_fetch_parse(name, long)
+    assert str(header_read.header_fetch_parse("In-Reply-To", "<o@x>")) == "<o@x>"
+    # a skipped field takes nothing from the budget, and the body parse has no flag
+    assert header_read.budget == [mail_reply_cleanup.MAX_HEADER_FETCH_CHARS - 5]
+    assert mail_reply_cleanup._bounded_policy().skip_content_type is False
+
+
+def test_read_bound_nine_rows_that_refuse_are_eight_parses(mailroot, monkeypatch):
+    # a row counts when its parse starts, not when it ends well: eight Sent rows over
+    # the body cap use up the eight parses, and the ninth row is not parsed, although
+    # it is the call's own Drafts copy
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    calls: list[int] = []
+    real = mail_reply_cleanup._split_quote
+    monkeypatch.setattr(
+        mail_reply_cleanup, "_split_quote", lambda msg: calls.append(1) or real(msg)
+    )
+    rows = [(21 + n, _SENT, f"s{n}@x", _sized(1_001)) for n in range(8)]
+    got = _stored(
+        mailroot, monkeypatch, [*rows, (40, _URL, "d@x", _OWN)], sent_twins=True
+    )
+    assert len(calls) == 8
+    assert got == mail_reply_cleanup.Draft("unproven", reason="body_too_large")
+
+
+def test_read_bound_a_message_inside_the_header_read_is_read_once(
+    mailroot, monkeypatch
+):
+    path = _put_raw(mailroot, 20, _HEAD + _HTML + _OWN.encode())
+    size = path.stat().st_size
+    counter = _count_bytes(monkeypatch, path)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    assert counter[0] == size  # the header read holds it whole: no second read
+    # the same at the value of the bound: a file of exactly that many bytes
+    counter[0] = 0
+    monkeypatch.setattr(mail_reply_cleanup, "HEADER_READ_BYTES", size)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    assert counter[0] == size
+    # one byte over: the header read (the bound and one byte), then the file
+    counter[0] = 0
+    monkeypatch.setattr(mail_reply_cleanup, "HEADER_READ_BYTES", size - 1)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    assert counter[0] == size + size
+
+
+def _header_block_of(size: int) -> bytes:
+    """A message whose header block, its empty line included, ends ``size`` bytes into
+    the stored file. The call's own copy follows."""
+    start = _HEAD + _HTML.rstrip() + b"\r\n"
+    body = _OWN.encode()
+
+    def message(fill: int) -> bytes:
+        pads = _PAD * ((size - len(start)) // len(_PAD) - 3)
+        return start + pads + b"X-Fill: " + b"f" * fill + b"\r\n\r\n" + body
+
+    count_line = len(str(len(message(100)))) + 1
+    fill = size - count_line - (len(message(0)) - len(body))
+    assert 0 < fill < 900
+    return message(fill)
+
+
+def test_read_bound_a_header_block_that_ends_at_the_header_read(mailroot, monkeypatch):
+    limit = mail_reply_cleanup.HEADER_READ_BYTES
+    # the empty line ends with the last byte that the header read uses: complete
+    raw = _put_raw(mailroot, 20, _header_block_of(limit)).read_bytes()
+    assert raw[:limit].endswith(b"\r\n\r\n") and raw[limit:].startswith(b"<div>Hi")
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # one byte later the LF of the empty line is the extra byte of the read. It is
+    # not used: the block is not complete, and "no postmark" is not answered
+    raw = _put_raw(mailroot, 20, _header_block_of(limit + 1)).read_bytes()
+    assert raw[:limit].endswith(b"\r\n\r") and raw[: limit + 1].endswith(b"\r\n\r\n")
+    assert _find(monkeypatch) == _unproven(_URL, "header_too_large", "")
+
+
+def test_read_bound_a_message_of_50_000_000_bytes_is_parsed(mailroot, monkeypatch):
+    # the size comes from `stat`: no test writes 50 MB
+    limit = mail_reply_cleanup.MAX_MESSAGE_BYTES
+    path = _put_raw(mailroot, 20, _HEAD + _HTML + _OWN.encode())
+    _lie(monkeypatch, path, limit)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    _lie(monkeypatch, path, limit + 1)
+    assert _find(monkeypatch) == _unproven(_URL, "message_too_large")
+
+
+def test_read_bound_a_message_of_1_000_000_lines_is_parsed(mailroot, monkeypatch):
+    limit = mail_reply_cleanup.MAX_MESSAGE_LINES
+    _put_raw(mailroot, 20, _lined(limit))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    _put_raw(mailroot, 20, _lined(limit + 1))
+    assert _find(monkeypatch) == _unproven(_URL, "message_too_large")
+
+
+def _in_a_tag(inside: bytes) -> bytes:
+    """The call's own copy with ``inside`` in one tag before the quote. A tag is not
+    text, so the copy stays the call's own."""
+    assert b">" not in inside
+    body = b"<div>Hi there</div><!x" + inside + b"\r\n>" + _QUOTE_HTML.encode()
+    return _HEAD + _HTML + body
+
+
+def test_read_bound_a_message_of_1_000_part_delimiter_lines_is_parsed(
+    mailroot, monkeypatch
+):
+    limit = mail_reply_cleanup.MAX_MESSAGE_PARTS
+    _put_raw(mailroot, 20, _in_a_tag(b"\r\n--x" * limit))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    _put_raw(mailroot, 20, _in_a_tag(b"\r\n--x" * (limit + 1)))
+    assert _find(monkeypatch) == _unproven(_URL, "message_too_large")
+    # two hyphens inside a line start no part: 1,001 of them are not counted
+    _put_raw(mailroot, 20, _in_a_tag(b" a--b" * (limit + 1)))
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+def test_read_bound_the_body_parse_has_its_own_budget(mailroot, monkeypatch):
+    # the header read of this row reads 625 characters of field values (In-Reply-To,
+    # Message-ID, one Received field of 600), and its body parse about 200. A budget
+    # of 700 holds each of them, and not both together.
+    stamp = b"Received: " + b"r" * 600 + b"\r\n"
+    _put_raw(mailroot, 20, stamp + _HEAD + _HTML + _OWN.encode())
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_HEADER_FETCH_CHARS", 700)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    # and each of the two does need its budget
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_HEADER_FETCH_CHARS", 600)
+    assert _find(monkeypatch) == _unproven(_URL, "header_too_large", "")
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_HEADER_FETCH_CHARS", 100)
+    _put_raw(mailroot, 20, _HEAD + _HTML + _OWN.encode())
+    assert _find(monkeypatch) == _unproven(_URL, "header_too_large")
