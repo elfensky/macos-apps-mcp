@@ -208,7 +208,7 @@ def resolve_mailbox(name: str, account: str | None = None) -> list[str]:
 # message).
 MAILBOX_REF = """on mailboxFor(acctId, mbPath)
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     if acctId is "" then
       if mbPath is "inbox" then
         return inbox
@@ -278,7 +278,7 @@ on run argv
   set rs to character id 30
   set out to ""
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with acct in every account
       set out to out & (id of acct) & us & (name of acct) & rs
     end repeat
@@ -376,7 +376,7 @@ _MY_ADDRESSES = """on run argv
   set AppleScript's text item delimiters to us
   set out to ""
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with acc in accounts
       set out to out & ((email addresses of acc) as text) & us
     end repeat

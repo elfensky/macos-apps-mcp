@@ -68,7 +68,7 @@ on run argv
   set out to ""
   set c to 0
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     if mid is not "" then
       set msgs to (messages of mb whose message id is mid)
     else if q is "" then
@@ -156,7 +156,7 @@ on run argv
   set maxBytes to (item 7 of argv) as integer
   set us to character id 31
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set matches to (messages of mb whose message id is mid)
     if (count of matches) is 0 then error ¬
       "no message with that message id in " & (item 3 of argv)

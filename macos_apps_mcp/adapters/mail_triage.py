@@ -76,7 +76,7 @@ on run argv
   set rs to character id 30
   set out to ""
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set n to (count of messages of inbox)
     if n > maxN then set n to maxN
     repeat with i from 1 to n
@@ -112,7 +112,7 @@ on run argv
   set rs to character id 30
   set out to ""
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set sm to sent mailbox
     set n to (count of messages of sm)
     if n > maxN then set n to maxN
@@ -144,7 +144,7 @@ _INBOX_REFS = """on run argv
   set out to ""
   set c to 0
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set cutoff to (current date) - cutoffSecs
     repeat with m in (messages of inbox whose date received > cutoff)
       set h to all headers of m

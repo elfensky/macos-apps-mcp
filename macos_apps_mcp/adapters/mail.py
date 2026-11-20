@@ -148,7 +148,7 @@ on run argv
   set out to ""
   set c to 0
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with m in (messages of inbox whose (subject contains q or sender contains q))
       set mid to message id of m
       -- RFC 5322 message-id is only SHOULD: a header-less message yields `missing
@@ -182,7 +182,7 @@ on run argv
   set mid to item 1 of argv
   set mb to my mailboxFor(item 2 of argv, item 3 of argv)
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set matches to (messages of mb whose message id is mid)
     if (count of matches) is 0 then error ¬
       "no message with that message id in " & (item 3 of argv)
@@ -227,7 +227,7 @@ on run argv
   set acctId to item 1 of argv
   set mbName to item 2 of argv
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     if acctId is "local" then
       make new mailbox with properties {name:mbName}
     else
@@ -238,7 +238,7 @@ on run argv
   end timeout
   set mb to my mailboxFor(acctId, mbName)
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     return name of mb
   end tell
   end timeout
@@ -280,7 +280,7 @@ on run argv
   set readOk to true
   set readErr to ""
   with timeout of 300 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     try
       set storedIds to message id of every message of mb
     on error errMsg
@@ -331,7 +331,7 @@ on run argv
   set us to character id 31
   set rs to character id 30
   with timeout of 300 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set mids to message id of every message of mb
     if wantInternal is "1" then
       set nids to id of every message of mb
@@ -509,7 +509,7 @@ on run argv
   set AppleScript's text item delimiters to ""
   set out to ""
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with k from 1 to (count of mids)
       set mid to item k of mids
       set n to (item k of nids) as integer
@@ -633,7 +633,7 @@ on run argv
   set out to ""
   set acted to {}
   with timeout of 600 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with k from 1 to (count of mids)
       set mid to item k of mids
       set n to (item k of nids) as integer
@@ -754,7 +754,7 @@ on run argv
   set out to ""
   set acted to {}
   with timeout of 900 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     -- FIRST PASS: delete. Verification is a SECOND pass below, deliberately — `delete`
     -- is asynchronous on both sides (§5c), so checking each message right after its own
     -- delete either reports a false failure or burns a per-message wait.
@@ -848,7 +848,7 @@ on run argv
   set AppleScript's text item delimiters to ""
   set out to ""
   with timeout of 300 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with rawId in ids
       set mid to rawId as text
       if mid is not "" then
