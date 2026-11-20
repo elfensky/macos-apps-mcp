@@ -33,10 +33,11 @@ The build uses these local files without network access.
   The same README identifies the bundled `_plistlib.py` source as CPython commit
   `90549676e063c2c818cfc14213d3adb7edcc2bd5`. `CPython-LICENSE` preserves that commit's complete licence.
   [CPython licence](https://github.com/python/cpython/blob/90549676e063c2c818cfc14213d3adb7edcc2bd5/LICENSE) · [🔖 2026-11-03](https://linkding.lav.ren/bookmarks?details=4692).
-- **fastmcp-slim 4.1.6:** the fallback is `LICENSE` from the matching `fastmcp-4.1.6` release archive.
+- **fastmcp-slim 4.2.0:** the fallback is `LICENSE` from the matching `fastmcp-4.2.0` release archive.
   Slim contains the framework code. The `fastmcp` distribution supplies its dependencies and Apache-2.0 licence.
-  The complete recursive release tree contains no `NOTICE` file.
-  [Release tree](https://github.com/PrefectHQ/fastmcp/tree/1302563111a0e72176174cdb5ac19838cb0687c3) · [🔖 2026-11-03](https://linkding.lav.ren/bookmarks?details=4689).
+  The 4.2.0 `LICENSE` is byte-identical to the 4.1.6 copy. Slim 4.2.0 still ships no licence file.
+  The complete recursive release tree contains no `NOTICE` file (evidence date: 2026-11-20 UTC).
+  [Release tree](https://github.com/PrefectHQ/fastmcp/tree/5e71792d8daf499325e3b747cc44cb04d4544119) · [🔖 2026-11-20](https://linkding.lav.ren/bookmarks?details=7752).
 - **PyObjC 12.2.2:** all 11 affected source archives contain byte-identical `License.txt` files.
   One shared copy retains both copyright lines, including Ronald Oussoren's 2003–2025 notice.
   Each distribution's source artifact is listed separately in the manifest.
