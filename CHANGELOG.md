@@ -30,32 +30,35 @@ surface may still shift between minor versions.
   for 9.4 s in the decode. Each step now has a bound that is checked before the step runs, and
   the result for normal mail does not change (0 differences on generated text in 13 scripts,
   header blocks and messages with attachments; not compared on real stored mail; not run on
-  device). The time of one sweep is now linear in the number of new rows, which is at most
-  300: a sweep built to the limit of every bound took 39.7 s in the review of this change
-  (292 rows of the thread at the header bounds, about 0.1 s each, and 8 candidate rows at
-  every body bound). A row over a bound is reported as `drafts_copy` `unproven`, and nothing
-  is deleted for it. Three new `drafts_copy_reason` values name the bound. `combining_run`: a
-  text of a candidate row, or a text of the call, holds more than 30 combining characters in
-  a row, counted in canonical decomposition (U+0344, U+0F73, U+0F75 and U+0F81 count as two),
-  so it was not normalized. `header_too_large`: the value of a header field that the sweep
-  reads is longer than 998 characters (the whole value, with every line of a folded field);
-  or the field lies outside the first 131,072 bytes of a message whose header block does not
-  end there; or one parse reads more than 200,000 characters of field values. The sweep reads
+  device). The time of one sweep is now bounded, and linear in the number of new rows, which
+  is at most 300. The largest sweep built in the review of this change took 75.3 s: 292 rows
+  of the thread at the header bounds, and 8 candidate rows that are each a 50,000,000-byte
+  `text/html` file with `charset=iso-8859-8` and a body of 0xFF bytes (6.3 s each: the decode
+  runs on the whole part before the cap of 2,000,000 characters, and the row then reads
+  `body_too_large`). A bound on the raw size of a text part before its decode is a possible
+  later step. A row over a bound is reported as `drafts_copy` `unproven`, and nothing is
+  deleted for it. Three new `drafts_copy_reason` values name the bound. `combining_run`: a
+  text of a candidate row, or a text of the call, holds more than 30 combining characters in a
+  row, counted in canonical decomposition (U+0344, U+0F73, U+0F75 and U+0F81 count as two), so
+  it was not normalized. `header_too_large`: the value of a header field that the sweep reads
+  is longer than 998 characters (the whole value, with every line of a folded field); or the
+  field lies outside the first 131,072 bytes of a message whose header block does not end
+  there; or one parse reads more than 200,000 characters of field values. The sweep reads
   `In-Reply-To` of every new row and the other fields of a row in the thread only. For a
   candidate row, a file name of 253 bytes fits in one `Content-Type` value, a percent-encoded
   name over about 270 bytes outside ASCII does not, and about 42 attachments with the longest
   names fit one parse. `message_too_large`: the stored message of a candidate row is larger
   than 50,000,000 bytes, or has more than 1,000,000 lines or more than 1,000 part-delimiter
-  lines, so it was not parsed. At most 8 candidate rows are parsed in one sweep; a further
-  one reads `too_many_rows`. `read_failed` now also names a row whose parse raised (the other
-  rows are still judged), and a candidate row with a `text/html` or `text/plain` part that
-  cannot be decoded, or that declares the charset `punycode` or `idna`. Such a part is no
-  longer skipped: before, a draft with typed text in a part with an unknown charset could
-  read as the call's own copy. Text in a part of another text type (a text attachment) is
-  still not read. The sweep parses the `Message-ID` of a row in the thread only, so a new
-  mail outside the thread with an unreadable `Message-ID` no longer makes the result
-  `unproven`. Before the sweep runs, `mail_reply` and `reply_all` normalize the text of the
-  original without this bound; that part is tracked in #632.
+  lines, so it was not parsed. At most 8 candidate rows are parsed in one sweep; a further one
+  reads `too_many_rows`. `read_failed` now also names a row whose parse raised (the other rows
+  are still judged), and a candidate row with a `text/html` or `text/plain` part that cannot
+  be decoded, or that declares the charset `punycode` or `idna`. Such a part is no longer
+  skipped: before, a draft with typed text in a part with an unknown charset could read as the
+  call's own copy. Text in a part of another text type (a text attachment) is still not read.
+  The sweep parses the `Message-ID` of a row in the thread only, so a new mail outside the
+  thread with an unreadable `Message-ID` no longer makes the result `unproven`. Before the
+  sweep runs, `mail_reply` and `reply_all` normalize the text of the original without this
+  bound; that part is tracked in #632.
 - **Mail scripts address Mail by its bundle id** (#585). With Mail closed, the name "Mail" could
   resolve to a helper bundle of the same name, and every Mail script then failed to compile.
   Each Mail script and the `doctor` probe now address the app by its bundle id
