@@ -748,3 +748,87 @@ def test_daemon_identity_of_a_bad_answer_never_raises(sockdir, monkeypatch, raw,
         assert deploy._daemon_identity() == want
     finally:
         s.close()
+
+
+def test_identity_route_answers_while_a_tool_runs(sockdir, monkeypatch):
+    """A `doctor` tool call would wait behind the native worker; the route does not."""
+    app = FastMCP("busy")
+    daemon.add_identity_route(app)
+    running = threading.Event()
+
+    @app.tool
+    def slow() -> str:
+        running.set()
+        time.sleep(1.5)
+        return "done"
+
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    s = _serve(app, p)
+
+    async def call():
+        async with Client(
+            StreamableHttpTransport(
+                "http://daemon/mcp", httpx_client_factory=daemon._uds_client_factory(p)
+            )
+        ) as c:
+            return (await c.call_tool("slow")).content[0].text
+
+    result = []
+    caller = threading.Thread(target=lambda: result.append(asyncio.run(call())))
+    caller.start()
+    try:
+        assert running.wait(10)
+        started = time.perf_counter()
+        answer = deploy._daemon_identity()
+        took = time.perf_counter() - started
+        still_running = result == []
+        caller.join(20)
+    finally:
+        s.close()
+    assert answer == (doctor.version(), doctor.build_stamp()) and took < 1
+    assert still_running and result == ["done"]
+
+
+def test_identity_route_is_not_served_on_the_dashboard_side():
+    """The dispatcher sends only unix-socket scopes to the MCP app."""
+    app = FastMCP("identity")
+    daemon.add_identity_route(app)
+    dispatcher = daemon.make_dispatcher(app.http_app(), None)
+
+    def status(server):
+        sent = []
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/identity",
+            "raw_path": b"/identity",
+            "root_path": "",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 50000),
+            "server": server,
+        }
+        asyncio.run(dispatcher(scope, receive, send))
+        return sent[0]["status"]
+
+    assert status(("127.0.0.1", 47632)) == 404
+    assert status(("/tmp/mcp.sock", None)) == 200  # the control: the unix-socket side
+
+
+def test_serve_answers_daemon_identity_on_its_socket(sockdir, monkeypatch):
+    """The real `serve()` registers the route."""
+    monkeypatch.setattr(daemon, "dashboard_state", None)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    assert "ok" in _serve_and_ping(p)
+    assert deploy._daemon_identity() == (doctor.version(), doctor.build_stamp())

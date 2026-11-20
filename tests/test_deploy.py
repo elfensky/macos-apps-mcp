@@ -3,13 +3,16 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import webbrowser
 from pathlib import Path
 
 import pytest
 
-from macos_apps_mcp import deploy, doctor
+from macos_apps_mcp import daemon, deploy, doctor
 from macos_apps_mcp.errors import NativeError
+
+_REAL_IDENTITY = deploy._daemon_identity  # the `opened` fixture scripts the read
 
 
 def _tcc_db(path, rows):
@@ -257,14 +260,13 @@ def test_install_agent_orchestrates(tmp_path, monkeypatch, capsys, cli_link):
     app = _app_with_wrapper(tmp_path)
     calls = []
     monkeypatch.setattr(deploy, "_run_bundle_role", lambda a, role: calls.append(role))
-    monkeypatch.setattr(
-        deploy, "_wait_for_socket", lambda timeout=30: calls.append("socket")
-    )
+    # the any-answer mode: no wanted identity, so no comparison and no restart
+    monkeypatch.setattr(deploy, "_wait_for_daemon", lambda: calls.append("daemon"))
     monkeypatch.setattr(
         deploy, "_request_grants_via_daemon", lambda: calls.append("prompts")
     )
     deploy.install_agent(["--app", str(app)])
-    assert calls == ["register", "socket", "prompts"]
+    assert calls == ["register", "daemon", "prompts"]
     out = capsys.readouterr().out
     assert "Privacy_AllFiles" in out  # FDA deep-link printed
     assert '"shim"' in out  # client config snippet
@@ -325,6 +327,26 @@ def test_link_cli_leaves_a_foreign_file_and_a_wrapperless_build_alone(
 # --- `launch`: what opening the .app does -------------------------------------------
 
 
+class _Notice:
+    """The child that shows the alert of the wait."""
+
+    def __init__(self, message):
+        self.message, self.ended = message, 0
+
+    def terminate(self):
+        self.ended += 1
+
+
+@pytest.fixture
+def sockdir():
+    # AF_UNIX sun_path is ~104 bytes on macOS, and pytest's tmp_path is longer.
+    d = Path(tempfile.mkdtemp(prefix="mcpsock-"))
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 class _Clock:
     """`deploy.time` for a wait: `sleep` moves `monotonic`, so no test waits."""
 
@@ -342,9 +364,10 @@ class _Clock:
 def opened(tmp_path, monkeypatch, cli_link):
     """`launch` from an app at the patched install path. Only the native boundary is
     faked (agent status, registration, the daemon's identity answers, the restart, the
-    clock, the daemon's dialog pass, the alert and the browser); the CLI link, the
-    setup marker and the dashboard link are real. `answers` scripts the identity
-    reads, and its last item repeats; the default is the app's own identity."""
+    clock, the alert of the wait, the daemon's dialog pass, the alert and the browser);
+    the CLI link, the setup marker and the dashboard link are real. `answers` scripts
+    the identity reads, and its last item repeats; the default is the app's own
+    identity."""
     app = _app_with_wrapper(tmp_path).resolve()
     monkeypatch.setattr(deploy, "_APP", app)
     monkeypatch.setattr(sys, "executable", str(app / "Contents/MacOS/macos-apps-mcp"))
@@ -354,15 +377,20 @@ def opened(tmp_path, monkeypatch, cli_link):
     mine = (doctor.version(), doctor.build_stamp())
     seen = {"urls": [], "alerts": [], "registered": 0, "state": state}
     seen |= {"mine": mine, "answers": [mine], "kicks": 0, "kick": _Kick(0, "")}
-    seen["clock"] = _Clock()
+    seen |= {"clock": _Clock(), "reads": 0, "notices": []}
 
     def identity():
+        seen["reads"] += 1
         answers = seen["answers"]
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
     def kickstart():
         seen["kicks"] += 1
         return seen["kick"]
+
+    def notice(message):
+        seen["notices"].append(_Notice(message))
+        return seen["notices"][-1]
 
     def dialogs():
         state["dialogs"] += 1
@@ -379,8 +407,8 @@ def opened(tmp_path, monkeypatch, cli_link):
 
     monkeypatch.setattr(deploy, "agent_status", lambda: state["status"])
     monkeypatch.setattr(deploy, "register_agent", register)
-    monkeypatch.setattr(deploy, "_wait_for_socket", lambda: None)
     monkeypatch.setattr(deploy, "_daemon_identity", identity)
+    monkeypatch.setattr(deploy, "_wait_notice", notice)
     monkeypatch.setattr(deploy, "_kickstart", kickstart)
     monkeypatch.setattr(deploy, "time", seen["clock"])
     monkeypatch.setattr(deploy, "_request_grants_via_daemon", dialogs)
@@ -455,6 +483,7 @@ def test_open_alerts_the_dashboard_refusal_and_a_missing_browser(opened, monkeyp
 def test_launch_restarts_nothing_when_the_daemon_identity_is_the_bundles(opened):
     deploy.launch()
     assert opened["kicks"] == 0 and opened["state"]["dialogs"] == 0
+    assert opened["notices"] == [] and opened["reads"] == 1
     assert "&to=" not in opened["urls"][-1] and opened["alerts"] == []
 
 
@@ -472,6 +501,141 @@ def test_launch_restarts_once_when_the_daemon_identity_differs(opened, other):
     deploy.launch()
     assert opened["kicks"] == 1 and opened["state"]["dialogs"] == 0
     assert "&to=" not in opened["urls"][-1] and opened["alerts"] == []
+    [notice] = opened["notices"]  # one alert, closed when the new daemon answered
+    assert notice.ended == 1 and "was updated" in notice.message
+    assert "few minutes" in notice.message and "econnect" in notice.message
+
+
+def test_launch_never_kickstarts_when_nothing_answers_daemon_identity(opened):
+    """No answer is a daemon in its start, or none: a restart would kill the start."""
+    opened["answers"][:] = [None, None, opened["mine"]]
+    deploy.launch()
+    assert opened["kicks"] == 0 and opened["alerts"] == []
+    [notice] = opened["notices"]
+    assert notice.ended == 1 and "was updated" not in notice.message
+    assert "few minutes" in notice.message
+    assert "&to=" not in opened["urls"][-1]
+
+
+def _bound_alert(opened):
+    """`launch` when the wait reaches its bound: it exits, no dashboard link was
+    opened, and the one alert names Login Items and the restart command."""
+    with pytest.raises(SystemExit) as e:
+        deploy.launch()
+    assert e.value.code == 1 and opened["urls"] == []
+    [alert] = opened["alerts"]
+    assert "Login Items" in alert
+    assert f"launchctl kickstart -k gui/$(id -u)/{deploy.BUNDLE_ID}" in alert
+    assert [n.ended for n in opened["notices"]] == [1]
+
+
+def test_launch_alerts_when_the_daemon_identity_never_matches(opened):
+    opened["answers"][:] = [("0.0.1", "0000000 2020-01-01T00:00:00Z")]
+    _bound_alert(opened)
+    assert opened["kicks"] == 1  # never a second restart
+    assert opened["clock"].now == deploy._DAEMON_WAIT == 300
+
+
+def test_launch_alerts_when_nothing_answers_daemon_identity_in_time(opened):
+    opened["answers"][:] = [None]
+    _bound_alert(opened)
+    assert opened["kicks"] == 0 and opened["clock"].now == 300
+
+
+def test_launch_never_kickstarts_when_a_silent_socket_gives_no_daemon_identity(
+    opened, sockdir, monkeypatch
+):
+    """`daemon.bind_socket()` listens before uvicorn serves, so a daemon in its start
+    accepts the connect and stays silent. The REAL read runs here, and its read
+    timeout must not read as "another daemon"."""
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(deploy, "_daemon_identity", _REAL_IDENTITY)
+    monkeypatch.setattr(deploy, "_IDENTITY_TIMEOUT", 0.1)
+    monkeypatch.setattr(deploy, "_DAEMON_WAIT", 1.5)
+    s = daemon.bind_socket(p)  # listens; nothing accepts
+    try:
+        _bound_alert(opened)
+    finally:
+        s.close()
+    assert opened["kicks"] == 0
+
+
+def test_wait_for_daemon_reports_a_failed_kickstart_at_once(opened):
+    opened["answers"][:] = [("0.0.1", "0000000 2020-01-01T00:00:00Z")]
+    opened["kick"] = _Kick(113, "Could not find service\n")
+    with pytest.raises(NativeError, match="Could not find service"):
+        deploy._wait_for_daemon(opened["mine"])
+    assert opened["kicks"] == 1 and opened["reads"] == 1  # no read after the refusal
+    assert opened["clock"].now == 0 and opened["notices"][-1].ended == 1
+    with pytest.raises(SystemExit):
+        deploy.launch()
+    assert "Could not find service" in opened["alerts"][-1] and opened["urls"] == []
+
+
+def test_first_open_waits_for_daemon_identity_before_the_dialogs(opened, monkeypatch):
+    opened["state"]["status"] = "not-registered"
+    opened["answers"][:] = [None, opened["mine"]]
+    dialogs = []  # the number of identity reads at each dialog pass
+    monkeypatch.setattr(
+        deploy, "_request_grants_via_daemon", lambda: dialogs.append(opened["reads"])
+    )
+    deploy.launch()
+    assert opened["registered"] == 1 and opened["kicks"] == 0
+    assert dialogs == [2]  # one pass, after the daemon answered
+    assert opened["urls"][-1].endswith("&to=/health") and opened["alerts"] == []
+    assert not deploy._SETUP_PENDING_FILE.exists()
+
+
+def test_wait_for_daemon_needs_an_answer_not_a_socket_file(
+    opened, sockdir, monkeypatch
+):
+    """A killed daemon leaves its socket file: the old wait returned on it, and the
+    dashboard opened on a dead port. The REAL read runs here."""
+    p = sockdir / "mcp.sock"
+    p.touch()
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(deploy, "_daemon_identity", _REAL_IDENTITY)
+    monkeypatch.setattr(deploy, "_DAEMON_WAIT", 5)  # each real read costs about 30 ms
+    for want in (opened["mine"], None):  # the `launch` mode and the any-answer mode
+        opened["clock"].now = 0
+        with pytest.raises(NativeError, match="Login Items"):
+            deploy._wait_for_daemon(want)
+        assert opened["clock"].now == 5 and opened["kicks"] == 0
+
+
+def test_wait_for_daemon_takes_any_answer_without_a_kickstart(opened, capsys):
+    """The `install-agent` mode: its caller can be another Python than the bundle, so
+    it compares nothing and restarts nothing."""
+    opened["answers"][:] = [None, ("", "")]
+    deploy._wait_for_daemon()
+    assert opened["kicks"] == 0 and opened["notices"] == [] and opened["reads"] == 2
+    assert "few minutes" in capsys.readouterr().err
+
+
+def test_wait_notice_carries_its_text_as_an_argument_and_ends_by_itself(monkeypatch):
+    started = []
+    monkeypatch.setattr(
+        deploy.subprocess, "Popen", lambda argv, **kw: started.append(argv) or "child"
+    )
+    text = 'updated" & (do shell script "id") & "'
+    assert deploy._wait_notice(text) == "child"  # returns at once, with the child
+    [argv] = started
+    assert argv[0] == "osascript" and argv[-1] == text
+    script = "\n".join(argv[1:-1])
+    assert "do shell script" not in script and "updated" not in script
+    assert "display alert" in script and "as critical" not in script
+    # a lost parent leaves no dialog for ever
+    assert f"giving up after {deploy._DAEMON_WAIT + 10}" in script
+
+
+def test_wait_for_daemon_ends_the_notice_on_every_exit(opened):
+    opened["answers"][:] = [None, opened["mine"]]
+    deploy._wait_for_daemon(opened["mine"])  # it returns
+    opened["answers"][:] = [None]
+    with pytest.raises(NativeError):
+        deploy._wait_for_daemon(opened["mine"])  # it raises at the bound
+    assert [n.ended for n in opened["notices"]] == [1, 1]
 
 
 def test_kickstart_helper_runs_the_one_launchctl_restart(monkeypatch):
