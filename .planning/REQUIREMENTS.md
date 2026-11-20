@@ -71,7 +71,7 @@ A merged implementation does not complete a requirement that still needs its rec
 - [x] **FIX-24**: State and Mail backup directories use owner-only POSIX permissions. New Mail backup files use exclusive `0600` creation. Doctor reports unsafe paths, ownership, exposure and in-process repairs. Storage failures preserve diagnostics, while backup destination failures prevent the Mail action. Existing files are not swept; ACLs are outside this check. Installed-device stat checks confirm the permissions (#540; D-22).
 - [ ] **FIX-25**: Ambiguous account Trash candidates produce a distinct outcome before an action relies on a guessed destination. Trash, dedupe and recovery callers handle it explicitly. Synthetic tests cover translated root folders and user-created Google-shaped namespaces; device acceptance remains required for affected Mail writes (#556).
 
-FIX-27 to FIX-35 are the bugs of Phase 05.12 that were open at its planning (2026-11-20).
+FIX-27 to FIX-35 are the bugs of Phase 05.12 that were open at its planning (2026-11-20). FIX-36 came from the probe review of the #611 change on the same day.
 The ten review bugs #572 to #581 were implemented before it in PR #584, without requirement ids; the open parts of #581 are FIX-35, and the open part of #572 moves to Phase 05.10.
 
 - [ ] **FIX-27**: When the running daemon's version or build differs from the app's own, opening the app restarts the agent and waits for the socket. A restart never drops a tool call silently: connected clients get the existing uncertain-outcome answer (#568).
@@ -83,6 +83,7 @@ The ten review bugs #572 to #581 were implemented before it in PR #584, without 
 - [ ] **FIX-33**: After a paste that did not settle, a key that Mail runs late pastes nothing into another compose window. The settle bound and the drain wait follow from a device measurement (#610).
 - [ ] **FIX-34**: The reply sweep strips HTML in linear time, with a size cap as the second bound and a timed test for the 256 KB case; the verdict of the sweep does not change for mail that Mail itself wrote (#611).
 - [ ] **FIX-35**: The open guard gaps of #581 are closed: the script compile check and the timeout tripwires cover every script in the package, no test asserts a dead constant, a real send in the integration suite needs its opt-in, the default suite creates no real `EKEventStore`, and the tool layer has a dispatch test over `registry.TOOLS`. Parts that PR #584 already closed are confirmed, not redone.
+- [ ] **FIX-36**: The read path of the reply sweep is bounded on crafted mail: a long run of combining characters cannot make the text normalization take quadratic time, an oversized header block or stored message is not parsed, and a parser error of one row stays `unproven` for that row only. Each bound has a timed test, and the verdict of the sweep does not change for mail that Mail itself wrote (#626).
 
 ### MCP migration — Phase 05.4
 
@@ -268,6 +269,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FIX-33 | Phase 05.12 | Pending |
 | FIX-34 | Phase 05.12 | Pending |
 | FIX-35 | Phase 05.12 | Pending |
+| FIX-36 | Phase 05.12 | Pending |
 | MIG-01 | Phase 05.4 | Complete (2026-11-06): #550, #561; signed and notarized builds on arm64 and physical Intel; installed device suite and real-frontend restart and outage passed |
 | DIST-01 | Phase 6 | Complete |
 | DIST-02 | Phase 6 | Complete |
@@ -278,11 +280,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 78 total
-- Mapped to phases: 78
+- v1 requirements: 79 total
+- Mapped to phases: 79
 - Unmapped: 0 ✓
 
-**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 05.12: 9 · Phase 6: 6
+**Phase totals:** Phase 1: 10 · Phase 2: 3 · Phase 02.1: 4 · Phase 3: 11 · Phase 03.1: 6 · Phase 4: 6 · Phase 04.1: 4 · Phase 5: 2 · Phase 05.1: 3 · Phase 05.4: 1 · Phase 05.2: 6 · Phase 05.6: 7 · Phase 05.12: 10 · Phase 6: 6
 
 **Open issues with no requirement:** #180 is a convention decision, recorded in PROJECT.md Key Decisions; #101, #102 and #103 are Out of Scope.
 
