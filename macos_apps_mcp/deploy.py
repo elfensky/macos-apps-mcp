@@ -214,17 +214,6 @@ def _run_bundle_role(app: Path, role: str) -> None:
     )
 
 
-def _wait_for_socket(timeout: float = 30) -> None:
-    from .daemon import socket_path
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if socket_path().exists():
-            return
-        time.sleep(0.25)
-    raise NativeError("daemon socket never appeared — check `launchctl print` / logs")
-
-
 _IDENTITY_TIMEOUT = 2.0  # seconds for one identity read; a test shortens it
 
 
@@ -271,27 +260,91 @@ def _kickstart() -> subprocess.CompletedProcess:
     )
 
 
-def _wait_for_daemon(want: tuple[str, str], timeout: float) -> None:
-    """Wait until the daemon on the socket answers with the identity ``want``. A
-    daemon that answers with another identity is restarted, once. Nothing is ever
-    restarted while nothing answers: that is a daemon in its start, or none at all."""
-    deadline = time.monotonic() + timeout
-    kicked = False
-    while True:
-        seen = _daemon_identity()
-        if seen == want:
-            return
-        if seen is not None and not kicked:
-            kicked = True
-            kick = _kickstart()
-            if kick.returncode != 0:
-                raise NativeError(
-                    "launchctl did not restart the background service: "
-                    f"{kick.stderr.strip()}"
+# Calculated: at least twice the largest observed first start of a new bundle (about
+# 2 min 20 s). The acceptance sitting on a Mac checks it.
+_DAEMON_WAIT = 300  # seconds
+
+
+def _wait_notice(message: str) -> subprocess.Popen:
+    """Start ONE alert that says why nothing opens yet, and return its child at once:
+    the caller ends the child when the wait is over. The text travels as an argument,
+    never spliced into the AppleScript source. The alert also ends by itself, so a
+    lost parent leaves no dialog for ever."""
+    return subprocess.Popen(
+        [
+            "osascript",
+            "-e",
+            "on run argv",
+            "-e",
+            'display alert "macos-apps-mcp" message (item 1 of argv) '
+            f"giving up after {_DAEMON_WAIT + 10}",
+            "-e",
+            "end run",
+            message,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _wait_for_daemon(
+    want: tuple[str, str] | None = None, timeout: float | None = None
+) -> None:
+    """Wait until the daemon ANSWERS on the socket, for at most ``_DAEMON_WAIT``
+    seconds. A socket file proves nothing: a killed daemon leaves its file.
+
+    With ``want`` (`launch`): the answer must be that identity. A daemon that answers
+    with another one is restarted, once, and the person sees one alert until the wait
+    ends. Nothing is ever restarted while nothing answers: that is a daemon in its
+    start, or none at all, and a restart would kill the start.
+
+    Without ``want`` (`install-agent`, whose caller can be another Python than the
+    bundle): any answer ends the wait, and nothing is compared or restarted."""
+    deadline = time.monotonic() + (_DAEMON_WAIT if timeout is None else timeout)
+    notice = None
+    first, kicked = True, False
+    try:
+        while True:
+            seen = _daemon_identity()
+            if seen is not None and (want is None or seen == want):
+                return
+            if first and want is None:
+                print(
+                    "waiting for the daemon to answer: the first start can take a "
+                    "few minutes",
+                    file=sys.stderr,
                 )
-        if time.monotonic() >= deadline:
-            raise NativeError("the background service did not answer in time")
-        time.sleep(0.5)
+            elif first:
+                notice = _wait_notice(
+                    (
+                        "The app was updated, and its background service restarts."
+                        if seen is not None
+                        else "The background service starts."
+                    )
+                    + " The first start after an update can take a few minutes. "
+                    "The dashboard opens when the service answers. Reconnect your "
+                    "MCP clients afterwards."
+                )
+            first = False
+            if want is not None and seen is not None and not kicked:
+                kicked = True
+                kick = _kickstart()
+                if kick.returncode != 0:
+                    raise NativeError(
+                        "launchctl did not restart the background service: "
+                        f"{kick.stderr.strip()}"
+                    )
+            if time.monotonic() >= deadline:
+                raise NativeError(
+                    "The background service did not answer in time. Check that "
+                    "macos-apps-mcp is turned on in System Settings → General → "
+                    "Login Items. Then restart it in Terminal: launchctl kickstart "
+                    f"-k gui/$(id -u)/{BUNDLE_ID}"
+                )
+            time.sleep(0.5)
+    finally:
+        if notice is not None:
+            notice.terminate()
 
 
 def _request_grants_via_daemon() -> None:
@@ -422,11 +475,11 @@ def launch() -> None:
                 _SETUP_PENDING_FILE.touch()
                 if status != "enabled":  # this process IS the bundle: in-process
                     register_agent()
-                _wait_for_daemon(mine, 300)
+                _wait_for_daemon(mine)
                 _request_grants_via_daemon()
                 _SETUP_PENDING_FILE.unlink()
             else:  # returns at once when the daemon is this app's own
-                _wait_for_daemon(mine, 300)
+                _wait_for_daemon(mine)
             _link_cli(app)
             if not dashboard(["health"] if first else []):
                 raise NativeError(
@@ -457,7 +510,7 @@ def install_agent(argv: list[str]) -> None:
         raise SystemExit(2)
     _quarantine_guard(app)
     _run_bundle_role(app, "register")
-    _wait_for_socket()
+    _wait_for_daemon()  # any answer: an update keeps its documented kickstart
     _request_grants_via_daemon()
     exe = app / "Contents/MacOS/macos-apps-mcp"
     snippet = {
