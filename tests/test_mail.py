@@ -3441,6 +3441,20 @@ def test_send_then_sweep_with_only_the_sent_copy_finds_no_drafts_copy(monkeypatc
     assert "45 s" in out["drafts_copy_note"]
 
 
+def test_send_then_sweep_linear_strip_on_a_crafted_twin(monkeypatch):
+    # #611: a crafted mail in the thread (256 KB of unclosed script openers) held the
+    # one native worker for 28 s after the send. It is read in linear time now, and it
+    # still is not the sent message's copy.
+    import time
+
+    started = time.perf_counter()
+    rig, out = _sent_reply(monkeypatch, (_SENT_URL, "<script " * 32_000, "html"))
+    assert time.perf_counter() - started < 2.0
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "sent_not_own"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
 # Mail's quote writes each inline image of the original as one span whose text is
 # `<file name>`: the id-only form in a Sent copy, the compose-time form in a draft
 # (facts 4e `Layout`). 05.2-18 read `unproven` because of it.

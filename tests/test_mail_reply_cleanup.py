@@ -5,9 +5,12 @@ tmp dir; nothing here touches Mail or the real Envelope Index."""
 from __future__ import annotations
 
 import email
+import html
+import random
 import re
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -15,6 +18,8 @@ import pytest
 
 from macos_apps_mcp.adapters import mail_index, mail_reply_cleanup
 from macos_apps_mcp.errors import NativeError
+from macos_apps_mcp.text import squash_text
+from tests import mailhtml
 
 # The conftest lock replaces ``_read``; the self-tests bind the real one here.
 _REAL_READ = mail_reply_cleanup._read
@@ -1325,3 +1330,135 @@ def test_split_quote_keeps_a_white_space_image_placeholder_as_text(token, openin
         policy=email.policy.default,
     )
     assert "<" in mail_reply_cleanup._split_quote(msg)[1]
+
+
+# --- the strip in linear time (FIX-34, #611) -----------------------------------------
+# The sweep's text decides a delete, so the linear form must give the output of the two
+# calls `_split_quote` made before. They are written out here as the reference.
+
+_OLD_BLOCK = r"(?is)<(script|style).*?</\1>"
+_OLD_TAG = r"<[^>]+>"
+
+
+def _old_strip(chunk: str) -> str:
+    chunk = re.sub(_OLD_BLOCK, "", chunk)
+    return re.sub(_OLD_TAG, " ", chunk)
+
+
+def _old_split_quote(msg) -> tuple[str, str]:
+    """``_split_quote`` as it was before #611, with the two old calls."""
+    markup = text = ""
+    for part in msg.walk():
+        kind = part.get_content_type()
+        try:
+            if kind == "text/html":
+                markup += part.get_content()
+            elif kind == "text/plain":
+                text += part.get_content()
+        except (LookupError, ValueError):
+            continue
+    if markup:
+        cut = re.search(r"(?i)<blockquote\b", markup)
+        at = cut.start() if cut else len(markup)
+        parts = []
+        quoted = markup[at:]
+        closes = list(re.finditer(r"(?i)</blockquote>", quoted))
+        end = closes[-1].end() if closes else 0
+        for chunk in (
+            markup[:at],
+            mail_reply_cleanup._drop_placeholders(quoted[:end]) + quoted[end:],
+        ):
+            parts.append(html.unescape(_old_strip(chunk)))
+        head, tail = parts
+    else:
+        lines = text.splitlines()
+        at = next(
+            (n for n, line in enumerate(lines) if line.startswith(">")), len(lines)
+        )
+        head, tail = "\n".join(lines[:at]), "\n".join(lines[at:])
+    return squash_text(head.replace(chr(0xFFFC), "")), squash_text(tail)
+
+
+def _strip(chunk: str) -> str:
+    return mail_reply_cleanup._drop_tags(mail_reply_cleanup._drop_blocks(chunk))
+
+
+def _html_message(markup: str):
+    return email.message_from_string(
+        "Content-Type: text/html; charset=utf-8\r\n\r\n" + markup,
+        policy=email.policy.default,
+    )
+
+
+def test_linear_strip_token_list_holds_its_code_points():
+    # by code point, so a glyph that an editor normalized fails here: the long s and the
+    # two i's case-fold to `s` or `i`, and U+FFFC is the object mark
+    points = {ord(char) for token in mailhtml._TOKENS for char in token}
+    assert {0x17F, 0x130, 0x131, 0xFFFC} <= points
+
+
+def test_linear_strip_keeps_both_old_pattern_objects():
+    block, tag = mail_reply_cleanup._BLOCK, mail_reply_cleanup._TAG
+    assert (block.pattern, tag.pattern) == (_OLD_BLOCK, _OLD_TAG)
+    assert block.flags == re.IGNORECASE | re.DOTALL | re.UNICODE
+    assert tag.flags == re.UNICODE
+
+
+def test_linear_strip_takes_under_two_seconds_on_256_kb_of_script_openers():
+    # the crafted mail of #611: this took 28 s, on the one native worker
+    markup = "<script " * 32_000
+    msg = _html_message(markup)
+    started = time.perf_counter()
+    got = mail_reply_cleanup._split_quote(msg)
+    assert time.perf_counter() - started < 2.0
+    assert got == (markup.strip(), "")  # nothing closes, so no character is dropped
+
+
+# the spellings an opener can have: a letter that case-folds to `s` or `i` matches too
+_LONG_S, _DOTTED_I, _DOTLESS_I = chr(0x17F), chr(0x130), chr(0x131)
+_OPENER_NAMES = [
+    "script",
+    f"{_LONG_S}cript",
+    f"scr{_DOTTED_I}pt",
+    f"scr{_DOTLESS_I}pt",
+    f"{_LONG_S}cr{_DOTTED_I}pt",
+    f"{_LONG_S}cr{_DOTLESS_I}pt",
+    "style",
+    f"{_LONG_S}tyle",
+]
+_WORST_CASES = {
+    "256 KB of <": "<" * 256_000,
+    "32,000 unclosed a openers": "<a " * 32_000,
+    "8 opener names, 256 KB": "".join(f"<{name} " for name in _OPENER_NAMES) * 3_900,
+    "2 MB of unclosed script openers": "<script " * 250_000,
+}
+
+
+@pytest.mark.parametrize("text", _WORST_CASES.values(), ids=_WORST_CASES.keys())
+def test_linear_strip_is_fast_on_each_worst_case(text):
+    started = time.perf_counter()
+    got = _strip(text)
+    assert time.perf_counter() - started < 2.0
+    assert got == text  # no closing tag and no `>`: nothing is a block or a tag
+
+
+def test_linear_strip_equals_the_old_patterns_on_generated_mail():
+    rng = random.Random(611)
+    differs = 0
+    for _ in range(2_000):
+        msg = mailhtml.message(mailhtml.reply_html(rng), rng)
+        differs += mail_reply_cleanup._split_quote(msg) != _old_split_quote(msg)
+    assert differs == 0
+
+
+def test_linear_strip_equals_the_old_patterns_on_crafted_text():
+    rng = random.Random(611)
+    differs = 0
+    for _ in range(20_000):
+        text = mailhtml.crafted(rng)
+        differs += (
+            mail_reply_cleanup._drop_blocks(text) != re.sub(_OLD_BLOCK, "", text)
+            or mail_reply_cleanup._drop_tags(text) != re.sub(_OLD_TAG, " ", text)
+            or _strip(text) != _old_strip(text)
+        )
+    assert differs == 0

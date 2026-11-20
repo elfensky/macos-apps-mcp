@@ -275,6 +275,46 @@ def _drop_placeholders(quote: str) -> str:
     return _PLACEHOLDER.sub(drop, quote)
 
 
+# The two strip patterns of `_split_quote`. They must not change: what they match
+# decides which text counts, and that text decides a delete. Each one alone repeats a
+# scan that cannot succeed (#611: 28 s for 256 KB of unclosed `<script ` openers), so
+# they run only behind `_drop_blocks` and `_drop_tags`.
+_BLOCK = re.compile(r"(?is)<(script|style).*?</\1>")
+_TAG = re.compile(r"<[^>]+>")
+_OPENER = re.compile(r"(?i)<(script|style)")
+
+
+def _drop_blocks(chunk: str) -> str:
+    """``_BLOCK.sub("", chunk)`` in linear time: the output of the old call
+    ``re.sub(r"(?is)<(script|style).*?</\\1>", "", chunk)`` for every input. The
+    pattern is tried only where an opener starts. A failed try means that no closing
+    tag for that captured name exists from there on, so a later opener with the same
+    name is skipped without a scan."""
+    out: list[str] = []
+    done = at = 0
+    dead: set[str] = set()  # captured names with no closing tag from here on
+    while (opener := _OPENER.search(chunk, at)) is not None:
+        # equal keys differ in ASCII case only, so they have the same closing tags
+        key = opener.group(1).lower()
+        block = None if key in dead else _BLOCK.match(chunk, opener.start())
+        if block is None:
+            dead.add(key)
+            at = opener.end()
+            continue
+        out.append(chunk[done : opener.start()])
+        done = at = block.end()
+    out.append(chunk[done:])
+    return "".join(out)
+
+
+def _drop_tags(chunk: str) -> str:
+    """``_TAG.sub(" ", chunk)`` in linear time: the output of the old call
+    ``re.sub(r"<[^>]+>", " ", chunk)`` for every input. No tag ends after the last
+    ``>``, and before it every ``<`` meets a ``>``."""
+    last = chunk.rfind(">") + 1
+    return _TAG.sub(" ", chunk[:last]) + chunk[last:]
+
+
 def _split_quote(msg) -> tuple[str, str]:
     """The squashed text of a draft before its first quote, and the squashed text from
     the quote on: the HTML text before / from the first blockquote, else the plain lines
@@ -303,8 +343,7 @@ def _split_quote(msg) -> tuple[str, str]:
         closes = list(re.finditer(r"(?i)</blockquote>", quote))
         end = closes[-1].end() if closes else 0
         for chunk in (markup[:at], _drop_placeholders(quote[:end]) + quote[end:]):
-            chunk = re.sub(r"(?is)<(script|style).*?</\1>", "", chunk)
-            parts.append(html.unescape(re.sub(r"<[^>]+>", " ", chunk)))
+            parts.append(html.unescape(_drop_tags(_drop_blocks(chunk))))
         head, tail = parts
     else:
         lines = text.splitlines()
