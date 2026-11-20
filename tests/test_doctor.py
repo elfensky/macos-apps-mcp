@@ -304,6 +304,34 @@ def test_automation_bundle_ids_match_the_grant_map():
         assert [t for svc, t in ADAPTER_GRANTS[name] if svc == EVENTS] == [bundle]
 
 
+def test_bundle_ids_by_bundle_id_come_from_the_runtime_table():
+    # #585: one table holds the ids; doctor keys it by the lower-case adapter name.
+    table = {app.lower(): bundle for app, bundle in runtime.BUNDLE_IDS.items()}
+    assert table == doc._AUTOMATION_BUNDLES
+
+
+def test_probe_by_bundle_id_gets_the_id_of_each_app(monkeypatch):
+    # #585: a name can resolve to another bundle (Mail's Quick Look extension).
+    calls = []
+    monkeypatch.setattr(
+        runtime, "run_osascript", lambda script, *args, **kw: calls.append(args)
+    )
+    doc._automation_surfaces(request=True)
+    assert calls == [(runtime.BUNDLE_IDS[app],) for app in doc._AUTOMATION_APPS]
+    assert calls[0] == ("com.apple.mail",) and len(calls) == 6
+    assert not {a for (a,) in calls} & set(doc._AUTOMATION_APPS)
+
+
+def test_probe_by_bundle_id_keeps_the_process_line_by_name(monkeypatch):
+    # pgrep reads a process by its name; the surface keeps the adapter name.
+    asked = []
+    monkeypatch.setattr(runtime, "run_osascript", lambda *a, **k: "")
+    monkeypatch.setattr(doc, "app_process_info", lambda app: asked.append(app))
+    surfaces = doc._automation_surfaces(request=True)
+    assert asked == list(doc._AUTOMATION_APPS)
+    assert [s["surface"] for s in surfaces] == [a.lower() for a in asked]
+
+
 def test_automation_surfaces_carry_process_line(monkeypatch):
     # #183: pid + uptime answer "did the force-quit actually restart Mail?" — a UI
     # quit once left a 37-minute-old wedged process alive. Reported even unprobed
@@ -365,7 +393,7 @@ def test_probe_template_swallows_only_1728():
     assert lines == [
         "on run argv",
         "with timeout of 120 seconds",
-        "tell application (item 1 of argv)",
+        "tell application id (item 1 of argv)",
         "try",
         "count windows",
         "on error errMsg number errNum",
@@ -402,7 +430,7 @@ def test_probe_error_filter_under_real_osascript(number, message, expected):
     """#317: -1728 exits 0; -1743 and -609 keep their number and classify."""
     if not shutil.which("osascript"):
         pytest.skip("osascript not available")
-    tell, count = "tell application (item 1 of argv)", "count windows"
+    tell, count = "tell application id (item 1 of argv)", "count windows"
     assert doc._PROBE.count(tell) == 1 and doc._PROBE.count(count) == 1
     # `tell current application` plus `error` sends no Apple event, so no app
     # launches and no consent prompt can appear.
