@@ -680,6 +680,15 @@ develop 70186a1, one Gmail account, macOS 27.0.1, Mail watchdog running.
 
 ## 7. AppleScript language traps
 
+- **Address an app by its bundle id, never by its name** (#585). Write `tell application id
+  "com.apple.mail"`. Three bundles carry the name Mail: Mail.app and two extensions inside it.
+  On 2026-11-06 (macOS 27.2), with Mail closed and the Quick Look extension running, the name
+  resolved to that extension, and every Mail script failed with a syntax error (-2741). The
+  same script inside a `tell` with the id `com.apple.mail` compiled while Mail stayed closed.
+  The first command to an id starts the app (Apple's rule for the `application id` form; not
+  measured here). `runtime` holds the one table of ids (`BUNDLE_IDS`), and its timeout hint
+  reads the process name from it. **Not run on a device yet:** an id-form script against a
+  Mail that it just started (Phase 05.12, plan 09, M13).
 - **`st` is a reserved word** — the ordinal suffix, as in "1st". `set st to "x"` fails with
   *"Expected expression but found “st”"* (-2741) at a character offset that points at the
   assignment and explains nothing. Caught 2026-08-03 by running `move_mail` for the first time,
