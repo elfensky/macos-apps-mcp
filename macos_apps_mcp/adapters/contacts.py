@@ -43,7 +43,7 @@ _SEARCH = """on run argv
   set rSep to character id 30
   set out to ""
   with timeout of 120 seconds
-  tell application "Contacts"
+  tell application id "com.apple.AddressBook"
     set idList to id of (people whose name contains q)
     set nameList to name of (people whose name contains q)
     set orgList to organization of (people whose name contains q)
@@ -79,7 +79,7 @@ _CREATE = """on run argv
   set ln to item 2 of argv
   set org to item 3 of argv
   with timeout of 120 seconds
-  tell application "Contacts"
+  tell application id "com.apple.AddressBook"
     set p to make new person with properties {first name:fn}
     if ln is not "" then set last name of p to ln
     if org is not "" then set organization of p to org
@@ -98,7 +98,7 @@ _VERIFY = """on run argv
   set pid to item 1 of argv
   set uSep to character id 31
   with timeout of 120 seconds
-  tell application "Contacts"
+  tell application id "com.apple.AddressBook"
     try
       set p to person id pid
     on error

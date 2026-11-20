@@ -20,7 +20,7 @@ _TABS = (
     + """
 
 with timeout of 120 seconds
-tell application "Safari"
+tell application id "com.apple.Safari"
   set us to character id 31
   set rs to character id 30
   set out to ""
@@ -39,7 +39,7 @@ end timeout"""
 _OPEN = """on run argv
   set u to item 1 of argv
   with timeout of 120 seconds
-  tell application "Safari"
+  tell application id "com.apple.Safari"
     if (count of windows) is 0 then
       make new document with properties {URL:u}
     else
