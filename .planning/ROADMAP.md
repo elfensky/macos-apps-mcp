@@ -619,18 +619,19 @@ Device-dependent Notes and draft changes retain their recorded probe prerequisit
 - Each AppleScript Mail tool works while Mail.app is closed, or refuses with a directive that names Mail. The scripts address Mail by its bundle id, so the name cannot resolve to Mail's Quick Look extension (#585).
 - A reply is not refused only because another app took the focus during the window check, or the refusal names the check that failed and tells the person what to do (#607).
 - The quote check of a reply does not take the account signature for Mail's quote (#609). A key that Mail runs late, after a paste that did not settle, pastes nothing into another compose window, and the settle bound is measured on a device (#610). The reply sweep strips HTML in linear time (#611).
+- The other parse steps of the reply sweep (text normalization, header parse, MIME parse) are bounded on crafted mail (#626). No plan yet: found by the probe review of the #611 change on 2026-11-20.
 
 Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule. The phase-close code review of Phase 05.2 (2026-11-19) found #609, #610 and #611, which join the phase under the same rule.
 **Requirements**: FIX-27, FIX-28, FIX-29, FIX-30, FIX-31, FIX-32, FIX-33, FIX-34, FIX-35 (#568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #585, #607, #609, #610, #611, #581; the bugs #572 to #580 were implemented in PR #584)
 **Depends on:** Phase 05.6
-**Plans:** 0/10 plans complete. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
+**Plans:** 3/10 plans complete (02, 03 and 04 are merged; their requirements complete at the acceptance sitting). Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
 
 Plans:
 **Wave 1** *(parallel: no shared source file)*
 - [ ] 05.12-01-PLAN.md — Measurement sitting 1 on the installed 0.16.1: bounds and verdicts for #607, #609, #610, device readings for #585 and #611 (owner, 30 min)
-- [ ] 05.12-02-PLAN.md — FIX-34: the reply sweep strips HTML in linear time, with a size cap (#611)
-- [ ] 05.12-03-PLAN.md — FIX-27: opening the app after an update restarts the daemon (#568)
-- [ ] 05.12-04-PLAN.md — FIX-30 part 1: Mail scripts and the doctor probe address the app by bundle id (#585)
+- [x] 05.12-02-PLAN.md — FIX-34: the reply sweep strips HTML in linear time, with a size cap (#611)
+- [x] 05.12-03-PLAN.md — FIX-27: opening the app after an update restarts the daemon (#568)
+- [x] 05.12-04-PLAN.md — FIX-30 part 1: Mail scripts and the doctor probe address the app by bundle id (#585)
 
 **Wave 2** *(blocked on Wave 1)*
 - [ ] 05.12-05-PLAN.md — FIX-30 part 2: the other five apps by bundle id, held by a guard test (#585)
@@ -754,7 +755,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 20/20 | Complete    | 2026-11-19 |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
-| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 0/10; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
+| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 3/10; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |

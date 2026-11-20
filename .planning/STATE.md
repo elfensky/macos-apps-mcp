@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.12 is planned and checked (2026-11-20): research, 10 plans in 5 waves, three scoped checker passes (4 blockers, 26 warnings, 12 info) and one revision that applied all 42 items; no second checker pass. Phase 05.6 plan 05.6-06 (the owner probe sitting) is planned too. Next, with the owner at the Mac: the 05.6-06 probe sitting and the 05.12-01 measurement sitting (they can share one visit); without the owner: /gsd-execute-phase 05.12 for plans 02, 03 and 04 (wave 1 code lanes, each stops at a draft PR for a probe review). Release 0.16.1 is published and installed. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615."
-last_updated: "2026-11-20T12:00:00.000Z"
+stopped_at: "Phase 05.12 wave 1 code is merged (2026-11-20): plans 02 (PR 624, the linear HTML strip), 04 (PR 623, Mail scripts by bundle id) and 03 (PR 625, the restart after an update), each after an independent probe review and a fix round; their issues 611, 585 and 568 stay open until the acceptance sitting. Issue 626 (other parse steps of the sweep) was found by the review and has no plan yet. Next without the owner: plans 05 and 06 (wave 2). Next with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour); plan 07 waits for 05.12-01. Open for the owner: the AGENTS.md clause on bundle ids (PR 623 left it unchanged), the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it."
+last_updated: "2026-11-20T16:30:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 11
   total_plans: 110
-  completed_plans: 99
+  completed_plans: 102
 last_activity: 2026-11-20
-last_activity_desc: "Phase 05.12 planned: research, 10 plans in 5 waves, checked and revised."
+last_activity_desc: "Phase 05.12 wave 1: PRs 624, 623 and 625 merged after probe reviews; issue 626 filed."
 ---
 
 # Project State
@@ -267,5 +267,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-20
-Stopped at: Phase 05.12 is planned and checked (2026-11-20): research, 10 plans in 5 waves, three scoped checker passes (4 blockers, 26 warnings, 12 info) and one revision that applied all 42 items; no second checker pass. Phase 05.6 plan 05.6-06 (the owner probe sitting) is planned too. Next, with the owner at the Mac: the 05.6-06 probe sitting and the 05.12-01 measurement sitting (they can share one visit); without the owner: /gsd-execute-phase 05.12 for plans 02, 03 and 04 (wave 1 code lanes, each stops at a draft PR for a probe review). Release 0.16.1 is published and installed. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615.
+Stopped at: Phase 05.12 wave 1 code is merged (2026-11-20): plans 02 (PR 624, the linear HTML strip), 04 (PR 623, Mail scripts by bundle id) and 03 (PR 625, the restart after an update), each after an independent probe review and a fix round; their issues 611, 585 and 568 stay open until the acceptance sitting. Issue 626 (other parse steps of the sweep) was found by the review and has no plan yet. Next without the owner: plans 05 and 06 (wave 2). Next with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour); plan 07 waits for 05.12-01. Open for the owner: the AGENTS.md clause on bundle ids (PR 623 left it unchanged), the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
