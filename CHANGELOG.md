@@ -27,7 +27,8 @@ surface may still shift between minor versions.
   (`com.apple.mail` for Mail). The id form is Apple's documented way to address an app that
   may not be running. The device check with Mail closed is still open. An "app not running"
   error now names the app when the script names its app; the `doctor` probe has a variable
-  target and keeps the generic text.
+  target and keeps the generic text. The scripts of Notes, Messages, Music, Contacts and Safari
+  address their app by bundle id too, and a test keeps every script in the id form.
 - **Opening the app after an update starts the new daemon** (#568). launchd keeps the old daemon
   process after the app is replaced. Before, an open after an update showed the old daemon's
   dashboard, or an alert that asked for a Terminal command. Now each open compares the running
