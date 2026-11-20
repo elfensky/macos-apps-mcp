@@ -224,8 +224,15 @@ def test_off_adapter_gets_no_apple_event(monkeypatch):
         "ok": None,
         "status": "adapter_off",
     }
-    assert "Mail" not in apps
-    assert sorted(apps) == ["Contacts", "Messages", "Music", "Notes", "Safari"]
+    # #585: the probe gets each app's bundle id, never its name
+    assert "com.apple.mail" not in apps
+    assert sorted(apps) == [
+        "com.apple.AddressBook",
+        "com.apple.MobileSMS",
+        "com.apple.Music",
+        "com.apple.Notes",
+        "com.apple.Safari",
+    ]
 
 
 def test_off_eventkit_entity_is_not_read_or_requested(monkeypatch):

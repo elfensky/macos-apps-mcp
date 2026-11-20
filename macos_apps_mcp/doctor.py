@@ -52,8 +52,9 @@ _AUTOMATION_APPS = (
     "Music",
 )
 
-# The app name is passed via argv (never interpolated), matching the injection-safe
-# osascript convention even though these targets are constants. name/id/version/
+# The app's bundle id is passed via argv (never spliced into the script), matching the
+# injection-safe osascript convention even though these targets are constants. An id
+# names one app; a name can resolve to another bundle (#585). name/id/version/
 # running/frontmost are host-resolved since AppleScript 10.5 — no Apple event, no TCC
 # check — so a probe asking for them proves nothing; it must send a REAL event, and
 # `count windows` is the cheapest read-only command that does. Trade-off: it launches
@@ -70,7 +71,7 @@ _AUTOMATION_APPS = (
 _PROBE = (
     "on run argv\n"
     "  with timeout of 120 seconds\n"
-    "    tell application (item 1 of argv)\n"
+    "    tell application id (item 1 of argv)\n"
     "      try\n"
     "        count windows\n"
     "      on error errMsg number errNum\n"
@@ -178,15 +179,9 @@ def _process_line(app: str) -> str:
 
 
 # Must equal the EVENTS targets of dashboard/grants.py ADAPTER_GRANTS, which doctor may
-# not import (pinned by test_automation_bundle_ids_match_the_grant_map).
-_AUTOMATION_BUNDLES = {
-    "mail": "com.apple.mail",
-    "notes": "com.apple.Notes",
-    "contacts": "com.apple.AddressBook",
-    "safari": "com.apple.Safari",
-    "messages": "com.apple.MobileSMS",
-    "music": "com.apple.Music",
-}
+# not import (pinned by test_automation_bundle_ids_match_the_grant_map). Built from the
+# one table of bundle ids, which runtime owns (#585).
+_AUTOMATION_BUNDLES = {app.lower(): bid for app, bid in runtime.BUNDLE_IDS.items()}
 
 # runtime.automation_permission OSStatus -> (status, ok); anything else is probe_error.
 _AE_STATUS = {
@@ -245,7 +240,9 @@ def _automation_surfaces(request: bool) -> list[dict]:
             out.append(_live_automation(name, app))
         else:
             try:
-                runtime.run_osascript(_PROBE, app, timeout=_PROBE_TIMEOUT)
+                runtime.run_osascript(
+                    _PROBE, _AUTOMATION_BUNDLES[name], timeout=_PROBE_TIMEOUT
+                )
                 out.append(_surface(name, "automation", True, "ok"))
             except NativeError as e:
                 # #47 already fingerprinted it (automation_denied / app_not_running /
