@@ -150,6 +150,8 @@ Use `ditto` (it keeps file times; a Finder drag is also fine), not `cp -R`. `cp 
 file's modification time, so a build made before #297 rewrites its `.pyc` inside the signed bundle
 on the first run and breaks the code seal. If an older `/Applications/macos-apps-mcp.app` is
 there, move it away first: `ditto` merges into an existing bundle, and a stale file breaks the seal.
+Then open the app (section 3) or run the kickstart of section 6, so the new daemon starts:
+launchd keeps the old daemon process until one of the two restarts it.
 
 The bundle **must** live at `/Applications/macos-apps-mcp.app` before registering: the agent
 plist names that path, so `~/Applications` does not work either. A
@@ -165,6 +167,25 @@ The first open registers the agent and shows the consent dialogs once (step 3 be
 links the CLI and opens the dashboard on its Health page. Health lists the grants that are still
 missing. A grant without a dialog gets an Open Settings link. If the first open stops before the
 dialogs end, the next open runs it again. Every later open goes to the dashboard.
+
+**An open after an update (#568).** launchd keeps the old daemon process after the bundle is
+replaced. So each open compares the running daemon with the app: it reads `GET /identity` on the
+daemon's unix socket, which answers the version and the build of the daemon. When the version or
+the build differs, or the daemon is older than this release (it has no such route), the open
+restarts the daemon at once with the kickstart of section 6. It then waits until the new daemon
+answers, and opens the dashboard. During the wait it shows one alert, which closes by itself.
+The first start after an update can take a few minutes. The bound of the wait is 300 s; after it
+an alert names Login Items and the kickstart command, and no dashboard opens.
+
+- A tool call that runs at the restart ends with the uncertain-outcome answer (Troubleshooting,
+  "A response stream ends without an answer"). It is not repeated.
+- Each MCP client must reconnect (section 4).
+- An open with the same version and build restarts nothing and shows no alert.
+- An open never restarts a daemon that does not answer. A daemon in its start listens before it
+  serves, and a restart would kill the start. The open waits for it.
+
+`install-agent` waits for an answer on the socket too. It compares nothing and restarts nothing,
+so an update through `install-agent` still needs the kickstart.
 
 The app must run from `/Applications/macos-apps-mcp.app`, because the agent plist names that
 path. From any other place, the app shows an alert and installs nothing. Each failure also shows
@@ -255,7 +276,8 @@ differs, `command`/`args` stay identical. A Terminal-spawned shim uses the same 
 a new bundle the moment launchd restarts it, but a client that is *already connected* keeps
 running the shim process it spawned at connect time — old code, until it reconnects. Beyond
 "the repo is not the daemon": after a rebuild, restart the daemon **and** reconnect every
-client, or you are testing one build's daemon against another build's shim.
+client, or you are testing one build's daemon against another build's shim. An open of the app
+that restarted the daemon (section 3) does not reconnect the clients.
 
 ### 5. Outbound (send) mode under the daemon
 
@@ -519,6 +541,22 @@ build:
   self-heals a stale socket left by a crash (connect-probe on `EADDRINUSE`, unlink + rebind if
   refused) — if a client still can't connect, confirm the daemon process is actually running
   (`launchctl print`, above) before assuming the socket is the problem.
+
+- **The alert "The background service did not answer in time".** Opening the app waited 300 s
+  for the daemon (section 3, "An open after an update"). Check the Login Items toggle (above),
+  then the service state, then restart the daemon:
+  ```sh
+  launchctl print gui/$UID/ren.lav.macos-apps-mcp
+  launchctl kickstart -k gui/$(id -u)/ren.lav.macos-apps-mcp
+  ```
+  The app reads `GET /identity` on the daemon's unix socket. This line shows the same answer:
+  ```sh
+  curl --unix-socket ~/.local/state/macos-apps-mcp/daemon/mcp.sock http://daemon/identity
+  ```
+  A daemon of this release answers `{"version": …, "build": …}`, the values that `doctor` reports.
+  A daemon up to 0.16.1 answers `Not Found`. No answer means that no daemon serves the socket yet.
+  An alert that starts with "launchctl did not restart the background service" gives launchctl's
+  own reason.
 
 - **Shim fails immediately with `daemon not running`.** This is the fail-fast path
   (`shim_check`), exit code 2 — expected when no daemon is listening at
