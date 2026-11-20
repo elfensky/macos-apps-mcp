@@ -22,7 +22,7 @@ from mcp.types import Implementation
 
 import macos_apps_mcp
 from macos_apps_mcp import audit as au
-from macos_apps_mcp import daemon, deploy, registry
+from macos_apps_mcp import daemon, deploy, doctor, registry
 
 
 @pytest.fixture(autouse=True)
@@ -640,3 +640,111 @@ def test_shim_client_factory_ping_without_context_falls_back_to_legacy(monkeypat
     info = result["client_info"]
     assert (info.name, info.version) == ("macos-apps-mcp-shim", "0")
     assert result["mode"] == "legacy"
+
+
+# --- the identity route: what `launch` reads to find an older daemon (#568) ---------
+
+
+def _identity_when_up():
+    """The identity read, repeated until the served app answers: the socket listens
+    before uvicorn serves."""
+    for _ in range(100):
+        answer = deploy._daemon_identity()
+        if answer is not None:
+            return answer
+        time.sleep(0.05)
+    return None
+
+
+def test_identity_route_answers_the_captured_version_and_build(
+    sockdir, tmp_path, monkeypatch
+):
+    app = FastMCP("identity")
+    daemon.add_identity_route(app)
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    replaced = tmp_path / "build_stamp"  # the bundle on disk is a newer build
+    replaced.write_text("0000000 2099-01-01T00:00:00Z")
+    monkeypatch.setattr(doctor, "_BUILD_STAMP_PATH", replaced)
+    s = _serve(app, p)
+    try:
+        answer = _identity_when_up()
+    finally:
+        s.close()
+    assert answer == (doctor.version(), doctor._SERVING_BUILD)
+    assert answer[1] != replaced.read_text()
+
+
+def test_daemon_identity_of_an_app_without_the_route_is_empty(sockdir, monkeypatch):
+    """Every daemon up to 0.16.1: it answers over HTTP, with a 404."""
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    s = _serve(FastMCP("old"), p)
+    try:
+        assert _identity_when_up() == ("", "")
+    finally:
+        s.close()
+
+
+@pytest.mark.parametrize("kind", ["stale", "absent"])
+def test_daemon_identity_is_none_for_a_stale_or_absent_socket_file(
+    sockdir, monkeypatch, kind
+):
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    if kind == "stale":
+        daemon.bind_socket(p).close()  # a killed daemon leaves its file
+    assert p.exists() == (kind == "stale")
+    assert deploy._daemon_identity() is None
+
+
+def test_daemon_identity_is_none_when_the_socket_accepts_and_does_not_answer(
+    sockdir, monkeypatch
+):
+    """A daemon between `bind_socket()` and its first served request. It must read as
+    "nothing answers": a restart would kill a daemon in its start."""
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(deploy, "_IDENTITY_TIMEOUT", 0.2)
+    s = daemon.bind_socket(p)  # listens; nothing accepts
+    try:
+        assert deploy._daemon_identity() is None
+    finally:
+        s.close()
+
+
+_HTTP_200 = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n"
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        (_HTTP_200 + b"content-length: 2\r\n\r\n[]", ("", "")),
+        (_HTTP_200 + b'content-length: 16\r\n\r\n{"version": "1"}', ("", "")),
+        (_HTTP_200 + b"content-length: 4\r\n\r\nnope", ("", "")),
+        (
+            _HTTP_200 + b"content-encoding: gzip\r\ncontent-length: 4\r\n\r\nnope",
+            ("", ""),
+        ),
+        (b"not http at all\r\n\r\n", None),
+    ],
+    ids=["no keys", "one key", "not json", "bad encoding", "not http"],
+)
+def test_daemon_identity_of_a_bad_answer_never_raises(sockdir, monkeypatch, raw, want):
+    """The answer is untrusted: a bad HTTP answer reads as another daemon, and bytes
+    that are not HTTP read as "nothing answers"."""
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    s = daemon.bind_socket(p)
+
+    def answer_once():
+        conn, _ = s.accept()
+        conn.recv(65536)
+        conn.sendall(raw)
+        conn.close()
+
+    threading.Thread(target=answer_once, daemon=True).start()
+    try:
+        assert deploy._daemon_identity() == want
+    finally:
+        s.close()
