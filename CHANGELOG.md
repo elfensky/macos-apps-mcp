@@ -19,8 +19,32 @@ surface may still shift between minor versions.
   run. A candidate row is a Drafts row that is not late and has a Message-ID, or, after a
   send, a Sent or All Mail row with a Message-ID. Such a row is reported as `drafts_copy`
   `unproven` with the new `drafts_copy_reason` `body_too_large`, and nothing is deleted for
-  it. Other parse steps of the sweep are not bounded by this change;
-  they are tracked in #626.
+  it. The other parse steps of the sweep are bounded by the next entry (#626).
+- **The reply sweep reads crafted mail in bounded time** (#626). The same Drafts check read
+  each new stored message in three more steps that had no bound, and this work found a
+  fourth. One crafted mail kept the one native worker busy at each step: a run of 120,001
+  combining marks for 7 s in the text normalization (four times longer for each doubling); a
+  `Message-ID` or `In-Reply-To` field of 100,000 dots for about 27 s in the header read;
+  25,001 small MIME parts for 3.4 s in the message parse; a `Content-Type` field of a part of
+  40,000 bytes for 7 s. Each step now has a bound that is checked before the step runs, and
+  the result for normal mail does not change (0 differences on generated text in 13 scripts,
+  header blocks and messages with attachments; not compared on real stored mail; not run on
+  device). A row over a bound is reported as `drafts_copy` `unproven`, and nothing is deleted
+  for it. Three new `drafts_copy_reason` values name the bound. `combining_run`: a text of a
+  candidate row, or a text of the call, holds more than 30 combining characters in a row, so
+  it was not normalized. `header_too_large`: the value of a header field that the sweep reads
+  is longer than 998 characters (the whole value, with every line of a folded field); or the
+  field lies outside the first 131,072 bytes of a message whose header block does not end
+  there; or one parse reads more than 200,000 characters of field values. A file name of 253
+  bytes fits, and at most 43 attachments with such names. `message_too_large`: the stored
+  message of a candidate row is larger than 50,000,000 bytes, or has more than 1,000,000
+  lines or more than 1,000 part-delimiter lines, so it was not parsed. At most 8 candidate
+  rows are parsed in one sweep; a further one reads `too_many_rows`. An error of the parser
+  on one row reads `read_failed` for that row, and the other rows are still judged. The sweep
+  parses the `Message-ID` of a row in the thread only, so a new mail outside the thread with
+  an unreadable `Message-ID` no longer makes the result `unproven`. Before the sweep runs,
+  `mail_reply` and `reply_all` normalize the text of the original without this bound; that
+  part is tracked in #632.
 - **Mail scripts address Mail by its bundle id** (#585). With Mail closed, the name "Mail" could
   resolve to a helper bundle of the same name, and every Mail script then failed to compile.
   Each Mail script and the `doctor` probe now address the app by its bundle id
