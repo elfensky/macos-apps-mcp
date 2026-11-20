@@ -22,11 +22,18 @@ Session-scoped so both apply before any test (including collection-time fixtures
 touches either; ``pytest.MonkeyPatch`` (not the function-scoped ``monkeypatch``
 fixture, which can't be used at session scope) makes the changes and undoes them once
 per session.
+
+* The app stores (Notes, Messages, Reminders, the Photos prefs, the Mail index and the
+  Mail folder) and the default file root are locked by the function-scoped
+  ``_no_real_stores`` (#581). It is function-scoped because an integration test must
+  read the real stores, and a session-scoped patch cannot read a test's marks.
 """
 
+import os
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 
@@ -36,9 +43,88 @@ from macos_apps_mcp.adapters import (
     mail_ids,
     mail_index,
     mail_reply_cleanup,
+    messages,
+    notes,
+    reminders_store,
 )
 from macos_apps_mcp.errors import NativeError
 from tests.envelope import SCHEMA, Envelope, seed_base
+
+# The home-anchored store paths (#581): module, name, and the absent path under the
+# session's temp folder that a unit test gets instead.
+_STORE_PATHS = (
+    (notes, "NOTESTORE", "absent-notes/NoteStore.sqlite"),
+    (messages, "CHAT_DB", "absent-messages/chat.db"),
+    (reminders_store, "_STORES", "absent-reminders/Stores"),
+    (runtime, "_PHOTOS_PREFS", "absent-photos/com.apple.Photos.plist"),
+)
+# These two read ``Path.home()`` at call time, so they have no constant to move.
+_STORE_FUNCTIONS = ("envelope_index_path", "mail_root")
+# The real objects, read before any patch: the lock replaces each one, and its copies.
+REAL_STORE_OBJECTS = {name: getattr(mod, name) for mod, name, _ in _STORE_PATHS} | {
+    name: getattr(mail_index, name) for name in _STORE_FUNCTIONS
+}
+
+# The areas of the real home that no unit test may open, connect to or list. An area
+# that holds this checkout is left out, or every read of the repo would be refused.
+_REAL_STORE_AREAS = tuple(
+    area
+    for area in (
+        *(
+            str(Path.home() / part)
+            for part in (
+                "Library/Mail",
+                "Library/Messages",
+                "Library/Group Containers",
+                "Library/Containers/com.apple.Photos",
+                "Library/Application Support/com.apple.TCC",
+                "Downloads",
+                ".local/state/macos-apps-mcp",
+            )
+        ),
+        "/Library/Application Support/com.apple.TCC",
+    )
+    if not __file__.startswith(area + "/")
+)
+_STORE_EVENTS = frozenset({"open", "sqlite3.connect", "os.scandir", "os.listdir"})
+_STORE_REFUSAL = (
+    "a unit test reached a real app store ({what}) — give the test a fixture store "
+    "or a fake (fake_envelope, blank_envelope, tests/_fakes.py); see _no_real_stores"
+)
+# The reads that the running unit test tried; None outside a unit test (hook off).
+_store_hits: list[str] | None = None
+
+
+def _refuse_real_store(event: str, args: tuple) -> None:
+    """The audit hook of ``_no_real_stores``: refuse a read under a real store area.
+
+    It runs BEFORE the open, the connect or the scan, so the read does not happen.
+    shortcut: a bare ``stat`` raises no audit event and a path through a symlink has
+    another prefix, so neither is seen; widen the hook when a test leaks that way."""
+    if event not in _STORE_EVENTS or _store_hits is None or not args:
+        return
+    target = args[0]
+    if isinstance(target, os.PathLike):
+        target = os.fspath(target)
+    if isinstance(target, bytes):
+        target = os.fsdecode(target)
+    if not isinstance(target, str):
+        return  # a file descriptor
+    if target.startswith("file:"):  # a sqlite URI
+        target = unquote(target.removeprefix("file:"))
+    if target.startswith(_REAL_STORE_AREAS):
+        area = next(a for a in _REAL_STORE_AREAS if target.startswith(a))
+        # the area only, with ~ for the home: no file name of the owner in the output
+        what = f"{event} under {area.replace(str(Path.home()), '~', 1)}"
+        _store_hits.append(what)
+        raise AssertionError(_STORE_REFUSAL.format(what=what))
+
+
+def _fail_on_store_hits(hits: list[str]) -> None:
+    assert not hits, _STORE_REFUSAL.format(what=", ".join(sorted(set(hits))))
+
+
+sys.addaudithook(_refuse_real_store)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -292,3 +378,55 @@ def _no_real_osascript(request, monkeypatch):
         "mail_attribution_stamp",
         lambda when: (f"{when.day} {when:%b} {when.year}", f"{when:%H:%M}"),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_real_stores(request, monkeypatch, _isolated_state):
+    """Keep a unit test off the real app stores of the Mac (#581).
+
+    Two parts. The paths: ``notes.NOTESTORE``, ``messages.CHAT_DB``,
+    ``reminders_store._STORES`` and ``runtime._PHOTOS_PREFS`` point at absent paths
+    under the session's temp folder, ``mail_index.envelope_index_path`` and
+    ``mail_index.mail_root`` return ``None`` (the answer of a Mac with no Mail data),
+    and ``MACOS_APPS_FILE_ROOT`` is a temp folder. A copy in another package module
+    (``from … import NAME``) is replaced too. The refusal: an open, a sqlite connect or
+    a directory listing under a real store area fails the test with the lock's message,
+    also when the code under test caught it. So a test that reaches a real store by
+    another route (a new home-anchored path, the real function bound by name) fails
+    instead of reading the owner's data. The lock never returns a real path.
+
+    A test that needs a store builds its own (``fake_envelope``, ``blank_envelope``, a
+    temp NoteStore) and patches the name: the lock runs first, so that patch wins.
+
+    Function-scoped, not a part of the session-scoped ``_isolated_state``, because an
+    integration test must read the real stores and only a function-scoped fixture can
+    read a test's marks. Exempt: tests marked ``integration`` only. Tests marked
+    ``device`` stay under the lock; that has no effect today, because the device suite
+    reaches the Mac through the daemon's socket.
+
+    The outside check is the audit plugin ``store_touch_audit.py`` of Phase 05.12
+    (``pytest -p store_touch_audit``): 0 rows on the default suite. Yields the list of
+    the refused reads; the self-tests in ``tests/test_native_seam.py`` read it.
+    """
+    global _store_hits
+    if "integration" in request.keywords:
+        yield None
+        return
+
+    replacement = {name: _isolated_state / rel for _, name, rel in _STORE_PATHS}
+    replacement |= dict.fromkeys(_STORE_FUNCTIONS, lambda: None)
+    # Package modules only, as for ``eventkit.store`` above.
+    for mod_name, mod in list(sys.modules.items()):
+        if mod_name.startswith("macos_apps_mcp"):
+            for name, real in REAL_STORE_OBJECTS.items():
+                if getattr(mod, name, None) is real:
+                    monkeypatch.setattr(mod, name, replacement[name])
+    monkeypatch.setenv("MACOS_APPS_FILE_ROOT", str(_isolated_state / "file-root"))
+
+    hits: list[str] = []
+    _store_hits = hits
+    try:
+        yield hits
+    finally:
+        _store_hits = None
+    _fail_on_store_hits(hits)

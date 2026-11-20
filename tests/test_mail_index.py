@@ -6,6 +6,10 @@ import pytest
 from macos_apps_mcp.adapters import mail_index
 from macos_apps_mcp.errors import SchemaDrift
 
+# The real function, bound at import: the store lock of conftest.py replaces the module
+# attribute in every unit test (#581). The test below gives it a temp home.
+_real_envelope_index_path = mail_index.envelope_index_path
+
 
 def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
     # sorted() on p.parts is LEXICOGRAPHIC: 'V10' < 'V9', so a Mac that kept an old
@@ -16,7 +20,7 @@ def test_envelope_index_path_prefers_v10_over_v9(tmp_path, monkeypatch):
         d.mkdir(parents=True)
         (d / "Envelope Index").touch()
     monkeypatch.setenv("HOME", str(tmp_path))
-    path = mail_index.envelope_index_path()
+    path = _real_envelope_index_path()
     assert path is not None
     assert path.parts[-3] == "V10"
 
