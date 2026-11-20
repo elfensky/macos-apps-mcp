@@ -163,10 +163,10 @@ def owned_sender(from_address: str) -> str:
 ROLLBACK = """on rollback(msg)
   with timeout of 120 seconds
     try
-      tell application "Mail" to delete msg
+      tell application id "com.apple.mail" to delete msg
     end try
     try
-      tell application "Mail" to get subject of msg
+      tell application id "com.apple.mail" to get subject of msg
       return false
     on error number en
       return (en is -1728)
@@ -214,7 +214,7 @@ on run argv
   set bccList to item 7 of argv
   set us to character id 31
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set msg to make new outgoing message with properties {visible:false}
     try
       set subject of msg to subj
@@ -283,7 +283,7 @@ on run argv
   set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   set us to character id 31
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set matches to (messages of mb whose message id is mid)
     if (count of matches) is 0 then error ¬
       "no message with that message id in " & (item 4 of argv)
@@ -336,7 +336,7 @@ end run"""
 # heuristics to attribute the count to one message.
 _OUTBOX_COUNT = """on run argv
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     return (count of (messages of outbox)) as text
   end tell
   end timeout
@@ -372,7 +372,7 @@ on run argv
   set rs to character id 30
   set out to ""
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set matches to (messages of mb whose message id is mid)
     if (count of matches) is 0 then error ¬
       "no message with that message id in " & (item 3 of argv)
@@ -432,7 +432,7 @@ on run argv
   set wantText to ((count of argv) < 4) or ((item 4 of argv) is not "0")
   set us to character id 31
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set matches to (messages of mb whose message id is mid)
     if (count of matches) is 0 then error ¬
       "no message with that message id in " & (item 3 of argv)
@@ -480,7 +480,7 @@ _OUTGOING_IDS = (
 
 on run argv
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set xs to id of every outgoing message
     end tell
   end timeout
@@ -522,7 +522,7 @@ on newWindowIds(idsBefore, idsAfter)
     if wi is not in idsBefore then
       set cl to true
       try
-        tell application "Mail" to set cl to closeable of window id wi
+        tell application id "com.apple.mail" to set cl to closeable of window id wi
       end try
       if cl then set end of found to wi
     end if
@@ -537,7 +537,7 @@ on run argv
   set expected to item 5 of argv
   set us to character id 31
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set m to «class mssg» id n of mb
     set gotId to "<<unreadable>>"
     try
@@ -590,7 +590,7 @@ _DISCARD_OUTGOING = (
 on run argv
   set oid to (item 1 of argv) as integer
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       if my rollback(outgoing message id oid) then return "dead"
       return "alive"
     end tell
@@ -615,7 +615,7 @@ on run argv
   set mid to item 2 of argv
   set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set matches to (messages of mb whose message id is mid)
       if (count of matches) is 0 then return "original-missing"
       set subj to subject of (item 1 of matches)
@@ -650,7 +650,7 @@ _ACCOUNT_ADDRESSES = """on run argv
   set rs to character id 30
   set out to ""
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     repeat with acc in accounts
       set AppleScript's text item delimiters to us
       set out to out & (id of acc) & us & ((email addresses of acc) as text) & rs
@@ -679,7 +679,7 @@ on run argv
   set n to (item 2 of argv) as integer
   set mb to my mailboxFor(item 3 of argv, item 4 of argv)
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set subj to subject of («class mssg» id n of mb)
       if subj is missing value or subj is "" then return "block"
       repeat with oi in ids
@@ -707,7 +707,7 @@ end run"""
 # row's own message id, never by this outgoing message.
 _SEND_OUTGOING = """on run argv
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set r to outgoing message id ((item 1 of argv) as integer)
       send r
       return "sent"
@@ -732,7 +732,7 @@ on run argv
   set mid to item 1 of argv
   set mb to my mailboxFor(item 2 of argv, item 3 of argv)
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set matches to (messages of mb whose message id is mid)
       if (count of matches) is 0 then return "gone"
       if (count of matches) > 1 then return "several"
@@ -776,7 +776,7 @@ on run argv
   set us to character id 31
   set rs to character id 30
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set dm to drafts mailbox
     set n to count of (messages of dm)
     set found to missing value
