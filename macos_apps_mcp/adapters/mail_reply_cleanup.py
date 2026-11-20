@@ -108,6 +108,38 @@ MAX_NEW_ROWS = 300
 # run of 2026-11-20, and up to 0.35 s on a busy Mac.
 MAX_BODY_CHARS = 2_000_000
 
+# The bounds of the read path (#626). Each sits before the step it bounds. The numbers
+# are from the prototype run of 2026-11-20, on generated input.
+# The header read takes this many bytes of a stored file: 7.5 times the largest
+# generated header block (17,407 bytes: 16 hops, 4 seals, 120 references). The field
+# split of a crafted block of this size took at most 0.05 s.
+HEADER_READ_BYTES = 131_072
+# A bound on the VALUE of one header field: the whole raw value as the parser stores
+# it, with every line of a folded field and its fold bytes. The basis, and a basis
+# only: RFC 5322 section 2.1.1 allows 998 characters for one LINE, and a valid message
+# id fits one line. The value parse of the worst field of this size took 2 to 3 ms.
+MAX_HEADER_FIELD_CHARS = 998
+# One parse reads at most this many characters of field values together. The parser
+# reads the Content-Type of each part about 5 times, so 43 attachments fit when each
+# has the longest file name a Mac allows (253 bytes) outside ASCII, or 276 with names
+# of 10 characters; a generated message with 100 attachments used 90,252.
+MAX_HEADER_FETCH_CHARS = 200_000
+# A candidate row is parsed only when its stored size is at most this. A message of
+# the 25 MB sending limit of the large providers is about 34 MB after base64 (that
+# limit is from memory, not read from a source).
+MAX_MESSAGE_BYTES = 50_000_000
+# ... and when it has at most this many lines (LF, CR and CRLF line ends). A 25 MB
+# message with one base64 attachment has 320,526; 4,000,000 one-byte lines took 0.6 s.
+MAX_MESSAGE_LINES = 1_000_000
+# ... and at most this many part-delimiter lines (lines that start with two hyphens).
+# A generated message with 100 attachments has 106; 25,001 small parts took 3.4 s, and
+# the most parts that pass took 0.13 to 0.27 s.
+MAX_MESSAGE_PARTS = 1_000
+# At most this many candidate rows are parsed in one sweep. A send makes two or three
+# (the Drafts copy, the Sent copy, on Gmail an All Mail twin); a candidate row built
+# just inside every bound took 0.36 to 0.53 s.
+MAX_PARSED_ROWS = 8
+
 
 class _BodyTooLarge(Exception):
     """A decoded body is over ``MAX_BODY_CHARS``. It carries no text of the body."""
@@ -118,6 +150,43 @@ class _CombiningRun(Exception):
     ``text.MAX_COMBINING_RUN``; it was not normalized. It carries no text. It derives
     from ``Exception`` itself: ``_split_quote`` skips a part on ``LookupError`` and
     ``ValueError``, and a refusal must never be skipped."""
+
+
+class _HeaderTooLarge(Exception):
+    """A header field that the sweep reads is over ``MAX_HEADER_FIELD_CHARS``, the
+    fields of one parse are over ``MAX_HEADER_FETCH_CHARS`` together, or the field
+    lies in the part of a header block that was not read. It carries no text, and it
+    derives from ``Exception`` itself, like ``_CombiningRun`` and for the same reason:
+    it can leave ``get_content()`` of a part."""
+
+
+class _MessageTooLarge(Exception):
+    """A stored message is over ``MAX_MESSAGE_BYTES``, ``MAX_MESSAGE_LINES`` or
+    ``MAX_MESSAGE_PARTS``; it was not parsed. It carries no text, and it derives from
+    ``Exception`` itself."""
+
+
+class _BoundedPolicy(email.policy.EmailPolicy):
+    """``email.policy.default`` with two limits on the VALUE parse of a field. It only
+    refuses: a value inside the limits is parsed by the parent method, so it is the
+    value of the default policy. ``budget``: a one-item list, the characters of field
+    values that this parse may still read."""
+
+    budget = None
+
+    def header_fetch_parse(self, name, value):
+        # the raw value as the parser stored it: fold bytes included
+        if len(value) > MAX_HEADER_FIELD_CHARS:
+            raise _HeaderTooLarge
+        self.budget[0] -= len(value)
+        if self.budget[0] < 0:
+            raise _HeaderTooLarge
+        return super().header_fetch_parse(name, value)
+
+
+def _bounded_policy() -> _BoundedPolicy:
+    """A new policy object with a new budget: one for each parse."""
+    return _BoundedPolicy(budget=[MAX_HEADER_FETCH_CHARS])
 
 
 class Draft(NamedTuple):
@@ -342,7 +411,9 @@ def _split_quote(msg) -> tuple[str, str]:
     ``MAX_BODY_CHARS``. Raises ``_CombiningRun`` before either text is normalized when
     one of them holds a long run of combining characters (``long_combining_run``); the
     text before the quote is scanned after its object marks are removed, because a
-    removal can join two runs."""
+    removal can join two runs. A refusal of the bounded policy (``_HeaderTooLarge``)
+    can leave ``get_content()`` of a part; it is not a decode error and is not caught
+    here."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
@@ -381,29 +452,90 @@ def _split_quote(msg) -> tuple[str, str]:
 
 
 def _read_draft(url: str, rowid: int):
-    """``(In-Reply-To, Message-ID, body, received)`` of one stored message, or None
-    when its file is absent or unreadable. Only the headers are parsed here; ``body()``
-    parses the whole message and is called for a threaded row only. ``received``: the
-    headers carry a ``Received`` field. A mail server adds one to a delivered message;
-    a draft and a Sent copy carry none."""
+    """``(in_reply_to, more)`` of one stored message, or None when its file is absent
+    or unreadable. ``in_reply_to`` is parsed here. ``more()`` returns
+    ``(message_id, body, received)`` and is for a row in the thread only: a row of
+    another thread costs one bounded read, one field split and one value parse.
+    ``received``: the headers carry a ``Received`` field with a value. A mail server
+    adds one to a delivered message; a draft and a Sent copy carry none. ``body()``
+    parses the whole message and is for a candidate row only.
+
+    Two bounds hold for the header read. Only the first ``HEADER_READ_BYTES`` of the
+    file are read (one ``read``; the file size comes from ``stat``). A field value is
+    parsed only when it is at most ``MAX_HEADER_FIELD_CHARS`` long. The standard
+    library splits the fields and parses each value, so a value is the value of the
+    whole-message read, or a refusal (``_HeaderTooLarge``). The parser itself reads
+    the top-level ``Content-Type`` of every row when the header read ends; the same
+    policy bounds that read, so such a field over the bound is a refusal for a row of
+    any thread.
+
+    A header block is complete when the message was read whole, or when the bytes read
+    hold its end (two LF in a row, or LF CR LF). In a block that is not complete the
+    last field is not used (the cut may have shortened it), and no answer is given
+    that the part not read could change: a field that is not found there is a refusal,
+    never "absent", and so is a postmark that is not found.
+
+    ``body()`` raises ``_MessageTooLarge`` before any further read when the stored
+    size is over ``MAX_MESSAGE_BYTES``, and before the parse when the lines or the
+    part-delimiter lines are over their bounds. A message that the header read holds
+    whole is not read again; a second read must start with the bytes of the first
+    (``OSError`` otherwise: the file changed). The parse uses a bounded policy of its
+    own, so a field of a part over a bound raises ``_HeaderTooLarge``."""
     path = _emlx_path(url, rowid)
     if path is None:
         return None
     try:
-        payload = mail_index.emlx_payload(path.read_bytes())
+        size = path.stat().st_size
+        with path.open("rb") as file:
+            raw = file.read(HEADER_READ_BYTES)
     except OSError:
         return None
+    payload = mail_index.emlx_payload(raw)
     if not payload:
         return None
-    head = email.parser.BytesParser(policy=email.policy.default).parsebytes(
+    whole = size <= len(raw)
+    complete = whole or b"\n\n" in payload or b"\n\r\n" in payload
+    head = email.parser.BytesParser(policy=_bounded_policy()).parsebytes(
         payload, headersonly=True
     )
-    return (
-        str(head.get("In-Reply-To", "") or ""),
-        str(head.get("Message-ID", "") or ""),
-        lambda: email.message_from_bytes(payload, policy=email.policy.default),
-        any(str(value).strip() for value in head.get_all("Received") or ()),
-    )
+    fields = list(head.raw_items())
+    usable = fields if complete else fields[:-1]
+
+    def first(name: str) -> str:
+        for key, value in usable:
+            if key.lower() == name:
+                return str(head.policy.header_fetch_parse(key, value) or "")
+        if not complete:
+            raise _HeaderTooLarge  # it may lie in the part that was not read
+        return ""
+
+    def body():
+        if size > MAX_MESSAGE_BYTES:
+            raise _MessageTooLarge
+        full = payload
+        if not whole:
+            full = mail_index.emlx_payload(path.read_bytes())
+            if not full.startswith(payload):
+                raise OSError("the stored message changed between the two reads")
+        lines = full.count(b"\n") + full.count(b"\r") - full.count(b"\r\n")
+        delimiters = full.count(b"\n--") + full.count(b"\r--")
+        if lines > MAX_MESSAGE_LINES or delimiters > MAX_MESSAGE_PARTS:
+            raise _MessageTooLarge
+        return email.message_from_bytes(full, policy=_bounded_policy())
+
+    def more():
+        # every `Received` field is parsed, as the whole-message read did
+        stamps = [
+            str(head.policy.header_fetch_parse(key, value))
+            for key, value in usable
+            if key.lower() == "received"
+        ]
+        received = any(stamp.strip() for stamp in stamps)
+        if not received and not complete:
+            raise _HeaderTooLarge  # a postmark may lie in the part that was not read
+        return first("message-id"), body, received
+
+    return first("in-reply-to"), more
 
 
 def _bare(text: str) -> str:
@@ -494,6 +626,16 @@ def find_own_draft(
     arguments (``own_text``, ``attribution``, ``signature``, ``tail``; scanned once, a
     ``None`` is skipped), holds a long run of combining characters: that text is never
     normalized, and for an argument over the limit no body is parsed.
+    The read of each row is bounded (``_read_draft``). A row whose needed header field
+    is over a bound, or cannot be answered from a cut header block, is ``unproven``
+    (``header_too_large``); so is a candidate row with such a field in a part. A
+    candidate row whose stored message is over a size bound is ``unproven``
+    (``message_too_large``) and is not parsed. At most ``MAX_PARSED_ROWS`` candidate
+    rows are parsed; a further one is ``unproven`` (``too_many_rows``). An error of
+    the parser on one row (a ``RecursionError`` is one) makes that row ``unproven``
+    (``read_failed``), and the other rows are still judged. None of these rows is
+    claimed or set aside. The ``Message-ID`` and the ``Received`` fields are parsed for
+    a row in the thread only.
     An ``unproven`` verdict carries the code of its branch in ``reason`` (the first row
     that could not be set aside names it; INBOX rows after a send are judged last).
     Raises ``NativeError`` when the index cannot be read now (the caller treats that as
@@ -510,13 +652,24 @@ def find_own_draft(
     twin_mids: set[str] = set()  # Message-IDs of the Sent / All Mail copies set aside
     # INBOX rows (url, Message-ID, has Received), judged after the loop
     delivered: list[tuple[str, str, bool]] = []
+    parsed = 0  # candidate rows whose message was parsed
     for rowid, url in rows:
-        draft = _read_draft(url, rowid)
-        if draft is None:
-            # a new row we cannot read might be the one
-            return Draft("unproven", reason="unreadable_row")
-        in_reply_to, mid, body, received = draft
-        if _norm_mid(in_reply_to) != _norm_mid(original_mid):
+        try:
+            draft = _read_draft(url, rowid)
+            if draft is None:
+                # a new row we cannot read might be the one
+                return Draft("unproven", reason="unreadable_row")
+            in_reply_to, more = draft
+            if _norm_mid(in_reply_to) != _norm_mid(original_mid):
+                continue
+            mid, body, received = more()
+        except NativeError:
+            raise
+        except _HeaderTooLarge:
+            found.append(Draft("unproven", url, "", "header_too_large"))
+            continue
+        except Exception:  # noqa: BLE001 - the parser's error stays with this row
+            found.append(Draft("unproven", url, "", "read_failed"))
             continue
         is_drafts = _is_drafts_url(url)
         late = landed_by is None or rowid > landed_by
@@ -526,13 +679,28 @@ def find_own_draft(
             if bad_argument:
                 found.append(Draft("unproven", url, mid, "combining_run"))
                 continue
+            if parsed >= MAX_PARSED_ROWS:
+                found.append(Draft("unproven", url, mid, "too_many_rows"))
+                continue
+            parsed += 1
             try:
                 before, after = _split_quote(body())
+            except NativeError:
+                raise
             except _BodyTooLarge:
-                found.append(Draft("unproven", url, mid, "body_too_large"))
-                continue
+                refused = "body_too_large"
+            except _MessageTooLarge:
+                refused = "message_too_large"
+            except _HeaderTooLarge:
+                refused = "header_too_large"
             except _CombiningRun:
-                found.append(Draft("unproven", url, mid, "combining_run"))
+                refused = "combining_run"
+            except Exception:  # noqa: BLE001 - the parser's error stays with this row
+                refused = "read_failed"
+            else:
+                refused = ""
+            if refused:
+                found.append(Draft("unproven", url, mid, refused))
                 continue
             says_ours = _is_own(
                 before, own_text, attribution, signature

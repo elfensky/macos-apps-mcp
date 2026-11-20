@@ -17,6 +17,14 @@ Every text here is generated from the fixed lists below with the caller's
   sweep normalizes a text (FIX-36, #626). They are generated text: common words and
   phrases typed as escapes, in NFC, NFD or as written. ``_PINS`` holds one code point of
   each sample that an editor could fold away.
+- ``mail_headers``: one header block as Mail writes a draft (``draft``) or a Sent copy
+  (``sent``), or as a mail server delivers a message (``delivered``; ``heavy`` has 10 to
+  16 hops, 4 seals and 40 to 120 references). ``header_chain``: a random chain of
+  ``_H_TOKENS``, every piece the header parser reacts to. ``message_with_attachments``:
+  a reply with ``count`` attachments, each with its file name also as an RFC 2231
+  ``name`` parameter of ``Content-Type``. They feed the differential tests of the
+  sweep's bounded header read and message parse (FIX-36, #626). Every address and host
+  is made up and has no top-level domain.
 
 The four characters that decide a test are written as escapes, never as glyphs (an
 editor once normalized such a glyph and the test went vacuous): U+017F, U+0130 and
@@ -314,3 +322,171 @@ def script_text(rng) -> str:
         out.append(unicodedata.normalize(form, word) if form else word)
         out.append(rng.choice(_SPACES))
     return "".join(out)
+
+
+# --- header blocks, crafted field chains and messages with attachments, for the
+# bounded read of the reply sweep (FIX-36, #626) ---
+
+
+def _mid(rng) -> str:
+    left = "".join(rng.choice("ABCDEF0123456789-") for _ in range(rng.randint(8, 36)))
+    return f"<{left}@{rng.choice(['mail-example', 'host', 'mx1-example', 'icloud'])}>"
+
+
+def mail_headers(rng, kind: str) -> bytes:
+    """A header block as Mail writes a draft or a Sent copy, or as a mail server
+    delivers a message. Generated: sizes are of generated text, not of real mail."""
+    eol = "\r\n" if rng.random() < 0.5 else "\n"
+    lines = []
+    if kind in ("delivered", "heavy"):
+        hops = rng.randint(3, 8) if kind == "delivered" else rng.randint(10, 16)
+        lines.append("Return-Path: <bounce-17@lists-example>")
+        for n in range(hops):
+            lines.append(
+                f"Received: from mx{n}-example (mx{n}-example [192.0.2.{n + 1}])"
+                f"{eol}\tby mx{n + 1}-example with ESMTPS id {rng.getrandbits(60):x}"
+                f"{eol}\tfor <jane@example>; Fri, 20 Nov 2026 10:{n:02d}:00 +0000"
+            )
+        seals = 1 if kind == "delivered" else 4
+        for n in range(seals):
+            b64 = "".join(rng.choice("ABCDEFabcdef0123456789+/") for _ in range(344))
+            folded = f"{eol}\t ".join(b64[i : i + 70] for i in range(0, 344, 70))
+            lines.append(
+                f"ARC-Seal: i={n + 1}; a=rsa-sha256; t=1795168800; cv=pass;"
+                f"{eol}\td=example-relay; s=arc-2026; b={folded}"
+            )
+            lines.append(
+                "ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed;"
+                f"{eol}\td=example-relay; h=to:subject:message-id:date:from;"
+                f"{eol}\tbh=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG=; b={folded}"
+            )
+            lines.append(
+                "Authentication-Results: mx-example; dkim=pass header.i=@example-a"
+                f" header.s=s1 header.b=abc;{eol}\tspf=pass smtp.mailfrom=a;"
+                f"{eol}\tdmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example-a"
+            )
+            lines.append(
+                f"DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=example-a;"
+                f"{eol}\ts=s1; h=from:to:subject:date:message-id; bh=abc=; b={folded}"
+            )
+        if kind == "heavy":
+            blob = "".join(rng.choice("ABCDEFabcdef0123456789+/") for _ in range(3000))
+            lines.append(
+                "X-MS-Exchange-AntiSpam-MessageData-0: "
+                + f"{eol}\t".join(blob[i : i + 76] for i in range(0, 3000, 76))
+            )
+            lines.append(
+                "List-Unsubscribe: <https://lists-example/u/" + "x" * 400 + ">"
+            )
+            refs = f"{eol} ".join(_mid(rng) for _ in range(rng.randint(40, 120)))
+            lines.append(f"References: {refs}")
+    else:
+        lines.append(
+            "Content-Type: multipart/alternative;"
+            f'{eol}\tboundary="Apple-Mail=_0A1B2C3D-0000-4000-8000-0123456789AB"'
+        )
+        lines.append("X-Uniform-Type-Identifier: com.apple.mail-draft")
+        lines.append(
+            "X-Universally-Unique-Identifier: 0A1B2C3D-0000-4000-8000-0123456789AB"
+        )
+    lines.append("From: Jane Doe <jane@example>")
+    lines.append("To: John Roe <john@example>")
+    lines.append(
+        "Subject: Re: "
+        + " ".join(
+            rng.choice(["report", "meeting", "x"]) * 2 for _ in range(rng.randint(1, 8))
+        )
+    )
+    lines.append("Date: Fri, 20 Nov 2026 10:00:00 +0100")
+    lines.append("Mime-Version: 1.0 (Mac OS X Mail 16.0 \\(3864.200.21\\))")
+    if rng.random() < 0.95:
+        lines.append(f"Message-Id: {_mid(rng)}")
+    if rng.random() < 0.8:
+        lines.append(f"In-Reply-To: {_mid(rng)}")
+    if kind != "heavy" and rng.random() < 0.8:
+        lines.append(
+            "References: " + f"{eol} ".join(_mid(rng) for _ in range(rng.randint(1, 6)))
+        )
+    rng.shuffle(lines)
+    return (eol.join(lines) + eol + eol).encode()
+
+
+_H_TOKENS = [
+    "Message-ID:",
+    "Message-Id:",
+    "MESSAGE-ID:",
+    "In-Reply-To:",
+    "in-reply-to:",
+    "Received:",
+    "received:",
+    "References:",
+    "X-A:",
+    "Subject:",
+    ":",
+    "From ",
+    "From: ",
+    " <a@b>",
+    "<orig@x>",
+    " <orig@x>",
+    "<ORIG@X>",
+    "<d@x>",
+    "(c)",
+    "((c))",
+    "(",
+    ")",
+    "=?utf-8?q?=3Corig=40x=3E?=",
+    "=?utf-8?q??=",
+    '"q"',
+    ",",
+    ";",
+    "<",
+    ">",
+    "@",
+    ".",
+    " ",
+    "\t",
+    "\r\n",
+    "\n",
+    "\r",
+    "\r\n ",
+    "\n\t",
+    "\r\n\r\n",
+    "\n\n",
+    "\x0c",
+    "\x0b",
+    "\x1c",
+    "\x85",
+    "\xe9",
+    "\x00",
+    "body",
+    "x" * 40,
+]
+
+
+def header_chain(rng) -> bytes:
+    """A random chain of ``_H_TOKENS``: field names, values, folds and line ends."""
+    text = "".join(rng.choice(_H_TOKENS) for _ in range(rng.randint(0, 28)))
+    return text.encode("latin-1")
+
+
+def message_with_attachments(rng, count: int) -> bytes:
+    """A reply (plain text and HTML in Mail's layout) with ``count`` attachments."""
+    msg = email.message.EmailMessage(policy=email.policy.default)
+    msg["Message-ID"], msg["In-Reply-To"] = "<d@x>", "<orig@x>"
+    msg.set_content("plain " + script_text(rng))
+    msg.add_alternative(reply_html(rng), subtype="html")
+    for n in range(count):
+        name = "\u56fe" * rng.randint(1, 80) + f"{n}.png"
+        if count > 30:
+            # many parts: short names, so their fields fit the budget of one parse
+            name = name[: rng.randint(1, 8)] + f"{n}.png"
+        # the name also as an RFC 2231 `name` parameter of Content-Type: that field is
+        # the one the parse reads (at most 80 characters here: 246 bytes)
+        msg.add_attachment(
+            b"\x89PNG" * rng.randint(1, 400),
+            maintype="image",
+            subtype="png",
+            filename=name,
+            params={"name": name},
+        )
+    return msg.as_bytes()
