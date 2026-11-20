@@ -625,7 +625,7 @@ Device-dependent Notes and draft changes retain their recorded probe prerequisit
 Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule. The phase-close code review of Phase 05.2 (2026-11-19) found #609, #610 and #611, which join the phase under the same rule.
 **Requirements**: FIX-27, FIX-28, FIX-29, FIX-30, FIX-31, FIX-32, FIX-33, FIX-34, FIX-35, FIX-36 (#626; #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #585, #607, #609, #610, #611, #581, #632 without a requirement id yet; the bugs #572 to #580 were implemented in PR #584)
 **Depends on:** Phase 05.6
-**Plans:** 5/11 plans complete (02 to 06 are merged; their requirements complete at the acceptance sitting). Plan 01, the measurement sitting, needs the owner; plan 07 waits for it. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
+**Plans:** 6/11 plans complete (02 to 06 and 11 are merged; their requirements complete at the acceptance sitting). Plan 01, the measurement sitting, needs the owner; plan 07 waits for it. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
 
 Plans:
 **Wave 1** *(parallel: no shared source file)*
@@ -638,7 +638,7 @@ Plans:
 - [x] 05.12-05-PLAN.md — FIX-30 part 2: the other five apps by bundle id, held by a guard test (#585)
 - [x] 05.12-06-PLAN.md — FIX-35: the store lock for unit tests, and the closed guard gaps confirmed (#581)
 - [ ] 05.12-07-PLAN.md — FIX-31, FIX-32, FIX-33: the reply window check, the quote check and the late key (#607, #609, #610)
-- [ ] 05.12-11-PLAN.md — FIX-36: the read path of the reply sweep is bounded on crafted mail (#626)
+- [x] 05.12-11-PLAN.md — FIX-36: the read path of the reply sweep is bounded on crafted mail (#626)
 
 **Wave 3** *(blocked on Wave 2)*
 - [ ] 05.12-08-PLAN.md — FIX-28, FIX-29: the two private advisories, fixed in their temporary private forks
@@ -757,7 +757,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 20/20 | Complete    | 2026-11-19 |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
-| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 5/11; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
+| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 6/11; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |

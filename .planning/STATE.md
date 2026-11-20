@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.12: plans 02 to 06 are merged; plan 11 (FIX-36, issue 626, the read bounds of the reply sweep) is planned and checked (one checker pass: 0 blockers, 4 warnings, all applied; no second pass) and runs next without the owner. Issue 632 (the compose path normalizes a crafted original without a bound) has no plan: it joins the plan 07 round. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour, in a new session); then plan 07, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it."
-last_updated: "2026-11-20T15:45:00.000Z"
+stopped_at: "Phase 05.12: 6 of 11 plans are merged (02, 03, 04, 05, 06 and 11; PRs 624, 625, 623, 628, 629, 635), each after an independent probe review; issues 611, 568, 585, 581 and 626 stay open until the acceptance sitting. Every plan that needs no device is done. Next, with the owner at the Mac, in a NEW session (this one lost its macos-apps tools at the restart of 2026-11-19): the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour). Then: plan 07 (issues 607, 609, 610) with a plan for issue 632, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10); for Phase 05.6 the code plans for issues 500 and 521. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it."
+last_updated: "2026-11-20T18:00:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 11
   total_plans: 111
-  completed_plans: 104
+  completed_plans: 105
 last_activity: 2026-11-20
-last_activity_desc: "Phase 05.12: plan 11 (issue 626) planned and checked; issue 632 filed; the two AGENTS.md clauses merged (PR 631)."
+last_activity_desc: "Phase 05.12: plan 11 merged (PR 635, issue 626) after two probe-review passes; 6 of 11 plans done."
 ---
 
 # Project State
@@ -268,5 +268,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-20
-Stopped at: Phase 05.12: plans 02 to 06 are merged; plan 11 (FIX-36, issue 626, the read bounds of the reply sweep) is planned and checked (one checker pass: 0 blockers, 4 warnings, all applied; no second pass) and runs next without the owner. Issue 632 (the compose path normalizes a crafted original without a bound) has no plan: it joins the plan 07 round. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour, in a new session); then plan 07, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it.
+Stopped at: Phase 05.12: 6 of 11 plans are merged (02, 03, 04, 05, 06 and 11; PRs 624, 625, 623, 628, 629, 635), each after an independent probe review; issues 611, 568, 585, 581 and 626 stay open until the acceptance sitting. Every plan that needs no device is done. Next, with the owner at the Mac, in a NEW session (this one lost its macos-apps tools at the restart of 2026-11-19): the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour). Then: plan 07 (issues 607, 609, 610) with a plan for issue 632, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10); for Phase 05.6 the code plans for issues 500 and 521. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
