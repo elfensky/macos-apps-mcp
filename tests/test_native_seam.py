@@ -21,6 +21,7 @@ The AST tests also forbid a direct ``subprocess`` spawn (``run``/``Popen``/``cal
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -249,12 +250,48 @@ def test_real_store_lock_is_live_on_open_connect_and_scan(
     _no_real_stores.clear()
 
 
-def test_real_store_lock_fails_a_test_that_swallowed_the_refusal():
-    # Product code may catch the refusal (``except Exception``). The fixture keeps each
-    # one and fails the test at teardown; this is the check it runs there.
-    with pytest.raises(AssertionError, match="real app store"):
-        conftest._fail_on_store_hits(["open under ~/Library/Mail"])
-    conftest._fail_on_store_hits([])
+def test_real_store_lock_fails_a_test_that_swallowed_the_refusal(
+    _no_real_stores, _isolated_state, monkeypatch
+):
+    # The code under test may catch the refusal (``except Exception``). The lock keeps
+    # each one and fails the test at teardown. A second lock is run by hand here.
+    lock = conftest._store_lock({}, monkeypatch, _isolated_state)
+    hits = next(lock)
+    with contextlib.suppress(AssertionError):  # the code under test swallows it
+        conftest._refuse_real_store("open", (f"{conftest._REAL_STORE_AREAS[0]}/x",))
+    assert hits == ["open under ~/Library/Mail"]
+    with pytest.raises(
+        AssertionError, match="real app store .open under ~/Library/Mail"
+    ):
+        next(lock)
+    assert conftest._store_hits is _no_real_stores  # this test's lock is back
+    assert _no_real_stores == []
+
+    clean = conftest._store_lock({}, monkeypatch, _isolated_state)
+    next(clean)
+    with pytest.raises(StopIteration):  # no refused read: the teardown passes
+        next(clean)
+
+
+def test_real_store_lock_exempts_a_test_marked_integration_only(
+    _no_real_stores, _isolated_state, monkeypatch
+):
+    # An integration test must read the real stores. The real path object goes back
+    # for this check; nothing opens it.
+    real = conftest.REAL_STORE_OBJECTS["NOTESTORE"]
+    monkeypatch.setattr(notes, "NOTESTORE", real)
+    exempt = conftest._store_lock({"integration": True}, monkeypatch, _isolated_state)
+    assert next(exempt) is None
+    assert notes.NOTESTORE is real
+    assert conftest._store_hits is _no_real_stores  # no second refusal list
+    with pytest.raises(StopIteration):
+        next(exempt)
+
+    locked = conftest._store_lock({"device": True}, monkeypatch, _isolated_state)
+    assert next(locked) == []
+    assert notes.NOTESTORE is not real
+    with pytest.raises(StopIteration):
+        next(locked)
 
 
 def test_real_store_lock_leaves_other_paths_alone(tmp_path):
