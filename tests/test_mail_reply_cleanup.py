@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import email
 import html
+import itertools
 import random
 import re
 import shutil
@@ -1353,6 +1354,9 @@ def test_split_quote_keeps_a_white_space_image_placeholder_as_text(token, openin
 
 _OLD_BLOCK = r"(?is)<(script|style).*?</\1>"
 _OLD_TAG = r"<[^>]+>"
+# The bound of every timed test here. The slowest case takes 0.4 s on a busy Mac; the
+# quadratic forms these tests guard against take 15 s or more.
+_TIME_BOUND_S = 5.0
 
 
 def _old_strip(chunk: str) -> str:
@@ -1419,13 +1423,13 @@ def test_linear_strip_keeps_both_old_pattern_objects():
     assert tag.flags == re.UNICODE
 
 
-def test_linear_strip_takes_under_two_seconds_on_256_kb_of_script_openers():
-    # the crafted mail of #611: this took 28 s, on the one native worker
+def test_linear_strip_is_fast_on_256_kb_of_script_openers():
+    # the crafted mail of #611: this took 28 s, on the one native worker (0.01 s now)
     markup = "<script " * 32_000
     msg = _html_message(markup)
     started = time.perf_counter()
     got = mail_reply_cleanup._split_quote(msg)
-    assert time.perf_counter() - started < 2.0
+    assert time.perf_counter() - started < _TIME_BOUND_S
     assert got == (markup.strip(), "")  # nothing closes, so no character is dropped
 
 
@@ -1453,8 +1457,37 @@ _WORST_CASES = {
 def test_linear_strip_is_fast_on_each_worst_case(text):
     started = time.perf_counter()
     got = _strip(text)
-    assert time.perf_counter() - started < 2.0
+    assert time.perf_counter() - started < _TIME_BOUND_S
     assert got == text  # no closing tag and no `>`: nothing is a block or a tag
+
+
+def _spellings(name: str) -> list[str]:
+    """Every ASCII case spelling of ``name``."""
+    return ["".join(s) for s in itertools.product(*((c, c.upper()) for c in name))]
+
+
+def test_linear_strip_scans_once_for_every_case_spelling_of_a_name():
+    # 96 ASCII case spellings of the two names, none closed, then 32 MB of text. The
+    # spellings of one name share their closing tags, so two scans reach the end. A
+    # memo keyed on the exact spelling scans 96 times (about 17 s against 0.4 s).
+    names = _spellings("script") + _spellings("style")
+    text = "".join(f"<{name} " for name in names) + "x" * 32_000_000
+    started = time.perf_counter()
+    got = _strip(text)
+    assert time.perf_counter() - started < _TIME_BOUND_S
+    assert len(names) == 96 and got == text
+
+
+def test_linear_strip_keeps_a_failed_name_after_a_removed_block():
+    # an unclosed script opener beside a closed style block, 20,000 times (460 KB).
+    # The script name fails once and stays skipped. A memo that is cleared after each
+    # removed block scans to the end from every script opener (about 29 s against
+    # 0.02 s).
+    text = "<script <style></style>" * 20_000
+    started = time.perf_counter()
+    got = _strip(text)
+    assert time.perf_counter() - started < _TIME_BOUND_S
+    assert got == "<script " * 20_000
 
 
 def test_linear_strip_equals_the_old_patterns_on_generated_mail():
@@ -1497,8 +1530,9 @@ def test_max_body_chars_is_two_million():
 def test_find_own_draft_keeps_a_body_too_large_unproven(
     mailroot, monkeypatch, url, kind, kw
 ):
-    # one character over the cap: the body is not parsed, so nothing is claimed and
-    # nothing is set aside. Under the cap the same copy reads as the call's own.
+    # one character over the cap: the body is decoded and measured, and the strip does
+    # not run, so nothing is claimed and nothing is set aside. Under the cap the same
+    # copy reads as the call's own.
     monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     mailroot(20, _ORIGINAL, "d@x", _sized(1_001, kind), url=url, kind=kind)
     got = _find(monkeypatch, [(20, url)], **kw)
@@ -1517,6 +1551,42 @@ def test_find_own_draft_does_not_cap_an_unthreaded_row_too_large(mailroot, monke
     monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     mailroot(20, "another-thread@x", "d@x", _sized(50_000))
     assert _find(monkeypatch) == mail_reply_cleanup.Draft("none")
+
+
+def test_split_quote_checks_the_cap_before_any_strip_runs_too_large(monkeypatch):
+    # "before any pattern runs": a body over the cap reaches none of the three steps
+    def ran(chunk):
+        pytest.fail("a strip step ran on a body over the cap")
+
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    for step in ("_drop_placeholders", "_drop_blocks", "_drop_tags"):
+        monkeypatch.setattr(mail_reply_cleanup, step, ran)
+    with pytest.raises(mail_reply_cleanup._BodyTooLarge):
+        mail_reply_cleanup._split_quote(_html_message(_sized(1_001)))
+
+
+def test_find_own_draft_measures_the_html_parts_together_too_large(monkeypatch):
+    # two HTML parts, each under the cap and over it together. The strip runs on the
+    # joined text, so the joined text is what the cap measures.
+    raw = (
+        'Content-Type: multipart/mixed; boundary="b"\r\n\r\n'
+        f"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{_sized(600)}\r\n"
+        f"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n{' ' * 600}\r\n"
+        "--b--\r\n"
+    )
+    msg = email.message_from_string(raw, policy=email.policy.default)
+    assert [len(part.get_content()) for part in msg.iter_parts()] == [600, 600]
+    monkeypatch.setattr(
+        mail_reply_cleanup,
+        "_read_draft",
+        lambda url, rowid: (f"<{_ORIGINAL}>", "<d@x>", lambda: msg, False),
+    )
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 2_000)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
+    assert _find(monkeypatch) == mail_reply_cleanup.Draft(
+        "unproven", _URL, "<d@x>", "body_too_large"
+    )
 
 
 def test_split_quote_huge_reference_raises_as_before():

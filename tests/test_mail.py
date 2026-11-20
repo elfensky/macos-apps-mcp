@@ -3449,15 +3449,16 @@ def test_send_then_sweep_linear_strip_on_a_crafted_twin(monkeypatch):
 
     started = time.perf_counter()
     rig, out = _sent_reply(monkeypatch, (_SENT_URL, "<script " * 32_000, "html"))
-    assert time.perf_counter() - started < 2.0
+    assert time.perf_counter() - started < 5.0
     assert out["sent"] is True and out["drafts_copy"] == "unproven"
     assert out["drafts_copy_reason"] == "sent_not_own"
     assert "_SWEEP_DELETE" not in rig.names()
 
 
 def test_send_then_sweep_reports_body_too_large(monkeypatch):
-    # the call's own Drafts copy, over the size cap (D9): it is not parsed, so it is
-    # reported with its own code and never deleted. Under the cap it would be removed.
+    # the call's own Drafts copy, over the size cap (D9): it is decoded and measured,
+    # and the strip does not run, so it is reported with its own code and never
+    # deleted. Under the cap it would be removed.
     monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     body = "<div>Hi</div>" + " " * 1_000 + _QUOTE_HTML
     rig, out = _sent_reply(monkeypatch, (_OWN_COPY[0], body, "html"))
