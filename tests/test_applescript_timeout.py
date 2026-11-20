@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import hashlib
 import pathlib
 import re
 
@@ -240,9 +241,9 @@ def test_call_shaped_host_caps_are_evaluated_at_max_targets():
 # --- #581: the guards are tied together -----------------------------------------------
 #
 # Two ways a script could miss a guard. A call-site script that is not in the compile
-# inventory gets the timeout check but no compile check. A script that is built inline
-# (a string in a function, a constant without ``tell application``) is in no inventory
-# at all, so no guard sees it.
+# inventory gets the timeout check but no compile check. A script that is run inline,
+# by a call that starts ``osascript`` itself and not through ``runtime.run_osascript``,
+# is in no inventory at all, so no guard sees it.
 
 
 def _outside_inventory(sites) -> list[str]:
@@ -252,72 +253,76 @@ def _outside_inventory(sites) -> list[str]:
 
 
 _PACKAGE = pathlib.Path(runtime.__file__).parent
-_LOOKS_LIKE_SCRIPT = re.compile(
-    r"\bon run\b|\bend tell\b|tell application|\bon error\b|display alert|"
-    r"display dialog|\bend try\b"
-)
-# Each script that is built inline, outside the compile inventory: ``file:name`` (the
-# function or the constant that holds the string) -> why no guard needs it. Never an
-# entry for a whole module.
-_INLINE_ALLOWED = {
+# A string that starts osascript: the program alone (one item of an argument list, with
+# or without a folder) or a command line with an option. A message that only names
+# osascript ("osascript failed: …") is not a start.
+_OSASCRIPT_START = re.compile(r"^(\S*/)?osascript( -|$)")
+# Other ways to run a script without that string.
+_OSASCRIPT_NAMES = frozenset({"MacOSXOSAScript", "NSAppleScript", "OSAScript"})
+# The one door. Its scripts are the call sites above.
+_OSASCRIPT_DOOR = "runtime.py:run_osascript"
+# Each function outside the door that starts osascript: ``file:function`` -> (the hash
+# of the function's source, why no script guard needs it). A change to the function
+# fails the guard: read the change, then renew the hash (the failure prints it). Never
+# an entry for a whole module.
+_OSASCRIPT_PINNED = {
     # A `display alert` only (D10). It targets no app, so it has no `tell` block and no
     # Apple Event to bound by `with timeout`, and its text travels as an argument.
-    "deploy.py:_alert": "a `display alert` only: it targets no app",
+    "deploy.py:_alert": (
+        "67d7b7038e43b4fb",
+        "a `display alert` only: it targets no app",
+    ),
     # The same alert for the wait on the daemon (#568). It ends by `giving up after`,
     # and the caller ends its child process when the wait is over.
-    "deploy.py:_wait_notice": "a `display alert` only: it targets no app",
-    # The text of a regular expression that reads the target of a script.
-    "runtime.py:_TELL_APP": "a pattern text, not a script",
+    "deploy.py:_wait_notice": (
+        "19edfc4f188a279b",
+        "a `display alert` only: it targets no app",
+    ),
+    # The standard library's own script opens one URL in the default browser. No
+    # script text of this package is in it.
+    "deploy.py:dashboard": ("72151fc88ca66607", "webbrowser opens the dashboard URL"),
 }
 
 
-def _inline_scripts(source: str, rel: str) -> list[tuple[str, int]]:
-    """(``file:name``, line) for each string constant of ``source`` that reads like
-    AppleScript and is part of no inventory script. ``name`` is the enclosing function
-    (dotted for a method), else the module-level name the string is assigned to.
-    Docstrings are left out."""
-    inventory = list(scripts.templates().values())
-    tree = ast.parse(source)
-    scopes = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
-    docstrings = {
-        id(node.body[0].value)
-        for node in ast.walk(tree)
-        if isinstance(node, scopes)
-        and node.body
-        and isinstance(node.body[0], ast.Expr)
-        and isinstance(node.body[0].value, ast.Constant)
-    }
-    found: list[tuple[str, int]] = []
+def _osascript_starts(source: str, rel: str) -> dict[str, str]:
+    """``{"file:function": hash}`` for each function of ``source`` that starts
+    osascript itself: it holds a string that matches ``_OSASCRIPT_START`` or one of
+    ``_OSASCRIPT_NAMES``. The function is the outermost one (dotted for a method), and
+    the hash covers its whole source, so a second script in a pinned function changes
+    it. A start outside every function is ``file:<module>``.
 
-    def visit(node: ast.AST, owner: str | None) -> None:
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            owner = f"{owner}.{node.name}" if owner else node.name
-        elif owner is None and isinstance(node, ast.Assign | ast.AnnAssign):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            owner = next((t.id for t in targets if isinstance(t, ast.Name)), None)
+    shortcut: a program name that is built at run time (``"osa" + "script"``), a shell
+    line without an option (``osascript x.scpt``) and ``osacompile`` are not seen;
+    widen the two patterns when the package gets such a call."""
+    tree = ast.parse(source)
+    found: dict[str, str] = {}
+
+    def visit(node: ast.AST, prefix: str, owner: tuple[str, ast.AST] | None) -> None:
+        if owner is None and isinstance(node, ast.ClassDef):
+            prefix = f"{prefix}{node.name}."
+        elif owner is None and isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            owner = (f"{rel}:{prefix}{node.name}", node)
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and id(node) not in docstrings
-            and _LOOKS_LIKE_SCRIPT.search(node.value)
-            and not any(node.value in script for script in inventory)
-        ):
-            found.append((f"{rel}:{owner or '<module>'}", node.lineno))
+            and _OSASCRIPT_START.search(node.value)
+        ) or getattr(node, "id", getattr(node, "attr", None)) in _OSASCRIPT_NAMES:
+            key, scope = owner or (f"{rel}:<module>", None)
+            text = ast.get_source_segment(source, scope) if scope else source
+            found[key] = hashlib.sha256(text.encode()).hexdigest()[:16]
         for child in ast.iter_child_nodes(node):
-            visit(child, owner)
+            visit(child, prefix, owner)
 
-    visit(tree, None)
+    visit(tree, "", None)
     return found
 
 
-def _package_inline_scripts() -> list[tuple[str, int]]:
-    return [
-        hit
-        for path, _module in scripts.modules()
-        for hit in _inline_scripts(
-            path.read_text(), path.relative_to(_PACKAGE).as_posix()
-        )
-    ]
+def _package_osascript_starts() -> dict[str, str]:
+    found: dict[str, str] = {}
+    for path, _module in scripts.modules():
+        rel = path.relative_to(_PACKAGE).as_posix()
+        found |= _osascript_starts(path.read_text(), rel)
+    return found
 
 
 def test_every_call_site_template_is_in_the_compile_inventory():
@@ -331,44 +336,72 @@ def test_every_call_site_template_is_in_the_compile_inventory():
     ]
 
 
-def test_inline_scripts_outside_the_compile_inventory_are_allowlisted():
-    found = {key for key, _line in _package_inline_scripts()}
-    extra = sorted(found - set(_INLINE_ALLOWED))
-    assert not extra, (
-        f"{extra}: a script outside the compile inventory. Make it a module-level "
-        "constant with `tell application`, or add a `file:name` entry with its reason "
-        "to _INLINE_ALLOWED"
+def test_inline_scripts_start_only_at_the_door_or_in_a_pinned_function():
+    found = _package_osascript_starts()
+    assert _OSASCRIPT_DOOR in found
+    outside = {key: digest for key, digest in found.items() if key != _OSASCRIPT_DOOR}
+    pinned = {key: digest for key, (digest, _why) in _OSASCRIPT_PINNED.items()}
+    assert outside == pinned, (
+        "a function outside runtime.run_osascript starts osascript, or a pinned one "
+        "changed. Send the script through run_osascript as a module-level constant, "
+        f"or read the change and renew its entry in _OSASCRIPT_PINNED: {outside}"
     )
-    # an entry that matches nothing is stale: remove it
-    assert sorted(set(_INLINE_ALLOWED) - found) == []
-    # An entry names one function or one constant, never a whole module: a made-up
-    # script in an allowlisted file, outside the allowlisted name, is still found.
-    for key, reason in _INLINE_ALLOWED.items():
+    # An entry names one function with its reason, never a whole module.
+    for key, (_digest, why) in _OSASCRIPT_PINNED.items():
         file, _, name = key.partition(":")
         assert file.endswith(".py") and name.replace(".", "_").isidentifier(), key
-        assert reason
-    made_up = '_OTHER = "tell application \\"Finder\\" to quit"\n'
-    assert _inline_scripts(made_up, "runtime.py") == [("runtime.py:_OTHER", 1)]
-    in_function = 'def f():\n    """doc: on error"""\n    return "display dialog 1"\n'
-    assert _inline_scripts(in_function, "deploy.py") == [("deploy.py:f", 3)]
-    assert "runtime.py:_OTHER" not in _INLINE_ALLOWED
-    assert "deploy.py:f" not in _INLINE_ALLOWED
+        assert why
+    # A change inside a pinned function changes its hash, and only its hash.
+    deploy_source = (_PACKAGE / "deploy.py").read_text()
+    assert deploy_source.count("as critical") == 1
+    changed = _osascript_starts(
+        deploy_source.replace("as critical", "as warning"), "deploy.py"
+    )
+    assert changed["deploy.py:_alert"] != pinned["deploy.py:_alert"]
+    assert changed["deploy.py:_wait_notice"] == pinned["deploy.py:_wait_notice"]
+
+
+@pytest.mark.parametrize(
+    ("source", "key"),
+    [
+        # the abbreviation `tell app`, which the inventory's `tell application` misses
+        (
+            "def f():\n    run(['osascript', '-e', 'tell app \"Finder\" to quit'])\n",
+            "f",
+        ),
+        ("def f():\n    run(['osascript', '-e', 'do shell script \"x\"'])\n", "f"),
+        # JavaScript for Automation
+        (
+            "def f():\n    run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', s])\n",
+            "f",
+        ),
+        # each piece is a part of an inventory script
+        ("def f():\n    run(['osascript', '-e', 'on run', '-e', 'end run'])\n", "f"),
+        ("def f():\n    os.system('osascript -e \"beep\"')\n", "f"),
+        (
+            "class C:\n  def m(self):\n    def g():\n      return 'osascript'\n",
+            "C.m",
+        ),
+        ("def f():\n    return Foundation.NSAppleScript.alloc()\n", "f"),
+        ("from webbrowser import MacOSXOSAScript as M\ndef f():\n    pass\n", None),
+        ("def f():\n    return MacOSXOSAScript('default')\n", "f"),
+        ("ARGV = ['osascript', '-e', SCRIPT]\n", "<module>"),
+    ],
+)
+def test_the_inline_script_scan_finds_each_way_to_start_osascript(source, key):
+    found = _osascript_starts(source, "x.py")
+    assert list(found) == ([f"x.py:{key}"] if key else [])
+    # `<module>` can never be pinned: the entry check wants a function name
+    assert not any(k in _OSASCRIPT_PINNED for k in found)
 
 
 def test_the_inline_script_scan_reads_the_package():
-    # guard the scan itself: an empty one would make the allowlist check vacuous
+    # guard the scan itself: an empty one would make the check above vacuous
     files = [path for path, _module in scripts.modules()]
     assert len(files) >= 30, files
     assert {p.name for p in files} >= {"deploy.py", "runtime.py", "mail.py"}
-    found = dict(_package_inline_scripts())
-    assert "deploy.py:_alert" in found
-    source = (_PACKAGE / "deploy.py").read_text().splitlines()
-    assert "display alert" in source[found["deploy.py:_alert"] - 1]
-    # a string that is part of an inventory script is not "inline"
-    part_of_a_script = next(
-        line
-        for script in scripts.templates().values()
-        for line in script.splitlines()
-        if _LOOKS_LIKE_SCRIPT.search(line)
-    )
-    assert _inline_scripts(f"_X = {part_of_a_script!r}\n", "x.py") == []
+    found = _package_osascript_starts()
+    assert {_OSASCRIPT_DOOR, "deploy.py:_alert"} <= set(found)
+    # a message that names osascript, and a docstring, start nothing
+    quiet = 'X = "osascript failed: "\n\ndef f():\n    """Run osascript."""\n'
+    assert _osascript_starts(quiet, "x.py") == {}
