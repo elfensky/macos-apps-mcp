@@ -2660,7 +2660,9 @@ def _real_selector(monkeypatch, *stored):
     ``(url, body, kind[, mid[, received]])`` per new row (rowids 8, 9, ...), each a
     reply to the original. ``mid`` is the row's Message-ID (default
     ``<own{rowid}@x>``); ``received`` is whether its headers carry a mail server's
-    postmark (default no)."""
+    postmark (default no). Test-only: a ``mid`` that is an exception is raised by
+    ``more()`` (the header read of that row fails), and a ``body`` that is an exception
+    is raised by the body callable (its parse fails)."""
     monkeypatch.setattr(mail_reply_cleanup, "find_own_draft", _REAL_FIND_OWN_DRAFT)
     rows = [(8 + n, row[0]) for n, row in enumerate(stored)]
     monkeypatch.setattr(mail_reply_cleanup, "new_rows", lambda top: rows)
@@ -2668,10 +2670,22 @@ def _real_selector(monkeypatch, *stored):
     def read(url, rowid):
         _, body, kind, *extra = stored[rowid - 8]
         msg = email.message.EmailMessage(policy=email.policy.default)
-        msg.set_content(body, subtype=kind)
+        if not isinstance(body, Exception):
+            msg.set_content(body, subtype=kind)
         mid = extra[0] if extra else f"<own{rowid}@x>"
         received = bool(extra[1]) if len(extra) > 1 else False
-        return ("<abc@x>", mid, lambda: msg, received)
+
+        def parsed():
+            if isinstance(body, Exception):
+                raise body
+            return msg
+
+        def more():
+            if isinstance(mid, Exception):
+                raise mid
+            return (mid, parsed, received)
+
+        return ("<abc@x>", more)
 
     monkeypatch.setattr(mail_reply_cleanup, "_read_draft", read)
 
@@ -3508,6 +3522,29 @@ def test_refused_reply_names_combining_run(monkeypatch):
     assert "_SWEEP_DELETE" not in rig.names()
 
 
+def test_send_then_sweep_reports_header_too_large_read_bound(monkeypatch):
+    # the header read of a row in the thread refuses a field (the bounded read itself
+    # is tested on stored files in test_mail_reply_cleanup.py): the code reaches the
+    # result, and the own Drafts copy beside that row is not deleted
+    refusal = mail_reply_cleanup._HeaderTooLarge()
+    rig, out = _sent_reply(
+        monkeypatch, _OWN_COPY, (_INBOX_URL, "<div>x</div>", "html", refusal)
+    )
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "header_too_large"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
+def test_send_then_sweep_reports_message_too_large_read_bound(monkeypatch):
+    # the stored message of the Drafts copy is over a size bound: it is not parsed,
+    # so it is reported with its own code and never deleted
+    refusal = mail_reply_cleanup._MessageTooLarge()
+    rig, out = _sent_reply(monkeypatch, (_OWN_COPY[0], refusal, "html"))
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "message_too_large"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
 # Mail's quote writes each inline image of the original as one span whose text is
 # `<file name>`: the id-only form in a Sent copy, the compose-time form in a draft
 # (facts 4e `Layout`). 05.2-18 read `unproven` because of it.
@@ -3690,6 +3727,8 @@ _SWEEP_CODES = {
     "several_rows",
     "body_too_large",
     "combining_run",
+    "header_too_large",
+    "message_too_large",
     "claim_refused",
     "read_failed",
     "delete_alive",
@@ -3808,8 +3847,9 @@ def test_a_reason_that_reaches_the_result_does_not_carry_the_rows_data(monkeypat
 
 
 def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
-    # the seven codes of the flow, as the result carries them; the ten of the selector
-    # are pinned in test_mail_reply_cleanup.py. Together they are the seventeen.
+    # the seven codes of the flow, as the result carries them; the thirteen of the
+    # selector are pinned in test_mail_reply_cleanup.py (`read_failed` is in both
+    # sets). Together they are the nineteen.
     produced = set()
     for _, kw, patch in _FLOW_REASON_CASES:
         with monkeypatch.context() as case:  # a patch of one case must not leak
@@ -3819,7 +3859,7 @@ def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
         c for c in _SWEEP_CODES if c.startswith("delete_")
     }
     assert produced == flow | {"drafts_not_own"}
-    assert produced <= _SWEEP_CODES and len(_SWEEP_CODES) == 17
+    assert produced <= _SWEEP_CODES and len(_SWEEP_CODES) == 19
     assert all(re.fullmatch(r"[a-z_]+", code) for code in _SWEEP_CODES)
 
 
