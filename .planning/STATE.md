@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.12: plans 02 to 06 are merged (2026-11-20; PRs 624, 623, 625, 628, 629), each after an independent probe review and a fix round; issues 611, 585, 568 and 581 stay open until the acceptance sitting. Every code plan that needs no device is done. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour); then plan 07 (issues 607, 609, 610), the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Issue 626 has no plan yet. Open for the owner: two proposed AGENTS.md clauses (bundle ids in runtime; the store lock in Hermetic tests), the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it."
-last_updated: "2026-11-20T19:30:00.000Z"
+stopped_at: "Phase 05.12: plans 02 to 06 are merged; plan 11 (FIX-36, issue 626, the read bounds of the reply sweep) is planned and checked (one checker pass: 0 blockers, 4 warnings, all applied; no second pass) and runs next without the owner. Issue 632 (the compose path normalizes a crafted original without a bound) has no plan: it joins the plan 07 round. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour, in a new session); then plan 07, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it."
+last_updated: "2026-11-20T15:45:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 11
-  total_plans: 110
+  total_plans: 111
   completed_plans: 104
 last_activity: 2026-11-20
-last_activity_desc: "Phase 05.12: plans 05 and 06 merged (PRs 628, 629) after probe reviews; every device-free code plan is done."
+last_activity_desc: "Phase 05.12: plan 11 (issue 626) planned and checked; issue 632 filed; the two AGENTS.md clauses merged (PR 631)."
 ---
 
 # Project State
@@ -109,6 +109,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.2]: Owner decision 2026-11-19 (question tool, after the page on the phase-close review): release 0.16.0 ships now from the code tested at the 05.2-20 sitting; the fix for review finding CR-01 (PR #608: a quoted reply is confirmed only when the old reply follows the text) ships in 0.16.1 and merges after the 0.16.0 cut. The device check of PR #608 ran on a signed build of its branch (two `mail_reply` calls, nothing sent) and passed. Review findings WR-01, WR-02 and WR-04 are #609, #610 and #611 in Phase 05.12.
 - [Roadmap]: Owner decisions 2026-11-19 (question tool, after the 0.16.0 cut): 0.16.0 is not published; 0.16.1 is cut the same day and goes to PyPI, the MCP Registry and a GitHub release; CodeQL leaves `.planning/` out of the scan (draft PR 617; the owner switches off the default setup first, a session may not change that setting).
 - [Phase 05.12]: Owner decisions 2026-11-20 (question tool, after the research page): opening the app restarts an older daemon at once, also while a call runs (the client gets the uncertain-outcome answer); a tool that needs Mail starts Mail when Mail is closed (scripts address the app by id); every app's scripts move to the id form in this phase, not only Mail's; the two private advisories are the last lane of the phase, written in GitHub's temporary private forks that the owner creates, and merged directly before the release. Research defaults that stand until the owner vetoes them (05.12-RESEARCH.md): one self-closing alert during the wait, a 300 s wait bound, a bounded activation poll with two refusal texts and no second activation, the unreadable-signature residual, a 2,000,000-character cap for the sweep's body read.
+- [Phase 05.12]: Owner decision 2026-11-20 (question tool): the two AGENTS.md clauses are added (bundle ids in `runtime.BUNDLE_IDS`; the store lock in the hermetic-tests rule), PR 631. Orchestrator decisions 2026-11-20 (the owner may veto; 05.12-11-PLAN.md): plan 11 bounds the sweep's read path only, and the compose-path part is issue 632 for the plan 07 round; the bounds are 30 combining marks, a 131,072-byte header read with a 998-character field value and a 200,000-character parse budget, 50,000,000 bytes, 1,000,000 lines, 1,000 part-delimiter lines and 8 parsed candidate rows. Known effect of the budget: a message with more than about 43 attachments that all have the longest non-ASCII file names reads `header_too_large` (nothing is deleted for it).
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -267,5 +268,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-11-20
-Stopped at: Phase 05.12: plans 02 to 06 are merged (2026-11-20; PRs 624, 623, 625, 628, 629), each after an independent probe review and a fix round; issues 611, 585, 568 and 581 stay open until the acceptance sitting. Every code plan that needs no device is done. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour); then plan 07 (issues 607, 609, 610), the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Issue 626 has no plan yet. Open for the owner: two proposed AGENTS.md clauses (bundle ids in runtime; the store lock in Hermetic tests), the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it.
+Stopped at: Phase 05.12: plans 02 to 06 are merged; plan 11 (FIX-36, issue 626, the read bounds of the reply sweep) is planned and checked (one checker pass: 0 blockers, 4 warnings, all applied; no second pass) and runs next without the owner. Issue 632 (the compose path normalizes a crafted original without a bound) has no plan: it joins the plan 07 round. Next, with the owner at the Mac: the 05.12-01 measurement sitting and the 05.6-06 probe sitting (one visit, about one hour, in a new session); then plan 07, the private lane (plan 08), the acceptance sitting (plan 09) and the release (plan 10). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615. The installed app is release 0.16.1; develop is ahead of it.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
