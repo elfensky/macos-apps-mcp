@@ -5,12 +5,18 @@ Pure string work; no native imports (the module's whole point).
 
 from __future__ import annotations
 
+import random
+import sys
+import unicodedata
+
 import pytest
 
+from macos_apps_mcp import text as text_module
 from macos_apps_mcp.errors import NativeError, OutputOverflow
 from macos_apps_mcp.text import (
     BODY_HARD_MAX,
     BODY_MAX,
+    MAX_COMBINING_RUN,
     RS,
     SUMMARY_MAX,
     US,
@@ -24,11 +30,13 @@ from macos_apps_mcp.text import (
     fold_text,
     int_or_none,
     int_or_zero,
+    long_combining_run,
     norm_text,
     parse_framed,
     sanitize_block,
     sanitize_line,
 )
+from tests import mailhtml
 
 
 def _rec(*fields):
@@ -278,3 +286,114 @@ def test_blank_if_missing_blanks_the_applescript_absent_marker():
     assert blank_if_missing("Real Name") == "Real Name"
     # a value merely CONTAINING the marker is a real value — only an exact match blanks
     assert blank_if_missing("re: missing value") == "re: missing value"
+
+
+# --- the combining-run scan before normalization (FIX-36, #626) -----------------------
+# Every mark is written as an escape and checked by code point: an editor that turns an
+# escape into a glyph, or normalizes one, must fail a test here.
+
+_GRAVE = "\u0300"  # a combining mark of class 230
+_COMMA = "\u0315"  # a combining mark of class 232: NFC sorts it after class 230
+_SPLIT_CHARS = {"\u0f73": 0x0F73, "\u0f75": 0x0F75, "\u0f81": 0x0F81}
+
+
+def _longest_run(text: str) -> int:
+    """The longest run of non-starters in ``text``, written out here on its own."""
+    best = run = 0
+    for char in text:
+        run = run + 1 if unicodedata.combining(char) else 0
+        best = max(best, run)
+    return best
+
+
+def test_combining_run_limit_is_thirty():
+    assert MAX_COMBINING_RUN == 30
+
+
+@pytest.mark.parametrize(
+    "text, hit",
+    [
+        ("Z" + _COMMA * 15 + _GRAVE * 15 + "algo", False),  # 30 marks on one letter
+        ("Z" + _COMMA * 16 + _GRAVE * 15 + "algo", True),  # 31 marks
+        ("plain ASCII text, 31 times over " * 31, False),
+        ("", False),
+        (("e" + _GRAVE * 30) * 5, False),  # a letter separates the runs
+        ((_GRAVE * 30 + " ") * 5, False),  # a space separates them
+        # 31 marks of ONE class are in canonical order already: the scan counts, it
+        # does not sort
+        ("e" + _GRAVE * 31, True),
+    ],
+)
+def test_combining_run_counts_non_starters_in_a_row(text, hit):
+    assert (ord(_GRAVE), ord(_COMMA)) == (0x300, 0x315)
+    assert (unicodedata.combining(_GRAVE), unicodedata.combining(_COMMA)) == (230, 232)
+    assert long_combining_run(text) is hit
+
+
+def test_combining_run_is_false_for_none():
+    # the sweep passes None for the attribution and the tail of a reply without a quote
+    assert long_combining_run(None) is False
+
+
+@pytest.mark.parametrize("char, point", _SPLIT_CHARS.items())
+def test_combining_run_counts_the_three_split_characters(char, point):
+    # class 0, and the decomposition is two non-starters: NFC sorts two marks for each
+    assert ord(char) == point and unicodedata.combining(char) == 0
+    assert long_combining_run(char * 15) is False  # 30 non-starters
+    assert long_combining_run(char * 16) is True
+    # U+0344 is a non-starter whose decomposition is two non-starters: it counts as 2
+    dialytika = "\u0344"
+    assert ord(dialytika) == 0x344 and unicodedata.combining(dialytika) == 230
+    assert long_combining_run("a" + dialytika * 15) is False
+    assert long_combining_run("a" + dialytika * 16) is True
+    assert long_combining_run("a" + dialytika + _GRAVE * 28) is False
+    assert long_combining_run("a" + dialytika + _GRAVE * 29) is True
+
+
+def test_combining_run_split_characters_match_unicodedata():
+    # the scan knows four characters by name. This pass over every code point fails
+    # when a later Unicode version adds a fifth.
+    lead, longer = [], []
+    for point in range(sys.maxunicode + 1):
+        if 0xD800 <= point <= 0xDFFF:
+            continue
+        char = chr(point)
+        parts = unicodedata.normalize("NFD", char)
+        if parts == char:
+            continue
+        if unicodedata.combining(char):
+            if len(parts) > 1:
+                longer.append(point)
+        elif unicodedata.combining(parts[0]):
+            lead.append(point)
+            assert all(unicodedata.combining(part) for part in parts)
+            assert len(parts) == 2
+    assert lead == [0x0F73, 0x0F75, 0x0F81]
+    assert longer == [0x0344]
+    # and the scan's table holds exactly these four, each with its decomposition
+    expected = {
+        chr(point): unicodedata.normalize("NFD", chr(point)) for point in lead + longer
+    }
+    table = text_module._SPLIT_MARKS
+    assert table == expected and all(len(parts) == 2 for parts in table.values())
+
+
+def test_combining_run_samples_hold_their_code_points():
+    assert len(mailhtml.SAMPLES) == 13
+    assert set(mailhtml._PINS) <= set(mailhtml.SAMPLES) and len(mailhtml._PINS) == 11
+    for name, point in mailhtml._PINS.items():
+        assert point in {ord(char) for char in mailhtml.SAMPLES[name]}, name
+    assert 0xFFFC in {ord(char) for space in mailhtml._SPACES for char in space}
+
+
+def test_combining_run_is_false_for_generated_text_in_13_scripts():
+    rng = random.Random(626)
+    refused = longest = 0
+    for _ in range(5_000):
+        text = mailhtml.script_text(rng)
+        refused += long_combining_run(text)
+        for form in ("", "NFC", "NFD", "NFKD"):
+            shaped = unicodedata.normalize(form, text) if form else text
+            longest = max(longest, _longest_run(shaped))
+    assert refused == 0
+    assert 1 <= longest <= 3  # 0 would mean that the samples lost their marks

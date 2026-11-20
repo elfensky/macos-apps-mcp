@@ -3477,6 +3477,37 @@ def test_send_then_sweep_huge_reference_reads_read_failed(monkeypatch):
     assert "_SWEEP_DELETE" not in rig.names()
 
 
+# One letter and 240,000 combining marks, class 232 then class 230: the worst order
+# for NFC (#626: about 29 s without the scan). By code point, never as glyphs.
+_MARK_RUN = "a" + chr(0x0315) * 120_000 + chr(0x0300) * 120_000
+
+
+def test_send_then_sweep_reports_combining_run(monkeypatch):
+    # a Sent copy whose quote holds the run: the text is refused before it is
+    # normalized, so the row is reported with its own code and nothing is deleted
+    import time
+
+    body = f"<div>Hi</div><blockquote>{_MARK_RUN}</blockquote>"
+    assert len(_MARK_RUN) == 240_001 and ord(_MARK_RUN[1]) == 0x315
+    started = time.perf_counter()
+    rig, out = _sent_reply(monkeypatch, (_SENT_URL, body, "html"))
+    assert time.perf_counter() - started < 5.0
+    assert out["sent"] is True and out["drafts_copy"] == "unproven"
+    assert out["drafts_copy_reason"] == "combining_run"
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
+def test_refused_reply_names_combining_run(monkeypatch):
+    # the same run in the quote of the Drafts copy, after a refusal
+    rig, folder, text = _refuse_with(monkeypatch)
+    body = f"<div>Hi</div><blockquote>{_MARK_RUN}</blockquote>"
+    _real_selector(monkeypatch, (_DRAFTS_URL, body, "html"))
+    msg = _run_refused(rig, folder, text)
+    assert msg.endswith(" Drafts check: combining_run.")
+    assert "nothing was created" not in msg
+    assert "_SWEEP_DELETE" not in rig.names()
+
+
 # Mail's quote writes each inline image of the original as one span whose text is
 # `<file name>`: the id-only form in a Sent copy, the compose-time form in a draft
 # (facts 4e `Layout`). 05.2-18 read `unproven` because of it.
@@ -3658,6 +3689,7 @@ _SWEEP_CODES = {
     "other_mailbox",
     "several_rows",
     "body_too_large",
+    "combining_run",
     "claim_refused",
     "read_failed",
     "delete_alive",
@@ -3776,8 +3808,8 @@ def test_a_reason_that_reaches_the_result_does_not_carry_the_rows_data(monkeypat
 
 
 def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
-    # the seven codes of the flow, as the result carries them; the nine of the selector
-    # are pinned in test_mail_reply_cleanup.py. Together they are the sixteen.
+    # the seven codes of the flow, as the result carries them; the ten of the selector
+    # are pinned in test_mail_reply_cleanup.py. Together they are the seventeen.
     produced = set()
     for _, kw, patch in _FLOW_REASON_CASES:
         with monkeypatch.context() as case:  # a patch of one case must not leak
@@ -3787,7 +3819,7 @@ def test_every_sweep_reason_is_a_fixed_code(monkeypatch):
         c for c in _SWEEP_CODES if c.startswith("delete_")
     }
     assert produced == flow | {"drafts_not_own"}
-    assert produced <= _SWEEP_CODES and len(_SWEEP_CODES) == 16
+    assert produced <= _SWEEP_CODES and len(_SWEEP_CODES) == 17
     assert all(re.fullmatch(r"[a-z_]+", code) for code in _SWEEP_CODES)
 
 

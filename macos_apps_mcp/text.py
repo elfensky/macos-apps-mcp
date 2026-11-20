@@ -293,6 +293,48 @@ def squash_text(text: object) -> str:
     return re.sub(r"\s+", " ", unicodedata.normalize("NFC", str(text or ""))).strip()
 
 
+# Unicode Standard Annex #15, section 13 (Stream-Safe Text Format, UAX15-D3): a text
+# holds no run of non-starters longer than 30. "The value of 30 is chosen to be
+# significantly beyond what is required for any linguistic or technical usage."
+MAX_COMBINING_RUN = 30
+
+# The characters that the scan counts as their canonical decomposition, each two
+# non-starters. The first three have combining class 0, so a scan by class alone reads
+# a run of them as no marks at all, and normalization still sorts two marks for each.
+# The fourth is a non-starter itself. A test compares this list with ``unicodedata``.
+_SPLIT_MARKS = {
+    "\u0f73": "\u0f71\u0f72",
+    "\u0f75": "\u0f71\u0f74",
+    "\u0f81": "\u0f71\u0f80",
+    "\u0344": "\u0308\u0301",
+}
+
+
+def long_combining_run(text: str | None, limit: int = MAX_COMBINING_RUN) -> bool:
+    """True when ``text`` holds more than ``limit`` non-starters (characters whose
+    combining class is not 0) in a row. Normalization sorts each such run, and a long
+    run in mixed order costs quadratic time (#626: 7 s for 120,001 marks, x4 for each
+    doubling), so a caller that reads text of another party runs this BEFORE
+    ``squash_text`` and refuses the text on a hit. The limit is the one of Unicode's
+    Stream-Safe Text Format (UAX #15, section 13). The scan is linear: one pass, and no
+    sort. ``_SPLIT_MARKS`` are replaced by their decomposition first, because
+    normalization sorts the two marks of each and ``unicodedata.combining`` reads three
+    of them as class 0. ``None`` and an empty text are False."""
+    if not text or text.isascii():
+        return False
+    for char, parts in _SPLIT_MARKS.items():
+        text = text.replace(char, parts)
+    run = 0
+    for char in text:
+        if unicodedata.combining(char):
+            run += 1
+            if run > limit:
+                return True
+        else:
+            run = 0
+    return False
+
+
 def clean_summary(text: object) -> str:
     """One-line, control-free, ``SUMMARY_MAX``-bounded ``Pointer.summary`` text."""
     return _truncate(sanitize_line(text), SUMMARY_MAX)

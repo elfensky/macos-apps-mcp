@@ -78,7 +78,7 @@ from typing import NamedTuple
 
 from .. import runtime
 from ..errors import NativeError
-from ..text import squash_text
+from ..text import long_combining_run, squash_text
 from . import mail_index, mailbox_url
 from .mail_addressing import _norm_mid
 
@@ -111,6 +111,13 @@ MAX_BODY_CHARS = 2_000_000
 
 class _BodyTooLarge(Exception):
     """A decoded body is over ``MAX_BODY_CHARS``. It carries no text of the body."""
+
+
+class _CombiningRun(Exception):
+    """A text of the sweep holds a run of combining characters over
+    ``text.MAX_COMBINING_RUN``; it was not normalized. It carries no text. It derives
+    from ``Exception`` itself: ``_split_quote`` skips a part on ``LookupError`` and
+    ``ValueError``, and a refusal must never be skipped."""
 
 
 class Draft(NamedTuple):
@@ -332,7 +339,10 @@ def _split_quote(msg) -> tuple[str, str]:
     not text (``_drop_placeholders``); the part before the quote, the part below it and
     plain text keep everything. Raises ``_BodyTooLarge`` before any pattern runs when
     the decoded HTML (for a message without HTML, the plain text) is longer than
-    ``MAX_BODY_CHARS``."""
+    ``MAX_BODY_CHARS``. Raises ``_CombiningRun`` before either text is normalized when
+    one of them holds a long run of combining characters (``long_combining_run``); the
+    text before the quote is scanned after its object marks are removed, because a
+    removal can join two runs."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
@@ -364,7 +374,10 @@ def _split_quote(msg) -> tuple[str, str]:
             (n for n, line in enumerate(lines) if line.startswith(">")), len(lines)
         )
         head, tail = "\n".join(lines[:at]), "\n".join(lines[at:])
-    return squash_text(head.replace("\ufffc", "")), squash_text(tail)
+    head = head.replace("\ufffc", "")
+    if long_combining_run(head) or long_combining_run(tail):
+        raise _CombiningRun
+    return squash_text(head), squash_text(tail)
 
 
 def _read_draft(url: str, rowid: int):
@@ -476,7 +489,11 @@ def find_own_draft(
     and has a Message-ID, or, after a send, a Sent or All Mail row with a Message-ID)
     whose decoded body is longer than ``MAX_BODY_CHARS`` is decoded and measured, and
     the strip does not run: it is ``unproven`` (``body_too_large``), never claimed and
-    never set aside; no other row is measured.
+    never set aside; no other row is measured. A candidate row is ``unproven``
+    (``combining_run``) in the same way when a text of it, or one of the four text
+    arguments (``own_text``, ``attribution``, ``signature``, ``tail``; scanned once, a
+    ``None`` is skipped), holds a long run of combining characters: that text is never
+    normalized, and for an argument over the limit no body is parsed.
     An ``unproven`` verdict carries the code of its branch in ``reason`` (the first row
     that could not be set aside names it; INBOX rows after a send are judged last).
     Raises ``NativeError`` when the index cannot be read now (the caller treats that as
@@ -484,6 +501,11 @@ def find_own_draft(
     rows = new_rows(top)
     if len(rows) > MAX_NEW_ROWS:
         return Draft("unproven", reason="too_many_rows")  # too many rows to read all
+    # the arguments are normalized for every candidate row; the attribution and the
+    # tail come from the original, which another party wrote
+    bad_argument = any(
+        long_combining_run(text) for text in (own_text, attribution, signature, tail)
+    )
     found: list[Draft] = []
     twin_mids: set[str] = set()  # Message-IDs of the Sent / All Mail copies set aside
     # INBOX rows (url, Message-ID, has Received), judged after the loop
@@ -501,10 +523,16 @@ def find_own_draft(
         own = not late and bool(_norm_mid(mid)) and is_drafts
         twin = sent_twins and _is_sent_url(url) and bool(_norm_mid(mid))
         if own or twin:
+            if bad_argument:
+                found.append(Draft("unproven", url, mid, "combining_run"))
+                continue
             try:
                 before, after = _split_quote(body())
             except _BodyTooLarge:
                 found.append(Draft("unproven", url, mid, "body_too_large"))
+                continue
+            except _CombiningRun:
+                found.append(Draft("unproven", url, mid, "combining_run"))
                 continue
             says_ours = _is_own(
                 before, own_text, attribution, signature
