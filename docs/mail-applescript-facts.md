@@ -358,7 +358,7 @@ Verified 2026-07-31 (#146), probing every branch against real accounts.
 | `name of <mailbox>` returns the **LEAF ONLY**, never the path. | Spam's name is `"Spam"`, and `mailbox "Spam" of acct` then **fails** — the nesting lives in `container`, so a name read back from Mail is not a usable address. Round-trip the url, never a name. |
 | `mailboxes of <account>` returns the account's mailboxes **flat**, nesting erased. | So "find the mailbox named X" cannot distinguish `[Gmail]/Drafts` from a user folder `Drafts`. |
 | An account is addressable by `first account whose id is "<uuid>"` — the uuid is exactly the segment in mailboxes.url. | Unknown uuid raises `Can't get account 1 whose id = …`, unknown folder raises `Can't get mailbox "Nope" of account …`. Both fail loudly; neither silently falls back to another mailbox. |
-| **On My Mac mailboxes hang off the APPLICATION, not an account** — `mailbox "Outbox"` inside `tell application "Mail"`. | `every account` never lists that store, so its `local://` uuid would never resolve through the account path. It needs its own branch. |
+| **On My Mac mailboxes hang off the APPLICATION, not an account** — `mailbox "Outbox"` inside `tell application id "com.apple.mail"`. | `every account` never lists that store, so its `local://` uuid would never resolve through the account path. It needs its own branch. |
 | A mailbox reference **returned from a handler survives the `tell` boundary** and is usable in the caller's own `tell` block. | Verified against a real filed message: `set mb to my mailboxFor(…)` outside, `messages of mb whose message id is mid` inside. This is what lets one shared resolver serve every id-addressed script. |
 
 ## 5b. Creating, moving and deleting mailboxes
