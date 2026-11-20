@@ -342,6 +342,21 @@ def test_bundle_table_by_bundle_id_holds_the_six_apps():
     }
 
 
+def test_script_app_by_bundle_id_ignores_letter_case():
+    # macOS reads a bundle id without regard to case, so the hint does too
+    assert runtime._script_app('tell application id "COM.APPLE.MAIL"') == "Mail"
+    assert runtime._script_app('tell application id "com.apple.notes"') == "Notes"
+
+
+def test_script_app_by_bundle_id_takes_the_first_target():
+    notes_then_mail = 'tell application id "com.apple.Notes"\nend tell\n' + _MAIL_BY_ID
+    assert runtime._script_app(notes_then_mail) == "Notes"
+    assert runtime._script_app('tell application "Finder"\n' + _MAIL_BY_ID) == "Finder"
+    # an unknown id in first place gives no app, also when a known target follows
+    unknown_first = 'tell application id "com.example.other"\n' + _MAIL_BY_ID
+    assert runtime._script_app(unknown_first) is None
+
+
 # --- verify-after-write diff (#49) ---------------------------------------------------
 
 

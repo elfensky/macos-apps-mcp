@@ -306,8 +306,18 @@ def test_automation_bundle_ids_match_the_grant_map():
 
 def test_bundle_ids_by_bundle_id_come_from_the_runtime_table():
     # #585: one table holds the ids; doctor keys it by the lower-case adapter name.
-    table = {app.lower(): bundle for app, bundle in runtime.BUNDLE_IDS.items()}
-    assert table == doc._AUTOMATION_BUNDLES
+    # The literal ids here are the second, independent copy.
+    expected = {
+        "mail": "com.apple.mail",
+        "notes": "com.apple.Notes",
+        "contacts": "com.apple.AddressBook",
+        "safari": "com.apple.Safari",
+        "messages": "com.apple.MobileSMS",
+        "music": "com.apple.Music",
+    }
+    assert expected == doc._AUTOMATION_BUNDLES
+    from_runtime = {a.lower(): runtime.BUNDLE_IDS[a] for a in doc._AUTOMATION_APPS}
+    assert from_runtime == expected
 
 
 def test_probe_by_bundle_id_gets_the_id_of_each_app(monkeypatch):
@@ -424,6 +434,10 @@ def test_probe_compiles():
         (-1728, "Photos got an error: Can't get every window.", None),
         (-1743, "Not authorized to send Apple events to Photos.", AutomationDenied),
         (-609, "Connection is invalid.", AppNotRunning),
+        # S2 of the PR 623 probe review: decide on a device (plan 09, M13). An id that
+        # no app has is expected to raise -1728 with a text of this form (not captured
+        # on a device). Today the probe swallows it, so that probe reads as answered.
+        (-1728, 'Can\'t get application id \\"com.example.none\\".', None),
     ],
 )
 def test_probe_error_filter_under_real_osascript(number, message, expected):
