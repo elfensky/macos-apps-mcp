@@ -67,6 +67,7 @@ unreadable for the sweep.
 
 from __future__ import annotations
 
+import codecs
 import email
 import email.parser
 import email.policy
@@ -117,12 +118,14 @@ HEADER_READ_BYTES = 131_072
 # A bound on the VALUE of one header field: the whole raw value as the parser stores
 # it, with every line of a folded field and its fold bytes. The basis, and a basis
 # only: RFC 5322 section 2.1.1 allows 998 characters for one LINE, and a valid message
-# id fits one line. The value parse of the worst field of this size took 2 to 3 ms.
+# id fits one line. The value parse of the worst field of this size took 2 to 8 ms
+# (2 to 3 ms in the prototype run, 7.6 ms in the review of the change).
 MAX_HEADER_FIELD_CHARS = 998
 # One parse reads at most this many characters of field values together. The parser
-# reads the Content-Type of each part about 5 times, so 43 attachments fit when each
-# has the longest file name a Mac allows (253 bytes) outside ASCII, or 276 with names
-# of 10 characters; a generated message with 100 attachments used 90,252.
+# reads the Content-Type of each part about 5 times, so about 42 attachments fit when
+# each has the longest file name a Mac allows (253 bytes) outside ASCII (42 fit and 43
+# are refused), or about 276 with names of 10 characters; a generated message with 100
+# attachments used 90,252.
 MAX_HEADER_FETCH_CHARS = 200_000
 # A candidate row is parsed only when its stored size is at most this. A message of
 # the 25 MB sending limit of the large providers is about 34 MB after base64 (that
@@ -141,6 +144,14 @@ MAX_MESSAGE_PARTS = 1_000
 # (the Drafts copy, the Sent copy, on Gmail an All Mail twin); a candidate row built
 # just inside every bound took 0.36 to 0.53 s.
 MAX_PARSED_ROWS = 8
+# A text part that declares one of these as its charset is not decoded. They are text
+# encodings of the standard library, but no character sets: they encode domain names.
+# The decode of `punycode` takes quadratic time (2.3 s for 100,000 bytes, 9.4 s for
+# 200,000); `idna` needs `punycode`. Every other text encoding of Python 3.14.5 decoded
+# 1 MB of crafted input in at most 0.12 s (110 encodings, 22 input shapes; a test
+# repeats that on the running Python). A codec that is no text encoding (base64, zlib,
+# bz2, hex, quopri, rot-13, uu) is refused by `bytes.decode` itself before it runs.
+_REFUSED_CHARSETS = frozenset({"punycode", "idna"})
 
 
 class _BodyTooLarge(Exception):
@@ -150,8 +161,8 @@ class _BodyTooLarge(Exception):
 class _CombiningRun(Exception):
     """A text of the sweep holds a run of combining characters over
     ``text.MAX_COMBINING_RUN``; it was not normalized. It carries no text. It derives
-    from ``Exception`` itself: ``_split_quote`` skips a part on ``LookupError`` and
-    ``ValueError``, and a refusal must never be skipped."""
+    from ``Exception`` itself, never from ``LookupError`` or ``ValueError``: those are
+    what a decode error of a part raises, and a refusal must stay apart from them."""
 
 
 class _HeaderTooLarge(Exception):
@@ -172,11 +183,24 @@ class _BoundedPolicy(email.policy.EmailPolicy):
     """``email.policy.default`` with two limits on the VALUE parse of a field. It only
     refuses: a value inside the limits is parsed by the parent method, so it is the
     value of the default policy. ``budget``: a one-item list, the characters of field
-    values that this parse may still read."""
+    values that this parse may still read.
+
+    ``skip_content_type`` is for the header read only. The parser asks for the
+    top-level ``Content-Type`` once when a parse ends (``FeedParser.close``) and drops
+    the answer of a headers-only parse; nothing in the header read uses that field. So
+    with the flag the field is not parsed at all and the answer is ``""``: a new mail
+    of another thread with a long ``Content-Type`` (a long file name) is skipped as
+    before, and is not a refusal. This cannot make a row of the thread a skipped row:
+    the thread test reads ``In-Reply-To`` alone, through this same method, and the
+    flag changes the answer for the one name ``Content-Type``. The body parse of a
+    candidate row has no flag, so there the field keeps its bound."""
 
     budget = None
+    skip_content_type = False
 
     def header_fetch_parse(self, name, value):
+        if self.skip_content_type and name.lower() == "content-type":
+            return ""
         # the raw value as the parser stored it: fold bytes included
         if len(value) > MAX_HEADER_FIELD_CHARS:
             raise _HeaderTooLarge
@@ -402,6 +426,20 @@ def _drop_tags(chunk: str) -> str:
     return _TAG.sub(" ", chunk[:last]) + chunk[last:]
 
 
+def _part_text(part) -> str:
+    """The decoded text of one ``text/html`` or ``text/plain`` part
+    (``get_content()``). A part that declares a charset of ``_REFUSED_CHARSETS`` is
+    not decoded: ``LookupError``, raised before the decode runs. Every other error is
+    the standard library's own (an unknown charset, a codec that is no text encoding,
+    a decode that fails), and none is caught here: a part that is not decoded is text
+    that the proof did not see, so the row must not be judged."""
+    # the charset as `email.contentmanager.get_text_content` reads it
+    charset = part.get_param("charset", "ASCII")
+    if codecs.lookup(charset).name in _REFUSED_CHARSETS:
+        raise LookupError("a text part declares a charset that is no character set")
+    return part.get_content()
+
+
 def _split_quote(msg) -> tuple[str, str]:
     """The squashed text of a draft before its first quote, and the squashed text from
     the quote on: the HTML text before / from the first blockquote, else the plain lines
@@ -413,19 +451,17 @@ def _split_quote(msg) -> tuple[str, str]:
     ``MAX_BODY_CHARS``. Raises ``_CombiningRun`` before either text is normalized when
     one of them holds a long run of combining characters (``long_combining_run``); the
     text before the quote is scanned after its object marks are removed, because a
-    removal can join two runs. A refusal of the bounded policy (``_HeaderTooLarge``)
-    can leave ``get_content()`` of a part; it is not a decode error and is not caught
-    here."""
+    removal can join two runs. A ``text/html`` or ``text/plain`` part that cannot be
+    decoded is never skipped: its error leaves this function (``_part_text``), and so
+    does a refusal of the bounded policy (``_HeaderTooLarge``) from inside
+    ``get_content()``. A part of another text type (a text attachment) is not read."""
     markup = text = ""
     for part in msg.walk():
         kind = part.get_content_type()
-        try:
-            if kind == "text/html":
-                markup += part.get_content()
-            elif kind == "text/plain":
-                text += part.get_content()
-        except (LookupError, ValueError):  # an undecodable part adds nothing
-            continue
+        if kind == "text/html":
+            markup += _part_text(part)
+        elif kind == "text/plain":
+            text += _part_text(part)
     if len(markup or text) > MAX_BODY_CHARS:
         raise _BodyTooLarge
     if markup:
@@ -464,43 +500,44 @@ def _read_draft(url: str, rowid: int):
     parses the whole message and is for a candidate row only.
 
     Two bounds hold for the header read. Only the first ``HEADER_READ_BYTES`` of the
-    file are read (one ``read``; the file size comes from ``stat``). A field value is
-    parsed only when it is at most ``MAX_HEADER_FIELD_CHARS`` long. The standard
-    library splits the fields and parses each value, so a value is the value of the
-    whole-message read, or a refusal (``_HeaderTooLarge``). The parser itself reads
-    the top-level ``Content-Type`` of every row when the header read ends; the same
-    policy bounds that read, so such a field over the bound is a refusal for a row of
-    any thread.
+    file are used: one ``read`` asks for one byte more, and that byte only tells
+    whether the file ends there. A field value is parsed only when it is at most
+    ``MAX_HEADER_FIELD_CHARS`` long. The standard library splits the fields and parses
+    each value, so a value is the value of the whole-message read, or a refusal
+    (``_HeaderTooLarge``). The top-level ``Content-Type``, which the parser asks for
+    when a parse ends, is not parsed in the header read (``skip_content_type``).
 
-    A header block is complete when the message was read whole, or when the bytes read
-    hold its end (two LF in a row, or LF CR LF). In a block that is not complete the
+    The message was read whole when the read met the end of the file. The size from
+    ``stat`` does not decide that: a file can grow between the two calls. A header
+    block is complete when the message was read whole, or when the bytes used hold its
+    end (two LF in a row, or LF CR LF). In a block that is not complete the
     last field is not used (the cut may have shortened it), and no answer is given
     that the part not read could change: a field that is not found there is a refusal,
     never "absent", and so is a postmark that is not found.
 
     ``body()`` raises ``_MessageTooLarge`` before any further read when the stored
-    size is over ``MAX_MESSAGE_BYTES``, and before the parse when the lines or the
-    part-delimiter lines are over their bounds. A message that the header read holds
-    whole is not read again; a second read must start with the bytes of the first
-    (``OSError`` otherwise: the file changed). The parse uses a bounded policy of its
-    own, so a field of a part over a bound raises ``_HeaderTooLarge``."""
+    size (from ``stat``) is over ``MAX_MESSAGE_BYTES``, and before the parse when the
+    lines or the part-delimiter lines are over their bounds. A message that the header
+    read holds whole is not read again; a second read must start with the bytes of the
+    first (``OSError`` otherwise: the file changed). The parse uses a bounded policy
+    of its own, with its own budget and without the flag, so a field of a part (or the
+    top-level ``Content-Type``) over a bound raises ``_HeaderTooLarge``."""
     path = _emlx_path(url, rowid)
     if path is None:
         return None
     try:
         size = path.stat().st_size
         with path.open("rb") as file:
-            raw = file.read(HEADER_READ_BYTES)
+            raw = file.read(HEADER_READ_BYTES + 1)
     except OSError:
         return None
-    payload = mail_index.emlx_payload(raw)
+    whole = len(raw) <= HEADER_READ_BYTES  # the read met the end of the file
+    payload = mail_index.emlx_payload(raw[:HEADER_READ_BYTES])
     if not payload:
         return None
-    whole = size <= len(raw)
     complete = whole or b"\n\n" in payload or b"\n\r\n" in payload
-    head = email.parser.BytesParser(policy=_bounded_policy()).parsebytes(
-        payload, headersonly=True
-    )
+    policy = _bounded_policy().clone(skip_content_type=True)
+    head = email.parser.BytesParser(policy=policy).parsebytes(payload, headersonly=True)
     fields = list(head.raw_items())
     usable = fields if complete else fields[:-1]
 
@@ -636,7 +673,10 @@ def find_own_draft(
     (``message_too_large``) and is not parsed. At most ``MAX_PARSED_ROWS`` candidate
     rows are parsed; a further one is ``unproven`` (``too_many_rows``). An error of
     the parser on one row (a ``RecursionError`` is one) makes that row ``unproven``
-    (``read_failed``), and the other rows are still judged. None of these rows is
+    (``read_failed``), and the other rows are still judged; so does a ``text/html`` or
+    ``text/plain`` part of a candidate row that cannot be decoded, or that declares a
+    charset that is not decoded (``_REFUSED_CHARSETS``): such a part is never skipped,
+    because its text would be missing from the proof. None of these rows is
     claimed or set aside. The ``Message-ID`` and the ``Received`` fields are parsed for
     a row in the thread only.
     An ``unproven`` verdict carries the code of its branch in ``reason`` (the first row
