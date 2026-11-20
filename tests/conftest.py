@@ -120,10 +120,6 @@ def _refuse_real_store(event: str, args: tuple) -> None:
         raise AssertionError(_STORE_REFUSAL.format(what=what))
 
 
-def _fail_on_store_hits(hits: list[str]) -> None:
-    assert not hits, _STORE_REFUSAL.format(what=", ".join(sorted(set(hits))))
-
-
 sys.addaudithook(_refuse_real_store)
 
 
@@ -408,12 +404,18 @@ def _no_real_stores(request, monkeypatch, _isolated_state):
     (``pytest -p store_touch_audit``): 0 rows on the default suite. Yields the list of
     the refused reads; the self-tests in ``tests/test_native_seam.py`` read it.
     """
+    yield from _store_lock(request.keywords, monkeypatch, _isolated_state)
+
+
+def _store_lock(keywords, monkeypatch, state_home):
+    """The body of ``_no_real_stores``, a plain generator so that its self-tests can
+    run the exemption and the teardown by hand."""
     global _store_hits
-    if "integration" in request.keywords:
+    if "integration" in keywords:
         yield None
         return
 
-    replacement = {name: _isolated_state / rel for _, name, rel in _STORE_PATHS}
+    replacement = {name: state_home / rel for _, name, rel in _STORE_PATHS}
     replacement |= dict.fromkeys(_STORE_FUNCTIONS, lambda: None)
     # Package modules only, as for ``eventkit.store`` above.
     for mod_name, mod in list(sys.modules.items()):
@@ -421,12 +423,14 @@ def _no_real_stores(request, monkeypatch, _isolated_state):
             for name, real in REAL_STORE_OBJECTS.items():
                 if getattr(mod, name, None) is real:
                     monkeypatch.setattr(mod, name, replacement[name])
-    monkeypatch.setenv("MACOS_APPS_FILE_ROOT", str(_isolated_state / "file-root"))
+    monkeypatch.setenv("MACOS_APPS_FILE_ROOT", str(state_home / "file-root"))
 
     hits: list[str] = []
-    _store_hits = hits
+    previous, _store_hits = _store_hits, hits
     try:
         yield hits
     finally:
-        _store_hits = None
-    _fail_on_store_hits(hits)
+        _store_hits = previous
+    # The code under test may catch the refusal (``except Exception``): fail the test
+    # here, with the same message.
+    assert not hits, _STORE_REFUSAL.format(what=", ".join(sorted(set(hits))))
