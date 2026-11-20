@@ -702,7 +702,11 @@ def test_daemon_identity_is_none_when_the_socket_accepts_and_does_not_answer(
     sockdir, monkeypatch
 ):
     """A daemon between `bind_socket()` and its first served request. It must read as
-    "nothing answers": a restart would kill a daemon in its start."""
+    "nothing answers": a restart would kill a daemon in its start.
+
+    This test cannot fail on a read with no bound: it would hang, and the suite has no
+    per-test timeout. The bound itself is guarded by
+    test_daemon_identity_has_a_total_bound_for_a_peer_that_drips."""
     p = sockdir / "mcp.sock"
     monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
     monkeypatch.setattr(deploy, "_IDENTITY_TIMEOUT", 0.2)
@@ -711,6 +715,44 @@ def test_daemon_identity_is_none_when_the_socket_accepts_and_does_not_answer(
         assert deploy._daemon_identity() is None
     finally:
         s.close()
+
+
+@pytest.mark.parametrize("part", ["headers", "body"])
+def test_daemon_identity_has_a_total_bound_for_a_peer_that_drips(
+    sockdir, monkeypatch, part
+):
+    """A timeout for each socket read is not a bound: a peer that sends one byte now
+    and then keeps the read open, and the bound of the wait is checked only between
+    reads. The peer here drips for 3 s and then hangs up, so a read that lost its
+    total bound fails this test (it returns late) and does not hang the suite."""
+    p = sockdir / "mcp.sock"
+    monkeypatch.setenv("MACOS_APPS_MCP_SOCKET", str(p))
+    monkeypatch.setattr(deploy, "_IDENTITY_TIMEOUT", 0.5)
+    s = daemon.bind_socket(p)
+    head = b"HTTP/1.1 200 OK\r\n"
+    if part == "body":
+        head += b"content-type: application/json\r\ncontent-length: 4000\r\n\r\n"
+
+    def drip():
+        conn, _ = s.accept()
+        try:
+            conn.recv(65536)
+            conn.sendall(head)
+            for _ in range(60):
+                conn.sendall(b" " if part == "body" else b"x")
+                time.sleep(0.05)  # far below the timeout of one read
+        except OSError:
+            pass  # the reader gave up and closed: the wanted outcome
+        finally:
+            conn.close()
+
+    threading.Thread(target=drip, daemon=True).start()
+    started = time.perf_counter()
+    try:
+        assert deploy._daemon_identity() is None  # nothing answers: never a restart
+    finally:
+        s.close()
+    assert time.perf_counter() - started < 1.5
 
 
 _HTTP_200 = b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n"
