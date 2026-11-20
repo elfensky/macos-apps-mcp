@@ -103,8 +103,9 @@ ORDER BY m.ROWID LIMIT ?
 # sweep then proves nothing. Far above the 0 to 10 a quiet minute brings.
 MAX_NEW_ROWS = 300
 
-# A larger decoded body is not parsed (#611). The strip of a crafted 2 MB body took 0.06
-# to 0.15 s in the prototype run of 2026-11-20, and up to 0.35 s on a busy Mac.
+# The strip does not run on a larger decoded body (#611): the body is decoded and
+# measured only. The strip of a crafted 2 MB body took 0.06 to 0.15 s in the prototype
+# run of 2026-11-20, and up to 0.35 s on a busy Mac.
 MAX_BODY_CHARS = 2_000_000
 
 
@@ -471,9 +472,11 @@ def find_own_draft(
     INBOX row of another message). ``signature``: the signature Mail put into this
     reply ("" when it did not read), accepted between the text and the attribution
     (``_is_own``), for the Drafts copy and the sent twins alike. After a refusal nothing
-    was sent, so nothing is set aside. A threaded Drafts row or sent copy whose decoded
-    body is longer than ``MAX_BODY_CHARS`` is not parsed: it is ``unproven``
-    (``body_too_large``), never claimed and never set aside; no other row is measured.
+    was sent, so nothing is set aside. A candidate row (a Drafts row that is not late
+    and has a Message-ID, or, after a send, a Sent or All Mail row with a Message-ID)
+    whose decoded body is longer than ``MAX_BODY_CHARS`` is decoded and measured, and
+    the strip does not run: it is ``unproven`` (``body_too_large``), never claimed and
+    never set aside; no other row is measured.
     An ``unproven`` verdict carries the code of its branch in ``reason`` (the first row
     that could not be set aside names it; INBOX rows after a send are judged last).
     Raises ``NativeError`` when the index cannot be read now (the caller treats that as
