@@ -623,10 +623,28 @@ Device-dependent Notes and draft changes retain their recorded probe prerequisit
 Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule. The phase-close code review of Phase 05.2 (2026-11-19) found #609, #610 and #611, which join the phase under the same rule.
 **Requirements**: FIX-27, FIX-28, FIX-29, FIX-30, FIX-31, FIX-32, FIX-33, FIX-34, FIX-35 (#568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #585, #607, #609, #610, #611, #581; the bugs #572 to #580 were implemented in PR #584)
 **Depends on:** Phase 05.6
-**Plans:** 0 plans. The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
+**Plans:** 0/10 plans complete. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 05.12 to break down)
+**Wave 1** *(parallel: no shared source file)*
+- [ ] 05.12-01-PLAN.md — Measurement sitting 1 on the installed 0.16.1: bounds and verdicts for #607, #609, #610, device readings for #585 and #611 (owner, 30 min)
+- [ ] 05.12-02-PLAN.md — FIX-34: the reply sweep strips HTML in linear time, with a size cap (#611)
+- [ ] 05.12-03-PLAN.md — FIX-27: opening the app after an update restarts the daemon (#568)
+- [ ] 05.12-04-PLAN.md — FIX-30 part 1: Mail scripts and the doctor probe address the app by bundle id (#585)
+
+**Wave 2** *(blocked on Wave 1)*
+- [ ] 05.12-05-PLAN.md — FIX-30 part 2: the other five apps by bundle id, held by a guard test (#585)
+- [ ] 05.12-06-PLAN.md — FIX-35: the store lock for unit tests, and the closed guard gaps confirmed (#581)
+- [ ] 05.12-07-PLAN.md — FIX-31, FIX-32, FIX-33: the reply window check, the quote check and the late key (#607, #609, #610)
+
+**Wave 3** *(blocked on Wave 2)*
+- [ ] 05.12-08-PLAN.md — FIX-28, FIX-29: the two private advisories, fixed in their temporary private forks
+
+**Wave 4** *(blocked on Wave 3)*
+- [ ] 05.12-09-PLAN.md — Signed builds and acceptance sitting 2 (M10 to M19, the open-app checks; owner, 75 to 90 min); issues close on evidence
+
+**Wave 5** *(blocked on Wave 4)*
+- [ ] 05.12-10-PLAN.md — Advisory merges, the patch release, the installed and proven app, the advisories published
 
 ### Phase 05.10: Tool surface — parameter descriptions, verb_noun names, merged duplicates and error codes (#514, #502) (INSERTED)
 

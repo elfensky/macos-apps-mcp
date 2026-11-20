@@ -4,16 +4,16 @@ milestone: v0.11.0
 current_phase: "05.6"
 current_phase_name: "Bug fixes — Notes write safety and system folders in any language (#500, #501, #497, #471, #521, #540, #556)"
 status: executing
-stopped_at: "Phase 05.6 plan 05.6-06 is planned and checked (one checker pass, one revision): the owner probe sitting of D-23, with its probe script in 05.6-proto. Next: /gsd-execute-phase 05.6 for plan 05.6-06 with the owner at the Mac (a new session asks the owner again before any device run); then plan the code for issues 500 and 521 from its verdicts. Release 0.16.1 is published and installed (2026-11-19). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615."
-last_updated: "2026-11-19T17:10:00.000Z"
+stopped_at: "Phase 05.12 is planned and checked (2026-11-20): research, 10 plans in 5 waves, three scoped checker passes (4 blockers, 26 warnings, 12 info) and one revision that applied all 42 items; no second checker pass. Phase 05.6 plan 05.6-06 (the owner probe sitting) is planned too. Next, with the owner at the Mac: the 05.6-06 probe sitting and the 05.12-01 measurement sitting (they can share one visit); without the owner: /gsd-execute-phase 05.12 for plans 02, 03 and 04 (wave 1 code lanes, each stops at a draft PR for a probe review). Release 0.16.1 is published and installed. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615."
+last_updated: "2026-11-20T12:00:00.000Z"
 state_head: d6abba5465c6ff0bdb93c00cee7cfd00595c3427
 progress:
   total_phases: 21
   completed_phases: 11
-  total_plans: 100
+  total_plans: 110
   completed_plans: 99
-last_activity: 2026-11-19
-last_activity_desc: "Phase 05.6 plan 05.6-06 (the owner probe sitting) planned and checked."
+last_activity: 2026-11-20
+last_activity_desc: "Phase 05.12 planned: research, 10 plans in 5 waves, checked and revised."
 ---
 
 # Project State
@@ -108,6 +108,7 @@ Their verification fingerprints are stale against current source. These counts d
 - [Phase 05.2]: Owner decisions 2026-11-19 (05.2-20 sitting, question tool): "F: close" and "H: close" — #348 closes without device evidence for the two-display window order (G-05.2-5) and for a refusal after an autosave (G-05.2-6); the window-check refusal of the first `reply_all` is filed as a bug (#607) and does not block #348 or release 0.16.0.
 - [Phase 05.2]: Owner decision 2026-11-19 (question tool, after the page on the phase-close review): release 0.16.0 ships now from the code tested at the 05.2-20 sitting; the fix for review finding CR-01 (PR #608: a quoted reply is confirmed only when the old reply follows the text) ships in 0.16.1 and merges after the 0.16.0 cut. The device check of PR #608 ran on a signed build of its branch (two `mail_reply` calls, nothing sent) and passed. Review findings WR-01, WR-02 and WR-04 are #609, #610 and #611 in Phase 05.12.
 - [Roadmap]: Owner decisions 2026-11-19 (question tool, after the 0.16.0 cut): 0.16.0 is not published; 0.16.1 is cut the same day and goes to PyPI, the MCP Registry and a GitHub release; CodeQL leaves `.planning/` out of the scan (draft PR 617; the owner switches off the default setup first, a session may not change that setting).
+- [Phase 05.12]: Owner decisions 2026-11-20 (question tool, after the research page): opening the app restarts an older daemon at once, also while a call runs (the client gets the uncertain-outcome answer); a tool that needs Mail starts Mail when Mail is closed (scripts address the app by id); every app's scripts move to the id form in this phase, not only Mail's; the two private advisories are the last lane of the phase, written in GitHub's temporary private forks that the owner creates, and merged directly before the release. Research defaults that stand until the owner vetoes them (05.12-RESEARCH.md): one self-closing alert during the wait, a 300 s wait bound, a bounded activation poll with two refusal texts and no second activation, the unreadable-signature residual, a 2,000,000-character cap for the sweep's body read.
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
@@ -265,6 +266,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-11-19
-Stopped at: Phase 05.6 plan 05.6-06 is planned and checked (one checker pass, one revision): the owner probe sitting of D-23, with its probe script in 05.6-proto. Next: /gsd-execute-phase 05.6 for plan 05.6-06 with the owner at the Mac (a new session asks the owner again before any device run); then plan the code for issues 500 and 521 from its verdicts. Release 0.16.1 is published and installed (2026-11-19). Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615.
+Last session: 2026-11-20
+Stopped at: Phase 05.12 is planned and checked (2026-11-20): research, 10 plans in 5 waves, three scoped checker passes (4 blockers, 26 warnings, 12 info) and one revision that applied all 42 items; no second checker pass. Phase 05.6 plan 05.6-06 (the owner probe sitting) is planned too. Next, with the owner at the Mac: the 05.6-06 probe sitting and the 05.12-01 measurement sitting (they can share one visit); without the owner: /gsd-execute-phase 05.12 for plans 02, 03 and 04 (wave 1 code lanes, each stops at a draft PR for a probe review). Release 0.16.1 is published and installed. Open for the owner: the CodeQL default setup (draft PR 617), the three UI-review items of the Health page, the page-key rotation (T-05.2-22), the Dependabot PR 615.
 Resume file: .planning/phases/05.2-bug-fixes-automation-grants-unreadable-on-macos-27-455/05.2-UAT.md
