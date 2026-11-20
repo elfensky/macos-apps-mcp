@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import pathlib
 import re
 
 import pytest
@@ -165,6 +166,7 @@ class _CallSite:
     backstop: float | None
     host: float | None
     error: str | None
+    source: str | None = None  # the script text; None when it could not be resolved
 
 
 def _call_sites() -> list[_CallSite]:
@@ -195,7 +197,7 @@ def _call_sites() -> list[_CallSite]:
             except _Unresolved as exc:
                 sites.append(_CallSite(site_id, label, None, None, str(exc)))
                 continue
-            sites.append(_CallSite(site_id, label, backstop, host, None))
+            sites.append(_CallSite(site_id, label, backstop, host, None, template))
     # stable ids regardless of filesystem glob order
     return sorted(sites, key=lambda s: s.id)
 
@@ -233,3 +235,140 @@ def test_call_shaped_host_caps_are_evaluated_at_max_targets():
     for site in sites:
         assert site.error is None, f"{site.id}: {site.error}"
         assert site.host == 435.0, f"{site.id}: host cap {site.host} != 435.0"
+
+
+# --- #581: the guards are tied together -----------------------------------------------
+#
+# Two ways a script could miss a guard. A call-site script that is not in the compile
+# inventory gets the timeout check but no compile check. A script that is built inline
+# (a string in a function, a constant without ``tell application``) is in no inventory
+# at all, so no guard sees it.
+
+
+def _outside_inventory(sites) -> list[str]:
+    """The ids of the call sites whose script is not a script of the inventory."""
+    inventory = set(scripts.templates().values())
+    return [site.id for site in sites if site.source not in inventory]
+
+
+_PACKAGE = pathlib.Path(runtime.__file__).parent
+_LOOKS_LIKE_SCRIPT = re.compile(
+    r"\bon run\b|\bend tell\b|tell application|\bon error\b|display alert|"
+    r"display dialog|\bend try\b"
+)
+# Each script that is built inline, outside the compile inventory: ``file:name`` (the
+# function or the constant that holds the string) -> why no guard needs it. Never an
+# entry for a whole module.
+_INLINE_ALLOWED = {
+    # A `display alert` only (D10). It targets no app, so it has no `tell` block and no
+    # Apple Event to bound by `with timeout`, and its text travels as an argument.
+    "deploy.py:_alert": "a `display alert` only: it targets no app",
+    # The same alert for the wait on the daemon (#568). It ends by `giving up after`,
+    # and the caller ends its child process when the wait is over.
+    "deploy.py:_wait_notice": "a `display alert` only: it targets no app",
+    # The text of a regular expression that reads the target of a script.
+    "runtime.py:_TELL_APP": "a pattern text, not a script",
+}
+
+
+def _inline_scripts(source: str, rel: str) -> list[tuple[str, int]]:
+    """(``file:name``, line) for each string constant of ``source`` that reads like
+    AppleScript and is part of no inventory script. ``name`` is the enclosing function
+    (dotted for a method), else the module-level name the string is assigned to.
+    Docstrings are left out."""
+    inventory = list(scripts.templates().values())
+    tree = ast.parse(source)
+    scopes = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, scopes)
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    found: list[tuple[str, int]] = []
+
+    def visit(node: ast.AST, owner: str | None) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            owner = f"{owner}.{node.name}" if owner else node.name
+        elif owner is None and isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            owner = next((t.id for t in targets if isinstance(t, ast.Name)), None)
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and _LOOKS_LIKE_SCRIPT.search(node.value)
+            and not any(node.value in script for script in inventory)
+        ):
+            found.append((f"{rel}:{owner or '<module>'}", node.lineno))
+        for child in ast.iter_child_nodes(node):
+            visit(child, owner)
+
+    visit(tree, None)
+    return found
+
+
+def _package_inline_scripts() -> list[tuple[str, int]]:
+    return [
+        hit
+        for path, _module in scripts.modules()
+        for hit in _inline_scripts(
+            path.read_text(), path.relative_to(_PACKAGE).as_posix()
+        )
+    ]
+
+
+def test_every_call_site_template_is_in_the_compile_inventory():
+    assert _outside_inventory(_CALL_SITES) == []
+    # the check is not vacuous: a made-up script fails it, and so does an unresolved one
+    made_up = _CallSite("x.py:1:_MADE_UP", "_MADE_UP", 30.0, 30.0, None, "on run\nend")
+    unresolved = _CallSite("x.py:2:_GONE", "_GONE", None, None, "no attribute")
+    assert _outside_inventory([made_up, unresolved, _CALL_SITES[0]]) == [
+        "x.py:1:_MADE_UP",
+        "x.py:2:_GONE",
+    ]
+
+
+def test_inline_scripts_outside_the_compile_inventory_are_allowlisted():
+    found = {key for key, _line in _package_inline_scripts()}
+    extra = sorted(found - set(_INLINE_ALLOWED))
+    assert not extra, (
+        f"{extra}: a script outside the compile inventory. Make it a module-level "
+        "constant with `tell application`, or add a `file:name` entry with its reason "
+        "to _INLINE_ALLOWED"
+    )
+    # an entry that matches nothing is stale: remove it
+    assert sorted(set(_INLINE_ALLOWED) - found) == []
+    # An entry names one function or one constant, never a whole module: a made-up
+    # script in an allowlisted file, outside the allowlisted name, is still found.
+    for key, reason in _INLINE_ALLOWED.items():
+        file, _, name = key.partition(":")
+        assert file.endswith(".py") and name.replace(".", "_").isidentifier(), key
+        assert reason
+    made_up = '_OTHER = "tell application \\"Finder\\" to quit"\n'
+    assert _inline_scripts(made_up, "runtime.py") == [("runtime.py:_OTHER", 1)]
+    in_function = 'def f():\n    """doc: on error"""\n    return "display dialog 1"\n'
+    assert _inline_scripts(in_function, "deploy.py") == [("deploy.py:f", 3)]
+    assert "runtime.py:_OTHER" not in _INLINE_ALLOWED
+    assert "deploy.py:f" not in _INLINE_ALLOWED
+
+
+def test_the_inline_script_scan_reads_the_package():
+    # guard the scan itself: an empty one would make the allowlist check vacuous
+    files = [path for path, _module in scripts.modules()]
+    assert len(files) >= 30, files
+    assert {p.name for p in files} >= {"deploy.py", "runtime.py", "mail.py"}
+    found = dict(_package_inline_scripts())
+    assert "deploy.py:_alert" in found
+    source = (_PACKAGE / "deploy.py").read_text().splitlines()
+    assert "display alert" in source[found["deploy.py:_alert"] - 1]
+    # a string that is part of an inventory script is not "inline"
+    part_of_a_script = next(
+        line
+        for script in scripts.templates().values()
+        for line in script.splitlines()
+        if _LOOKS_LIKE_SCRIPT.search(line)
+    )
+    assert _inline_scripts(f"_X = {part_of_a_script!r}\n", "x.py") == []
