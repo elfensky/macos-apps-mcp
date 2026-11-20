@@ -64,7 +64,7 @@ on run argv
   set bodyText to my readBody(item 3 of argv)
   set fromAddr to item 4 of argv
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set msg to make new outgoing message with properties {visible:true}
     try
       set subject of msg to subj
@@ -101,7 +101,7 @@ on run argv
   set out to ""
   set c to 0
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set dm to drafts mailbox
     set n to count of (messages of dm)
     repeat with i from 1 to n
@@ -133,7 +133,7 @@ end run"""
 _DELETE_DRAFT = """on run argv
   set mid to item 1 of argv
   with timeout of 120 seconds
-  tell application "Mail"
+  tell application id "com.apple.mail"
     set dm to drafts mailbox
     set n to count of (messages of dm)
     repeat with i from n to 1 by -1
