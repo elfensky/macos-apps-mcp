@@ -19,7 +19,7 @@ import pytest
 
 from macos_apps_mcp.adapters import mail_index, mail_reply_cleanup
 from macos_apps_mcp.errors import NativeError
-from macos_apps_mcp.text import squash_text
+from macos_apps_mcp.text import long_combining_run, squash_text
 from tests import mailhtml
 
 # The conftest lock replaces ``_read``; the self-tests bind the real one here.
@@ -970,6 +970,26 @@ def test_find_own_draft_never_sets_aside_an_inbox_row_by_the_drafts_copys_messag
     assert got.kind == "unproven" and got.reason == "inbox_row"
 
 
+# Combining marks for the scan before normalization (FIX-36, #626), by code point: an
+# editor cannot turn these into glyphs.
+_GRAVE, _COMMA = chr(0x0300), chr(0x0315)  # combining classes 230 and 232
+_OBJECT = chr(0xFFFC)
+
+
+def _marks(count: int) -> str:
+    """``count`` combining marks in the worst order for NFC: class 232, then 230."""
+    return _COMMA * (count // 2) + _GRAVE * (count - count // 2)
+
+
+def _marked_own(count: int, kind: str = "html") -> str:
+    """The call's own copy (``_OWN``, or its plain-text form) with ``count`` marks on
+    one letter of the quote. At most 30 marks read as the call's own."""
+    words = f"quoted w{_marks(count)}ords"
+    if kind == "plain":
+        return f"Hi there\n\n{_ATTRIBUTION}\n> {words}"
+    return _OWN.replace("quoted words", words)
+
+
 def _sized(size: int, kind: str = "html") -> str:
     """The call's own copy (``_OWN``, or its plain-text form) padded with spaces to
     exactly ``size`` characters. Under the size cap it reads as the call's own."""
@@ -1015,6 +1035,8 @@ _BRANCH_CASES = [
     ),
     # over the size cap, which the two tests below set to 1,000 characters
     ("body_too_large", [(20, _URL, "d@x", _sized(1_001))], {}),
+    # 31 combining marks in a row, one over the limit
+    ("combining_run", [(20, _URL, "d@x", _marked_own(31))], {}),
 ]
 
 
@@ -1040,6 +1062,7 @@ def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
         "other_mailbox",
         "several_rows",
         "body_too_large",
+        "combining_run",
     }
     monkeypatch.setattr(mail_reply_cleanup, "MAX_BODY_CHARS", 1_000)
     produced = set()
@@ -1054,7 +1077,7 @@ def test_every_find_own_draft_reason_is_a_fixed_code(mailroot, monkeypatch):
             **{"landed_by": 10**6, **kw},
         )
         produced.add(got.reason)
-    assert produced == codes and len(codes) == 9
+    assert produced == codes and len(codes) == 10
     assert all(re.fullmatch(r"[a-z_]+", code) for code in produced)
 
 
@@ -1595,3 +1618,147 @@ def test_split_quote_huge_reference_raises_as_before():
     msg = _html_message("<div>Hi there &#" + "9" * 5_000 + ";</div>")
     with pytest.raises(ValueError):
         mail_reply_cleanup._split_quote(msg)
+
+
+# --- the combining-run scan before normalization (FIX-36, #626, D12) ----------------
+# NFC sorts each run of combining marks, and a long run in mixed order took quadratic
+# time (7 s for 120,001 marks, on the one native worker). The scan refuses such a text
+# before NFC runs. `squash_text` and the compare functions did not change.
+
+
+def _utf8_message(body: str, kind: str = "html"):
+    raw = f"Content-Type: text/{kind}; charset=utf-8\r\n\r\n{body}".encode()
+    return email.message_from_bytes(raw, policy=email.policy.default)
+
+
+_CRAFTED_RUNS = {
+    # one letter and 240,000 marks: class 232, then class 230 (the worst order)
+    "240,001 characters in the quote": (
+        f"<div>Hi</div><blockquote>a{_marks(240_000)}</blockquote>"
+    ),
+    # class 0, so a scan by combining class alone counts no mark in it
+    "160,000 of U+0F73 above the quote": (
+        f"<div>{chr(0x0F73) * 160_000}</div><blockquote>q</blockquote>"
+    ),
+}
+
+
+@pytest.mark.parametrize("markup", _CRAFTED_RUNS.values(), ids=_CRAFTED_RUNS.keys())
+def test_split_quote_refuses_a_combining_run_fast(markup):
+    # without the scan: about 29 s and about 26 s
+    assert (ord(_GRAVE), ord(_COMMA)) == (0x300, 0x315)
+    msg = _utf8_message(markup)
+    assert msg.get_content() == markup  # the marks reach the scan as written
+    started = time.perf_counter()
+    with pytest.raises(mail_reply_cleanup._CombiningRun):
+        mail_reply_cleanup._split_quote(msg)
+    assert time.perf_counter() - started < _TIME_BOUND_S
+
+
+def test_split_quote_scans_the_text_that_nfc_sees_combining_run():
+    # two runs of 20 with the object mark between them. Above the quote the mark is
+    # removed before NFC runs, so NFC sees one run of 40. In the quote the mark stays.
+    pieces = f"a{_marks(20)}{_OBJECT}{_marks(20)}"
+    assert ord(_OBJECT) == 0xFFFC and not long_combining_run(pieces)
+    above = _utf8_message(f"<div>{pieces}</div><blockquote>q</blockquote>")
+    with pytest.raises(mail_reply_cleanup._CombiningRun):
+        mail_reply_cleanup._split_quote(above)
+    below = _utf8_message(f"<div>Hi</div><blockquote>{pieces}</blockquote>")
+    before, after = mail_reply_cleanup._split_quote(below)
+    assert before == "Hi" and _OBJECT in after
+
+
+@pytest.mark.parametrize(
+    "url, kind, kw",
+    [
+        (_URL, "html", {}),  # the own Drafts copy alone, after a refusal
+        (_SENT, "html", {"sent_twins": True}),  # the Sent copy alone, after a send
+        (_URL, "plain", {}),
+    ],
+)
+def test_find_own_draft_keeps_a_combining_run_unproven(
+    mailroot, monkeypatch, url, kind, kw
+):
+    # 31 marks on one letter of the quote, one over the limit: the text is not
+    # normalized, so nothing is claimed and nothing is set aside
+    mailroot(20, _ORIGINAL, "d@x", _marked_own(31, kind), url=url, kind=kind)
+    got = _find(monkeypatch, [(20, url)], **kw)
+    assert got == mail_reply_cleanup.Draft("unproven", url, "<d@x>", "combining_run")
+
+
+def test_find_own_draft_judges_thirty_marks_as_before_combining_run(
+    mailroot, monkeypatch
+):
+    # at the limit the same copies are judged as before: the Drafts copy is the call's
+    # own, and after a send the Sent copy is the send itself
+    tail = f"quoted w{_marks(30)}ords"
+    mailroot(20, _ORIGINAL, "d@x", _marked_own(30))
+    got = _find(monkeypatch, tail=tail)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+    mailroot(21, _ORIGINAL, "s@x", _marked_own(30), url=_SENT)
+    got = _find(monkeypatch, [(21, _SENT)], tail=tail, sent_twins=True)
+    assert got == mail_reply_cleanup.Draft("none")
+
+
+@pytest.mark.parametrize("name", ["own", "attribution", "signature", "tail"])
+def test_find_own_draft_scans_its_own_arguments_combining_run(
+    mailroot, monkeypatch, name
+):
+    # the attribution line and the tail come from the original, which another party
+    # wrote, and every candidate row normalizes them. With 31 marks in one argument a
+    # candidate row is not parsed and not compared.
+    monkeypatch.setattr(
+        mail_reply_cleanup,
+        "_split_quote",
+        lambda msg: pytest.fail("the body of a row was parsed"),
+    )
+    kw = {name: f"w{_marks(31)}ord"}
+    mailroot(20, _ORIGINAL, "d@x", _OWN)
+    got = _find(monkeypatch, **kw)
+    assert got == mail_reply_cleanup.Draft("unproven", _URL, "<d@x>", "combining_run")
+    mailroot(21, _ORIGINAL, "s@x", _OWN, url=_SENT)
+    got = _find(monkeypatch, [(21, _SENT)], sent_twins=True, **kw)
+    assert got == mail_reply_cleanup.Draft("unproven", _SENT, "<s@x>", "combining_run")
+    # a threaded row that is no candidate keeps its own code
+    archive = f"imap://{_ACCT}/Archive"
+    mailroot(22, _ORIGINAL, "a@x", _OWN, url=archive)
+    assert _find(monkeypatch, [(22, archive)], **kw).reason == "other_mailbox"
+    # and a row of another thread still is not the call's own
+    mailroot(30, "another-thread@x", "p@x", _OWN)
+    assert _find(monkeypatch, [(30, _URL)], **kw) == mail_reply_cleanup.Draft("none")
+
+
+def test_find_own_draft_scans_no_argument_that_is_none_combining_run(
+    mailroot, monkeypatch
+):
+    # a reply without a quote has no attribution and no tail: None is skipped, and
+    # the own copy is claimed as before
+    mailroot(20, _ORIGINAL, "d@x", "<div>Hi there</div>")
+    got = _find(monkeypatch, attribution=None, tail=None)
+    assert got == mail_reply_cleanup.Draft("one", _URL, "<d@x>")
+
+
+# The size of the differential: 2,000 bodies take about 1 s on this Mac.
+_SCAN_BODIES = 2_000
+
+
+def test_split_quote_with_the_scan_equals_the_old_output_combining_run():
+    # every second body carries text in 13 scripts above and inside the quote
+    rng = random.Random(626)
+    refused = differs = marked = 0
+    for n in range(_SCAN_BODIES):
+        markup = mailhtml.reply_html(rng)
+        if n % 2:
+            above, inside = mailhtml.script_text(rng), mailhtml.script_text(rng)
+            markup = markup.replace(
+                "<blockquote", f"<div>{above}</div><blockquote", 1
+            ).replace("</blockquote>", f"<p>{inside}</p></blockquote>", 1)
+        msg = mailhtml.message(markup, rng)
+        old = _old_split_quote(msg)
+        marked += any(ord(char) in range(0x300, 0x370) for char in "".join(old))
+        try:
+            differs += mail_reply_cleanup._split_quote(msg) != old
+        except mail_reply_cleanup._CombiningRun:
+            refused += 1
+    assert (refused, differs) == (0, 0)
+    assert marked > 100  # the bodies do hold combining marks
