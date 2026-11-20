@@ -147,10 +147,12 @@ MAX_PARSED_ROWS = 8
 # A text part that declares one of these as its charset is not decoded. They are text
 # encodings of the standard library, but no character sets: they encode domain names.
 # The decode of `punycode` takes quadratic time (2.3 s for 100,000 bytes, 9.4 s for
-# 200,000); `idna` needs `punycode`. Every other text encoding of Python 3.14.5 decoded
-# 1 MB of crafted input in at most 0.12 s (110 encodings, 22 input shapes; a test
-# repeats that on the running Python). A codec that is no text encoding (base64, zlib,
-# bz2, hex, quopri, rot-13, uu) is refused by `bytes.decode` itself before it runs.
+# 200,000). `idna` decodes each label with `punycode`; in Python 3.14.5 it refuses the
+# error handler of `get_content` at once, and it is listed so that the bound does not
+# rest on that. Every other text encoding of Python 3.14.5 decoded 1 MB of crafted
+# input in at most 0.12 s (110 encodings, 22 input shapes; a test repeats a smaller
+# pass on the running Python). A codec that is no text encoding (base64, zlib, bz2,
+# hex, quopri, rot-13, uu) is refused by `bytes.decode` itself before it runs.
 _REFUSED_CHARSETS = frozenset({"punycode", "idna"})
 
 
@@ -493,8 +495,8 @@ def _read_draft(url: str, rowid: int):
     """``(in_reply_to, more)`` of one stored message, or None when its file is absent
     or unreadable. ``in_reply_to`` is parsed here. ``more()`` returns
     ``(message_id, body, received)`` and is for a row in the thread only: a row of
-    another thread costs one bounded read, one field split and at most two value
-    parses (``In-Reply-To``, and the top-level ``Content-Type``, see below).
+    another thread costs one bounded read, one field split and one value parse
+    (``In-Reply-To``).
     ``received``: the headers carry a ``Received`` field with a value. A mail server
     adds one to a delivered message; a draft and a Sent copy carry none. ``body()``
     parses the whole message and is for a candidate row only.
