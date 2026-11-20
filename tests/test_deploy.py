@@ -325,18 +325,44 @@ def test_link_cli_leaves_a_foreign_file_and_a_wrapperless_build_alone(
 # --- `launch`: what opening the .app does -------------------------------------------
 
 
+class _Clock:
+    """`deploy.time` for a wait: `sleep` moves `monotonic`, so no test waits."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
 @pytest.fixture
 def opened(tmp_path, monkeypatch, cli_link):
     """`launch` from an app at the patched install path. Only the native boundary is
-    faked (agent status, registration, the daemon's dialog pass, the alert and the
-    browser); the CLI link, the setup marker and the dashboard link are real."""
+    faked (agent status, registration, the daemon's identity answers, the restart, the
+    clock, the daemon's dialog pass, the alert and the browser); the CLI link, the
+    setup marker and the dashboard link are real. `answers` scripts the identity
+    reads, and its last item repeats; the default is the app's own identity."""
     app = _app_with_wrapper(tmp_path).resolve()
     monkeypatch.setattr(deploy, "_APP", app)
     monkeypatch.setattr(sys, "executable", str(app / "Contents/MacOS/macos-apps-mcp"))
     deploy._DASHBOARD_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
     deploy._DASHBOARD_KEY_FILE.write_text("k" * 43)
     state = {"status": "enabled", "dialogs": 0, "fail": None}
+    mine = (doctor.version(), doctor.build_stamp())
     seen = {"urls": [], "alerts": [], "registered": 0, "state": state}
+    seen |= {"mine": mine, "answers": [mine], "kicks": 0, "kick": _Kick(0, "")}
+    seen["clock"] = _Clock()
+
+    def identity():
+        answers = seen["answers"]
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    def kickstart():
+        seen["kicks"] += 1
+        return seen["kick"]
 
     def dialogs():
         state["dialogs"] += 1
@@ -354,6 +380,9 @@ def opened(tmp_path, monkeypatch, cli_link):
     monkeypatch.setattr(deploy, "agent_status", lambda: state["status"])
     monkeypatch.setattr(deploy, "register_agent", register)
     monkeypatch.setattr(deploy, "_wait_for_socket", lambda: None)
+    monkeypatch.setattr(deploy, "_daemon_identity", identity)
+    monkeypatch.setattr(deploy, "_kickstart", kickstart)
+    monkeypatch.setattr(deploy, "time", seen["clock"])
     monkeypatch.setattr(deploy, "_request_grants_via_daemon", dialogs)
     monkeypatch.setattr(deploy, "_alert", seen["alerts"].append)
     monkeypatch.setattr(webbrowser.MacOSXOSAScript, "open", browser)
@@ -421,6 +450,54 @@ def test_open_alerts_the_dashboard_refusal_and_a_missing_browser(opened, monkeyp
         deploy.launch()
     assert e.value.code == 1 and "No browser opened" in opened["alerts"][-1]
     assert "k" * 43 not in opened["alerts"][-1]  # the key never reaches a dialog
+
+
+def test_launch_restarts_nothing_when_the_daemon_identity_is_the_bundles(opened):
+    deploy.launch()
+    assert opened["kicks"] == 0 and opened["state"]["dialogs"] == 0
+    assert "&to=" not in opened["urls"][-1] and opened["alerts"] == []
+
+
+@pytest.mark.parametrize("other", ["version", "build", "no route"])
+def test_launch_restarts_once_when_the_daemon_identity_differs(opened, other):
+    """#568: launchd keeps the old daemon process after the bundle is replaced."""
+    version, build = opened["mine"]
+    old = {
+        "version": ("0.0.1", build),
+        "build": (version, "0000000 2020-01-01T00:00:00Z"),
+        "no route": ("", ""),  # every daemon up to 0.16.1 answers 404
+    }[other]
+    # the old daemon answers twice, then the socket is dead, then the new one answers
+    opened["answers"][:] = [old, old, None, opened["mine"]]
+    deploy.launch()
+    assert opened["kicks"] == 1 and opened["state"]["dialogs"] == 0
+    assert "&to=" not in opened["urls"][-1] and opened["alerts"] == []
+
+
+def test_kickstart_helper_runs_the_one_launchctl_restart(monkeypatch):
+    ran = []
+    monkeypatch.setattr(
+        deploy.subprocess, "run", lambda argv, **kw: ran.append(argv) or _Kick(0, "")
+    )
+    assert deploy._kickstart().returncode == 0
+    target = f"gui/{os.getuid()}/{deploy.BUNDLE_ID}"
+    assert ran == [["launchctl", "kickstart", "-k", target]]
+
+
+def test_allow_send_uses_the_kickstart_helper(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(deploy, "_ALLOW_SEND_FILE", tmp_path / "state" / "allow_send")
+    kicks = [_Kick(0, ""), _Kick(1, "not registered\n")]
+    monkeypatch.setattr(deploy, "_kickstart", lambda: kicks.pop(0))
+    deploy.allow_send(["mail"])
+    assert capsys.readouterr().out == (
+        "outbound: mail\ndaemon restarted — reconnect your MCP client\n"
+    )
+    deploy.allow_send(["off"])
+    assert capsys.readouterr().out == (
+        "outbound: off\nno daemon restarted (not registered); restart your "
+        "stdio server for this to take effect\n"
+    )
+    assert kicks == []  # one restart for each change
 
 
 def test_allow_send_round_trip(tmp_path, monkeypatch, capsys):
