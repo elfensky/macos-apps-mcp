@@ -51,7 +51,9 @@ requires `check`; `main` takes PRs with a merge commit only and requires `check`
   label made by `create_mailbox` has no `source`, and its counter stays 0 — compare against an
   AppleScript count there (#291).
 - **Hermetic tests** (2026-11-05). A test never touches a real home path. `tests/conftest.py` (`_isolated_state`)
-  patches every home-anchored constant and sets `MACOS_APPS_MCP_SOCKET`; add a new one there. A test
+  patches every home-anchored constant and sets `MACOS_APPS_MCP_SOCKET`; add a new one there. The app
+  store paths and the file root are locked by the function-scoped `_no_real_stores` (a test with the
+  `integration` marker is exempt): a new home-anchored store path goes there (2026-11-20). A test
   that reached `uninstall_agent()` once unlinked the live daemon's socket.
 - **The repo is not the daemon** (2026-07-29). Merging changes nothing about what Claude Code sees until the `.app`
   is rebuilt and reinstalled. A release includes the three-file version bump and the mandatory `doctor().version`
@@ -77,8 +79,10 @@ requires `check`; `main` takes PRs with a merge commit only and requires `check`
   threads, and never widen the executor past `max_workers=1`.
 - **One adapter module per app** under `macos_apps_mcp/adapters/`. Adding an app = add a module + mount its
   tools in `server.py` + (if the app is reached via osascript/Automation) add its name to
-  `doctor._AUTOMATION_APPS` and its bundle id to `doctor._AUTOMATION_BUNDLES` so `doctor`
-  checks it (a pin test fails when they disagree); it must not reach into another adapter. This is
+  `doctor._AUTOMATION_APPS` and its name and bundle id to `runtime.BUNDLE_IDS` (`doctor._AUTOMATION_BUNDLES`
+  is built from it) so `doctor` checks it (a pin test fails when they disagree), and its scripts address
+  the app by that id (`tell application id "…"`, held by `tests/test_script_addressing.py`, 2026-11-20);
+  it must not reach into another adapter. This is
   what lets a module later harden into a `lyfe` native data-plane adapter unchanged.
 - **The shim↔daemon hop has NO read deadline** (`daemon._uds_client_factory`, `Timeout(None,
   connect=10.0)`). A call's duration is the daemon's business — a bulk Mail pass runs HOURS —
