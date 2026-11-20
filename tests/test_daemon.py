@@ -23,6 +23,7 @@ from mcp.types import Implementation
 import macos_apps_mcp
 from macos_apps_mcp import audit as au
 from macos_apps_mcp import daemon, deploy, doctor, registry
+from tests.conftest import REAL_DEFAULT_SOCKET_DIR
 
 
 @pytest.fixture(autouse=True)
@@ -73,10 +74,15 @@ def test_socket_path_default_ignores_xdg_state_home(tmp_path, monkeypatch):
     # regardless of what any one of them has in XDG_STATE_HOME.
     monkeypatch.delenv("MACOS_APPS_MCP_SOCKET", raising=False)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg-state"))
-    expected = (
-        Path.home() / ".local" / "state" / "macos-apps-mcp" / "daemon" / "mcp.sock"
+    # The default is anchored on the home, not on XDG_STATE_HOME. conftest.py moves the
+    # constant to a temp folder, because socket_path() CREATES the folder: this test
+    # once made the real one.
+    assert REAL_DEFAULT_SOCKET_DIR.relative_to(Path.home()) == Path(
+        ".local/state/macos-apps-mcp/daemon"
     )
-    assert daemon.socket_path() == expected
+    assert daemon.socket_path() == daemon._DEFAULT_SOCKET_DIR / "mcp.sock"
+    assert tmp_path not in daemon.socket_path().parents
+    assert Path.home() not in daemon.socket_path().parents
 
 
 def test_bind_socket_perms(sockdir):
