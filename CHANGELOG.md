@@ -6,6 +6,18 @@ surface may still shift between minor versions.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The reply sweep reads a crafted mail in linear time** (#611). The Drafts check that runs
+  after a sent `reply_all` and after a refused reply parses the new stored messages of the
+  thread. A crafted mail there (256 KB of unclosed `<script ` openers) kept the one native
+  worker busy for 28 s, and a larger one for minutes; every other native call waited. The
+  strip of `script` and `style` blocks and of tags now takes linear time (about 0.01 s for
+  the same mail) and gives the same text as before, so the result for normal mail does not
+  change. A second bound: a threaded Drafts row or sent copy whose decoded body is longer
+  than 2,000,000 characters is not parsed. It is reported as `drafts_copy` `unproven` with
+  the new `drafts_copy_reason` `body_too_large`, and nothing is deleted for it.
+
 ## [0.16.1] - 2026-11-19 — The reply paste check
 
 ### Fixed
