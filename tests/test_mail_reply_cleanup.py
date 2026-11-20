@@ -2627,21 +2627,23 @@ def test_read_bound_find_own_draft_is_fast_on_a_punycode_charset(mailroot, monke
 @pytest.mark.parametrize(
     "charset", ["punycode", "PunyCode", '"punycode"', "idna", "IDNA", "puny code"]
 )
+@pytest.mark.parametrize("kind", ["html", "plain"])
 def test_read_bound_a_charset_that_is_no_character_set_is_not_decoded(
-    mailroot, monkeypatch, charset
+    mailroot, monkeypatch, charset, kind
 ):
-    # the call's own copy in content, but it declares a domain-name encoding: the part
-    # is not decoded (`get_content` is not called for it), and the row is not judged
+    # the call's own copy in content, as text/html and as text/plain, but it declares
+    # a domain-name encoding: the part is not decoded (`get_content` is not called for
+    # it), and the row is not judged
     monkeypatch.setattr(
         email.message.MIMEPart,
         "get_content",
         lambda *args, **kw: pytest.fail("a part with a refused charset was decoded"),
     )
-    _put_raw(mailroot, 20, _charset_row(charset, _OWN.encode()))
+    payload = _charset_row(charset, _marked_own(0, kind).encode(), kind)
+    _put_raw(mailroot, 20, payload)
     assert _find(monkeypatch) == _unproven(_URL, "read_failed")
-    msg = email.message_from_bytes(
-        _charset_row(charset, _OWN.encode()), policy=email.policy.default
-    )
+    msg = email.message_from_bytes(payload, policy=email.policy.default)
+    assert msg.get_content_type() == f"text/{kind}"
     with pytest.raises(LookupError):
         mail_reply_cleanup._split_quote(msg)
 
@@ -2777,9 +2779,20 @@ _UNDECODABLE = {
     "text/html, a codec that is no text encoding": (
         b"Content-Type: text/html; charset=rot_13\r\n\r\n"
     ),
-    # `idna` cannot decode with the error handler that `get_content` uses
+    # a refused charset: LookupError before the decode
     "text/html, idna": b"Content-Type: text/html; charset=idna\r\n\r\n",
+    # the codec `undefined` raises UnicodeError for every input
+    "text/html, UnicodeError": b"Content-Type: text/html; charset=undefined\r\n\r\n",
+    "text/plain, UnicodeError": (
+        b"Content-Type: text/plain; charset=undefined\r\n\r\n"
+    ),
+    # a NUL character in the label: ValueError from the codec lookup
+    "text/html, ValueError": b'Content-Type: text/html; charset="a\x00b"\r\n\r\n',
+    "text/plain, ValueError": b'Content-Type: text/plain; charset="a\x00b"\r\n\r\n',
 }
+# what each of the last four raises: no LookupError, so a skip on UnicodeError or on
+# ValueError alone would hide them
+_RAISES = {"undefined": UnicodeError, "a\x00b": ValueError}
 
 
 @pytest.mark.parametrize("fields", _UNDECODABLE.values(), ids=_UNDECODABLE.keys())
@@ -2790,6 +2803,12 @@ def test_read_bound_a_text_part_that_cannot_be_decoded_is_never_skipped(
     # read as the call's own copy (the flow then deletes it)
     payload = _three_parts(fields + _TYPED)
     msg = email.message_from_bytes(payload, policy=email.policy.default)
+    label = list(msg.iter_parts())[1].get_param("charset")
+    if label in _RAISES:
+        with pytest.raises(_RAISES[label]) as raised:
+            mail_reply_cleanup._split_quote(msg)
+        assert not isinstance(raised.value, LookupError)
+        assert type(raised.value) is _RAISES[label]
     assert "typed" not in "".join(_old_split_quote(msg))
     assert _old_split_quote(msg)[0] == "Hi there"
     _put_raw(mailroot, 20, payload)
