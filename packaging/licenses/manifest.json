@@ -26,7 +26,7 @@
     ]
   },
   "fastmcp-slim": {
-    "version": "4.1.6",
+    "version": "4.2.0",
     "distributions": [
       "fastmcp-slim"
     ],
@@ -36,22 +36,22 @@
     "sources": [
       {
         "name": "fastmcp-slim",
-        "version": "4.1.6",
-        "url": "https://files.pythonhosted.org/packages/7c/fb/b74c65952db7d60809bbc655afe00a76c41961c44fec82d4d2b65c0745fd/fastmcp_slim-4.1.6.tar.gz",
-        "sha256": "cd181b9b780161bbfdfc16ca6e417aaa8efd75d0a9ae961fdd20fa992d3d789f",
+        "version": "4.2.0",
+        "url": "https://files.pythonhosted.org/packages/a7/b7/ef6c9830adf73063b911b257ae6b295e40585e1024ba6a9d254fd3d9f060/fastmcp_slim-4.2.0.tar.gz",
+        "sha256": "01578f6d1a1423ca073e9d2ea4a193eed3ed9a5330e121fbcd9415511cfd1c0f",
         "members": []
       },
       {
         "name": "fastmcp",
-        "version": "4.1.6",
-        "url": "https://files.pythonhosted.org/packages/b9/c2/295e633099882c2f336f88338549ab7979a94422e037c170f75b17c142d2/fastmcp-4.1.6.tar.gz",
-        "sha256": "5e307ae4ac3048a1b586aac6fc31e08661141bb69b8a2b473070e5becae0176c",
+        "version": "4.2.0",
+        "url": "https://files.pythonhosted.org/packages/a6/3f/bb84343d2fec87230659632b7c186c0f0424c9744ca24b11a994bb3d6907/fastmcp-4.2.0.tar.gz",
+        "sha256": "833508360b9a5db6ae3524cf12471b31716c210feee0c726a867e38c43a9287f",
         "members": [
-          "fastmcp-4.1.6/LICENSE"
+          "fastmcp-4.2.0/LICENSE"
         ]
       },
       {
-        "url": "https://github.com/PrefectHQ/fastmcp/tree/1302563111a0e72176174cdb5ac19838cb0687c3",
+        "url": "https://github.com/PrefectHQ/fastmcp/tree/5e71792d8daf499325e3b747cc44cb04d4544119",
         "notice_check": "Complete recursive release tree has LICENSE and no NOTICE file."
       }
     ]
