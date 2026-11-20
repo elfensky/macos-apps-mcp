@@ -112,18 +112,20 @@ def test_delete_without_title_passes_only_id(monkeypatch):
     assert out == {"deleted": "N-1"}  # C5d: the ONE deletion envelope
 
 
-def test_get_bodies_sanitizes_and_preserves_structure(monkeypatch):
+def test_get_bodies_sanitizes_and_preserves_structure(notestore, monkeypatch):
     # #52: a hydrated body is control-stripped but keeps its line/tab structure (it is
     # legitimately multi-line — unlike a one-line summary, it must not be flattened).
+    # ``notestore``: the fixture store does not know the id, so AppleScript fills it.
     raw = "N-1\x1fLine1\nLine2\x00\tend\x1e"
     monkeypatch.setattr(runtime, "run_osascript", lambda *a: raw)
     out = NotesAdapter().get_bodies(["N-1"])
     assert out == [{"id": "N-1", "body": "Line1\nLine2\tend"}]
 
 
-def test_get_bodies_huge_body_downgrades_without_failing_batch(monkeypatch):
+def test_get_bodies_huge_body_downgrades_without_failing_batch(notestore, monkeypatch):
     # a single pathological body (a pasted dump) must not fail the whole batch: it
     # downgrades to a per-item notice while the sibling note hydrates normally.
+    # ``notestore``: the fixture store knows neither id, so AppleScript fills both.
     from macos_apps_mcp.text import BODY_HARD_MAX
 
     huge = "z" * (BODY_HARD_MAX + 1)
