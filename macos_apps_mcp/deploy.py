@@ -214,30 +214,38 @@ def _run_bundle_role(app: Path, role: str) -> None:
     )
 
 
-_IDENTITY_TIMEOUT = 2.0  # seconds for one identity read; a test shortens it
+_IDENTITY_TIMEOUT = 2.0  # seconds for one WHOLE identity read; a test shortens it
 
 
 def _daemon_identity() -> tuple[str, str] | None:
     """``(version, build)`` of the daemon that answers ``GET /identity`` on the socket
     (#568). ``("", "")`` for any other HTTP answer: a daemon without the route (every
     one up to 0.16.1 answers 404), or a 200 with a bad body. ``None`` when no HTTP
-    answer comes, which is every transport error: no file, a refused connect, a read
-    timeout, a read error. ``daemon.bind_socket()`` listens before uvicorn serves, so
-    a daemon in its start accepts the connect and stays silent, and it must not read
-    as "another daemon". The answer is untrusted, and it is compared, never run.
-    One request through its own client: the shim hop (``_uds_client_factory``) and its
-    unlimited read are not used here."""
+    answer comes, which is every transport error (no file, a refused connect, a read
+    timeout, a read error) and a read that passes its total bound.
+    ``daemon.bind_socket()`` listens before uvicorn serves, so a daemon in its start
+    accepts the connect and stays silent, and it must not read as "another daemon".
+    The answer is untrusted, and it is compared, never run. One request through its
+    own client: the shim hop (``_uds_client_factory``) and its unlimited read are not
+    used here."""
+    import asyncio
+
     import httpx2
 
     from .daemon import socket_path
 
-    try:
-        with httpx2.Client(
-            transport=httpx2.HTTPTransport(uds=str(socket_path())),
-            timeout=_IDENTITY_TIMEOUT,
+    async def read():
+        async with httpx2.AsyncClient(
+            transport=httpx2.AsyncHTTPTransport(uds=str(socket_path())),
+            timeout=_IDENTITY_TIMEOUT,  # for each socket read, so not a bound
         ) as client:
-            answer = client.get("http://daemon/identity")
-    except httpx2.TransportError:
+            return await client.get("http://daemon/identity")
+
+    try:
+        # The bound of the whole read: a peer that drips one byte now and then passes
+        # every per-read timeout, and the caller checks its deadline between reads.
+        answer = asyncio.run(asyncio.wait_for(read(), _IDENTITY_TIMEOUT))
+    except (httpx2.TransportError, TimeoutError):
         return None
     except httpx2.DecodingError:  # an HTTP answer whose body does not decode
         return "", ""
@@ -263,6 +271,12 @@ def _kickstart() -> subprocess.CompletedProcess:
 # Calculated: at least twice the largest observed first start of a new bundle (about
 # 2 min 20 s). The acceptance sitting on a Mac checks it.
 _DAEMON_WAIT = 300  # seconds
+_RESTART_HINT = (
+    "Check that macos-apps-mcp is turned on in System Settings → General → "
+    f"Login Items, and check `launchctl print gui/$(id -u)/{BUNDLE_ID}` and the "
+    "logs. Then restart it in Terminal: "
+    f"launchctl kickstart -k gui/$(id -u)/{BUNDLE_ID}"
+)
 
 
 def _wait_notice(message: str) -> subprocess.Popen:
@@ -287,6 +301,16 @@ def _wait_notice(message: str) -> subprocess.Popen:
     )
 
 
+def _end_notice(notice: subprocess.Popen) -> None:
+    """End the alert of the wait and reap its child. A child that ignores the signal
+    is killed, so it cannot hold the exit."""
+    notice.terminate()
+    try:
+        notice.wait(2)
+    except subprocess.TimeoutExpired:
+        notice.kill()
+
+
 def _wait_for_daemon(
     want: tuple[str, str] | None = None, timeout: float | None = None
 ) -> None:
@@ -305,27 +329,10 @@ def _wait_for_daemon(
     first, kicked = True, False
     try:
         while True:
+            restarted = kicked  # before this read
             seen = _daemon_identity()
             if seen is not None and (want is None or seen == want):
                 return
-            if first and want is None:
-                print(
-                    "waiting for the daemon to answer: the first start can take a "
-                    "few minutes",
-                    file=sys.stderr,
-                )
-            elif first:
-                notice = _wait_notice(
-                    (
-                        "The app was updated, and its background service restarts."
-                        if seen is not None
-                        else "The background service starts."
-                    )
-                    + " The first start after an update can take a few minutes. "
-                    "The dashboard opens when the service answers. Reconnect your "
-                    "MCP clients afterwards."
-                )
-            first = False
             if want is not None and seen is not None and not kicked:
                 kicked = True
                 kick = _kickstart()
@@ -334,17 +341,46 @@ def _wait_for_daemon(
                         "launchctl did not restart the background service: "
                         f"{kick.stderr.strip()}"
                     )
+            if first and want is None:
+                print(
+                    f"waiting for the daemon to answer (up to {_DAEMON_WAIT} s): the "
+                    "first start can take a few minutes",
+                    file=sys.stderr,
+                )
+            elif first:
+                # After the restart, so the text is true. It stays true when a
+                # restart comes later in this wait: it shows ONE alert.
+                message = (
+                    "Waiting for the background service to answer. The first start "
+                    "after an install or an update can take a few minutes. The "
+                    "dashboard opens when the service answers."
+                )
+                if kicked:
+                    message = (
+                        "The background service was another version or build than "
+                        f"this app, so it was restarted. {message} Reconnect your "
+                        "MCP clients afterwards."
+                    )
+                with contextlib.suppress(OSError):  # optional: the wait goes on
+                    notice = _wait_notice(message)
+            first = False
             if time.monotonic() >= deadline:
+                if restarted and seen is not None:
+                    # Text from a socket: named only when it is short and plain.
+                    plain = all(0 < len(s) <= 40 and s.isprintable() for s in seen)
+                    named = f" (version {seen[0]}, build {seen[1]})" if plain else ""
+                    raise NativeError(
+                        "Another copy of the background service answers on the "
+                        f"socket and does not stop after a restart{named}. Quit "
+                        f"that copy when you started it by hand. {_RESTART_HINT}"
+                    )
                 raise NativeError(
-                    "The background service did not answer in time. Check that "
-                    "macos-apps-mcp is turned on in System Settings → General → "
-                    "Login Items. Then restart it in Terminal: launchctl kickstart "
-                    f"-k gui/$(id -u)/{BUNDLE_ID}"
+                    f"The background service did not answer in time. {_RESTART_HINT}"
                 )
             time.sleep(0.5)
     finally:
         if notice is not None:
-            notice.terminate()
+            _end_notice(notice)
 
 
 def _request_grants_via_daemon() -> None:

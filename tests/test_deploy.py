@@ -372,7 +372,7 @@ class _Clock:
         # runs the REAL read also needs the bound of that read
         # (test_daemon_identity_has_a_total_bound_for_a_peer_that_drips): no clock
         # can end a read that blocks.
-        assert self.now <= 3600, "the wait has no bound"
+        assert self.now <= 600, "the wait has no bound"  # twice the real bound
 
 
 @pytest.fixture

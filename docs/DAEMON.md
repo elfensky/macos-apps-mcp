@@ -180,12 +180,14 @@ an alert names Login Items and the kickstart command, and no dashboard opens.
 - A tool call that runs at the restart ends with the uncertain-outcome answer (Troubleshooting,
   "A response stream ends without an answer"). It is not repeated.
 - Each MCP client must reconnect (section 4).
-- An open with the same version and build restarts nothing and shows no alert.
+- An open with the same version and build restarts nothing. It shows no alert when the daemon
+  answers within the bound of one read (2 s). A daemon that is slow to answer gets the alert of
+  the wait, and no restart.
 - An open never restarts a daemon that does not answer. A daemon in its start listens before it
   serves, and a restart would kill the start. The open waits for it.
 
-`install-agent` waits for an answer on the socket too. It compares nothing and restarts nothing,
-so an update through `install-agent` still needs the kickstart.
+`install-agent` waits for an answer on the socket too, for at most 300 s. It compares nothing and
+restarts nothing, so an update through `install-agent` still needs the kickstart.
 
 The app must run from `/Applications/macos-apps-mcp.app`, because the agent plist names that
 path. From any other place, the app shows an alert and installs nothing. Each failure also shows
@@ -557,6 +559,13 @@ build:
   A daemon up to 0.16.1 answers `Not Found`. No answer means that no daemon serves the socket yet.
   An alert that starts with "launchctl did not restart the background service" gives launchctl's
   own reason.
+
+- **The alert "Another copy of the background service answers on the socket".** The open
+  restarted the daemon, and 300 s later a daemon with another version or build still answers. A
+  copy that was started by hand (`macos-apps-mcp daemon` in a terminal) owns the socket, or the
+  bundle in `/Applications` is half replaced. The alert names the version and the build that the
+  copy reported, when they are short plain text. Quit the copy that was started by hand, or
+  install the bundle again (section 2), then run the kickstart.
 
 - **Shim fails immediately with `daemon not running`.** This is the fail-fast path
   (`shim_check`), exit code 2 — expected when no daemon is listening at
