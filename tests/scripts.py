@@ -35,6 +35,8 @@ _APP_DIRS = (
 )
 # Both forms of a target (#585): by `id "<bundle id>"` and by `"<name>"`.
 _TELL_RE = re.compile(r'tell application (id )?"([^"]+)"')
+# What makes a string a script: a `tell` of an app, the `tell app` short form included.
+_DRIVES_APP = re.compile(r"\btell\s+app(?:lication)?\b")
 _APP_BY_ID = {bundle: app for app, bundle in runtime.BUNDLE_IDS.items()}
 
 
@@ -51,8 +53,8 @@ def templates() -> dict[str, str]:
     """``{"module.NAME": source}`` for each module-level script constant.
 
     A script constant is an uppercase name bound to a multi-line string that drives an
-    app (``tell application``). A value one module re-exports from another counts once,
-    under the first module the walk meets.
+    app (``tell application``, or the short form ``tell app``). A value one module
+    re-exports from another counts once, under the first module the walk meets.
     """
     found: dict[str, str] = {}
     seen: set[str] = set()
@@ -61,7 +63,7 @@ def templates() -> dict[str, str]:
         for name, val in vars(mod).items():
             if not (name.isupper() and isinstance(val, str)):
                 continue
-            if "\n" not in val or "tell application" not in val or val in seen:
+            if "\n" not in val or not _DRIVES_APP.search(val) or val in seen:
                 continue
             seen.add(val)
             found[f"{short}.{name}"] = val
