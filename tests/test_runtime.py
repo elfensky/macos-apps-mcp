@@ -210,13 +210,19 @@ def test_app_process_info_not_running_is_none(monkeypatch):
     assert runtime.app_process_info("Mail") is None
 
 
-def test_timeout_hint_wedged_names_force_quit_and_pid(monkeypatch):
+# #585: a script addresses its app by bundle id. The pattern still reads the name form.
+_MAIL_BY_ID = 'tell application id "com.apple.mail" to count accounts'
+_MAIL_BY_NAME = 'tell application "Mail" to count accounts'
+
+
+@pytest.mark.parametrize("script", [_MAIL_BY_ID, _MAIL_BY_NAME])
+def test_timeout_hint_wedged_names_force_quit_and_pid(monkeypatch, script):
     monkeypatch.setattr(
         runtime,
         "app_process_info",
         lambda app: {"pid": 838, "state": "S", "cpu": 0.9, "etime": "37:12"},
     )
-    hint = runtime._timeout_hint('tell application "Mail" to count accounts')
+    hint = runtime._timeout_hint(script)
     # The wedged remediation must be the honest one (facts §9b): force-quit — a UI
     # quit can leave the wedged process alive — and verify the pid actually changed.
     assert "WEDGED" in hint and "killall Mail" in hint and "pid 838" in hint
@@ -229,7 +235,7 @@ def test_timeout_hint_busy_says_self_recovering(monkeypatch):
         "app_process_info",
         lambda app: {"pid": 99, "state": "R", "cpu": 87.0, "etime": "02:01"},
     )
-    hint = runtime._timeout_hint('tell application "Mail" to count accounts')
+    hint = runtime._timeout_hint(_MAIL_BY_ID)
     assert "busy" in hint and "recovers on its own" in hint
     assert "killall" not in hint  # never suggest a force-quit for a busy app
 
@@ -239,7 +245,7 @@ def test_timeout_hint_empty_without_app_or_process(monkeypatch):
     # the generic timeout message reads exactly as before.
     assert runtime._timeout_hint("delay 2") == ""
     monkeypatch.setattr(runtime, "app_process_info", lambda app: None)
-    assert runtime._timeout_hint('tell application "Mail" to count accounts') == ""
+    assert runtime._timeout_hint(_MAIL_BY_ID) == ""
 
 
 def test_classify_1712_is_native_timeout_with_hint(monkeypatch):
@@ -252,10 +258,88 @@ def test_classify_1712_is_native_timeout_with_hint(monkeypatch):
     )
     err = _classify_osascript_failure(
         "execution error: Mail got an error: AppleEvent timed out. (-1712)",
-        'tell application "Mail" to count accounts',
+        _MAIL_BY_ID,
     )
     assert isinstance(err, NativeTimeout)
     assert "WEDGED" in str(err) and "-1712" in str(err)
+
+
+def test_timeout_hint_names_mail_for_a_script_by_bundle_id(monkeypatch):
+    # The process is read by its NAME, which the id gives through the one table.
+    asked = []
+
+    def info(app):
+        asked.append(app)
+        return {"pid": 838, "state": "S", "cpu": 0.9, "etime": "37:12"}
+
+    monkeypatch.setattr(runtime, "app_process_info", info)
+    hint = runtime._timeout_hint(_MAIL_BY_ID)
+    assert asked == ["Mail"]
+    assert "WEDGED" in hint and "killall Mail && open -a Mail" in hint
+    assert "pid 838" in hint and "pid changed" in hint
+    assert "com.apple.mail" not in hint
+
+
+def test_timeout_hint_by_bundle_id_says_busy_for_an_active_process(monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "app_process_info",
+        lambda app: {"pid": 99, "state": "R", "cpu": 87.0, "etime": "02:01"},
+    )
+    hint = runtime._timeout_hint(_MAIL_BY_ID)
+    assert hint.startswith(" Mail (pid 99")
+    assert "busy" in hint and "recovers on its own" in hint
+    assert "killall" not in hint
+
+
+def test_timeout_hint_by_bundle_id_is_empty_for_an_unknown_id(monkeypatch):
+    # An id outside the table has no known process name: no hint, and no process read.
+    def no_read(app):
+        raise AssertionError(f"process read for {app!r}")
+
+    monkeypatch.setattr(runtime, "app_process_info", no_read)
+    assert runtime._timeout_hint('tell application id "com.example.other"') == ""
+
+
+def test_classify_1712_by_bundle_id_is_native_timeout_with_hint(monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "app_process_info",
+        lambda app: {"pid": 1, "state": "S", "cpu": 0.5, "etime": "40:00"},
+    )
+    err = _classify_osascript_failure(
+        "execution error: Mail got an error: AppleEvent timed out. (-1712)",
+        'on run argv\n  tell application id "com.apple.mail"\n  end tell\nend run',
+    )
+    assert isinstance(err, NativeTimeout)
+    assert "WEDGED" in str(err) and "killall Mail" in str(err)
+
+
+@pytest.mark.parametrize("code", ["(-609)", "(-10810)"])
+def test_classify_app_not_running_by_bundle_id_names_the_app(code):
+    stderr = f"execution error: something {code}"
+    err = _classify_osascript_failure(stderr, _MAIL_BY_ID)
+    assert isinstance(err, AppNotRunning)
+    assert "Mail is not running or could not be started" in str(err)
+    assert "open Mail" in str(err) and stderr in str(err)
+    # no app in the script: the text of before #585
+    generic = _classify_osascript_failure(stderr)
+    assert isinstance(generic, AppNotRunning)
+    assert str(generic) == (
+        "The target macOS app isn't running or couldn't be launched. Tell the user "
+        f"to open it, then try again once it's open. [{stderr}]"
+    )
+
+
+def test_bundle_table_by_bundle_id_holds_the_six_apps():
+    assert runtime.BUNDLE_IDS == {
+        "Mail": "com.apple.mail",
+        "Notes": "com.apple.Notes",
+        "Contacts": "com.apple.AddressBook",
+        "Safari": "com.apple.Safari",
+        "Messages": "com.apple.MobileSMS",
+        "Music": "com.apple.Music",
+    }
 
 
 # --- verify-after-write diff (#49) ---------------------------------------------------

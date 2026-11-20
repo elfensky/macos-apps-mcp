@@ -123,8 +123,32 @@ _APPLE_EVENT_TIMEOUT = "(-1712)"  # the app never answered the Apple Event
 # changes the pid. The same signal from an ACTIVE process is a busy app (e.g. a
 # post-restart account resync) that recovers on its own. Both signatures were observed
 # live. The process read happens only on the failure path — never on a happy path.
-_TELL_APP = re.compile(r'tell application "([^"]+)"')
+# Scripts address an app by this id; the hint reads the process name from it (#585).
+BUNDLE_IDS = {
+    "Mail": "com.apple.mail",
+    "Notes": "com.apple.Notes",
+    "Contacts": "com.apple.AddressBook",
+    "Safari": "com.apple.Safari",
+    "Messages": "com.apple.MobileSMS",
+    "Music": "com.apple.Music",
+}
+# Both forms of a target: by `id "<bundle id>"` and by `"<name>"`.
+_TELL_APP = re.compile(r'tell application (id )?"([^"]+)"')
 _BUSY_CPU = 5.0  # %CPU at/above which a sleeping process still counts as working
+
+
+def _script_app(script: str) -> str | None:
+    """The process name of the app a script addresses, by id or by name. ``None`` when
+    the script names no app, or an id outside ``BUNDLE_IDS``."""
+    m = _TELL_APP.search(script)
+    if not m:
+        return None
+    by_id, target = m.groups()
+    if not by_id:
+        return target
+    return next(
+        (app for app, bid in BUNDLE_IDS.items() if bid.lower() == target.lower()), None
+    )
 
 
 def app_process_info(app: str) -> dict | None:
@@ -156,10 +180,9 @@ def _timeout_hint(script: str) -> str:
     """The #183 classification, appended to a timeout error's message. Empty when the
     script names no app or the process can't be read — the generic timeout message
     then reads exactly as before."""
-    m = _TELL_APP.search(script)
-    if not m:
+    app = _script_app(script)
+    if app is None:
         return ""
-    app = m.group(1)
     info = app_process_info(app)
     if info is None:
         return ""
@@ -199,6 +222,11 @@ def _classify_osascript_failure(stderr: str, script: str = "") -> NativeError:
             f"[{detail}]"
         )
     if any(code in stderr for code in _APP_NOT_RUNNING):
+        if app := _script_app(script):
+            return AppNotRunning(
+                f"{app} is not running or could not be started. Tell the user to "
+                f"open {app}, then try again once it's open. [{detail}]"
+            )
         return AppNotRunning(
             "The target macOS app isn't running or couldn't be launched. Tell the user "
             f"to open it, then try again once it's open. [{detail}]"
@@ -702,7 +730,7 @@ _COMPOSE_OSA_TIMEOUT = 120.0  # equals each script's own `with timeout` backstop
 _WINDOW_INDEX = """on run argv
   set wid to (item 1 of argv) as integer
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       set idx to index of window id wid
     end tell
   end timeout
@@ -712,7 +740,7 @@ end run"""
 _ACTIVATE_WINDOW = """on run argv
   set wid to (item 1 of argv) as integer
   with timeout of 120 seconds
-    tell application "Mail"
+    tell application id "com.apple.mail"
       activate
       set index of window id wid to 1
     end tell
