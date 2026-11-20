@@ -2402,24 +2402,35 @@ def test_read_bound_message_over_the_line_bound_is_not_parsed(
 
 _PART = b"--b\r\nContent-Type: text/html\r\n\r\nx\r\n"
 _MANY_PARTS = {
-    # (the line end of the parts, the line end of the header block, the verdict)
-    "CRLF": (b"\r\n", b"\r\n", ("<d@x>", "message_too_large")),
-    "bare CR in the parts": (b"\r", b"\r\n", ("<d@x>", "message_too_large")),
+    # (one part, the line end of the parts, the line end of the header block, verdict)
+    "CRLF": (_PART, b"\r\n", b"\r\n", ("<d@x>", "message_too_large")),
+    # no field in a part. The parser reads the Content-Type of the container once for
+    # each part, so the budget of field values stops these parts too (30,000 of them
+    # in 0.24 s); the count refuses them before the parse, with its own code.
+    "parts without a field": (
+        b"--b\r\n\r\nx\r\n",
+        b"\r\n",
+        b"\r\n",
+        ("<d@x>", "message_too_large"),
+    ),
+    "bare CR in the parts": (_PART, b"\r", b"\r\n", ("<d@x>", "message_too_large")),
     # no LF at all: the end of the header block is not provable in the header read
-    "bare CR everywhere": (b"\r", b"\r", ("", "header_too_large")),
+    "bare CR everywhere": (_PART, b"\r", b"\r", ("", "header_too_large")),
 }
 
 
 @pytest.mark.parametrize(
-    "eol, head_eol, verdict", _MANY_PARTS.values(), ids=_MANY_PARTS.keys()
+    "part, eol, head_eol, verdict", _MANY_PARTS.values(), ids=_MANY_PARTS.keys()
 )
 def test_read_bound_find_own_draft_is_fast_on_120_000_parts(
-    mailroot, monkeypatch, eol, head_eol, verdict
+    mailroot, monkeypatch, part, eol, head_eol, verdict
 ):
-    # a Sent copy after a send. Without the count of part-delimiter lines: 18 to 36 s
-    parts = (_PART * 120_000 + b"--b--\r\n").replace(b"\r\n", eol)
+    # a Sent copy after a send. The count of part-delimiter lines refuses it before
+    # the parse. Without the count the budget of field values still stops the parse
+    # (with the code `header_too_large`); without both it takes 16 s or more.
+    parts = (part * 120_000 + b"--b--\r\n").replace(b"\r\n", eol)
     payload = (_HEAD + _MIXED).replace(b"\r\n", head_eol) + parts
-    assert len(payload) > 3_700_000
+    assert len(payload) > 1_200_000
     _put_raw(mailroot, 21, payload, url=_SENT)
     started = time.perf_counter()
     got = _find(monkeypatch, [(21, _SENT)], sent_twins=True)
