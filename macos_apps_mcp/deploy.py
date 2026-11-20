@@ -225,6 +225,75 @@ def _wait_for_socket(timeout: float = 30) -> None:
     raise NativeError("daemon socket never appeared — check `launchctl print` / logs")
 
 
+_IDENTITY_TIMEOUT = 2.0  # seconds for one identity read; a test shortens it
+
+
+def _daemon_identity() -> tuple[str, str] | None:
+    """``(version, build)`` of the daemon that answers ``GET /identity`` on the socket
+    (#568). ``("", "")`` for any other HTTP answer: a daemon without the route (every
+    one up to 0.16.1 answers 404), or a 200 with a bad body. ``None`` when no HTTP
+    answer comes, which is every transport error: no file, a refused connect, a read
+    timeout, a read error. ``daemon.bind_socket()`` listens before uvicorn serves, so
+    a daemon in its start accepts the connect and stays silent, and it must not read
+    as "another daemon". The answer is untrusted, and it is compared, never run.
+    One request through its own client: the shim hop (``_uds_client_factory``) and its
+    unlimited read are not used here."""
+    import httpx2
+
+    from .daemon import socket_path
+
+    try:
+        with httpx2.Client(
+            transport=httpx2.HTTPTransport(uds=str(socket_path())),
+            timeout=_IDENTITY_TIMEOUT,
+        ) as client:
+            answer = client.get("http://daemon/identity")
+    except httpx2.TransportError:
+        return None
+    except httpx2.DecodingError:  # an HTTP answer whose body does not decode
+        return "", ""
+    if answer.status_code != 200:
+        return "", ""
+    try:
+        data = answer.json()
+        return str(data["version"]), str(data["build"])
+    except (ValueError, KeyError, TypeError):
+        return "", ""
+
+
+def _kickstart() -> subprocess.CompletedProcess:
+    """The one restart of the agent: launchd kills the running daemon and starts it
+    again. A call in flight ends with the shim's uncertain-outcome answer."""
+    return subprocess.run(
+        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{BUNDLE_ID}"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def _wait_for_daemon(want: tuple[str, str], timeout: float) -> None:
+    """Wait until the daemon on the socket answers with the identity ``want``. A
+    daemon that answers with another identity is restarted, once. Nothing is ever
+    restarted while nothing answers: that is a daemon in its start, or none at all."""
+    deadline = time.monotonic() + timeout
+    kicked = False
+    while True:
+        seen = _daemon_identity()
+        if seen == want:
+            return
+        if seen is not None and not kicked:
+            kicked = True
+            kick = _kickstart()
+            if kick.returncode != 0:
+                raise NativeError(
+                    "launchctl did not restart the background service: "
+                    f"{kick.stderr.strip()}"
+                )
+        if time.monotonic() >= deadline:
+            raise NativeError("the background service did not answer in time")
+        time.sleep(0.5)
+
+
 def _request_grants_via_daemon() -> None:
     """Fire every consent prompt FROM the daemon process (bundle identity — prompts
     from this terminal would attach to the terminal instead). doctor(request=True)
@@ -341,6 +410,10 @@ def launch() -> None:
                     "macOS stopped the background service. Turn on macos-apps-mcp in "
                     "System Settings → General → Login Items, then open it again."
                 )
+            from . import doctor  # lazy: it pulls the native layer
+
+            # #568: launchd keeps the old daemon process after the bundle is replaced.
+            mine = (doctor.version(), doctor.build_stamp())
             first = status != "enabled" or _SETUP_PENDING_FILE.exists()
             if first:
                 _SETUP_PENDING_FILE.parent.mkdir(
@@ -349,9 +422,11 @@ def launch() -> None:
                 _SETUP_PENDING_FILE.touch()
                 if status != "enabled":  # this process IS the bundle: in-process
                     register_agent()
-                _wait_for_socket()
+                _wait_for_daemon(mine, 300)
                 _request_grants_via_daemon()
                 _SETUP_PENDING_FILE.unlink()
+            else:  # returns at once when the daemon is this app's own
+                _wait_for_daemon(mine, 300)
             _link_cli(app)
             if not dashboard(["health"] if first else []):
                 raise NativeError(
@@ -591,11 +666,7 @@ def allow_send(argv: list[str]) -> None:
     _ALLOW_SEND_FILE.write_text(value)
     # Registration happens at import, so the running daemon still has the old gate.
     # No agent registered (stdio-only user) → nothing to restart, and that is fine.
-    kick = subprocess.run(
-        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{BUNDLE_ID}"],
-        capture_output=True,
-        text=True,
-    )
+    kick = _kickstart()
     print(
         f"outbound: {value or 'off'}"
         + (

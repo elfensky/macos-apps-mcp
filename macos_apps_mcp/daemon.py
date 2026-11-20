@@ -27,6 +27,7 @@ from fastmcp.server.providers.proxy import FastMCPProxy, ProxyClient
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, Implementation
 from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from starlette.responses import JSONResponse
 
 from .audit import SHIM_ID_HEADER
 from .text import sanitize_line
@@ -276,6 +277,21 @@ def restart(server, *, timer=threading.Timer, delay: float = 3.0) -> bool:
     return True
 
 
+def add_identity_route(mcp) -> None:
+    """Register ``GET /identity`` on the FastMCP app: the version and the build this
+    process captured at its start (#574), as JSON. It is for ``deploy.launch``, which
+    compares the answer with the opened app and restarts an older daemon (#568). The
+    route reads no store and needs no grant, MCP session, tool or native worker, so it
+    answers while a tool runs. ``make_dispatcher`` serves it on the unix socket only."""
+    from . import doctor  # late: doctor pulls the native layer, which the shim skips
+
+    @mcp.custom_route("/identity", methods=["GET"], include_in_schema=False)
+    async def identity(request):
+        return JSONResponse(
+            {"version": doctor.version(), "build": doctor.build_stamp()}
+        )
+
+
 def serve() -> None:
     """Run the FastMCP server as the daemon: streamable-http over the owned UDS.
     One MCP session per client connection (fork resolution, spec)."""
@@ -288,6 +304,7 @@ def serve() -> None:
     from .server import mcp  # late: importing server pulls the adapter tree
 
     global dashboard_state
+    add_identity_route(mcp)
     path = socket_path()
     s = bind_socket(path)
     tcp = None
