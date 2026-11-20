@@ -28,6 +28,15 @@ surface may still shift between minor versions.
   may not be running. The device check with Mail closed is still open. An "app not running"
   error now names the app when the script names its app; the `doctor` probe has a variable
   target and keeps the generic text.
+- **Opening the app after an update starts the new daemon** (#568). launchd keeps the old daemon
+  process after the app is replaced. Before, an open after an update showed the old daemon's
+  dashboard, or an alert that asked for a Terminal command. Now each open compares the running
+  daemon with the app: the version and the build. When they differ, or the daemon is from a
+  release without this check, the open restarts the daemon and waits until it answers. One alert
+  shows during the wait and closes by itself. The first start after an update can take a few
+  minutes. A tool call that runs at the restart ends with the uncertain-outcome warning and is
+  not repeated. Each MCP client must reconnect. An open never restarts a daemon that does not
+  answer yet. After 300 s, an alert names Login Items and the restart command.
 
 ## [0.16.1] - 2026-11-19 — The reply paste check
 
