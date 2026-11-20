@@ -15,6 +15,7 @@ import pkgutil
 import re
 
 import macos_apps_mcp
+from macos_apps_mcp import runtime
 
 # Modules the walk never imports, each with the reason.
 SKIP_MODULES = {
@@ -32,7 +33,9 @@ _APP_DIRS = (
     pathlib.Path("/Applications"),
     pathlib.Path("/System/Library/CoreServices"),
 )
-_TELL_RE = re.compile(r'tell application "([^"]+)"')
+# Both forms of a target (#585): by `id "<bundle id>"` and by `"<name>"`.
+_TELL_RE = re.compile(r'tell application (id )?"([^"]+)"')
+_APP_BY_ID = {bundle: app for app, bundle in runtime.BUNDLE_IDS.items()}
 
 
 def modules():
@@ -70,9 +73,15 @@ def missing_apps(source: str) -> list[str]:
 
     ``osacompile`` reads the target app's scripting dictionary, so a script for an
     absent app cannot compile here — the caller skips it with this list as the reason.
+    An id-form target names its app through ``runtime.BUNDLE_IDS``. An id outside the
+    table is never "missing": its script goes to the compiler, which fails loudly.
     """
+    apps = {
+        _APP_BY_ID.get(target) if by_id else target
+        for by_id, target in _TELL_RE.findall(source)
+    }
     return sorted(
         app
-        for app in set(_TELL_RE.findall(source))
+        for app in apps - {None}
         if not any((d / f"{app}.app").exists() for d in _APP_DIRS)
     )
