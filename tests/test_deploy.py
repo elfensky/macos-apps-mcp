@@ -328,13 +328,23 @@ def test_link_cli_leaves_a_foreign_file_and_a_wrapperless_build_alone(
 
 
 class _Notice:
-    """The child that shows the alert of the wait."""
+    """The child that shows the alert of the wait. A `stuck` one ignores the signal."""
+
+    stuck = False
 
     def __init__(self, message):
-        self.message, self.ended = message, 0
+        self.message, self.ended, self.reaped, self.killed = message, 0, 0, 0
 
     def terminate(self):
         self.ended += 1
+
+    def wait(self, timeout):
+        if self.stuck:
+            raise subprocess.TimeoutExpired("osascript", timeout)
+        self.reaped += 1
+
+    def kill(self):
+        self.killed += 1
 
 
 @pytest.fixture
@@ -358,6 +368,11 @@ class _Clock:
 
     def sleep(self, seconds):
         self.now += seconds
+        # A wait that lost its bound must fail here, not hang the suite. A test that
+        # runs the REAL read also needs the bound of that read
+        # (test_daemon_identity_has_a_total_bound_for_a_peer_that_drips): no clock
+        # can end a read that blocks.
+        assert self.now <= 3600, "the wait has no bound"
 
 
 @pytest.fixture
@@ -502,8 +517,9 @@ def test_launch_restarts_once_when_the_daemon_identity_differs(opened, other):
     assert opened["kicks"] == 1 and opened["state"]["dialogs"] == 0
     assert "&to=" not in opened["urls"][-1] and opened["alerts"] == []
     [notice] = opened["notices"]  # one alert, closed when the new daemon answered
-    assert notice.ended == 1 and "was updated" in notice.message
-    assert "few minutes" in notice.message and "econnect" in notice.message
+    assert (notice.ended, notice.reaped, notice.killed) == (1, 1, 0)
+    assert "was restarted" in notice.message and "Waiting for" in notice.message
+    assert "few minutes" in notice.message and "Reconnect" in notice.message
 
 
 def test_launch_never_kickstarts_when_nothing_answers_daemon_identity(opened):
@@ -512,7 +528,9 @@ def test_launch_never_kickstarts_when_nothing_answers_daemon_identity(opened):
     deploy.launch()
     assert opened["kicks"] == 0 and opened["alerts"] == []
     [notice] = opened["notices"]
-    assert notice.ended == 1 and "was updated" not in notice.message
+    # nothing was restarted, so the text says nothing about a restart or the clients
+    assert notice.ended == 1 and "Waiting for" in notice.message
+    assert "restarted" not in notice.message and "Reconnect" not in notice.message
     assert "few minutes" in notice.message
     assert "&to=" not in opened["urls"][-1]
 
@@ -527,19 +545,48 @@ def _bound_alert(opened):
     assert "Login Items" in alert
     assert f"launchctl kickstart -k gui/$(id -u)/{deploy.BUNDLE_ID}" in alert
     assert [n.ended for n in opened["notices"]] == [1]
+    return alert
 
 
-def test_launch_alerts_when_the_daemon_identity_never_matches(opened):
-    opened["answers"][:] = [("0.0.1", "0000000 2020-01-01T00:00:00Z")]
-    _bound_alert(opened)
+_OLD = ("0.0.1", "0000000 2020-01-01T00:00:00Z")
+
+
+@pytest.mark.parametrize(
+    ("other", "named"),
+    [
+        (_OLD, True),
+        (("", ""), False),  # a daemon without the route has no identity to name
+        (("9" * 41, "0000000"), False),  # too long
+        (("0.0.1", "x\x1b[31m\nRun this in Terminal:"), False),  # not plain text
+    ],
+    ids=["plain", "no route", "long", "control characters"],
+)
+def test_launch_alerts_when_the_daemon_identity_never_matches(opened, other, named):
+    """After the restart a daemon still answers with another identity: a copy that
+    was started by hand owns the socket, or the bundle is half replaced. "It did not
+    answer" would be false. Its identity comes from a socket, so the alert names it
+    only when it is short plain text."""
+    opened["answers"][:] = [other]
+    alert = _bound_alert(opened)
     assert opened["kicks"] == 1  # never a second restart
     assert opened["clock"].now == deploy._DAEMON_WAIT == 300
+    assert "Another copy" in alert and "did not answer" not in alert
+    assert (f"version {other[0]}, build {other[1]}" in alert) == named
+    assert ("\x1b" in alert or "9" * 41 in alert or "Run this" in alert) is False
+
+
+def test_launch_alert_says_no_answer_when_the_restarted_daemon_stays_silent(opened):
+    opened["answers"][:] = [_OLD, None]
+    alert = _bound_alert(opened)
+    assert opened["kicks"] == 1 and opened["clock"].now == 300
+    assert "did not answer in time" in alert and "Another copy" not in alert
 
 
 def test_launch_alerts_when_nothing_answers_daemon_identity_in_time(opened):
     opened["answers"][:] = [None]
-    _bound_alert(opened)
+    alert = _bound_alert(opened)
     assert opened["kicks"] == 0 and opened["clock"].now == 300
+    assert "did not answer in time" in alert and "launchctl print" in alert
 
 
 def test_launch_never_kickstarts_when_a_silent_socket_gives_no_daemon_identity(
@@ -567,7 +614,8 @@ def test_wait_for_daemon_reports_a_failed_kickstart_at_once(opened):
     with pytest.raises(NativeError, match="Could not find service"):
         deploy._wait_for_daemon(opened["mine"])
     assert opened["kicks"] == 1 and opened["reads"] == 1  # no read after the refusal
-    assert opened["clock"].now == 0 and opened["notices"][-1].ended == 1
+    # the restart comes first, so no notice claims a restart that did not happen
+    assert opened["clock"].now == 0 and opened["notices"] == []
     with pytest.raises(SystemExit):
         deploy.launch()
     assert "Could not find service" in opened["alerts"][-1] and opened["urls"] == []
@@ -587,6 +635,50 @@ def test_first_open_waits_for_daemon_identity_before_the_dialogs(opened, monkeyp
     assert not deploy._SETUP_PENDING_FILE.exists()
 
 
+@pytest.mark.parametrize("first", ["not-registered", "marker"])
+def test_first_open_restarts_a_daemon_of_another_identity_before_the_dialogs(
+    opened, monkeypatch, first
+):
+    """A first open (or one that failed half-way) can meet an old daemon too: it must
+    compare, not take any answer."""
+    if first == "marker":
+        deploy._SETUP_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        deploy._SETUP_PENDING_FILE.touch()
+    else:
+        opened["state"]["status"] = "not-registered"
+    opened["answers"][:] = [_OLD, None, opened["mine"]]
+    dialogs = []  # the number of identity reads at each dialog pass
+    monkeypatch.setattr(
+        deploy, "_request_grants_via_daemon", lambda: dialogs.append(opened["reads"])
+    )
+    deploy.launch()
+    assert opened["kicks"] == 1
+    assert dialogs == [3]  # one pass, after the NEW daemon answered
+    assert opened["urls"][-1].endswith("&to=/health") and opened["alerts"] == []
+
+
+def test_wait_for_daemon_goes_on_when_the_notice_cannot_start(opened, monkeypatch):
+    """The notice is optional: a child that cannot start must not stop the restart."""
+
+    def no_child(message):
+        raise OSError("osascript: cannot start")
+
+    monkeypatch.setattr(deploy, "_wait_notice", no_child)
+    opened["answers"][:] = [_OLD, None, opened["mine"]]
+    deploy.launch()
+    assert opened["kicks"] == 1 and opened["alerts"] == []
+    assert "&to=" not in opened["urls"][-1]
+
+
+def test_wait_for_daemon_kills_a_notice_that_does_not_end(opened, monkeypatch):
+    """No zombie stays, and a child that ignores the signal cannot block the exit."""
+    monkeypatch.setattr(_Notice, "stuck", True)
+    opened["answers"][:] = [None, opened["mine"]]
+    deploy._wait_for_daemon(opened["mine"])
+    [notice] = opened["notices"]
+    assert (notice.ended, notice.reaped, notice.killed) == (1, 0, 1)
+
+
 def test_wait_for_daemon_needs_an_answer_not_a_socket_file(
     opened, sockdir, monkeypatch
 ):
@@ -599,8 +691,10 @@ def test_wait_for_daemon_needs_an_answer_not_a_socket_file(
     monkeypatch.setattr(deploy, "_DAEMON_WAIT", 5)  # each real read costs about 30 ms
     for want in (opened["mine"], None):  # the `launch` mode and the any-answer mode
         opened["clock"].now = 0
-        with pytest.raises(NativeError, match="Login Items"):
+        # `install-agent` keeps its old advice beside the new one
+        with pytest.raises(NativeError, match="Login Items") as e:
             deploy._wait_for_daemon(want)
+        assert "launchctl print" in str(e.value) and "logs" in str(e.value)
         assert opened["clock"].now == 5 and opened["kicks"] == 0
 
 
@@ -610,7 +704,8 @@ def test_wait_for_daemon_takes_any_answer_without_a_kickstart(opened, capsys):
     opened["answers"][:] = [None, ("", "")]
     deploy._wait_for_daemon()
     assert opened["kicks"] == 0 and opened["notices"] == [] and opened["reads"] == 2
-    assert "few minutes" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "few minutes" in err and "up to 300 s" in err and err.count("\n") == 1
 
 
 def test_wait_notice_carries_its_text_as_an_argument_and_ends_by_itself(monkeypatch):
@@ -635,7 +730,7 @@ def test_wait_for_daemon_ends_the_notice_on_every_exit(opened):
     opened["answers"][:] = [None]
     with pytest.raises(NativeError):
         deploy._wait_for_daemon(opened["mine"])  # it raises at the bound
-    assert [n.ended for n in opened["notices"]] == [1, 1]
+    assert [(n.ended, n.reaped) for n in opened["notices"]] == [(1, 1), (1, 1)]
 
 
 def test_kickstart_helper_runs_the_one_launchctl_restart(monkeypatch):
