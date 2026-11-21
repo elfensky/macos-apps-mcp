@@ -348,6 +348,31 @@ the hand Reply All and the probe's run 12. Every other reply was discarded. Ever
 run 12's after the send included, was found by a Drafts read at +45 s or later and deleted by
 message id. At the end Drafts held nothing new, no compose window was open, and Accessibility was on.
 
+### 4f. Measurements for the quote check and the HTML strip (#609, #611)
+
+Run on 2026-11-21 (macOS 27.2.1, build 26B131; Mail 3901.200.71.1.16; the installed bundle,
+release 0.16.1) with `05.12-proto/sitting1_probe.py`, started as the installed bundle, with the
+Mail watchdog loaded. Nothing was sent. Owner decision of the same day: the timing measurements
+of the plan are not run; clipboard and activation timing count as fine until a bug report.
+
+| Measurement | Result |
+|---|---|
+| M6 (#609): is the signature text in the Accessibility text of a reply? | **Yes.** One scripted reply to the scratch original in the signature account: `message signature` read (58 characters), and its letters and digits occur in the body that the Accessibility walk returns (7,448 characters). So the quote check cannot take "text follows the reply text" as proof of Mail's quote: the signature follows it too. |
+| M9 (#611): the old and the new HTML strip on stored mail | **0 differences.** 156 stored files of the Sent and Drafts mailboxes of the signature account, 156 parsed, 140 with HTML, 0 different, 0 errors, the whole set inside the time budget. For 6 files the body was over 100,000 characters, so the old strip did not run and they were not compared. |
+
+The same run opened the reply with the Phase 05.2 scripts in the id form (`tell application id
+"com.apple.mail"`): the open bound one new closeable window, the focus check passed in 22 ms,
+the discard answered -1728, and Drafts held no new reply row at +30 s and at +3 min.
+
+Not verified:
+
+- M1, M2 (#607): the time from the activation script to an active Mail, and which half of the
+  window check was false. Not run. The poll bound stays the default of 2.0 s.
+- M3, M4, M5 (#610): the paste settle time while Mail is busy, Cmd-V on an emptied pasteboard,
+  and a key that Mail runs after a stop. Not run. The settle bound stays the default of 1.0 s.
+- M7, M8 (#585): how an app name and a bundle id resolve while the app is closed. Not run on
+  release 0.16.1; the id-form scripts are checked on the next signed build.
+
 ## 5. Addressing a mailbox by name
 
 Verified 2026-07-31 (#146), probing every branch against real accounts.
@@ -394,7 +419,7 @@ delete cannot be built.
 | **`delete` returning cleanly and removing NOTHING is a symptom of a SICK Mail, not a property of the verb** (#164, resolved 2026-08-06). The 2026-08-05 evidence — 2 of 10 sets dropped, ~56 s per set — was collected in a session that took **19 crashes** and spent time in the §8b crash-loop. Re-measured on a freshly restarted Mail: **0 failures in 232 delete-observations**, and ~50x faster. | Two arms, both on 2026-08-06. FAST: 200 deletes in a 10-message mailbox, 0 reported failures and **0 silent drops** against an independent post-count, 0.57 s each. SLOW: 32 sets in `Personal/Gaming` — the very mailbox #164 was found in, 3,454 messages — 32/32, **0.98 s per set against the 56 s baseline**. The clincher: the one message that had failed TWICE (`1bc5d9cb…`, still 2 copies a day later) collapsed in ~1 s in that run. Nothing about the message, the mailbox or the batch size ever predicted it; Mail's process health did. |
 | So the mitigation is **restart Mail, then re-run** — not a code change, and above all not a retry loop. | **Never "fix" this with a retry loop inside the script** (facts §8: bounded waits only) — retrying belongs at the CLI, where re-running IS the retry and a human is watching. What earns the trust is the VERIFICATION, which was never the weak part: all 3 historical drops were caught and reported as `ERROR expected 1 copy to survive but 2 remain`, and the 2026-08-06 arms add 232 observations with zero silent drops. A dropped delete is loud and is a no-op — never a wrong delete. |
 | `Mail.sdef` has **no `erase` and no `expunge` command** at all. The full verb list is GetURL, bounce, check for new mail, delete, duplicate, extract address/name from, forward, import Mail mailbox, mailto, move, perform mail action with messages, redirect, reply, send, synchronize. | With `delete`-in-Trash a no-op, `deleted status` unwritable and no erase verb, **there is no scriptable targeted permanent delete.** Emptying Trash stays a human act in Mail.app — which is also why `empty_trash` was cut from #80. Do not build a permanent-delete tool against this; prove it changed before trying again. |
-| **`trash mailbox of <account>` raises -1728 for EVERY account**, although `Mail.sdef` declares it on the account class (line 406) exactly like `drafts mailbox`/`sent mailbox`/`junk mailbox`. | Only the APPLICATION-level `trash mailbox` works, and it is the unified **"All Trash"** across accounts. So an account's own Trash cannot be read from Mail; get it from the Envelope Index (`mailboxes.url`), whose per-account spellings differ — `…/Trash` (IMAP), `…/Deleted%20Messages` (iCloud), `…/%5BGmail%5D/Trash` (Gmail). |
+| **`trash mailbox of <account>` raises -1728 for EVERY account**. `Mail.sdef` (read on 2026-11-21, macOS 27.2.1, build 26B131) declares `drafts mailbox`, `junk mailbox`, `sent mailbox` and `trash mailbox` on the application and on the message viewer, not on the account class. | Only the APPLICATION-level `trash mailbox` works, and it is the unified **"All Trash"** across accounts. So an account's own Trash cannot be read from Mail; get it from the Envelope Index (`mailboxes.url`), whose per-account spellings differ — `…/Trash` (IMAP), `…/Deleted%20Messages` (iCloud), `…/%5BGmail%5D/Trash` (Gmail). |
 | **`move` OUT of the unified `trash mailbox` accessor does the move and then CRASHES Mail** — and the caller hangs, host-side timeout and all. | The messages did land in the destination (verified in the index afterwards), then Mail died with the §10 assertion and the `run_osascript` call never returned — an MCP client aborted it at **1800s**, far past `_MOVE_TIMEOUT=300`. A dead Mail mid-Apple-Event does not surface as a timeout. So an undo must move back **from the message's own account Trash url**, read out of the index, never from the unified accessor. Counting through the unified accessor is fine; moving through it is not. |
 
 ## 5d. Cross-account copies are the SAME message with DIFFERENT bytes (#153)
@@ -628,6 +653,28 @@ develop 70186a1, one Gmail account, macOS 27.0.1, Mail watchdog running.
 
 - **`whose` is unreliable on the Drafts mailbox** — raised -1728 on a draft that demonstrably
   existed. Address drafts by iterating `message i of dm` and comparing `message id`.
+  On an account's own Drafts mailbox (probe of 2026-11-21, macOS 27.2.1, build 26B131; scratch
+  drafts made by `create_draft`, their compose windows closed first): `messages of <that
+  account's Drafts> whose message id is` found exactly one draft in 5 of 5 single runs with Mail
+  idle and in 5 of 5 runs after a sync start, for an IMAP account, an iCloud account and a Gmail
+  account. Worst time 268 ms; highest `mail_cpu` in the sets after a sync start 70.9, 116.9 and
+  86.2. The draft's row was in the index at most 4.8 s after the `create_draft` call started.
+  The Gmail draft had one live index row at first, and two rows with its Message-ID about a
+  minute later: one in `[Gmail]/Drafts` and one in `[Gmail]/All Mail`. Not verified: an Exchange
+  account, and a Drafts mailbox with another name.
+- **Mail saves an open draft again as a new index row** (the same probe). Each of three drafts
+  that `create_draft` had just opened got a new row in its Drafts mailbox about 30 s later,
+  and the first row was gone. A scoped `whose message id is` on the first row then counted 0
+  (the fifth of five runs, 4 of 5 found). After that second save the rows stayed for 50 s, also
+  with the windows still open. So an id that `drafts()` returned for a draft whose compose
+  window is open, and that is younger than about a minute, can be dead a moment later. On
+  Gmail the first version stayed for a short time as a row in `[Gmail]/All Mail` with a
+  Message-ID of its own, so there the Message-ID changed with the row. Not checked: the
+  Message-ID of the other two kinds.
+- `delete_draft` (the walk of the unified Drafts mailbox, about 290 drafts, Mail idle) deleted each
+  of the three scratch drafts on the first call; each row was then in the account's own Trash
+  (`Trash`, `Deleted Messages`, `[Gmail]/Trash`) and no scratch row was in a Drafts mailbox at
+  +4 min. The timeout of #521 was not seen on an idle Mail.
 - **Deleting while iterating forward invalidates the reference** (-1728). Always iterate in reverse
   by index: `repeat with i from n to 1 by -1`.
 - Mail's default sender is **not** predictable from account order (with 4 accounts, the first is

@@ -114,6 +114,7 @@ requires `check`; `main` takes PRs with a merge commit only and requires `check`
 |---|---|---|
 | The whole design | [DESIGN.md](DESIGN.md) | The design and its rationale |
 | `macos_apps_mcp/adapters/` (Mail) | [docs/mail-applescript-facts.md](docs/mail-applescript-facts.md) | Device-verified Mail behaviour |
+| `macos_apps_mcp/adapters/notes.py` | [docs/notes-applescript-facts.md](docs/notes-applescript-facts.md) | Device-verified Notes behaviour |
 | `macos_apps_mcp/daemon.py`, `packaging/`, `scripts/build_app.sh` | [docs/DAEMON.md](docs/DAEMON.md) | Install modes, signing, notarization, the launchd agent |
 | `pyproject.toml` version, `server.json`, `CHANGELOG.md`, `.github/workflows/publish.yml` | [docs/RELEASING.md](docs/RELEASING.md) | The release procedure and the device suite after a deploy |
 | `macos_apps_mcp/server.py` tools | [README.md](README.md) § Tools | The tool list and its tiers |
