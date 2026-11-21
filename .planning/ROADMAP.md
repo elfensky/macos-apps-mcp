@@ -49,7 +49,7 @@ One line per minor release. The roadmap page reads this section. Bug-fix phases 
 - ✅ **0.15 Photos and the owner's dashboard** — Photos can be searched and exported, and a local dashboard shows permissions, usage, the write log and backups. (shipped 2026-10-22)
 - 🚧 **0.16 Runs on MCP 2, and replies keep Mail's quote** — The server moves to MCP 2 and the open bugs are fixed. 0.16.0 ships after reply drafts pass on a real Mac.
   - Phases: 05.4, 05.2, 05.6, 05.12
-  - Next: the Notes and Drafts probe at the Mac (plan 05.6-06, about 30 minutes of the owner's time). 0.16.0 and 0.16.1 (the fix for the reply paste check, PR 608) were cut on 2026-11-19; 0.16.1 is the published one.
+  - Next: the code plans for #500 and #521 (Phase 05.6), and plan 07 of Phase 05.12, planned again for #607, #609 and #632. The two probe plans ran unattended in reduced form on 2026-11-21. 0.16.0 and 0.16.1 (the fix for the reply paste check, PR 608) were cut on 2026-11-19; 0.16.1 is the published one.
   - Waits for: the remaining bugs of Phases 05.6 and 05.12, which ship as patch releases.
 - 📋 **0.17 Final tool names and clear errors** — A breaking release before the testers: each tool name is a verb and a noun, and each error names its kind.
   - Phases: 05.10
@@ -584,7 +584,7 @@ Plans:
 Bugs precede features (owner, 2026-10-11). The phase follows Phase 05.2 acceptance; independent implementation can proceed after migration.
 **Requirements**: FIX-19, FIX-20, FIX-21, FIX-22, FIX-23, FIX-24, FIX-25
 **Depends on:** Phase 05.2 acceptance before phase close. Probe-independent implementations proceed after the MCP migration.
-**Plans:** 5 implementation plans executed; the owner probe sitting (05.6-06) is planned; the code plans for #500 and #521 follow its verdicts; device acceptance stays open.
+**Plans:** 5 implementation plans executed; the probe plan (05.6-06) ran in reduced form on 2026-11-21 (owner decision: probes 1 and 6 unattended, probes 2, 3 and 4 dropped, probe 5 had no account); the code plans for #500 and #521 follow its verdicts; device acceptance stays open.
 
 Plans:
 - [x] [05.6-01-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-01-PLAN.md) — private state and Mail backups (#540), merged in #552; installed state/socket and fresh Mail backup modes passed on arm64.
@@ -592,7 +592,7 @@ Plans:
 - [x] [05.6-03-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-03-PLAN.md) — verified bundled licence notices (#471), merged in #553; signed installed notice inspection passed on arm64 (133 distributions, 15 fallback users).
 
 - [x] [05.6-04-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-04-PLAN.md) — dated permission chips (#497), merged in #557; dated Health/Adapters snapshot checks passed on macOS 27; forced-refusal and in-flight device cases remain open.
-- [ ] [05.6-06-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-06-PLAN.md) — owner probe sitting (D-23): Notes write safety on scratch notes, system folders in another language, the scoped Drafts query; the code plans for #500 and #521 follow its verdicts (D-24).
+- [x] [05.6-06-PLAN.md](phases/05.6-bug-fixes-notes-write-safety-and-system-folders-in-any-langu/05.6-06-PLAN.md) — owner probe sitting (D-23): Notes write safety on scratch notes, system folders in another language, the scoped Drafts query; the code plans for #500 and #521 follow its verdicts (D-24).
 
 [Installed build evidence](overnight/2026-11-04-installed-acceptance.md) records the signed deployment and each acceptance limit.
 [Mail recovery evidence](overnight/2026-11-04-mail-recovery-acceptance.md) records one successful self-addressed send, Trash move, and undo, including fresh backup modes and a 6.087-second call.
@@ -619,17 +619,18 @@ Device-dependent Notes and draft changes retain their recorded probe prerequisit
 - Each AppleScript Mail tool works while Mail.app is closed, or refuses with a directive that names Mail. The scripts address Mail by its bundle id, so the name cannot resolve to Mail's Quick Look extension (#585).
 - A reply is not refused only because another app took the focus during the window check, or the refusal names the check that failed and tells the person what to do (#607).
 - The quote check of a reply does not take the account signature for Mail's quote (#609). A key that Mail runs late, after a paste that did not settle, pastes nothing into another compose window, and the settle bound is measured on a device (#610). The reply sweep strips HTML in linear time (#611).
+- Owner decision 2026-11-21: #610 leaves this phase and stays open until a bug report. Clipboard and activation timing count as fine until then, and the timing measurements of plan 01 were not run.
 - The other parse steps of the reply sweep (text normalization, header parse, MIME parse) are bounded on crafted mail (#626, plan 11; found by the probe review of the #611 change on 2026-11-20).
 - The reply flow does not normalize a crafted original without a bound before the paste (#632). No plan yet: it changes the same compose code as #607, #609 and #610 and is planned with plan 07, after the measurement sitting.
 
 Bugs precede features (owner, 2026-10-11). The adversarial review of PR #566 found the first three; the owner put them in one phase before Phase 05.10 (2026-11-05). The codebase review of 2026-11-06 found #572 to #581; the owner added them to this phase (2026-11-06). The device run of the same day found #585, which joins the phase under the same rule. The 05.2-20 device sitting of 2026-11-19 found #607, which joins the phase under the same rule. The phase-close code review of Phase 05.2 (2026-11-19) found #609, #610 and #611, which join the phase under the same rule.
 **Requirements**: FIX-27, FIX-28, FIX-29, FIX-30, FIX-31, FIX-32, FIX-33, FIX-34, FIX-35, FIX-36 (#626; #568, GHSA-7772-4pjg-72m4, GHSA-xjgg-xphw-h6fp, #585, #607, #609, #610, #611, #581, #632 without a requirement id yet; the bugs #572 to #580 were implemented in PR #584)
 **Depends on:** Phase 05.6
-**Plans:** 6/11 plans complete (02 to 06 and 11 are merged; their requirements complete at the acceptance sitting). Plan 01, the measurement sitting, needs the owner; plan 07 waits for it. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
+**Plans:** 7/11 plans complete (02 to 06 and 11 are merged; their requirements complete at the acceptance sitting). Plan 01 ran in reduced form on 2026-11-21 (M6 and M9; PR #642). Plan 07 is planned again: #607, #609 and #632, without #610. Before these plans: The ten review issues (#572 to #581) are implemented in [PR #584](https://github.com/elfensky/macos-apps-mcp/pull/584), merged 2026-11-06, without a GSD plan: one delegate for each package, integrated in one PR. #572 and #581 stay open for their remaining parts. #568 and the two advisories remain to plan. That PR lists the device checks for the Mail and EventKit changes.
 
 Plans:
 **Wave 1** *(parallel: no shared source file)*
-- [ ] 05.12-01-PLAN.md — Measurement sitting 1 on the installed 0.16.1: bounds and verdicts for #607, #609, #610, device readings for #585 and #611 (owner, 30 min)
+- [x] 05.12-01-PLAN.md — Measurement run on the installed 0.16.1, reduced by the owner on 2026-11-21: the signature reading for #609 and the strip compare for #611 ran; the timing measurements for #607 and #610 and the readings for #585 were dropped
 - [x] 05.12-02-PLAN.md — FIX-34: the reply sweep strips HTML in linear time, with a size cap (#611)
 - [x] 05.12-03-PLAN.md — FIX-27: opening the app after an update restarts the daemon (#568)
 - [x] 05.12-04-PLAN.md — FIX-30 part 1: Mail scripts and the doctor probe address the app by bundle id (#585)
@@ -637,7 +638,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1)*
 - [x] 05.12-05-PLAN.md — FIX-30 part 2: the other five apps by bundle id, held by a guard test (#585)
 - [x] 05.12-06-PLAN.md — FIX-35: the store lock for unit tests, and the closed guard gaps confirmed (#581)
-- [ ] 05.12-07-PLAN.md — FIX-31, FIX-32, FIX-33: the reply window check, the quote check and the late key (#607, #609, #610)
+- [ ] 05.12-07-PLAN.md — FIX-31, FIX-32: the reply window check and the quote check (#607, #609), with #632; to be planned again without the late key (#610, owner 2026-11-21)
 - [x] 05.12-11-PLAN.md — FIX-36: the read path of the reply sweep is bounded on crafted mail (#626)
 
 **Wave 3** *(blocked on Wave 2)*
@@ -757,7 +758,7 @@ Plan summaries record implemented work; they do not prove current-build acceptan
 | 05.4. Migration — mcp 2 and fastmcp 4 (INSERTED) | 2/2 | Complete    | 2026-11-06 |
 | 05.2. Bug Fixes — every open bug before Phase 6 (INSERTED) | 20/20 | Complete    | 2026-11-19 |
 | 05.6. Bug Fixes — Notes write safety, system folders, #497, #471, #521, #540, #556 (INSERTED) | 4/4 planned implementations | In progress; remaining bugs and acceptance open | - |
-| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 6/11; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
+| 05.12. Bug Fixes — the app after an upgrade, advisories, review defects (INSERTED) | 7/11; PR #584 merged without a plan | In progress; #568, the two advisories and #585 open; #572 and #581 open for their remaining parts | - |
 | 05.10. Tool surface — rubric, verb_noun, error codes (INSERTED) | 0/TBD | Not started | - |
 | 05.3. Feedback — problem reports (INSERTED) | 0/TBD | Not started | - |
 | 05.11. Paged reads — cursor (INSERTED) | 0/TBD | Not started | - |
