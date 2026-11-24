@@ -46,8 +46,7 @@ branch `chore/release-X.Y.Z`) and land it on `develop` by PR like any other chan
 uv run pytest tests/test_packaging.py
 git commit -am "chore(release): X.Y.Z — <milestone name>"
 git push -u origin HEAD && gh pr create --base develop --fill
-gh pr checks --watch --required && gh pr merge --rebase
-git push origin --delete chore/release-X.Y.Z   # not --delete-branch from the lane: git-and-prs.md § Merging
+gh pr checks --watch --required && gh pr merge --rebase   # GitHub deletes the merged branch
 ```
 
 **2. Verify develop is green** — the tree you are about to release, not one from earlier:
